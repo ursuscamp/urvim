@@ -9,7 +9,7 @@
 //! # Example
 //!
 //! ```
-//! use terminal::style::{Style, Color};
+//! use urvim::terminal::style::{Style, Color};
 //!
 //! let style = Style::new()
 //!     .bold()
@@ -125,7 +125,7 @@ pub const DOUBLE_UNDERLINE: u32 = 1 << 10;
 /// A builder pattern is used to construct styles:
 ///
 /// ```
-/// use terminal::style::{Style, Color};
+/// use urvim::terminal::style::{Style, Color};
 ///
 /// let style = Style::new()
 ///     .bold()
@@ -252,7 +252,7 @@ impl Style {
     /// # Example
     ///
     /// ```
-    /// use terminal::style::{Style, Color};
+    /// use urvim::terminal::style::{Style, Color};
     ///
     /// let style = Style::new().bold().fg(Color::ansi(196));
     /// assert_eq!(style.escape_code(), "\x1b[1;38;5;196m");

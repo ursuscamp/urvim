@@ -17,6 +17,8 @@
 /// # Example
 ///
 /// ```
+/// use urvim::terminal::utils::write_decimal;
+///
 /// let mut buf = [0u8; 10];
 /// let i = write_decimal(123u32, &mut buf, 0);
 /// assert_eq!(&buf[..i], b"123");
@@ -67,7 +69,7 @@ pub fn write_decimal<N: TryInto<u64>>(n: N, buf: &mut [u8], mut i: usize) -> usi
 /// # Example
 ///
 /// ```
-/// use terminal::utils::osc52_copy_to_clipboard;
+/// use urvim::terminal::utils::osc52_copy_to_clipboard;
 ///
 /// let seq = osc52_copy_to_clipboard("Hello, world!");
 /// // seq contains: \x1b]52;c;SGVsbG8sIHdvcmxkIT\x07

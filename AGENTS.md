@@ -11,3 +11,4 @@ urvim is a terminal based text editor.
 - normal application logging occurs in debug.log
 - examples/demos should log to demo.log
 - when asked to do a code review, also fix clippy lints
+- create documentation comments for public modules, types and methods

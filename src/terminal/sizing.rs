@@ -74,7 +74,7 @@ impl HorizontalAlign {
 /// # Example
 ///
 /// ```
-/// use terminal::sizing::{TextSizing, VerticalAlign, HorizontalAlign};
+/// use urvim::terminal::sizing::{TextSizing, VerticalAlign, HorizontalAlign};
 ///
 /// let sizing = TextSizing::new()
 ///     .scale(2)

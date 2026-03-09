@@ -12,7 +12,7 @@
 /// # Example
 ///
 /// ```
-/// use terminal::Modifiers;
+/// use urvim::terminal::Modifiers;
 ///
 /// let modifiers = Modifiers::SHIFT | Modifiers::CTRL;
 /// assert!(modifiers.has_shift());

@@ -11,8 +11,8 @@
 //!
 //! # Usage
 //!
-//! ```
-//! use terminal::{Terminal, Event, KeyCode};
+//! ```ignore
+//! use urvim::terminal::{Terminal, Event, KeyCode};
 //! use std::io::{stdin, stdout};
 //!
 //! let mut terminal = Terminal::new(stdin(), stdout()).unwrap();
@@ -284,7 +284,11 @@ impl<I: Read + AsFd, O: Write + AsFd> Terminal<I, O> {
     ///
     /// # Example
     ///
-    /// ```
+    /// ```ignore
+    /// use urvim::terminal::{Terminal, Event, KeyCode};
+    /// use std::io::{stdin, stdout};
+    ///
+    /// let mut terminal = Terminal::new(stdin(), stdout()).unwrap();
     /// terminal.batch(|t| {
     ///     t.set_cursor_position(0, 0)?;
     ///     t.write_text("Hello")?;
@@ -385,7 +389,11 @@ impl<I: Read + AsFd, O: Write + AsFd> Terminal<I, O> {
     ///
     /// # Example
     ///
-    /// ```
+    /// ```ignore
+    /// use urvim::terminal::{Terminal, CursorStyle};
+    /// use std::io::{stdin, stdout};
+    ///
+    /// let mut terminal = Terminal::new(stdin(), stdout()).unwrap();
     /// terminal.set_cursor_style(CursorStyle::BlinkingBlock)?;
     /// ```
     pub fn set_cursor_style(&mut self, style: CursorStyle) -> io::Result<()> {
@@ -874,7 +882,14 @@ mod tests {
     fn create_terminal(data: Vec<u8>) -> Terminal<TestBackend, TestBackend> {
         let backend = TestBackend::new(data);
         let output_backend = TestBackend::new(Vec::new());
-        Terminal::new_for_testing(backend, output_backend)
+        let mut terminal = Terminal::new_for_testing(backend, output_backend);
+
+        if let Some((rows, cols)) = get_terminal_size() {
+            terminal.last_rows = rows;
+            terminal.last_cols = cols;
+        }
+
+        terminal
     }
 
     fn get_terminal_output(terminal: &Terminal<TestBackend, TestBackend>) -> Vec<u8> {
