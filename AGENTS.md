@@ -12,3 +12,4 @@ urvim is a terminal based text editor.
 - examples/demos should log to demo.log
 - when asked to do a code review, also fix clippy lints
 - create documentation comments for public modules, types and methods
+- prefer calling trait methods like `value.trait_method()` rather than `TraitType::method(value)`

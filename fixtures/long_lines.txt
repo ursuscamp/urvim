@@ -1,0 +1,52 @@
+This is a short line.
+This is a 40 character line that has exactly forty chars.
+This is a 80 character line that has exactly eighty characters in it.
+This is a 120 character line that has exactly one hundred twenty characters in it.
+This is a 200 character line that has exactly two hundred characters in it for testing scrolling behavior.
+
+ASCII only line with numbers 0123456789 and symbols !@#$%^&*()_+-=[]{}|;':",./<>?
+01234567890123456789012345678901234567890123456789012345678901234567890123456789
+
+Chinese characters only: 中文测试文本内容用于测试滚动功能是否正常工作
+日本語テストテキスト内容テスト用スクロール機能
+한국어 테스트 텍스트 내용 스크롤 기능 테스트용
+
+Emoji line with various emojis: 😀😃😄😁😆😅😂🤣😊🙃😉😌😍🥰😘😗😙😚😋😛😜🤪😝🤑🤗🤭🤫🤔🤐🤨😐😑😶😏😒🙄😬🤥😌😔😪🤤😴😷🤒🤕
+
+Mixed ASCII and CJK: Hello世界你好日本日本韩国한국어DeutschFrançaisEspañol
+
+Line starting with wide chars: 中文测试内容从开头开始
+😀😃😄😁😆😅😂🤣 emoji at start of line
+
+Line ending with wide chars: some text at end中文
+some text at end😀😃😄
+
+Wide chars only for horizontal scroll test: 中文中文中文中文中文中文中文中文中文中文中文中文中文中文中文中文中文中文中文中文中文中文中文中文
+
+Very long line with mixed content: The quick brown fox jumps over the lazy dog. 中文文本 日本語テスト emoji😀 mixed content here! 再来一段中文内容 for good measure. And more ASCII here to make it really long.
+
+Tab and space handling:     indented	text	with	tabs	and	spaces	mixed	together	for	testing
+
+Combining characters: e\u{301} e\u{301} e\u{301} test of combining acute accent
+Zalgo text test: H\u{308}\u{328}\u{335}\u{342}\u{345}\u{348}\u{353}\u{355}\u{362}\u{364}\u{369}\u{370}\u{371}\u{376}\u{30e}\u{048}
+
+Line with null byte handling: test\x00null\x00byte\x00in\x00middle
+
+CJK punctuation test: 「『【《】』」『「』（）【】《》〈〉「」『』
+
+Numbers in CJK: 一二三五六七八九十百千万億兆
+
+Fullwidth ASCII: ＡＢＣＤＥＦＧＨＩＪＫＬＭＮＯＰＱＲＳＴＵＶＷＸＹＺ
+
+Halfwidth Katakana: ｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃﾄﾅﾆﾇﾈﾉﾊﾋﾌﾍﾎﾏﾐﾑﾒﾓﾔﾕﾖﾗﾘﾙﾚﾛﾜｦﾝ
+
+Arrow symbols: ←↑→↓↔↕↖↗↘↙⇐⇒⇔⇑⇓⇖⇗⇘⇙
+
+Math symbols: ∑∏∫∂∆∇√∞≈≠≤≥±×÷→←↑↓
+
+Box drawing: ┌┬┐├┼┤└┴┘─│┌┐└┘├┤┬┴┼
+
+Special: •◦‣▪▫■□▪️●○◆◇★☆♠♣♥♦
+
+End of file marker below this line:
+=============================

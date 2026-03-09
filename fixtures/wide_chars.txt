@@ -1,0 +1,12 @@
+Hello World!
+This is a test file with mixed characters.
+ASCII text here.
+Now with emoji: 😀😃😄😁😆 😅 😂 🤣
+And CJK characters: 你好世界 日本語 한국어
+Mixed together: Hello世界😀日本
+A longer line with all of them: ABCdef😀DEF中文GHI日本語JKL👋
+Line with emoji at end: test😀
+Line with CJK at end: test中文
+Numbers: 12345
+Special chars: !@#$%^&*()
+End of file.

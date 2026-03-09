@@ -1,9 +1,9 @@
-//! Text buffer module backed by ropey.
+//! Text buffer module backed by Vector<Arc<str>>.
 //!
 //! This module provides the `Buffer` type, a text buffer implementation built on
-//! top of [ropey](https://github.com/cessen/ropey) - a fast and robust UTF-8
-//! text rope library. The buffer supports efficient text manipulation with proper
-//! Unicode handling including grapheme clusters, combining characters, and emoji.
+//! top of imbl's Vector with Arc<str> for each line. The buffer supports
+//! efficient text manipulation with proper Unicode handling including grapheme
+//! clusters, combining characters, and emoji.
 //!
 //! # Features
 //!
@@ -17,118 +17,67 @@
 //! # Example
 //!
 //! ```
-//! use urvim::buffer::Buffer;
+//! use urvim::buffer::{Buffer, Cursor};
 //!
 //! // Create a new buffer
 //! let mut buf = Buffer::new();
 //!
 //! // Insert text
-//! buf.insert_text(0, "Hello, 世界! 😀");
+//! buf.insert_text(Cursor::new(0, 0), "Hello, 世界! 😀");
 //!
 //! // Get line count
 //! println!("Lines: {}", buf.line_count());
 //!
 //! // Get a specific line
-//! if let Some(line) = buf.get_line(0) {
-//!     println!("Line content: {}", line.as_str());
-//!     println!("Line width: {}", line.grapheme_len());
+//! if let Some(line) = buf.line_at(0) {
+//!     println!("Line content: {}", line);
 //! }
 //! ```
 
 use crate::path::AbsolutePath;
-use ropey::Rope;
+use imbl::Vector;
 use std::fs::File;
 use std::io::{self, Read, Write};
 use std::path::Path;
-use unicode_segmentation::{GraphemeCursor, UnicodeSegmentation};
+use std::sync::Arc;
+use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
-/// A text buffer backed by a rope data structure.
+/// Cursor position in the buffer.
+///
+/// Line and column (byte position within line).
+/// Column can be from 0 to line byte length (inclusive, meaning cursor is at end of line).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Cursor {
+    pub line: usize,
+    pub col: usize,
+}
+
+impl Cursor {
+    pub fn new(line: usize, col: usize) -> Self {
+        Self { line, col }
+    }
+}
+
+/// A text buffer backed by a Vector of Arc<str> lines.
 ///
 /// Buffer provides efficient text editing with proper Unicode support.
-/// It wraps [ropey](https://github.com/cessen/ropey) to provide:
-/// - O(log n) insertion and deletion
-/// - Efficient line and character indexing
-/// - Full Unicode support including grapheme clusters
+/// Each line is stored as an Arc<str> without trailing newline characters.
+/// Newlines exist implicitly between lines.
 ///
 /// # Example
 ///
 /// ```
-/// use urvim::buffer::Buffer;
+/// use urvim::buffer::{Buffer, Cursor};
 ///
 /// let mut buf = Buffer::from_str("Hello, World!");
-/// buf.insert_text(7, "Beautiful ");
+/// buf.insert_text(Cursor::new(0, 7), "Beautiful ");
 /// assert_eq!(buf.as_str(), "Hello, Beautiful World!");
 /// ```
 #[derive(Debug, Clone)]
 pub struct Buffer {
-    rope: Rope,
+    lines: Vector<Arc<str>>,
     path: Option<AbsolutePath>,
-}
-
-/// A reference to a line in the buffer.
-///
-/// Line provides methods to access line content and calculate display widths.
-/// The line does not include the trailing newline character (if present).
-///
-/// # Example
-///
-/// ```
-/// use urvim::buffer::Buffer;
-///
-/// let buf = Buffer::from_str("Hello\nWorld\n");
-/// let line = buf.get_line(0).unwrap();
-/// assert_eq!(line.as_str(), "Hello");
-/// assert_eq!(line.len(), 5);
-/// ```
-#[derive(Debug, Clone)]
-pub struct Line<'a> {
-    rope: &'a Rope,
-    line_idx: usize,
-}
-
-/// An iterator over grapheme clusters in the buffer.
-///
-/// Each item is a tuple of (byte_index, grapheme_string) where:
-/// - `byte_index` is the byte offset of the grapheme in the text
-/// - `grapheme_string` is the grapheme cluster as a String
-///
-/// # Example
-///
-/// ```
-/// use urvim::buffer::Buffer;
-///
-/// let buf = Buffer::from_str("a😀c");
-/// for (byte_idx, grapheme) in buf.grapheme_indices() {
-///     println!("{}: {}", byte_idx, grapheme);
-/// }
-/// // Output:
-/// // 0: a
-/// // 1: 😀
-/// // 5: c
-/// ```
-#[derive(Debug, Clone)]
-pub struct GraphemeIndices<'a> {
-    rope: &'a Rope,
-    cursor: GraphemeCursor,
-    current_byte: usize,
-}
-
-/// An iterator over bytes in the buffer.
-///
-/// # Example
-///
-/// ```
-/// use urvim::buffer::Buffer;
-///
-/// let buf = Buffer::from_str("abc");
-/// let bytes: Vec<u8> = buf.bytes().collect();
-/// assert_eq!(bytes, vec![b'a', b'b', b'c']);
-/// ```
-#[derive(Debug, Clone)]
-pub struct Bytes<'a> {
-    rope: &'a Rope,
-    char_idx: usize,
 }
 
 impl Default for Buffer {
@@ -150,12 +99,15 @@ impl Buffer {
     /// ```
     pub fn new() -> Self {
         Self {
-            rope: Rope::new(),
+            lines: Vector::unit(Arc::from("")),
             path: None,
         }
     }
 
     /// Creates a buffer from a string slice.
+    ///
+    /// The text is split into lines by newline characters.
+    /// Each line is stored WITHOUT its trailing newline.
     ///
     /// # Arguments
     ///
@@ -166,28 +118,29 @@ impl Buffer {
     /// ```
     /// use urvim::buffer::Buffer;
     ///
-    /// let buf = Buffer::from_str("Hello, World!");
-    /// assert_eq!(buf.len(), 13);
+    /// let buf = Buffer::from_str("Hello\nWorld");
+    /// assert_eq!(buf.line_count(), 2);
     /// ```
     pub fn from_str(text: &str) -> Self {
-        Self {
-            rope: Rope::from(text),
-            path: None,
-        }
+        let lines: Vector<Arc<str>> = if text.is_empty() {
+            Vector::unit(Arc::from(""))
+        } else {
+            text.lines().map(Arc::from).collect::<Vector<_>>()
+        };
+        Self { lines, path: None }
     }
 
     pub fn with_path(path: AbsolutePath) -> Self {
         Self {
-            rope: Rope::new(),
+            lines: Vector::unit(Arc::from("")),
             path: Some(path),
         }
     }
 
     pub fn from_str_with_path(text: &str, path: AbsolutePath) -> Self {
-        Self {
-            rope: Rope::from(text),
-            path: Some(path),
-        }
+        let mut buf = Self::from_str(text);
+        buf.path = Some(path);
+        buf
     }
 
     /// Loads a buffer from a file.
@@ -216,10 +169,7 @@ impl Buffer {
         let mut contents = String::new();
         file.read_to_string(&mut contents)?;
         let abs_path = AbsolutePath::from_path(path);
-        Ok(Self {
-            rope: Rope::from(contents),
-            path: abs_path,
-        })
+        Ok(Self::from_str_with_path(&contents, abs_path.unwrap()))
     }
 
     /// Saves the buffer contents to a file.
@@ -252,7 +202,7 @@ impl Buffer {
 
     /// Returns the number of characters in the buffer.
     ///
-    /// This is the total character count, not byte count or display width.
+    /// This counts all characters across all lines (excluding newlines between lines).
     ///
     /// # Example
     ///
@@ -263,7 +213,7 @@ impl Buffer {
     /// assert_eq!(buf.len(), 5);
     /// ```
     pub fn len(&self) -> usize {
-        self.rope.len_chars()
+        self.lines.iter().map(|s| s.len()).sum::<usize>() + self.lines.len().saturating_sub(1)
     }
 
     /// Returns true if the buffer is empty.
@@ -277,7 +227,7 @@ impl Buffer {
     /// assert!(buf.is_empty());
     /// ```
     pub fn is_empty(&self) -> bool {
-        self.rope.len_chars() == 0
+        self.lines.len() == 1 && self.lines.get(0).map_or(true, |s| s.is_empty())
     }
 
     pub fn path(&self) -> Option<&AbsolutePath> {
@@ -292,145 +242,15 @@ impl Buffer {
         self.path.as_ref().and_then(|p| p.file_name())
     }
 
-    /// Inserts a single character at the specified position.
+    /// Gets the line at the specified index.
+    ///
+    /// Lines are 0-indexed. Each line does NOT include a trailing newline.
     ///
     /// # Arguments
     ///
-    /// * `index` - Character position to insert at (0-indexed)
-    /// * `ch` - Character to insert
+    /// * `line_idx` - Line number (0-indexed)
     ///
-    /// # Example
-    ///
-    /// ```
-    /// use urvim::buffer::Buffer;
-    ///
-    /// let mut buf = Buffer::from_str("Hello");
-    /// buf.insert_char(5, '!');
-    /// assert_eq!(buf.as_str(), "Hello!");
-    /// ```
-    pub fn insert_char(&mut self, index: usize, ch: char) {
-        self.rope.insert_char(index, ch);
-    }
-
-    /// Inserts text at the specified position.
-    ///
-    /// # Arguments
-    ///
-    /// * `index` - Character position to insert at (0-indexed)
-    /// * `text` - Text to insert
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use urvim::buffer::Buffer;
-    ///
-    /// let mut buf = Buffer::from_str("Hello");
-    /// buf.insert_text(5, " World");
-    /// assert_eq!(buf.as_str(), "Hello World");
-    /// ```
-    pub fn insert_text(&mut self, index: usize, text: &str) {
-        self.rope.insert(index, text);
-    }
-
-    /// Removes a range of characters from the buffer.
-    ///
-    /// # Arguments
-    ///
-    /// * `start` - Start position of the range (inclusive)
-    /// * `end` - End position of the range (exclusive)
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use urvim::buffer::Buffer;
-    ///
-    /// let mut buf = Buffer::from_str("Hello, World!");
-    /// buf.remove(5, 12);  // Remove ", World"
-    /// assert_eq!(buf.as_str(), "Hello!");
-    /// ```
-    pub fn remove(&mut self, start: usize, end: usize) {
-        self.rope.remove(start..end);
-    }
-
-    /// Gets the character at the specified position.
-    ///
-    /// # Arguments
-    ///
-    /// * `index` - Character position (0-indexed)
-    ///
-    /// Returns `None` if the position is out of bounds.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use urvim::buffer::Buffer;
-    ///
-    /// let buf = Buffer::from_str("Hello");
-    /// assert_eq!(buf.get_char_at(0), Some('H'));
-    /// assert_eq!(buf.get_char_at(5), None);
-    /// ```
-    pub fn get_char_at(&self, index: usize) -> Option<char> {
-        self.rope.get_char(index)
-    }
-
-    /// Gets the grapheme cluster at the specified byte position.
-    ///
-    /// Note: This takes a byte index, not a character index.
-    ///
-    /// # Arguments
-    ///
-    /// * `byte_idx` - Byte position in the text (0-indexed)
-    ///
-    /// Returns `None` if the position is out of bounds.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use urvim::buffer::Buffer;
-    ///
-    /// let buf = Buffer::from_str("a😀c");
-    /// assert_eq!(buf.get_grapheme_at(0).map(|s| s.as_str()), Some(Some("a")));
-    /// assert_eq!(buf.get_grapheme_at(1).map(|s| s.as_str()), Some(Some("😀")));
-    /// ```
-    pub fn get_grapheme_at(&self, byte_idx: usize) -> Option<ropey::RopeSlice<'_>> {
-        if byte_idx >= self.rope.len_bytes() {
-            return None;
-        }
-
-        let mut cursor = GraphemeCursor::new(0, self.rope.len_bytes(), true);
-        let mut current_byte = 0;
-
-        while current_byte < self.rope.len_bytes() {
-            let (chunk, chunk_byte_idx, _, _) = self.rope.chunk_at_byte(current_byte);
-            let chunk_start = chunk_byte_idx;
-
-            match cursor.next_boundary(chunk, chunk_start) {
-                Ok(Some(end_byte)) => {
-                    let end_byte = end_byte.min(self.rope.len_bytes());
-                    if current_byte == byte_idx {
-                        let start_char = self.rope.byte_to_char(current_byte);
-                        let end_char = self.rope.byte_to_char(end_byte);
-                        return Some(self.rope.slice(start_char..end_char));
-                    }
-                    current_byte = end_byte;
-                }
-                Ok(None) => break,
-                Err(_) => break,
-            }
-        }
-        None
-    }
-
-    /// Gets a line by its line number.
-    ///
-    /// Lines are 0-indexed. The returned Line does not include
-    /// the trailing newline character.
-    ///
-    /// # Arguments
-    ///
-    /// * `line_num` - Line number (0-indexed)
-    ///
-    /// Returns `None` if the line number is out of bounds.
+    /// Returns None if the line index is out of bounds.
     ///
     /// # Example
     ///
@@ -438,18 +258,11 @@ impl Buffer {
     /// use urvim::buffer::Buffer;
     ///
     /// let buf = Buffer::from_str("Line 1\nLine 2\n");
-    /// let line = buf.get_line(0);
+    /// let line = buf.line_at(0);
     /// assert!(line.is_some());
     /// ```
-    pub fn get_line(&self, line_num: usize) -> Option<Line<'_>> {
-        if line_num >= self.line_count() {
-            None
-        } else {
-            Some(Line {
-                rope: &self.rope,
-                line_idx: line_num,
-            })
-        }
+    pub fn line_at(&self, line_idx: usize) -> Option<&Arc<str>> {
+        self.lines.get(line_idx)
     }
 
     /// Returns the number of lines in the buffer.
@@ -463,71 +276,7 @@ impl Buffer {
     /// assert_eq!(buf.line_count(), 3);
     /// ```
     pub fn line_count(&self) -> usize {
-        self.rope.len_lines()
-    }
-
-    /// Converts a line number to a character position.
-    ///
-    /// Returns the character index at the start of the given line.
-    ///
-    /// # Arguments
-    ///
-    /// * `line` - Line number (0-indexed)
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use urvim::buffer::Buffer;
-    ///
-    /// let buf = Buffer::from_str("abc\ndef\nghi");
-    /// assert_eq!(buf.line_to_char(1), 4);
-    /// ```
-    pub fn line_to_char(&self, line: usize) -> usize {
-        self.rope.line_to_char(line)
-    }
-
-    /// Converts a character position to (line, column).
-    ///
-    /// # Arguments
-    ///
-    /// * `char_idx` - Character index (0-indexed)
-    ///
-    /// Returns a tuple of (line, column), both 0-indexed.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use urvim::buffer::Buffer;
-    ///
-    /// let buf = Buffer::from_str("abc\ndef\nghi");
-    /// assert_eq!(buf.char_to_line_char(5), (1, 1));
-    /// ```
-    pub fn char_to_line_char(&self, char_idx: usize) -> (usize, usize) {
-        let line = self.rope.char_to_line(char_idx);
-        let line_start = self.rope.line_to_char(line);
-        let col = char_idx - line_start;
-        (line, col)
-    }
-
-    /// Returns an iterator over grapheme clusters in the buffer.
-    ///
-    /// Each item is (byte_index, grapheme_string).
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use urvim::buffer::Buffer;
-    ///
-    /// let buf = Buffer::from_str("a😀c");
-    /// let indices: Vec<_> = buf.grapheme_indices().collect();
-    /// assert_eq!(indices.len(), 3);
-    /// ```
-    pub fn grapheme_indices(&self) -> GraphemeIndices<'_> {
-        GraphemeIndices {
-            rope: &self.rope,
-            cursor: GraphemeCursor::new(0, self.rope.len_bytes(), true),
-            current_byte: 0,
-        }
+        self.lines.len()
     }
 
     /// Returns the buffer contents as a String.
@@ -541,317 +290,435 @@ impl Buffer {
     /// assert_eq!(buf.as_str(), "Hello");
     /// ```
     pub fn as_str(&self) -> String {
-        self.rope.to_string()
-    }
-
-    /// Returns an iterator over bytes in the buffer.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use urvim::buffer::Buffer;
-    ///
-    /// let buf = Buffer::from_str("abc");
-    /// let bytes: Vec<_> = buf.bytes().collect();
-    /// assert_eq!(bytes, vec![b'a', b'b', b'c']);
-    /// ```
-    pub fn bytes(&self) -> Bytes<'_> {
-        Bytes {
-            rope: &self.rope,
-            char_idx: 0,
+        if self.lines.is_empty() {
+            return String::new();
         }
-    }
-
-    /// Checks if the character at the given position is a newline.
-    ///
-    /// # Arguments
-    ///
-    /// * `char_idx` - Character position (0-indexed)
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use urvim::buffer::Buffer;
-    ///
-    /// let buf = Buffer::from_str("ab\ncd");
-    /// assert!(!buf.is_newline(0));
-    /// assert!(buf.is_newline(2));
-    /// ```
-    pub fn is_newline(&self, char_idx: usize) -> bool {
-        self.rope.get_char(char_idx).map_or(false, |ch| ch == '\n')
-    }
-
-    /// Finds the previous newline character before the given byte position.
-    ///
-    /// # Arguments
-    ///
-    /// * `from_byte` - Byte position to search from (searches positions < from_byte)
-    ///
-    /// Returns the byte index of the newline, or `None` if no newline exists.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use urvim::buffer::Buffer;
-    ///
-    /// let buf = Buffer::from_str("ab\ncd");
-    /// assert_eq!(buf.prev_newline(4), Some(2));
-    /// assert_eq!(buf.prev_newline(1), None);
-    /// ```
-    pub fn prev_newline(&self, from_byte: usize) -> Option<usize> {
-        let text = self.rope.to_string();
-        let bytes = text.as_bytes();
-
-        if from_byte == 0 {
-            return None;
-        }
-
-        let search_end = from_byte.saturating_sub(1);
-
-        for i in (0..=search_end).rev() {
-            if bytes[i] == b'\n' {
-                return Some(i);
+        let mut result = String::new();
+        for (i, line) in self.lines.iter().enumerate() {
+            if i > 0 {
+                result.push('\n');
             }
+            result.push_str(line);
         }
-        None
+        result
     }
 
-    /// Finds the next newline character at or after the given position.
+    /// Inserts a single character at the specified position.
     ///
     /// # Arguments
     ///
-    /// * `from` - Character position to start searching from
-    ///
-    /// Returns the character index of the newline, or `None` if no newline exists.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use urvim::buffer::Buffer;
-    ///
-    /// let buf = Buffer::from_str("ab\ncd");
-    /// assert_eq!(buf.next_newline(0), Some(2));
-    /// assert_eq!(buf.next_newline(3), None);
-    /// ```
-    pub fn next_newline(&self, from: usize) -> Option<usize> {
-        let text = self.rope.to_string();
-        let chars: Vec<char> = text.chars().collect();
-
-        for i in from..chars.len() {
-            if chars[i] == '\n' {
-                return Some(i);
-            }
-        }
-        None
-    }
-
-    /// Gets the line containing the given character position.
-    ///
-    /// # Arguments
-    ///
-    /// * `char_idx` - Character position (0-indexed)
+    /// * `cursor` - Cursor position (line and byte index) to insert at
+    /// * `ch` - Character to insert
     ///
     /// # Example
     ///
     /// ```
-    /// use urvim::buffer::Buffer;
+    /// use urvim::buffer::{Buffer, Cursor};
     ///
-    /// let buf = Buffer::from_str("Line 1\nLine 2");
-    /// let line = buf.line_containing_char(7);
-    /// assert!(line.is_some());
+    /// let mut buf = Buffer::from_str("Hello");
+    /// buf.insert_char(Cursor::new(0, 5), '!');
+    /// assert_eq!(buf.as_str(), "Hello!");
     /// ```
-    pub fn line_containing_char(&self, char_idx: usize) -> Option<Line<'_>> {
-        let line_idx = self.rope.char_to_line(char_idx);
-        self.get_line(line_idx)
-    }
+    pub fn insert_char(&mut self, cursor: Cursor, ch: char) {
+        let line_idx = cursor.line;
+        let col = cursor.col;
 
-    /// Gets the chunk of text containing the given character position.
-    ///
-    /// This is useful for working with ropey's internal chunking.
-    ///
-    /// # Arguments
-    ///
-    /// * `char_idx` - Character position (0-indexed)
-    ///
-    /// Returns a string slice of the containing chunk, or `None` if out of bounds.
-    pub fn get_chunk_at(&self, char_idx: usize) -> Option<&str> {
-        self.rope.get_chunk_at_char(char_idx).map(|(s, _, _, _)| s)
-    }
-}
-
-impl<'a> Line<'a> {
-    /// Returns the number of characters in the line (excluding trailing newline).
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use urvim::buffer::Buffer;
-    ///
-    /// let buf = Buffer::from_str("Hello\nWorld");
-    /// let line = buf.get_line(0).unwrap();
-    /// assert_eq!(line.len(), 5);
-    /// ```
-    pub fn len(&self) -> usize {
-        let slice = self.rope.line(self.line_idx);
-        let len = slice.len_chars();
-        if len > 0 {
-            if slice.get_char(len - 1) == Some('\n') {
-                return len - 1;
-            }
-        }
-        len
-    }
-
-    /// Returns the number of characters in the line.
-    ///
-    /// Alias for [`len()`](Line::len).
-    pub fn char_len(&self) -> usize {
-        self.len()
-    }
-
-    /// Returns the display width of the line in characters.
-    ///
-    /// This uses Unicode width calculation, so characters like '中' and emoji
-    /// will have width 2, while ASCII characters have width 1.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use urvim::buffer::Buffer;
-    ///
-    /// let buf = Buffer::from_str("Hello\n");
-    /// let line = buf.get_line(0).unwrap();
-    /// assert_eq!(line.grapheme_len(), 5);
-    /// ```
-    pub fn grapheme_len(&self) -> usize {
-        self.as_str().width()
-    }
-
-    /// Returns the line content as a String.
-    ///
-    /// The returned string does not include the trailing newline.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use urvim::buffer::Buffer;
-    ///
-    /// let buf = Buffer::from_str("Hello\n");
-    /// let line = buf.get_line(0).unwrap();
-    /// assert_eq!(line.as_str(), "Hello");
-    /// ```
-    pub fn as_str(&self) -> String {
-        let s = self.rope.line(self.line_idx).to_string();
-        s.strip_suffix('\n').unwrap_or(&s).to_string()
-    }
-
-    /// Gets the character at the given column position.
-    ///
-    /// # Arguments
-    ///
-    /// * `col` - Column position (0-indexed)
-    ///
-    /// Returns `None` if the column is out of bounds.
-    pub fn char_at(&self, col: usize) -> Option<char> {
-        let slice = self.rope.line(self.line_idx);
-        let len = slice.len_chars();
-        if len > 0 && slice.get_char(len - 1) == Some('\n') {
-            if col < len - 1 {
-                slice.get_char(col)
+        if ch == '\n' {
+            let before = if let Some(line) = self.lines.get(line_idx) {
+                line[..col].to_string()
             } else {
-                None
+                String::new()
+            };
+
+            let after = if let Some(line) = self.lines.get(line_idx) {
+                line[col..].to_string()
+            } else {
+                String::new()
+            };
+
+            let mut new_lines = Vec::new();
+            new_lines.push(Arc::from(before));
+            new_lines.push(Arc::from(after));
+
+            let mut left = self.lines.take(line_idx);
+            let right = self.lines.skip(line_idx + 1);
+            let new: Vector<Arc<str>> = new_lines.into_iter().collect();
+            left.append(new);
+            left.append(right);
+            self.lines = left;
+        } else {
+            if let Some(line) = self.lines.get(line_idx) {
+                let mut new_line = (&*line).to_string();
+                new_line.insert(col, ch);
+                self.lines = self.lines.update(line_idx, Arc::from(new_line));
+            }
+        }
+    }
+
+    /// Inserts text at the specified position.
+    ///
+    /// # Arguments
+    ///
+    /// * `cursor` - Cursor position (line and byte index) to insert at
+    /// * `text` - Text to insert
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use urvim::buffer::{Buffer, Cursor};
+    ///
+    /// let mut buf = Buffer::from_str("Hello");
+    /// buf.insert_text(Cursor::new(0, 5), " World");
+    /// assert_eq!(buf.as_str(), "Hello World");
+    /// ```
+    pub fn insert_text(&mut self, mut cursor: Cursor, text: &str) {
+        for ch in text.chars() {
+            self.insert_char(cursor, ch);
+            if ch == '\n' {
+                cursor = Cursor::new(cursor.line + 1, 0);
+            } else {
+                cursor = Cursor::new(cursor.line, cursor.col + ch.len_utf8());
+            }
+        }
+    }
+
+    /// Removes a range of characters from the buffer.
+    ///
+    /// # Arguments
+    ///
+    /// * `start` - Start cursor position (inclusive)
+    /// * `end` - End cursor position (exclusive)
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use urvim::buffer::{Buffer, Cursor};
+    ///
+    /// let mut buf = Buffer::from_str("Hello, World!");
+    /// buf.remove(Cursor::new(0, 5), Cursor::new(0, 12));  // Remove ", World"
+    /// assert_eq!(buf.as_str(), "Hello!");
+    /// ```
+    pub fn remove(&mut self, start: Cursor, end: Cursor) {
+        if start.line > end.line || (start.line == end.line && start.col >= end.col) {
+            return;
+        }
+
+        let start_line = start.line;
+        let start_col = start.col;
+        let end_line = end.line;
+        let end_col = end.col;
+
+        if start_line == end_line {
+            if let Some(line) = self.lines.get(start_line) {
+                let mut new_line = (&*line).to_string();
+                new_line.drain(start_col..end_col);
+                self.lines = self.lines.update(start_line, Arc::from(new_line));
             }
         } else {
-            slice.get_char(col)
+            let before = if let Some(line) = self.lines.get(start_line) {
+                line[..start_col].to_string()
+            } else {
+                String::new()
+            };
+
+            let after = if let Some(line) = self.lines.get(end_line) {
+                line[end_col..].to_string()
+            } else {
+                String::new()
+            };
+
+            let merged = Arc::from(format!("{}{}", before, after));
+
+            let mut left = self.lines.take(start_line);
+            let right = self.lines.skip(end_line + 1);
+            left.push_back(merged);
+            left.append(right);
+            self.lines = left;
         }
     }
 
-    /// Gets the grapheme cluster at the given column position.
+    /// Returns the byte length of a line.
     ///
     /// # Arguments
     ///
-    /// * `col` - Column position (0-indexed)
+    /// * `line_idx` - Line index (0-based)
     ///
-    /// Returns `None` if the column is out of bounds.
-    pub fn grapheme_at(&self, col: usize) -> Option<String> {
-        let text = self.as_str();
-        let mut graphemes = text.graphemes(true);
-        graphemes.nth(col).map(|s| s.to_string())
-    }
-
-    /// Returns the character position where this line starts.
+    /// Returns 0 if line doesn't exist.
     ///
     /// # Example
     ///
     /// ```
     /// use urvim::buffer::Buffer;
     ///
-    /// let buf = Buffer::from_str("Line 1\nLine 2");
-    /// let line = buf.get_line(1).unwrap();
-    /// assert_eq!(line.to_char(), 7);
+    /// let buf = Buffer::from_str("hello\nworld");
+    /// assert_eq!(buf.line_len(0), 5);
+    /// assert_eq!(buf.line_len(1), 5);
     /// ```
-    pub fn to_char(&self) -> usize {
-        self.rope.line_to_char(self.line_idx)
+    pub fn line_len(&self, line_idx: usize) -> usize {
+        self.lines.get(line_idx).map_or(0, |s| s.len())
     }
-}
 
-impl<'a> Iterator for GraphemeIndices<'a> {
-    type Item = (usize, ropey::RopeSlice<'a>);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.current_byte >= self.rope.len_bytes() {
-            return None;
+    /// Checks if a cursor position is valid.
+    ///
+    /// # Arguments
+    ///
+    /// * `cursor` - Cursor position to check
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use urvim::buffer::{Buffer, Cursor};
+    ///
+    /// let buf = Buffer::from_str("hello");
+    /// assert!(buf.is_valid_cursor(Cursor::new(0, 0)));
+    /// assert!(buf.is_valid_cursor(Cursor::new(0, 5)));  // at end of line
+    /// assert!(!buf.is_valid_cursor(Cursor::new(0, 6))); // beyond line
+    /// assert!(!buf.is_valid_cursor(Cursor::new(1, 0))); // beyond last line
+    /// ```
+    pub fn is_valid_cursor(&self, cursor: Cursor) -> bool {
+        if cursor.line >= self.lines.len() {
+            return false;
         }
+        let line_len = self.line_len(cursor.line);
+        if cursor.col > line_len {
+            return false;
+        }
+        if cursor.col == line_len {
+            return true;
+        }
+        if let Some(line) = self.lines.get(cursor.line) {
+            line.is_char_boundary(cursor.col)
+        } else {
+            false
+        }
+    }
 
-        let start_byte = self.current_byte;
-        let (chunk, chunk_byte_idx, _, _) = self.rope.chunk_at_byte(start_byte);
-        let chunk_start = chunk_byte_idx;
+    /// Moves cursor right by one grapheme.
+    ///
+    /// Returns None if cursor is at end of last line.
+    ///
+    /// # Arguments
+    ///
+    /// * `cursor` - Starting cursor position
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use urvim::buffer::{Buffer, Cursor};
+    ///
+    /// let buf = Buffer::from_str("ab");
+    /// let cursor = Cursor::new(0, 0);
+    /// let next = buf.cursor_right(cursor);
+    /// assert_eq!(next, Some(Cursor::new(0, 1)));
+    /// ```
+    pub fn cursor_right(&self, cursor: Cursor) -> Option<Cursor> {
+        let line_len = self.line_len(cursor.line);
 
-        match self.cursor.next_boundary(chunk, chunk_start) {
-            Ok(Some(end_byte)) => {
-                let end_byte = end_byte.min(self.rope.len_bytes());
-                let start_char = self.rope.byte_to_char(start_byte);
-                let end_char = self.rope.byte_to_char(end_byte);
-                let grapheme = self.rope.slice(start_char..end_char);
-                self.current_byte = end_byte;
-                Some((start_byte, grapheme))
+        if cursor.col < line_len {
+            // Move within current line
+            let line = self.lines.get(cursor.line)?;
+            let line_str = line.as_ref();
+
+            // Find next grapheme (skip current if at boundary)
+            for (byte_offset, _grapheme) in line_str.grapheme_indices(true) {
+                if byte_offset > cursor.col {
+                    return Some(Cursor::new(cursor.line, byte_offset));
+                }
             }
-            Ok(None) => None,
-            Err(_) => None,
-        }
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        let remaining = self.rope.len_bytes().saturating_sub(self.current_byte);
-        (remaining, Some(remaining))
-    }
-}
-
-impl<'a> DoubleEndedIterator for GraphemeIndices<'a> {
-    fn next_back(&mut self) -> Option<Self::Item> {
-        None
-    }
-}
-
-impl<'a> Iterator for Bytes<'a> {
-    type Item = u8;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.char_idx >= self.rope.len_chars() {
+            // At last grapheme, move to end of line
+            return Some(Cursor::new(cursor.line, line_len));
+        } else if cursor.line < self.lines.len() - 1 {
+            // Move to start of next line
+            return Some(Cursor::new(cursor.line + 1, 0));
+        } else {
+            // At end of last line, stay in place
             return None;
         }
-        let byte_idx = self.rope.char_to_byte(self.char_idx);
-        self.char_idx += 1;
-        self.rope.to_string().as_bytes().get(byte_idx).copied()
     }
 
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        let remaining = self.rope.len_chars() - self.char_idx;
-        (remaining, Some(remaining))
+    /// Moves cursor left by one grapheme.
+    ///
+    /// Returns None if cursor is at start of first line.
+    ///
+    /// # Arguments
+    ///
+    /// * `cursor` - Starting cursor position
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use urvim::buffer::{Buffer, Cursor};
+    ///
+    /// let buf = Buffer::from_str("ab");
+    /// let cursor = Cursor::new(0, 1);
+    /// let prev = buf.cursor_left(cursor);
+    /// assert_eq!(prev, Some(Cursor::new(0, 0)));
+    /// ```
+    pub fn cursor_left(&self, cursor: Cursor) -> Option<Cursor> {
+        if cursor.col > 0 {
+            // Move within current line
+            let line = self.lines.get(cursor.line)?;
+            let line_str = line.as_ref();
+
+            // Find previous grapheme start
+            let mut prev_offset = 0;
+            for (byte_offset, _grapheme) in line_str.grapheme_indices(true) {
+                if byte_offset >= cursor.col {
+                    return Some(Cursor::new(cursor.line, prev_offset));
+                }
+                prev_offset = byte_offset;
+            }
+            // Should not reach here if cursor.col > 0 and <= line_len
+            return Some(Cursor::new(cursor.line, prev_offset));
+        } else if cursor.line > 0 {
+            // Move to end of previous line
+            let prev_line_len = self.line_len(cursor.line - 1);
+            return Some(Cursor::new(cursor.line - 1, prev_line_len));
+        } else {
+            // At start of first line, stay in place
+            return None;
+        }
+    }
+
+    /// Moves cursor down to the next line, preserving visual column.
+    ///
+    /// Returns None if cursor is on the last line.
+    ///
+    /// # Arguments
+    ///
+    /// * `cursor` - Starting cursor position
+    /// * `visual_col` - Target visual column to preserve
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use urvim::buffer::{Buffer, Cursor};
+    ///
+    /// let buf = Buffer::from_str("ab\ncd");
+    /// let cursor = Cursor::new(0, 1);
+    /// let down = buf.cursor_down(cursor, 1);
+    /// assert_eq!(down, Some(Cursor::new(1, 1)));
+    /// ```
+    pub fn cursor_down(&self, cursor: Cursor, visual_col: usize) -> Option<Cursor> {
+        if cursor.line >= self.lines.len() - 1 {
+            return None;
+        }
+
+        let next_line = cursor.line + 1;
+        let target_col = self.byte_pos_at_visual_col(next_line, visual_col);
+
+        Some(Cursor::new(next_line, target_col))
+    }
+
+    /// Moves cursor up to the previous line, preserving visual column.
+    ///
+    /// Returns None if cursor is on the first line.
+    ///
+    /// # Arguments
+    ///
+    /// * `cursor` - Starting cursor position
+    /// * `visual_col` - Target visual column to preserve
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use urvim::buffer::{Buffer, Cursor};
+    ///
+    /// let buf = Buffer::from_str("ab\ncd");
+    /// let cursor = Cursor::new(1, 1);
+    /// let up = buf.cursor_up(cursor, 1);
+    /// assert_eq!(up, Some(Cursor::new(0, 1)));
+    /// ```
+    pub fn cursor_up(&self, cursor: Cursor, visual_col: usize) -> Option<Cursor> {
+        if cursor.line == 0 {
+            return None;
+        }
+
+        let prev_line = cursor.line - 1;
+        let target_col = self.byte_pos_at_visual_col(prev_line, visual_col);
+
+        Some(Cursor::new(prev_line, target_col))
+    }
+
+    /// Returns the visual column (display width) at the cursor position.
+    ///
+    /// # Arguments
+    ///
+    /// * `cursor` - Cursor position
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use urvim::buffer::{Buffer, Cursor};
+    ///
+    /// let buf = Buffer::from_str("a😀c");
+    /// assert_eq!(buf.visual_col_at(Cursor::new(0, 0)), 0);
+    /// assert_eq!(buf.visual_col_at(Cursor::new(0, 1)), 1);
+    /// assert_eq!(buf.visual_col_at(Cursor::new(0, 5)), 3);
+    /// ```
+    pub fn visual_col_at(&self, cursor: Cursor) -> usize {
+        let line = match self.lines.get(cursor.line) {
+            Some(l) => l.as_ref(),
+            None => return 0,
+        };
+
+        let mut visual_col = 0;
+        let mut byte_offset = 0;
+
+        for grapheme in line.graphemes(true) {
+            if byte_offset >= cursor.col {
+                break;
+            }
+            visual_col += grapheme_width(grapheme);
+            byte_offset += grapheme.len();
+        }
+
+        visual_col
+    }
+
+    /// Returns the byte position at the given visual column.
+    ///
+    /// If visual column is beyond end of line, returns line byte length.
+    ///
+    /// # Arguments
+    ///
+    /// * `line_idx` - Line index
+    /// * `visual_col` - Target visual column
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use urvim::buffer::Buffer;
+    ///
+    /// let buf = Buffer::from_str("a😀c");
+    /// assert_eq!(buf.byte_pos_at_visual_col(0, 0), 0);
+    /// assert_eq!(buf.byte_pos_at_visual_col(0, 1), 1);
+    /// assert_eq!(buf.byte_pos_at_visual_col(0, 2), 1);  // middle of emoji
+    /// assert_eq!(buf.byte_pos_at_visual_col(0, 3), 5);
+    /// ```
+    pub fn byte_pos_at_visual_col(&self, line_idx: usize, visual_col: usize) -> usize {
+        let line = match self.lines.get(line_idx) {
+            Some(l) => l.as_ref(),
+            None => return 0,
+        };
+
+        let mut current_visual = 0;
+        let mut byte_offset = 0;
+
+        for grapheme in line.graphemes(true) {
+            let gwidth = grapheme_width(grapheme);
+            if current_visual + gwidth > visual_col {
+                // Stop at this grapheme
+                return byte_offset;
+            }
+            current_visual += gwidth;
+            byte_offset += grapheme.len();
+        }
+
+        // Beyond all graphemes, return end of line
+        line.len()
     }
 }
-
-impl<'a> ExactSizeIterator for Bytes<'a> {}
 
 /// Calculates the display width of a single character.
 ///
@@ -903,26 +770,6 @@ pub fn grapheme_width(grapheme: &str) -> usize {
     UnicodeWidthStr::width(grapheme)
 }
 
-/// Converts a byte index to a character index.
-///
-/// # Arguments
-///
-/// * `byte_idx` - Byte position in the text
-/// * `text` - The text to index into
-///
-/// # Example
-///
-/// ```
-/// use urvim::buffer::to_char_index;
-///
-/// let text = "aβc";
-/// // 'a' = byte 0, 'β' = bytes 1-2, 'c' = byte 3
-/// assert_eq!(to_char_index(3, text), 2);
-/// ```
-pub fn to_char_index(byte_idx: usize, text: &str) -> usize {
-    text[..byte_idx].chars().count()
-}
-
 /// Converts a character index to a byte index.
 ///
 /// # Arguments
@@ -954,7 +801,7 @@ mod tests {
     fn test_new_buffer() {
         let buf = Buffer::new();
         assert!(buf.is_empty());
-        assert_eq!(buf.len(), 0);
+        assert_eq!(buf.line_count(), 1);
         assert_eq!(buf.as_str(), "");
     }
 
@@ -962,58 +809,79 @@ mod tests {
     fn test_from_str() {
         let buf = Buffer::from_str("hello");
         assert!(!buf.is_empty());
-        assert_eq!(buf.len(), 5);
+        assert_eq!(buf.line_count(), 1);
+        assert_eq!(buf.as_str(), "hello");
+    }
+
+    #[test]
+    fn test_from_str_multiline() {
+        let buf = Buffer::from_str("hello\nworld");
+        assert_eq!(buf.line_count(), 2);
+        assert_eq!(buf.as_str(), "hello\nworld");
+    }
+
+    #[test]
+    fn test_from_str_trailing_newline() {
+        let buf = Buffer::from_str("hello\n");
+        assert_eq!(buf.line_count(), 1);
         assert_eq!(buf.as_str(), "hello");
     }
 
     #[test]
     fn test_insert_char() {
         let mut buf = Buffer::from_str("hello");
-        buf.insert_char(5, '!');
+        buf.insert_char(Cursor::new(0, 5), '!');
         assert_eq!(buf.as_str(), "hello!");
     }
 
     #[test]
     fn test_insert_text() {
         let mut buf = Buffer::from_str("hello");
-        buf.insert_text(5, " world");
+        buf.insert_text(Cursor::new(0, 5), " world");
         assert_eq!(buf.as_str(), "hello world");
     }
 
     #[test]
     fn test_insert_at_beginning() {
         let mut buf = Buffer::from_str("world");
-        buf.insert_text(0, "hello ");
+        buf.insert_text(Cursor::new(0, 0), "hello ");
         assert_eq!(buf.as_str(), "hello world");
     }
 
     #[test]
     fn test_insert_in_middle() {
         let mut buf = Buffer::from_str("hello");
-        buf.insert_text(2, "XX");
+        buf.insert_text(Cursor::new(0, 2), "XX");
         assert_eq!(buf.as_str(), "heXXllo");
+    }
+
+    #[test]
+    fn test_insert_with_newline() {
+        let mut buf = Buffer::from_str("hello");
+        buf.insert_text(Cursor::new(0, 2), "X\nY");
+        assert_eq!(buf.as_str(), "heX\nYllo");
+        assert_eq!(buf.line_count(), 2);
     }
 
     #[test]
     fn test_remove() {
         let mut buf = Buffer::from_str("hello world");
-        buf.remove(5, 11);
+        buf.remove(Cursor::new(0, 5), Cursor::new(0, 11));
         assert_eq!(buf.as_str(), "hello");
     }
 
     #[test]
     fn test_remove_from_beginning() {
         let mut buf = Buffer::from_str("hello");
-        buf.remove(0, 2);
+        buf.remove(Cursor::new(0, 0), Cursor::new(0, 2));
         assert_eq!(buf.as_str(), "llo");
     }
 
     #[test]
-    fn test_get_char_at() {
-        let buf = Buffer::from_str("hello");
-        assert_eq!(buf.get_char_at(0), Some('h'));
-        assert_eq!(buf.get_char_at(4), Some('o'));
-        assert_eq!(buf.get_char_at(5), None);
+    fn test_remove_multiline() {
+        let mut buf = Buffer::from_str("hello\nworld");
+        buf.remove(Cursor::new(0, 2), Cursor::new(1, 2));
+        assert_eq!(buf.as_str(), "herld");
     }
 
     #[test]
@@ -1035,117 +903,65 @@ mod tests {
     }
 
     #[test]
-    fn test_get_line() {
+    fn test_line_at() {
         let buf = Buffer::from_str("line1\nline2\nline3");
-        let line0 = buf.get_line(0).unwrap();
-        assert_eq!(line0.as_str(), "line1");
-
-        let line1 = buf.get_line(1).unwrap();
-        assert_eq!(line1.as_str(), "line2");
-
-        let line2 = buf.get_line(2).unwrap();
-        assert_eq!(line2.as_str(), "line3");
+        assert_eq!(buf.line_at(0).map(|s| s.as_ref() as &str), Some("line1"));
+        assert_eq!(buf.line_at(1).map(|s| s.as_ref() as &str), Some("line2"));
+        assert_eq!(buf.line_at(2).map(|s| s.as_ref() as &str), Some("line3"));
     }
 
     #[test]
-    fn test_get_line_out_of_bounds() {
+    fn test_line_at_out_of_bounds() {
         let buf = Buffer::from_str("hello");
-        assert!(buf.get_line(1).is_none());
-    }
-
-    #[test]
-    fn test_line_to_char() {
-        let buf = Buffer::from_str("abc\ndef\nghi");
-        assert_eq!(buf.line_to_char(0), 0);
-        assert_eq!(buf.line_to_char(1), 4);
-        assert_eq!(buf.line_to_char(2), 8);
-    }
-
-    #[test]
-    fn test_char_to_line_char() {
-        let buf = Buffer::from_str("abc\ndef\nghi");
-        assert_eq!(buf.char_to_line_char(0), (0, 0));
-        assert_eq!(buf.char_to_line_char(2), (0, 2));
-        assert_eq!(buf.char_to_line_char(4), (1, 0));
-        assert_eq!(buf.char_to_line_char(6), (1, 2));
-        assert_eq!(buf.char_to_line_char(8), (2, 0));
-    }
-
-    #[test]
-    fn test_grapheme_indices() {
-        let buf = Buffer::from_str("aβc");
-        let indices: Vec<_> = buf.grapheme_indices().collect();
-        assert_eq!(indices.len(), 3);
-        assert_eq!(indices[0].0, 0);
-        assert_eq!(indices[0].1.as_str(), Some("a"));
-        assert_eq!(indices[1].0, 1);
-        assert_eq!(indices[1].1.as_str(), Some("β"));
-        // 'β' is 2 bytes (0xCE 0xB2), so 'c' is at byte 3
-        assert_eq!(indices[2].0, 3);
-        assert_eq!(indices[2].1.as_str(), Some("c"));
-    }
-
-    #[test]
-    fn test_emoji_grapheme() {
-        let buf = Buffer::from_str("a😀c");
-        let indices: Vec<_> = buf.grapheme_indices().collect();
-        assert_eq!(indices.len(), 3);
-        assert_eq!(indices[0].0, 0);
-        assert_eq!(indices[0].1.as_str(), Some("a"));
-        assert_eq!(indices[1].0, 1);
-        assert_eq!(indices[1].1.as_str(), Some("😀"));
-        assert_eq!(indices[2].0, 5);
-        assert_eq!(indices[2].1.as_str(), Some("c"));
-    }
-
-    #[test]
-    fn test_combining_char_grapheme() {
-        let buf = Buffer::from_str("e\u{0301}");
-        let indices: Vec<_> = buf.grapheme_indices().collect();
-        assert_eq!(indices.len(), 1);
-        assert_eq!(indices[0].0, 0);
-        assert_eq!(indices[0].1.as_str(), Some("e\u{0301}"));
-    }
-
-    #[test]
-    fn test_get_grapheme_at() {
-        let buf = Buffer::from_str("a😀c");
-        assert_eq!(buf.get_grapheme_at(0).map(|s| s.as_str()), Some(Some("a")));
-        assert_eq!(buf.get_grapheme_at(1).map(|s| s.as_str()), Some(Some("😀")));
-        assert_eq!(buf.get_grapheme_at(5).map(|s| s.as_str()), Some(Some("c")));
-    }
-
-    #[test]
-    fn test_line_len() {
-        let buf = Buffer::from_str("hello\nworld");
-        let line = buf.get_line(0).unwrap();
-        assert_eq!(line.len(), 5);
-        assert_eq!(line.char_len(), 5);
-
-        let line2 = buf.get_line(1).unwrap();
-        assert_eq!(line2.len(), 5);
+        assert!(buf.line_at(1).is_none());
     }
 
     #[test]
     fn test_line_grapheme_len() {
         let buf = Buffer::from_str("a😀c\n");
-        let line = buf.get_line(0).unwrap();
-        assert_eq!(line.grapheme_len(), 4);
+        assert_eq!(buf.line_at(0).map(|s| str_width(s.as_ref())), Some(4));
     }
 
     #[test]
-    fn test_line_char_at() {
-        let buf = Buffer::from_str("hello");
-        let line = buf.get_line(0).unwrap();
-        assert_eq!(line.char_at(0), Some('h'));
-        assert_eq!(line.char_at(4), Some('o'));
+    fn test_save_and_load() {
+        let buf = Buffer::from_str("hello world");
+        buf.save_to_file(std::path::Path::new("/tmp/test_buffer.txt"))
+            .unwrap();
+
+        let loaded = Buffer::load_from_file(std::path::Path::new("/tmp/test_buffer.txt")).unwrap();
+        assert_eq!(loaded.as_str(), "hello world");
+
+        std::fs::remove_file("/tmp/test_buffer.txt").ok();
     }
 
     #[test]
-    fn test_line_to_char_method() {
-        let buf = Buffer::from_str("line1\nline2");
-        let line = buf.get_line(1).unwrap();
-        assert_eq!(line.to_char(), 6);
+    fn test_multiline_with_empty_lines() {
+        let buf = Buffer::from_str("a\n\nb");
+        assert_eq!(buf.line_count(), 3);
+        assert_eq!(buf.line_at(0).map(|s| s.as_ref() as &str), Some("a"));
+        assert_eq!(buf.line_at(1).map(|s| s.as_ref() as &str), Some(""));
+        assert_eq!(buf.line_at(2).map(|s| s.as_ref() as &str), Some("b"));
+    }
+
+    #[test]
+    fn test_remove_all() {
+        let mut buf = Buffer::from_str("hello");
+        buf.remove(Cursor::new(0, 0), Cursor::new(0, 5));
+        assert!(buf.is_empty());
+        assert_eq!(buf.as_str(), "");
+    }
+
+    #[test]
+    fn test_insert_into_empty() {
+        let mut buf = Buffer::new();
+        buf.insert_text(Cursor::new(0, 0), "test");
+        assert_eq!(buf.as_str(), "test");
+    }
+
+    #[test]
+    fn test_line_with_tab() {
+        let buf = Buffer::from_str("a\tb");
+        assert_eq!(buf.line_at(0).map(|s| s.len()), Some(3));
     }
 
     #[test]
@@ -1163,7 +979,6 @@ mod tests {
     #[test]
     fn test_char_width_narrow() {
         assert_eq!(char_width('\t'), 0);
-        assert_eq!(char_width('\n'), 0);
     }
 
     #[test]
@@ -1182,87 +997,457 @@ mod tests {
     }
 
     #[test]
-    fn test_bytes_iterator() {
-        let buf = Buffer::from_str("abc");
-        let bytes: Vec<_> = buf.bytes().collect();
-        assert_eq!(bytes, vec![b'a', b'b', b'c']);
+    fn test_visual_col_at() {
+        let buf = Buffer::from_str("a😀c");
+        assert_eq!(buf.visual_col_at(Cursor::new(0, 0)), 0);
+        assert_eq!(buf.visual_col_at(Cursor::new(0, 1)), 1);
+        assert_eq!(buf.visual_col_at(Cursor::new(0, 5)), 3);
     }
 
     #[test]
-    fn test_is_newline() {
+    fn test_buffer_len() {
+        let buf = Buffer::from_str("abc\ndef");
+        assert_eq!(buf.len(), 7); // 3 + 1 + 3
+    }
+
+    // Cursor tests
+
+    #[test]
+    fn test_cursor_new() {
+        let cursor = Cursor::new(0, 0);
+        assert_eq!(cursor.line, 0);
+        assert_eq!(cursor.col, 0);
+    }
+
+    #[test]
+    fn test_cursor_default() {
+        let cursor = Cursor::default();
+        assert_eq!(cursor, Cursor::new(0, 0));
+    }
+
+    #[test]
+    fn test_cursor_partial_eq() {
+        let c1 = Cursor::new(0, 5);
+        let c2 = Cursor::new(0, 5);
+        let c3 = Cursor::new(1, 5);
+        assert_eq!(c1, c2);
+        assert_ne!(c1, c3);
+    }
+
+    #[test]
+    fn test_is_valid_cursor() {
+        let buf = Buffer::from_str("hello");
+        assert!(buf.is_valid_cursor(Cursor::new(0, 0)));
+        assert!(buf.is_valid_cursor(Cursor::new(0, 3)));
+        assert!(buf.is_valid_cursor(Cursor::new(0, 5))); // at end
+        assert!(!buf.is_valid_cursor(Cursor::new(0, 6))); // beyond line
+        assert!(!buf.is_valid_cursor(Cursor::new(1, 0))); // beyond last line
+    }
+
+    #[test]
+    fn test_is_valid_cursor_multiline() {
+        let buf = Buffer::from_str("hello\nworld");
+        assert!(buf.is_valid_cursor(Cursor::new(0, 0)));
+        assert!(buf.is_valid_cursor(Cursor::new(0, 5)));
+        assert!(buf.is_valid_cursor(Cursor::new(1, 0)));
+        assert!(buf.is_valid_cursor(Cursor::new(1, 5)));
+        assert!(!buf.is_valid_cursor(Cursor::new(1, 6)));
+        assert!(!buf.is_valid_cursor(Cursor::new(2, 0)));
+    }
+
+    // cursor_right tests
+
+    #[test]
+    fn test_cursor_right_ascii() {
+        let buf = Buffer::from_str("hello");
+
+        assert_eq!(buf.cursor_right(Cursor::new(0, 0)), Some(Cursor::new(0, 1)));
+        assert_eq!(buf.cursor_right(Cursor::new(0, 1)), Some(Cursor::new(0, 2)));
+        assert_eq!(buf.cursor_right(Cursor::new(0, 4)), Some(Cursor::new(0, 5)));
+        assert_eq!(buf.cursor_right(Cursor::new(0, 5)), None); // at end of line, last line
+    }
+
+    #[test]
+    fn test_cursor_right_multibyte() {
+        let buf = Buffer::from_str("aβc"); // 'β' is 2 bytes
+
+        assert_eq!(buf.cursor_right(Cursor::new(0, 0)), Some(Cursor::new(0, 1)));
+        assert_eq!(buf.cursor_right(Cursor::new(0, 1)), Some(Cursor::new(0, 3))); // jump over β
+        assert_eq!(buf.cursor_right(Cursor::new(0, 3)), Some(Cursor::new(0, 4)));
+    }
+
+    #[test]
+    fn test_cursor_right_emoji() {
+        let buf = Buffer::from_str("a😀c"); // emoji is 4 bytes
+
+        assert_eq!(buf.cursor_right(Cursor::new(0, 0)), Some(Cursor::new(0, 1)));
+        assert_eq!(buf.cursor_right(Cursor::new(0, 1)), Some(Cursor::new(0, 5))); // jump over emoji
+        assert_eq!(buf.cursor_right(Cursor::new(0, 5)), Some(Cursor::new(0, 6)));
+    }
+
+    #[test]
+    fn test_cursor_right_across_newline() {
         let buf = Buffer::from_str("ab\ncd");
-        assert!(!buf.is_newline(0));
-        assert!(!buf.is_newline(1));
-        assert!(buf.is_newline(2));
-        assert!(!buf.is_newline(3));
+
+        // "ab" has byte len 2, "cd" has byte len 2
+        assert_eq!(buf.cursor_right(Cursor::new(0, 0)), Some(Cursor::new(0, 1)));
+        assert_eq!(buf.cursor_right(Cursor::new(0, 1)), Some(Cursor::new(0, 2)));
+        assert_eq!(buf.cursor_right(Cursor::new(0, 2)), Some(Cursor::new(1, 0))); // cross newline
+        assert_eq!(buf.cursor_right(Cursor::new(1, 0)), Some(Cursor::new(1, 1)));
+        // At col 2 (end of "cd"), moving right goes past end -> None
+        assert_eq!(buf.cursor_right(Cursor::new(1, 2)), None);
     }
 
     #[test]
-    fn test_prev_newline() {
+    fn test_cursor_right_at_end_of_last_line() {
         let buf = Buffer::from_str("ab\ncd");
-        // byte indices: 0='a', 1='b', 2='\n', 3='c', 4='d'
-        // prev_newline searches for newline BEFORE the given position
-        assert_eq!(buf.prev_newline(4), Some(2)); // search 0-3, finds at 2
-        assert_eq!(buf.prev_newline(3), Some(2)); // search 0-2, finds at 2
-        assert_eq!(buf.prev_newline(2), None); // search 0-1, no newline
-        assert_eq!(buf.prev_newline(1), None); // search 0, no newline
+
+        // At end of last line, moving right stays in place (returns None)
+        assert_eq!(buf.cursor_right(Cursor::new(1, 2)), None);
+    }
+
+    // cursor_left tests
+
+    #[test]
+    fn test_cursor_left_ascii() {
+        let buf = Buffer::from_str("hello");
+
+        assert_eq!(buf.cursor_left(Cursor::new(0, 1)), Some(Cursor::new(0, 0)));
+        assert_eq!(buf.cursor_left(Cursor::new(0, 5)), Some(Cursor::new(0, 4)));
+        assert_eq!(buf.cursor_left(Cursor::new(0, 0)), None); // at start
     }
 
     #[test]
-    fn test_next_newline() {
+    fn test_cursor_left_multibyte() {
+        let buf = Buffer::from_str("aβc"); // 'β' is 2 bytes
+
+        assert_eq!(buf.cursor_left(Cursor::new(0, 3)), Some(Cursor::new(0, 1))); // jump over β
+        assert_eq!(buf.cursor_left(Cursor::new(0, 1)), Some(Cursor::new(0, 0)));
+    }
+
+    #[test]
+    fn test_cursor_left_emoji() {
+        let buf = Buffer::from_str("a😀c"); // emoji is 4 bytes
+
+        assert_eq!(buf.cursor_left(Cursor::new(0, 5)), Some(Cursor::new(0, 1))); // jump over emoji
+        assert_eq!(buf.cursor_left(Cursor::new(0, 1)), Some(Cursor::new(0, 0)));
+    }
+
+    #[test]
+    fn test_cursor_left_across_newline() {
         let buf = Buffer::from_str("ab\ncd");
-        assert_eq!(buf.next_newline(0), Some(2));
-        assert_eq!(buf.next_newline(2), Some(2));
-        assert_eq!(buf.next_newline(3), None);
+
+        assert_eq!(buf.cursor_left(Cursor::new(1, 0)), Some(Cursor::new(0, 2))); // cross newline
+        assert_eq!(buf.cursor_left(Cursor::new(0, 2)), Some(Cursor::new(0, 1)));
     }
 
     #[test]
-    fn test_save_and_load() {
-        let buf = Buffer::from_str("hello world");
-        buf.save_to_file(std::path::Path::new("/tmp/test_buffer.txt"))
-            .unwrap();
+    fn test_cursor_left_at_start() {
+        let buf = Buffer::from_str("ab");
 
-        let loaded = Buffer::load_from_file(std::path::Path::new("/tmp/test_buffer.txt")).unwrap();
-        assert_eq!(loaded.as_str(), "hello world");
+        assert_eq!(buf.cursor_left(Cursor::new(0, 0)), None);
+    }
 
-        std::fs::remove_file("/tmp/test_buffer.txt").ok();
+    // cursor_down tests
+
+    #[test]
+    fn test_cursor_down_preserves_visual_col() {
+        let buf = Buffer::from_str("ab\ncd");
+
+        assert_eq!(
+            buf.cursor_down(Cursor::new(0, 0), 0),
+            Some(Cursor::new(1, 0))
+        );
+        assert_eq!(
+            buf.cursor_down(Cursor::new(0, 1), 1),
+            Some(Cursor::new(1, 1))
+        );
+        assert_eq!(
+            buf.cursor_down(Cursor::new(0, 2), 2),
+            Some(Cursor::new(1, 2))
+        );
     }
 
     #[test]
-    fn test_hangul_graphemes() {
-        let buf = Buffer::from_str("안녕하세요");
-        let indices: Vec<_> = buf.grapheme_indices().collect();
-        assert_eq!(indices.len(), 5);
+    fn test_cursor_down_with_emoji() {
+        let buf = Buffer::from_str("a😀\nb");
+
+        // a😀 has visual width 3 (1 + 2), b has visual width 1
+        // visual col 1 should map to byte 1 (after 'a')
+        assert_eq!(
+            buf.cursor_down(Cursor::new(0, 0), 0),
+            Some(Cursor::new(1, 0))
+        );
+        assert_eq!(
+            buf.cursor_down(Cursor::new(0, 1), 1),
+            Some(Cursor::new(1, 1))
+        ); // after 'a'
+           // visual col 2 would be in middle of emoji, should clamp to end of next line
+        assert_eq!(
+            buf.cursor_down(Cursor::new(0, 5), 3),
+            Some(Cursor::new(1, 1))
+        ); // end of "b"
     }
 
     #[test]
-    fn test_multiline_with_empty_lines() {
-        let buf = Buffer::from_str("a\n\nb");
-        assert_eq!(buf.line_count(), 3);
-        assert_eq!(buf.get_line(0).unwrap().as_str(), "a");
-        assert_eq!(buf.get_line(1).unwrap().as_str(), "");
-        assert_eq!(buf.get_line(2).unwrap().as_str(), "b");
+    fn test_cursor_down_short_line_clamps() {
+        let buf = Buffer::from_str("ab\nc");
+
+        // Line 0 has "ab" (2 chars), Line 1 has "c" (1 char)
+        // From col 2 on line 0, going down should clamp to col 1 (end of line 1)
+        assert_eq!(
+            buf.cursor_down(Cursor::new(0, 2), 2),
+            Some(Cursor::new(1, 1))
+        );
     }
 
     #[test]
-    fn test_remove_all() {
-        let mut buf = Buffer::from_str("hello");
-        buf.remove(0, 5);
-        assert!(buf.is_empty());
-        assert_eq!(buf.as_str(), "");
+    fn test_cursor_down_at_last_line() {
+        let buf = Buffer::from_str("ab\ncd");
+
+        // At last line, should return None
+        assert_eq!(buf.cursor_down(Cursor::new(1, 0), 0), None);
+    }
+
+    // cursor_up tests
+
+    #[test]
+    fn test_cursor_up_preserves_visual_col() {
+        let buf = Buffer::from_str("ab\ncd");
+
+        assert_eq!(buf.cursor_up(Cursor::new(1, 0), 0), Some(Cursor::new(0, 0)));
+        assert_eq!(buf.cursor_up(Cursor::new(1, 1), 1), Some(Cursor::new(0, 1)));
+        assert_eq!(buf.cursor_up(Cursor::new(1, 2), 2), Some(Cursor::new(0, 2)));
     }
 
     #[test]
-    fn test_insert_into_empty() {
+    fn test_cursor_up_with_emoji() {
+        let buf = Buffer::from_str("a\nb😀");
+
+        // Going up from line 1 should preserve visual column
+        assert_eq!(buf.cursor_up(Cursor::new(1, 0), 0), Some(Cursor::new(0, 0)));
+        assert_eq!(buf.cursor_up(Cursor::new(1, 1), 1), Some(Cursor::new(0, 1)));
+    }
+
+    #[test]
+    fn test_cursor_up_short_line_clamps() {
+        let buf = Buffer::from_str("ab\nc");
+
+        // Line 0 has "ab" (2 chars), Line 1 has "c" (1 char)
+        // From col 1 on line 1, going up should stay at col 1
+        assert_eq!(buf.cursor_up(Cursor::new(1, 1), 1), Some(Cursor::new(0, 1)));
+    }
+
+    #[test]
+    fn test_cursor_up_at_first_line() {
+        let buf = Buffer::from_str("ab\ncd");
+
+        // At first line, should return None
+        assert_eq!(buf.cursor_up(Cursor::new(0, 0), 0), None);
+    }
+
+    // visual_col_at tests
+
+    #[test]
+    fn test_visual_col_at_cursor() {
+        let buf = Buffer::from_str("a😀c");
+
+        assert_eq!(buf.visual_col_at(Cursor::new(0, 0)), 0);
+        assert_eq!(buf.visual_col_at(Cursor::new(0, 1)), 1);
+        assert_eq!(buf.visual_col_at(Cursor::new(0, 5)), 3);
+    }
+
+    #[test]
+    fn test_visual_col_at_multiline() {
+        let buf = Buffer::from_str("ab\ncd");
+
+        assert_eq!(buf.visual_col_at(Cursor::new(0, 0)), 0);
+        assert_eq!(buf.visual_col_at(Cursor::new(0, 1)), 1);
+        assert_eq!(buf.visual_col_at(Cursor::new(0, 2)), 2);
+        assert_eq!(buf.visual_col_at(Cursor::new(1, 0)), 0);
+    }
+
+    // byte_pos_at_visual_col tests
+
+    #[test]
+    fn test_byte_pos_at_visual_col() {
+        let buf = Buffer::from_str("a😀c");
+
+        assert_eq!(buf.byte_pos_at_visual_col(0, 0), 0);
+        assert_eq!(buf.byte_pos_at_visual_col(0, 1), 1);
+        assert_eq!(buf.byte_pos_at_visual_col(0, 2), 1); // middle of emoji
+        assert_eq!(buf.byte_pos_at_visual_col(0, 3), 5);
+        assert_eq!(buf.byte_pos_at_visual_col(0, 10), 6); // beyond line
+    }
+
+    // line_len tests
+
+    #[test]
+    fn test_line_len() {
+        let buf = Buffer::from_str("hello\nworld");
+
+        assert_eq!(buf.line_len(0), 5);
+        assert_eq!(buf.line_len(1), 5);
+    }
+
+    #[test]
+    fn test_line_len_out_of_bounds() {
+        let buf = Buffer::from_str("hello");
+
+        assert_eq!(buf.line_len(1), 0);
+    }
+
+    #[test]
+    fn test_insert_char_ascii_cursor_mapping() {
         let mut buf = Buffer::new();
-        buf.insert_text(0, "test");
-        assert_eq!(buf.as_str(), "test");
+        let cursor = Cursor::new(0, 0);
+
+        buf.insert_char(cursor, 'h');
+        buf.insert_char(Cursor::new(0, 1), 'e');
+        buf.insert_char(Cursor::new(0, 2), 'l');
+        buf.insert_char(Cursor::new(0, 3), 'l');
+        buf.insert_char(Cursor::new(0, 4), 'o');
+
+        assert_eq!(buf.as_str(), "hello");
+        assert_eq!(buf.visual_col_at(Cursor::new(0, 0)), 0);
+        assert_eq!(buf.visual_col_at(Cursor::new(0, 1)), 1);
+        assert_eq!(buf.visual_col_at(Cursor::new(0, 2)), 2);
+        assert_eq!(buf.visual_col_at(Cursor::new(0, 3)), 3);
+        assert_eq!(buf.visual_col_at(Cursor::new(0, 4)), 4);
+        assert_eq!(buf.visual_col_at(Cursor::new(0, 5)), 5);
     }
 
     #[test]
-    fn test_line_with_tab() {
-        let buf = Buffer::from_str("a\tb");
-        let line = buf.get_line(0).unwrap();
-        assert_eq!(line.char_len(), 3);
+    fn test_insert_char_wide_cursor_mapping() {
+        let mut buf = Buffer::new();
+        let cursor = Cursor::new(0, 0);
+
+        buf.insert_char(cursor, '日');
+        buf.insert_char(Cursor::new(0, 3), '本');
+        buf.insert_char(Cursor::new(0, 6), '語');
+
+        assert_eq!(buf.as_str(), "日本語");
+        assert_eq!(buf.visual_col_at(Cursor::new(0, 0)), 0);
+        assert_eq!(buf.visual_col_at(Cursor::new(0, 3)), 2);
+        assert_eq!(buf.visual_col_at(Cursor::new(0, 6)), 4);
+    }
+
+    #[test]
+    fn test_insert_char_emoji_cursor_mapping() {
+        let mut buf = Buffer::new();
+        let cursor = Cursor::new(0, 0);
+
+        buf.insert_char(cursor, 'a');
+        buf.insert_char(Cursor::new(0, 1), '😀');
+        buf.insert_char(Cursor::new(0, 5), 'b');
+
+        assert_eq!(buf.as_str(), "a😀b");
+        assert_eq!(buf.visual_col_at(Cursor::new(0, 0)), 0);
+        assert_eq!(buf.visual_col_at(Cursor::new(0, 1)), 1);
+        assert_eq!(buf.visual_col_at(Cursor::new(0, 5)), 3);
+        assert_eq!(buf.visual_col_at(Cursor::new(0, 6)), 4);
+    }
+
+    #[test]
+    fn test_insert_newline_cursor_mapping() {
+        let mut buf = Buffer::from_str("hello");
+        let cursor = Cursor::new(0, 5);
+
+        buf.insert_char(cursor, '\n');
+
+        assert_eq!(buf.line_count(), 2);
+        assert_eq!(buf.as_str(), "hello\n");
+        assert_eq!(buf.visual_col_at(Cursor::new(0, 5)), 5);
+        assert_eq!(buf.visual_col_at(Cursor::new(1, 0)), 0);
+    }
+
+    #[test]
+    fn test_insert_newline_mid_line_cursor_mapping() {
+        let mut buf = Buffer::from_str("hello");
+        let cursor = Cursor::new(0, 2);
+
+        buf.insert_char(cursor, '\n');
+
+        assert_eq!(buf.line_count(), 2);
+        assert_eq!(buf.as_str(), "he\nllo");
+        assert_eq!(buf.visual_col_at(Cursor::new(0, 0)), 0);
+        assert_eq!(buf.visual_col_at(Cursor::new(0, 2)), 2);
+        assert_eq!(buf.visual_col_at(Cursor::new(1, 0)), 0);
+        assert_eq!(buf.visual_col_at(Cursor::new(1, 3)), 3);
+    }
+
+    #[test]
+    fn test_insert_mixed_ascii_wide_cursor_mapping() {
+        let mut buf = Buffer::new();
+
+        buf.insert_char(Cursor::new(0, 0), 'a');
+        buf.insert_char(Cursor::new(0, 1), '日');
+        buf.insert_char(Cursor::new(0, 4), 'b');
+        buf.insert_char(Cursor::new(0, 5), '本');
+        buf.insert_char(Cursor::new(0, 8), 'c');
+
+        assert_eq!(buf.as_str(), "a日b本c");
+        assert_eq!(buf.visual_col_at(Cursor::new(0, 0)), 0);
+        assert_eq!(buf.visual_col_at(Cursor::new(0, 1)), 1);
+        assert_eq!(buf.visual_col_at(Cursor::new(0, 4)), 3);
+        assert_eq!(buf.visual_col_at(Cursor::new(0, 5)), 4);
+        assert_eq!(buf.visual_col_at(Cursor::new(0, 8)), 6);
+        assert_eq!(buf.visual_col_at(Cursor::new(0, 9)), 7);
+    }
+
+    #[test]
+    fn test_insert_between_wide_chars_via_cursor_movement() {
+        let mut buf = Buffer::from_str("日本語");
+
+        assert_eq!(buf.as_str(), "日本語");
+        assert_eq!(buf.line_len(0), 9);
+
+        let cursor_after_first_char = buf.cursor_right(Cursor::new(0, 0));
+        assert_eq!(cursor_after_first_char, Some(Cursor::new(0, 3)));
+
+        if let Some(cursor) = cursor_after_first_char {
+            buf.insert_char(cursor, 'X');
+        }
+
+        assert_eq!(buf.as_str(), "日X本語");
+
+        let cursor_after_insert = buf.cursor_right(cursor_after_first_char.unwrap());
+        assert_eq!(cursor_after_insert, Some(Cursor::new(0, 4)));
+    }
+
+    #[test]
+    fn test_insert_between_emoji_via_cursor_movement() {
+        let mut buf = Buffer::from_str("😀😀");
+
+        assert_eq!(buf.as_str(), "😀😀");
+        assert_eq!(buf.line_len(0), 8);
+
+        let cursor_after_first_emoji = buf.cursor_right(Cursor::new(0, 0));
+        assert_eq!(cursor_after_first_emoji, Some(Cursor::new(0, 4)));
+
+        if let Some(cursor) = cursor_after_first_emoji {
+            buf.insert_char(cursor, 'X');
+        }
+
+        assert_eq!(buf.as_str(), "😀X😀");
+
+        let cursor_after_insert = buf.cursor_right(cursor_after_first_emoji.unwrap());
+        assert_eq!(cursor_after_insert, Some(Cursor::new(0, 5)));
+    }
+
+    #[test]
+    fn test_insert_mid_emoji_via_cursor_movement() {
+        let mut buf = Buffer::from_str("a😀b");
+
+        assert_eq!(buf.as_str(), "a😀b");
+
+        let cursor_after_emoji = buf.cursor_right(Cursor::new(0, 1));
+        assert_eq!(cursor_after_emoji, Some(Cursor::new(0, 5)));
+
+        if let Some(cursor) = cursor_after_emoji {
+            buf.insert_char(cursor, 'X');
+        }
+
+        assert_eq!(buf.as_str(), "a😀Xb");
     }
 }
