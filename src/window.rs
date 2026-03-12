@@ -308,7 +308,10 @@ impl BufferView {
     ///
     /// The viewport shows content starting from `scroll_offset.row` rows and `scroll_offset.col` visual columns.
     /// Cursor is positioned at the last visible row/column when scrolling brings it into view.
-    pub fn scroll_to_cursor(&mut self, viewport_size: Size) {
+    ///
+    /// The `gutter_width` parameter should be the width of the gutter in characters, which is
+    /// subtracted from the visible columns to ensure horizontal scrolling accounts for the gutter.
+    pub fn scroll_to_cursor(&mut self, viewport_size: Size, gutter_width: u16) {
         let cursor = self.cursor;
 
         let buffer_line_count = self.buffer.line_count();
@@ -318,7 +321,8 @@ impl BufferView {
         }
 
         let visible_rows = viewport_size.rows as usize;
-        let visible_cols = viewport_size.cols as usize;
+        // Subtract gutter width from visible columns to match render calculation
+        let visible_cols = viewport_size.cols.saturating_sub(gutter_width) as usize;
 
         // Vertical scrolling: Ensure cursor.line is within [scroll_offset.row, scroll_offset.row + visible_rows)
         // If cursor is above viewport, scroll up to show it at the top
@@ -456,6 +460,7 @@ impl BufferView {
 pub struct Window {
     buffer_view: BufferView,
     render_data: RenderData,
+    size: Size,
 }
 
 impl Window {
@@ -463,6 +468,7 @@ impl Window {
         Self {
             buffer_view: BufferView::new(buffer),
             render_data: RenderData::new(0),
+            size: Size::default(),
         }
     }
 
@@ -474,11 +480,16 @@ impl Window {
         &mut self.buffer_view
     }
 
+    pub fn size(&self) -> Size {
+        self.size
+    }
+
     pub fn render_data(&self) -> &RenderData {
         &self.render_data
     }
 
     pub fn render(&mut self, screen: &mut Screen, origin: Position, size: Size) {
+        self.size = size;
         // Get buffer info for gutter
         let buffer = self.buffer_view.buffer();
         let total_lines = buffer.line_count();
@@ -487,6 +498,9 @@ impl Window {
         // Create gutter with needed info (no buffer reference)
         let mut gutter = Gutter::new(start_line, size.rows, total_lines);
         let gutter_width = gutter.calculate_width();
+
+        // Scroll to make cursor visible before rendering
+        self.buffer_view.scroll_to_cursor(size, gutter_width);
 
         // Render gutter at origin position
         gutter.render(screen, origin);
@@ -497,6 +511,10 @@ impl Window {
 
         self.render_data = self.buffer_view.build_render_data(content_size);
         self.render_data.render(screen, content_origin);
+    }
+
+    pub fn set_cursor(&mut self, cursor: Cursor) {
+        self.buffer_view.set_cursor(cursor);
     }
 
     pub fn visual_cursor(&self) -> Option<Position> {

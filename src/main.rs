@@ -1,9 +1,10 @@
 use clap::Parser;
 use std::io;
+use urvim::terminal::Modifiers;
 
 use urvim::buffer::{Buffer, Cursor};
 use urvim::screen::Screen;
-use urvim::terminal::{size::get_terminal_size, Event, KeyCode, Terminal};
+use urvim::terminal::{Event, KeyCode, Terminal, size::get_terminal_size};
 use urvim::window::{Position, Size, Window};
 
 #[derive(Parser)]
@@ -64,7 +65,7 @@ fn main() -> io::Result<()> {
         let event = terminal.read_event()?;
 
         if let Event::Key(key) = event {
-            if key.code == KeyCode::Char('q') {
+            if key.code == KeyCode::Char('q') && key.modifiers == Modifiers::CTRL {
                 break;
             }
 
@@ -131,10 +132,7 @@ fn main() -> io::Result<()> {
             };
 
             if let Some(new_cursor) = new_cursor {
-                window.buffer_view_mut().set_cursor(new_cursor);
-                window
-                    .buffer_view_mut()
-                    .scroll_to_cursor(Size::new(rows, cols));
+                window.set_cursor(new_cursor);
             }
         }
 
