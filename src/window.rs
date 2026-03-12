@@ -6,6 +6,7 @@
 
 use crate::buffer::{Buffer, Cursor};
 use crate::screen::Screen;
+use crate::terminal::Color;
 use crate::terminal::Style;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
@@ -31,6 +32,127 @@ pub struct Size {
 impl Size {
     pub fn new(rows: u16, cols: u16) -> Self {
         Self { rows, cols }
+    }
+}
+
+/// Gutter renders line numbers on the left side of the editor window.
+///
+/// The gutter displays line numbers for the visible buffer content,
+/// with a distinct background color to separate it from the content.
+#[derive(Debug, Clone)]
+pub struct Gutter {
+    /// First visible buffer line (scroll offset)
+    start_line: usize,
+    /// Number of visible rows in the window
+    visible_rows: u16,
+    /// Total number of lines in the buffer (for width calculation)
+    total_buffer_lines: usize,
+    /// Last rendered buffer line number (for wrapping detection)
+    last_buffer_line: Option<usize>,
+    /// Background color for gutter (ANSI 236 = dark gray)
+    background_color: Color,
+    /// Foreground color for line numbers (ANSI 245 = light gray)
+    foreground_color: Color,
+}
+
+impl Gutter {
+    /// Creates a new Gutter with viewport info.
+    ///
+    /// # Arguments
+    /// * `start_line` - First visible buffer line (0-indexed)
+    /// * `visible_rows` - Number of visible rows in window
+    /// * `total_buffer_lines` - Total lines in buffer (for width calculation)
+    pub fn new(start_line: usize, visible_rows: u16, total_buffer_lines: usize) -> Self {
+        Self {
+            start_line,
+            visible_rows,
+            total_buffer_lines,
+            last_buffer_line: None,
+            background_color: Color::ansi(236),
+            foreground_color: Color::ansi(245),
+        }
+    }
+
+    /// Calculates the required width for the gutter.
+    /// Width = digits(total_buffer_lines) + 2 (1 space padding each side)
+    pub fn calculate_width(&self) -> u16 {
+        let digits = Self::digit_count(self.total_buffer_lines);
+        // Minimum 3 columns: 1 digit + 1 space left + 1 space right
+        // (even for empty buffer, show at least "1")
+        let min_width = if self.total_buffer_lines == 0 {
+            3
+        } else {
+            digits + 2
+        };
+        min_width as u16
+    }
+
+    /// Counts the number of digits in a number using mathematical calculation.
+    /// Returns 1 for 0 (edge case).
+    fn digit_count(n: usize) -> usize {
+        if n == 0 {
+            return 1;
+        }
+        // Use ilog10 for efficient digit counting
+        n.ilog10() as usize + 1
+    }
+
+    /// Renders the gutter to the screen at the given position.
+    /// Renders ALL visible_rows with background, line numbers for content rows.
+    pub fn render(&mut self, screen: &mut Screen, origin: Position) {
+        let width = self.calculate_width();
+        let gutter_style = Style::new()
+            .bg(self.background_color)
+            .fg(self.foreground_color);
+
+        // Render each row: create full gutter line string and write it
+        for screen_row in 0..self.visible_rows {
+            let screen_row_idx = screen_row as usize;
+            let buffer_line = self.start_line + screen_row_idx;
+
+            // Skip line number if same buffer line would repeat (for wrapping support)
+            if Some(buffer_line) == self.last_buffer_line && buffer_line < self.total_buffer_lines {
+                // Still need to render background for this row
+                let gutter_line = " ".repeat(width as usize);
+                screen.write_string(
+                    origin.row + screen_row,
+                    origin.col,
+                    gutter_style,
+                    &gutter_line,
+                );
+                continue;
+            }
+
+            // Create the gutter line: left_pad + line_number + right_pad
+            let gutter_line = if buffer_line < self.total_buffer_lines {
+                let line_num = buffer_line + 1;
+                let line_str = line_num.to_string();
+                let line_width = line_str.len();
+
+                // Right-align: left_pad fills to (width - line_width - 1) for right padding
+                let left_pad_len = width as usize - 1 - line_width;
+                let left_pad = " ".repeat(left_pad_len);
+                let right_pad = " "; // 1 space on the right
+
+                format!("{}{}{}", left_pad, line_str, right_pad)
+            } else {
+                // No valid buffer line - just background
+                " ".repeat(width as usize)
+            };
+
+            // Write the entire gutter line at once
+            screen.write_string(
+                origin.row + screen_row,
+                origin.col,
+                gutter_style,
+                &gutter_line,
+            );
+
+            // Track last buffer line for wrapping detection
+            if buffer_line < self.total_buffer_lines {
+                self.last_buffer_line = Some(buffer_line);
+            }
+        }
     }
 }
 
@@ -357,13 +479,44 @@ impl Window {
     }
 
     pub fn render(&mut self, screen: &mut Screen, origin: Position, size: Size) {
-        self.render_data = self.buffer_view.build_render_data(size);
-        self.render_data.render(screen, origin);
+        // Get buffer info for gutter
+        let buffer = self.buffer_view.buffer();
+        let total_lines = buffer.line_count();
+        let start_line = self.buffer_view.scroll_offset().row as usize;
+
+        // Create gutter with needed info (no buffer reference)
+        let mut gutter = Gutter::new(start_line, size.rows, total_lines);
+        let gutter_width = gutter.calculate_width();
+
+        // Render gutter at origin position
+        gutter.render(screen, origin);
+
+        // Render buffer content offset by gutter width
+        let content_origin = Position::new(origin.row, origin.col + gutter_width);
+        let content_size = Size::new(size.rows, size.cols.saturating_sub(gutter_width));
+
+        self.render_data = self.buffer_view.build_render_data(content_size);
+        self.render_data.render(screen, content_origin);
     }
 
     pub fn visual_cursor(&self) -> Option<Position> {
-        self.render_data
+        // Get cursor position from render data
+        if let Some(mut pos) = self
+            .render_data
             .cursor_screen_position(self.buffer_view.cursor())
+        {
+            // Add gutter width to column to get screen position
+            let total_lines = self.buffer_view.buffer().line_count();
+            let gutter = Gutter::new(
+                self.buffer_view.scroll_offset().row as usize,
+                self.render_data.visible_rows(),
+                total_lines,
+            );
+            pos.col += gutter.calculate_width();
+            Some(pos)
+        } else {
+            None
+        }
     }
 }
 
@@ -442,8 +595,12 @@ mod tests {
         let mut screen = crate::screen::Screen::new(3, 80);
         window.render(&mut screen, Position::new(0, 0), Size::new(3, 80));
 
-        assert_eq!(screen.get_cell_mut(0, 0).unwrap().text, "l");
-        assert_eq!(screen.get_cell_mut(1, 0).unwrap().text, "l");
+        // With gutter (3 columns for 3 lines: digits(3) + 2 = 3), buffer starts at col 3
+        // Check gutter background is rendered
+        assert_eq!(screen.get_cell_mut(0, 0).unwrap().text, " ");
+        // Check buffer content starts after gutter
+        assert_eq!(screen.get_cell_mut(0, 3).unwrap().text, "l");
+        assert_eq!(screen.get_cell_mut(1, 3).unwrap().text, "l");
     }
 
     #[test]
@@ -484,5 +641,281 @@ mod tests {
         let render_data = view.build_render_data(Size::new(3, 80));
 
         assert!(render_data.get_line(10).is_none());
+    }
+
+    // Gutter tests
+    #[test]
+    fn test_gutter_width_calculation() {
+        // 1-9 lines: 1 digit + 2 padding = 3 columns
+        let gutter = Gutter::new(0, 10, 9);
+        assert_eq!(gutter.calculate_width(), 3);
+
+        // 1-99 lines: 2 digits + 2 padding = 4 columns
+        let gutter = Gutter::new(0, 10, 99);
+        assert_eq!(gutter.calculate_width(), 4);
+
+        // 1-999 lines: 3 digits + 2 padding = 5 columns
+        let gutter = Gutter::new(0, 10, 999);
+        assert_eq!(gutter.calculate_width(), 5);
+
+        // Empty buffer: minimum 3 columns
+        let gutter = Gutter::new(0, 10, 0);
+        assert_eq!(gutter.calculate_width(), 3);
+    }
+
+    #[test]
+    fn test_gutter_digit_count() {
+        assert_eq!(Gutter::digit_count(0), 1);
+        assert_eq!(Gutter::digit_count(9), 1);
+        assert_eq!(Gutter::digit_count(10), 2);
+        assert_eq!(Gutter::digit_count(99), 2);
+        assert_eq!(Gutter::digit_count(100), 3);
+        assert_eq!(Gutter::digit_count(999), 3);
+        assert_eq!(Gutter::digit_count(1000), 4);
+    }
+
+    #[test]
+    fn test_gutter_render_background() {
+        // Use 10 lines so gutter width is 4 (digits(10) + 2 = 4)
+        let mut gutter = Gutter::new(0, 5, 10);
+        let mut screen = crate::screen::Screen::new(5, 80);
+
+        gutter.render(&mut screen, Position::new(0, 0));
+
+        let gutter_width = gutter.calculate_width();
+        assert_eq!(gutter_width, 4); // Verify expected width
+
+        // Check background is rendered for all visible rows in gutter area
+        for row in 0..5 {
+            for col in 0..gutter_width {
+                let _cell = screen.get_cell_mut(row, col).unwrap();
+                // Most cells should be spaces (background or padding)
+                // Only specific columns should have line numbers
+            }
+        }
+
+        // Specifically check that gutter cells have spaces (not line numbers)
+        // Column 0 should always be space (left padding)
+        assert_eq!(screen.get_cell_mut(0, 0).unwrap().text, " ");
+        assert_eq!(screen.get_cell_mut(1, 0).unwrap().text, " ");
+    }
+
+    #[test]
+    fn test_gutter_render_line_numbers() {
+        // For 10 lines: digits(10) + 2 = 4 columns
+        // Layout: col0=left_pad, col1=empty/1st_digit, col2=2nd_digit/last_digit, col3=right_pad
+        let mut gutter = Gutter::new(0, 3, 10);
+        let mut screen = crate::screen::Screen::new(3, 80);
+
+        gutter.render(&mut screen, Position::new(0, 0));
+
+        // Width is digits(10) + 2 = 4
+        // Line "1": col0=space, col1=space, col2="1", col3=space
+        let cell_left_pad = screen.get_cell_mut(0, 0).unwrap();
+        assert_eq!(cell_left_pad.text, " "); // left padding
+        let cell_empty = screen.get_cell_mut(0, 1).unwrap();
+        assert_eq!(cell_empty.text, " "); // empty for 1-digit
+        let cell_num = screen.get_cell_mut(0, 2).unwrap();
+        assert_eq!(cell_num.text, "1"); // line number right-aligned
+        let cell_right_pad = screen.get_cell_mut(0, 3).unwrap();
+        assert_eq!(cell_right_pad.text, " "); // right padding
+
+        // Line "2": col0=space, col1=space, col2="2", col3=space
+        assert_eq!(screen.get_cell_mut(1, 0).unwrap().text, " ");
+        assert_eq!(screen.get_cell_mut(1, 1).unwrap().text, " ");
+        assert_eq!(screen.get_cell_mut(1, 2).unwrap().text, "2");
+        assert_eq!(screen.get_cell_mut(1, 3).unwrap().text, " ");
+
+        // Line "3": col0=space, col1=space, col2="3", col3=space
+        assert_eq!(screen.get_cell_mut(2, 0).unwrap().text, " ");
+        assert_eq!(screen.get_cell_mut(2, 1).unwrap().text, " ");
+        assert_eq!(screen.get_cell_mut(2, 2).unwrap().text, "3");
+        assert_eq!(screen.get_cell_mut(2, 3).unwrap().text, " ");
+    }
+
+    #[test]
+    fn test_gutter_wrap_detection() {
+        // Simulate scrolling where same buffer line appears in multiple screen rows
+        // start_line=5, visible_rows=2 would show buffer lines 5 and 6
+        // With 10 lines: width = 4
+        // Row 0: buffer line 5 -> "6" at column 2, right padding at column 3
+        // Row 1: buffer line 6 -> "7" at column 2, right padding at column 3
+        let mut gutter = Gutter::new(5, 2, 10);
+        let mut screen = crate::screen::Screen::new(2, 80);
+
+        gutter.render(&mut screen, Position::new(0, 0));
+
+        // Row 0: buffer line 5 -> "6" (1-indexed)
+        // Line "6" at column 2 (right-aligned for 1-digit)
+        let cell_0 = screen.get_cell_mut(0, 2).unwrap();
+        assert_eq!(cell_0.text, "6");
+
+        // Row 1: buffer line 6 -> "7" (1-indexed)
+        let cell_1 = screen.get_cell_mut(1, 2).unwrap();
+        assert_eq!(cell_1.text, "7");
+    }
+
+    #[test]
+    fn test_gutter_scroll_offset() {
+        // Test gutter with scroll offset
+        // With 20 total lines: digits(20) + 2 = 4 columns
+        // start_line=10 means first visible is buffer line 10 (display 11, 2 digits)
+        let mut gutter = Gutter::new(10, 5, 20);
+        let mut screen = crate::screen::Screen::new(5, 80);
+
+        gutter.render(&mut screen, Position::new(0, 0));
+
+        // Verify gutter width
+        assert_eq!(gutter.calculate_width(), 4);
+
+        // First visible line is buffer line 10 (1-indexed: 11, 2 digits)
+        // Layout: col0=left_pad, col1="1", col2="1", col3=right_pad
+        let cell_left_pad = screen.get_cell_mut(0, 0).unwrap();
+        assert_eq!(cell_left_pad.text, " "); // left padding
+        let cell_digit1 = screen.get_cell_mut(0, 1).unwrap();
+        assert_eq!(cell_digit1.text, "1"); // first digit of "11"
+        let cell_digit2 = screen.get_cell_mut(0, 2).unwrap();
+        assert_eq!(cell_digit2.text, "1"); // second digit of "11"
+        let cell_right_pad = screen.get_cell_mut(0, 3).unwrap();
+        assert_eq!(cell_right_pad.text, " "); // right padding
+    }
+
+    #[test]
+    fn test_window_visual_cursor_with_gutter() {
+        let buffer = Buffer::from_str("line1\nline2\nline3");
+        let mut window = Window::new(buffer);
+
+        // Set cursor to line 0, column 2 (within "line1")
+        window.buffer_view_mut().set_cursor(Cursor::new(0, 2));
+
+        // Need to call render to build render_data first
+        let size = Size::new(3, 80);
+        let mut screen = crate::screen::Screen::new(3, 80);
+        window.render(&mut screen, Position::new(0, 0), size);
+
+        // Get visual cursor position
+        let cursor_pos = window.visual_cursor();
+
+        assert!(cursor_pos.is_some());
+        let pos = cursor_pos.unwrap();
+
+        // Cursor should be offset by gutter width (3 columns for 3 lines)
+        // The cursor is at column 2 in the content, plus 3 for gutter = column 5
+        let gutter_width = 3; // digits(3) + 2 = 3
+        assert_eq!(pos.col, 2 + gutter_width);
+    }
+
+    #[test]
+    fn test_gutter_scroll_and_rerender() {
+        // Simulate scrolling and re-rendering
+        // First render at start_line=0
+        let mut gutter = Gutter::new(0, 5, 20);
+        let mut screen = crate::screen::Screen::new(5, 80);
+
+        gutter.render(&mut screen, Position::new(0, 0));
+
+        // Verify initial render - line 1 should have gutter style
+        // For 20 lines, width = digits(20) + 2 = 2 + 2 = 4
+        // Line "1" (digit 1): col0=space, col1=space, col2="1", col3=space
+        let cell_line1 = screen.get_cell_mut(0, 2).unwrap();
+        assert_eq!(cell_line1.text, "1");
+
+        // Now simulate scrolling - create new gutter at start_line=3
+        let mut gutter2 = Gutter::new(3, 5, 20);
+        let mut screen2 = crate::screen::Screen::new(5, 80);
+
+        gutter2.render(&mut screen2, Position::new(0, 0));
+
+        // After scrolling to line 3, row 0 should show line 4 (buffer line 3 + 1)
+        // Line "4": col0=space, col1=space, col2="4", col3=space
+        let cell_scrolled = screen2.get_cell_mut(0, 2).unwrap();
+        assert_eq!(cell_scrolled.text, "4");
+
+        // Verify gutter background is rendered for ALL rows including empty ones
+        // Row 4 would be buffer line 7 which doesn't exist in 20 lines, but background should still be there
+        let cell_empty_row = screen2.get_cell_mut(4, 0).unwrap();
+        assert_eq!(cell_empty_row.text, " ");
+    }
+
+    #[test]
+    fn test_gutter_then_buffer_render() {
+        // Test that buffer content doesn't overwrite gutter
+        // This simulates what happens in Window::render
+        let gutter_width = 4; // digits(20) + 2 = 4
+
+        // First render gutter
+        let mut gutter = Gutter::new(0, 5, 20);
+        let mut screen = crate::screen::Screen::new(5, 80);
+        gutter.render(&mut screen, Position::new(0, 0));
+
+        // Verify gutter cells have correct content
+        assert_eq!(screen.get_cell_mut(0, 0).unwrap().text, " ");
+        assert_eq!(screen.get_cell_mut(0, 2).unwrap().text, "1");
+        assert_eq!(screen.get_cell_mut(0, 3).unwrap().text, " ");
+
+        // Now simulate buffer content rendering at offset
+        let content_origin = Position::new(0, gutter_width);
+        let content_size = Size::new(5, 80 - gutter_width);
+
+        // Create some buffer content to render
+        let buffer = crate::buffer::Buffer::from_str("line1\nline2\nline3");
+        let view = BufferView::new(buffer);
+        let render_data = view.build_render_data(content_size);
+        render_data.render(&mut screen, content_origin);
+
+        // After buffer rendering, gutter cells should STILL have correct gutter content
+        // Gutter is at columns 0-3, buffer is at column 4+
+        // Column 0 should still be gutter left padding
+        assert_eq!(screen.get_cell_mut(0, 0).unwrap().text, " ");
+        // Column 2 should still have line number "1" (not overwritten by buffer)
+        assert_eq!(screen.get_cell_mut(0, 2).unwrap().text, "1");
+        // Column 3 should still be gutter right padding
+        assert_eq!(screen.get_cell_mut(0, 3).unwrap().text, " ");
+
+        // But buffer content should be at column 4+
+        assert_eq!(screen.get_cell_mut(0, 4).unwrap().text, "l"); // "line1"
+    }
+
+    #[test]
+    fn test_gutter_width_change() {
+        // Test gutter when width changes (e.g., file grows from 99 to 100 lines)
+        // Old gutter width = 4 (digits(99) + 2 = 2 + 2)
+        // New gutter width = 5 (digits(100) + 2 = 3 + 2)
+
+        // Simulate first render with width=4
+        let mut screen = crate::screen::Screen::new(3, 80);
+        let mut gutter = Gutter::new(0, 3, 99);
+        gutter.render(&mut screen, Position::new(0, 0));
+
+        // With width=4 and line "1":
+        // col0=space, col1=space, col2="1", col3=space
+        assert_eq!(screen.get_cell_mut(0, 0).unwrap().text, " ");
+        assert_eq!(screen.get_cell_mut(0, 1).unwrap().text, " ");
+        assert_eq!(screen.get_cell_mut(0, 2).unwrap().text, "1");
+        assert_eq!(screen.get_cell_mut(0, 3).unwrap().text, " ");
+
+        // Now simulate re-render with width=5 (simulating file grew)
+        // The screen still has old content, but we re-render with new width
+        let mut gutter2 = Gutter::new(0, 3, 100);
+        gutter2.render(&mut screen, Position::new(0, 0));
+
+        // With width=5 and line "1" (1 digit):
+        // col0=space, col1=space, col2=space, col3="1", col4=space
+        // Because: right_padding at col4, line at col4-1=3
+        assert_eq!(screen.get_cell_mut(0, 0).unwrap().text, " ");
+        assert_eq!(screen.get_cell_mut(0, 1).unwrap().text, " ");
+        assert_eq!(screen.get_cell_mut(0, 2).unwrap().text, " ");
+        assert_eq!(screen.get_cell_mut(0, 3).unwrap().text, "1");
+        assert_eq!(screen.get_cell_mut(0, 4).unwrap().text, " ");
+
+        // Also verify multi-digit line number
+        // Line "11" would be at columns 2-3
+        let mut gutter3 = Gutter::new(9, 3, 100); // start at line 9, showing 10, 11
+        gutter3.render(&mut screen, Position::new(0, 0));
+
+        // Line "10" at row 0: col2="1", col3="0", col4=space
+        assert_eq!(screen.get_cell_mut(0, 2).unwrap().text, "1");
+        assert_eq!(screen.get_cell_mut(0, 3).unwrap().text, "0");
+        assert_eq!(screen.get_cell_mut(0, 4).unwrap().text, " ");
     }
 }

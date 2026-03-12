@@ -212,6 +212,8 @@ impl Screen {
         &mut self,
         terminal: &mut Terminal<I, O>,
     ) -> io::Result<()> {
+        terminal.hide_cursor()?;
+
         for row in 0..self.rows {
             let mut col: u16 = 0;
             while col < self.cols {
@@ -230,13 +232,14 @@ impl Screen {
                             terminal.set_cursor_position(row + 1, col + 1 + clear_offset as u16)?;
                             terminal.write_text(" ")?;
                         }
+                        // Reposition after clearing wide character cells
+                        terminal.set_cursor_position(row + 1, col + 1)?;
                     }
 
-                    if cell.style != old_cell.style {
-                        terminal.set_cursor_position(row + 1, col + 1)?;
-                        terminal.set_style(&cell.style)?;
-                    }
-                    terminal.set_cursor_position(row + 1, col + 1)?;
+                    // Always apply the style to ensure correctness, regardless of whether
+                    // it changed from old_buffer. The terminal state may differ from buffer
+                    // state when we skip unchanged cells in the else branch.
+                    terminal.set_style(&cell.style)?;
                     terminal.write_text(&cell.text)?;
                     terminal.reset_style()?;
 
@@ -246,6 +249,8 @@ impl Screen {
                 }
             }
         }
+
+        terminal.show_cursor()?;
 
         std::mem::swap(&mut self.buffer, &mut self.old_buffer);
 
