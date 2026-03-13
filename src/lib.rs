@@ -1,4 +1,5 @@
 pub mod buffer;
+pub mod editor;
 pub mod logger;
 pub mod path;
 pub mod screen;

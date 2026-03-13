@@ -48,16 +48,14 @@ pub mod utils;
 
 use crate::terminal::utils::write_decimal;
 use buffer::ByteBuffer;
-use escape::parse_event_with_buffer;
 pub use keys::{Event, Key, KeyCode, Modifiers};
 use rustix::event::{PollFd, PollFlags, poll};
 use rustix::fd::AsFd;
 use rustix::termios::{OptionalActions, Termios, tcgetattr, tcsetattr};
-use size::{get_terminal_size, poll_input, query_cursor_position};
+use size::{get_terminal_size, query_cursor_position};
 pub use sizing::{HorizontalAlign, TextSizing, TextSizingSupport, VerticalAlign};
 use std::io::{self, Read, Write};
 pub use style::{Color, Rgb, Style, UnderlineStyle};
-use tracing::{debug, trace};
 #[allow(dead_code)]
 pub use utils::osc52_copy_to_clipboard;
 
@@ -80,13 +78,16 @@ const HIDE_CURSOR: &str = "\x1b[?25l";
 /// Escape sequence to show the cursor.
 const SHOW_CURSOR: &str = "\x1b[?25h";
 
-/// Timeout in milliseconds for waiting for escape sequence data.
-/// This is the maximum time to wait after receiving an escape character
-/// to determine if more bytes are coming (forming a complete sequence).
-const ESC_TIMEOUT_MS: i32 = 50;
 /// Maximum size for paste data in bytes. Pastes exceeding this size
 /// will be discarded and re-read as individual key events.
 const MAX_PASTE_SIZE: usize = 1024 * 1024;
+
+/// Poll timeout in milliseconds for TTY mode.
+/// This balances responsiveness with CPU usage:
+/// - Shorter timeout = more responsive to input, but more CPU overhead from frequent polls
+/// - Longer timeout = less CPU overhead, but higher input latency
+/// 50ms is a good balance: responsive (< 1 frame at 60fps) while not hammering the CPU
+const POLL_TIMEOUT_MS: i32 = 50;
 
 /// Terminal cursor style.
 ///
@@ -530,198 +531,154 @@ impl<I: Read + AsFd, O: Write + AsFd> Terminal<I, O> {
     /// - No polling; reads directly
     /// - Still parses escape sequences and handles paste
     pub fn read_event(&mut self) -> io::Result<Event> {
-        // In TTY mode, use polling to detect input availability
-        if self.is_tty {
-            let input_fd = self.input.as_fd();
-
-            loop {
-                let pollfd = PollFd::new(&input_fd, PollFlags::IN);
-                let mut fds = [pollfd];
-                let poll_result = poll(&mut fds, 50);
-                if let Err(e) = poll_result {
-                    if e.kind() != io::ErrorKind::Interrupted {
-                        return Err(e.into());
-                    }
-                    continue;
-                }
-
-                // Check for terminal resize after polling
-                if let Some((rows, cols)) = get_terminal_size()
-                    && (rows != self.last_rows || cols != self.last_cols)
-                {
-                    debug!(
-                        "resize: {}x{} -> {}x{}",
-                        self.last_rows, self.last_cols, rows, cols
-                    );
-                    self.last_rows = rows;
-                    self.last_cols = cols;
-                    return Ok(Event::Resize(rows, cols));
-                }
-
-                // No input available, continue polling
-                if fds[0].revents().is_empty() {
-                    continue;
-                }
-
-                break;
-            }
-        } else {
-            // Non-TTY mode: check for resize without polling
-            if let Some((rows, cols)) = get_terminal_size()
-                && (rows != self.last_rows || cols != self.last_cols)
-            {
-                debug!(
-                    "resize: {}x{} -> {}x{}",
-                    self.last_rows, self.last_cols, rows, cols
-                );
-                self.last_rows = rows;
-                self.last_cols = cols;
-                return Ok(Event::Resize(rows, cols));
-            }
-        }
-
-        // Check for leftover data from previous parse (e.g., incomplete sequence)
-        if self.buffer.filled_len() > 0 {
-            let event = parse_event_with_buffer(&mut self.buffer);
-            trace!("buffered -> event: {:?}", event);
-            return Ok(event);
-        }
-
-        // Check if we're in the middle of reading a bracketed paste
-        if self.paste_active {
-            return self.read_paste_event();
-        }
-
-        // Read the first byte to determine event type
-        let mut first_byte = [0u8; 1];
         loop {
-            match self.input.read(&mut first_byte) {
-                Ok(0) => return Ok(KeyCode::Null.event()),
-                Ok(_) => break,
-                Err(e) if e.kind() == io::ErrorKind::Interrupted => {
-                    continue;
-                }
-                Err(e) => return Err(e),
-            }
-        }
-
-        // Handle escape character - start of escape sequence
-        if first_byte[0] == b'\x1b' {
-            self.buffer.clear();
-            self.buffer.push(first_byte[0]);
-
-            // Determine if we should wait for more bytes (escape sequence)
-            // or treat this as a plain Escape key
-            let should_poll = self.is_tty && poll_input(&self.input, ESC_TIMEOUT_MS);
-            let should_read = !self.is_tty || should_poll;
-
-            if should_read {
-                let mut temp_buf = [0u8; 64];
-                loop {
-                    let n = match self.input.read(&mut temp_buf) {
-                        Ok(n) => n,
-                        Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
-                        Err(_) => break,
-                    };
-                    if n == 0 {
-                        break;
-                    }
-                    for &b in &temp_buf[..n] {
-                        self.buffer.push(b);
-                    }
-
-                    // Limit buffer size to prevent runaway reads
-                    if self.buffer.len() >= 6 {
-                        break;
-                    }
-                    // Check if this looks like a partial CSI sequence
-                    if self.buffer.len() >= 2 {
-                        let seq = self.buffer.get_range(0, self.buffer.len());
-                        // Must be \x1b[ followed by digits and semicolons only
-                        if !seq.starts_with(b"\x1b[")
-                            || !seq[3..].iter().all(|&b| b.is_ascii_digit() || b == b';')
-                        {
-                            break;
-                        }
-                    }
-                }
+            // ============================================================
+            // Step 1: Check for ongoing bracketed paste
+            // ============================================================
+            // If we're in the middle of reading a bracketed paste, continue
+            // reading until we get the end marker (\x1b[201~)
+            if self.paste_active {
+                return self.read_paste_event();
             }
 
-            trace!(
-                "ESC read: buf.len={}, buf={:02x?}",
-                self.buffer.len(),
-                self.buffer.get_range(0, self.buffer.len())
-            );
-
-            // Check for bracketed paste start sequence: \x1b[200~
-            if self.buffer.len() >= 6 {
-                let paste_start = self.buffer.get_range(0, 6);
-                if paste_start.starts_with(b"\x1b[200~") {
+            // ============================================================
+            // Step 2: Check for leftover data from previous read
+            // ============================================================
+            // After parsing an event, there may be leftover bytes in the buffer
+            // (e.g., multiple keys pressed quickly). Check and process them first.
+            if self.buffer.filled_len() > 0 {
+                // Check if the leftover data starts with a bracketed paste sequence
+                let data = self.buffer.get_range(0, self.buffer.len());
+                if data.starts_with(b"\x1b[200~") {
+                    // Extract content after the paste start marker and enter paste mode
                     let remaining = self.buffer.get_range(6, self.buffer.len()).to_vec();
                     self.buffer.clear();
                     self.buffer.extend(&remaining);
                     self.paste_active = true;
                     return self.read_paste_event();
                 }
-            }
 
-            // Parse as escape sequence
-            if self.buffer.len() > 1 {
-                let event = parse_event_with_buffer(&mut self.buffer);
-                trace!("raw: {:02x?} -> event: {:?}", first_byte, event);
+                // Parse the leftover bytes as an event
+                let event = escape::parse_event_with_buffer(&mut self.buffer);
                 return Ok(event);
-            } else {
-                // Single escape character - plain Escape key
-                trace!("raw: {:02x?} -> event: Esc", first_byte);
-                return Ok(KeyCode::Esc.event());
             }
-        }
 
-        // Handle high bytes (128+) - UTF-8 multi-byte sequences
-        self.buffer.clear();
-        self.buffer.push(first_byte[0]);
+            // ============================================================
+            // Step 3: Check for terminal resize
+            // ============================================================
+            // On each iteration, check if the terminal size has changed.
+            // This works for both TTY and non-TTY modes.
+            if let Some((rows, cols)) = get_terminal_size() {
+                if rows != self.last_rows || cols != self.last_cols {
+                    self.last_rows = rows;
+                    self.last_cols = cols;
+                    return Ok(Event::Resize(rows, cols));
+                }
+            }
 
-        if first_byte[0] >= 0x80 {
-            let mut temp_buf = [0u8; 64];
-            loop {
-                // Poll for more bytes with timeout
-                if !self.is_tty || poll_input(&self.input, ESC_TIMEOUT_MS) {
-                    let n = match self.input.read(&mut temp_buf) {
-                        Ok(n) => n,
-                        Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
-                        Err(e) => {
-                            debug!("read error: {:?}", e);
-                            break;
+            // ============================================================
+            // Step 4: Read input (TTY vs non-TTY handling)
+            // ============================================================
+            if self.is_tty {
+                // --- TTY MODE: Use polling ---
+                // Poll for input availability with timeout. This allows us to:
+                // - Detect when input is available without blocking forever
+                // - Check for terminal resize between polls
+                // - Yield CPU time to other tasks
+                let input_fd = self.input.as_fd();
+                let poll_fd = PollFd::new(&input_fd, PollFlags::IN);
+                let mut fds = [poll_fd];
+
+                let poll_result = poll(&mut fds, POLL_TIMEOUT_MS);
+
+                match poll_result {
+                    // Input is available - read it
+                    Ok(n) if n > 0 && fds[0].revents().contains(PollFlags::IN) => {
+                        let mut buf = [0u8; 64];
+                        match self.input.read(&mut buf) {
+                            Ok(0) => {
+                                // EOF reached
+                                return Ok(KeyCode::Null.event());
+                            }
+                            Ok(bytes_read) => {
+                                // Process the read bytes
+                                self.buffer.clear();
+                                for &b in &buf[..bytes_read] {
+                                    self.buffer.push(b);
+                                }
+                                return self.process_buffer_for_event();
+                            }
+                            Err(e) if e.kind() == io::ErrorKind::Interrupted => {
+                                continue;
+                            }
+                            Err(e) => {
+                                return Err(e);
+                            }
                         }
-                    };
-                    if n == 0 {
-                        break;
                     }
-                    for &b in &temp_buf[..n] {
-                        self.buffer.push(b);
+                    // No input available yet - continue polling
+                    Ok(_) => {
+                        continue;
                     }
-
-                    // Check if we have a complete UTF-8 character
-                    let data = self.buffer.get_range(0, self.buffer.len());
-                    if let Ok(s) = std::str::from_utf8(data)
-                        && s.chars().next().map(|c| c.len_utf8()) == Some(self.buffer.len())
-                    {
-                        break;
+                    // Handle interrupt (should retry)
+                    Err(e) if e.kind() == io::ErrorKind::Interrupted => {
+                        continue;
                     }
-                    // Limit to prevent runaway reads
-                    if self.buffer.len() >= 4 {
-                        break;
+                    // Poll error - propagate
+                    Err(e) => {
+                        return Err(e.into());
                     }
-                } else {
-                    break;
+                }
+            } else {
+                // --- NON-TTY MODE: Read directly ---
+                // For piped/redirected input, read without polling.
+                // The input is not interactive, so blocking reads are appropriate.
+                let mut buf = [0u8; 64];
+                match self.input.read(&mut buf) {
+                    Ok(0) => {
+                        // EOF reached
+                        return Ok(KeyCode::Null.event());
+                    }
+                    Ok(bytes_read) => {
+                        // Process the read bytes
+                        self.buffer.clear();
+                        for &b in &buf[..bytes_read] {
+                            self.buffer.push(b);
+                        }
+                        return self.process_buffer_for_event();
+                    }
+                    Err(e) if e.kind() == io::ErrorKind::Interrupted => {
+                        continue;
+                    }
+                    Err(e) => {
+                        return Err(e);
+                    }
                 }
             }
         }
+    }
 
-        let event = parse_event_with_buffer(&mut self.buffer);
+    /// Processes the current buffer to generate an event.
+    ///
+    /// This is a helper that handles:
+    /// 1. Checking for bracketed paste start sequence
+    /// 2. Parsing the buffer as an escape sequence/event
+    ///
+    /// Returns the parsed event, or calls read_paste_event() if paste is detected.
+    fn process_buffer_for_event(&mut self) -> io::Result<Event> {
+        // Check for bracketed paste start sequence
+        let data = self.buffer.get_range(0, self.buffer.len());
+        if data.starts_with(b"\x1b[200~") {
+            // Extract content after the paste start marker and enter paste mode
+            let remaining = self.buffer.get_range(6, self.buffer.len()).to_vec();
+            self.buffer.clear();
+            self.buffer.extend(&remaining);
+            self.paste_active = true;
+            return self.read_paste_event();
+        }
 
-        trace!("raw: {:02x?} -> event: {:?}", first_byte, event);
-
+        // Parse the bytes as an event (only consumes what's needed for one key)
+        let event = escape::parse_event_with_buffer(&mut self.buffer);
         Ok(event)
     }
 
@@ -745,10 +702,6 @@ impl<I: Read + AsFd, O: Write + AsFd> Terminal<I, O> {
         loop {
             // Safety check: limit paste size to prevent memory issues
             if self.buffer.len() > MAX_PASTE_SIZE {
-                debug!(
-                    "paste exceeded max size {} bytes, discarding",
-                    MAX_PASTE_SIZE
-                );
                 self.buffer.clear();
                 self.paste_active = false;
                 return self.read_event();
@@ -774,7 +727,6 @@ impl<I: Read + AsFd, O: Write + AsFd> Terminal<I, O> {
                     self.buffer.extend(&remaining);
                     self.paste_active = false;
 
-                    trace!("paste: {} bytes", paste_content.len());
                     return Ok(Event::Paste(paste_content));
                 }
             }
@@ -793,9 +745,8 @@ impl<I: Read + AsFd, O: Write + AsFd> Terminal<I, O> {
                     }
                 }
                 Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
-                Err(e) => {
+                Err(_) => {
                     // Read error - cancel paste
-                    debug!("paste read error: {:?}", e);
                     self.buffer.clear();
                     self.paste_active = false;
                     return self.read_event();

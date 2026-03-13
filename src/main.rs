@@ -1,10 +1,10 @@
 use clap::Parser;
 use std::io;
-use urvim::terminal::Modifiers;
 
-use urvim::buffer::{Buffer, Cursor};
+use urvim::buffer::Buffer;
+use urvim::editor::{InsertMode, KeyAction, Mode, NormalMode};
 use urvim::screen::Screen;
-use urvim::terminal::{Event, KeyCode, Terminal, size::get_terminal_size};
+use urvim::terminal::{size::get_terminal_size, Event, Terminal};
 use urvim::window::{Position, Size, Window};
 
 #[derive(Parser)]
@@ -53,6 +53,10 @@ fn main() -> io::Result<()> {
 
     let mut window = Window::new(buffer);
 
+    // Initialize with Normal mode and set cursor style
+    let mut mode: Box<dyn Mode> = Box::new(NormalMode::new());
+    terminal.set_cursor_style(mode.cursor_style())?;
+
     loop {
         screen.clear();
         window.render(&mut screen, Position::new(0, 0), Size::new(rows, cols));
@@ -65,74 +69,34 @@ fn main() -> io::Result<()> {
         let event = terminal.read_event()?;
 
         if let Event::Key(key) = event {
-            if key.code == KeyCode::Char('q') && key.modifiers == Modifiers::CTRL {
-                break;
-            }
+            let action = mode.handle_key(&key);
 
-            let cursor = window.buffer_view().cursor();
-            let buffer = window.buffer_view_mut().buffer_mut();
-
-            let new_cursor = match key.code {
-                KeyCode::Char(c) => {
-                    buffer.insert_char(cursor, c);
-                    Some(Cursor::new(cursor.line, cursor.col + c.len_utf8()))
+            match action {
+                KeyAction::MoveLeft => {
+                    window.move_cursor_left();
                 }
-                KeyCode::Enter => {
-                    buffer.insert_char(cursor, '\n');
-                    Some(Cursor::new(cursor.line + 1, 0))
+                KeyAction::MoveDown => {
+                    window.move_cursor_down();
                 }
-                KeyCode::Left => buffer.cursor_left(cursor),
-                KeyCode::Right => buffer.cursor_right(cursor),
-                KeyCode::Up => {
-                    let visual_col = buffer.visual_col_at(cursor);
-                    buffer.cursor_up(cursor, visual_col)
+                KeyAction::MoveUp => {
+                    window.move_cursor_up();
                 }
-                KeyCode::Down => {
-                    let visual_col = buffer.visual_col_at(cursor);
-                    buffer.cursor_down(cursor, visual_col)
+                KeyAction::MoveRight => {
+                    window.move_cursor_right();
                 }
-                KeyCode::PageUp => {
-                    let visual_col = buffer.visual_col_at(cursor);
-                    let mut new_cursor = cursor;
-                    let scroll_amount = (rows as usize).saturating_sub(1);
-                    for _ in 0..scroll_amount {
-                        if let Some(c) = buffer.cursor_up(new_cursor, visual_col) {
-                            new_cursor = c;
-                        } else {
-                            break;
-                        }
-                    }
-                    Some(new_cursor)
+                KeyAction::InsertChar(c) => {
+                    window.insert_char(c);
                 }
-                KeyCode::PageDown => {
-                    let visual_col = buffer.visual_col_at(cursor);
-                    let mut new_cursor = cursor;
-                    let scroll_amount = (rows as usize).saturating_sub(1);
-                    for _ in 0..scroll_amount {
-                        if let Some(c) = buffer.cursor_down(new_cursor, visual_col) {
-                            new_cursor = c;
-                        } else {
-                            break;
-                        }
-                    }
-                    Some(new_cursor)
+                KeyAction::SwitchToNormal => {
+                    mode = Box::new(NormalMode::new());
+                    terminal.set_cursor_style(mode.cursor_style())?;
                 }
-                KeyCode::Home if key.modifiers.has_ctrl() => Some(Cursor::new(0, 0)),
-                KeyCode::End if key.modifiers.has_ctrl() => {
-                    let last_line = buffer.line_count().saturating_sub(1);
-                    let last_col = buffer.line_at(last_line).map(|l| l.len()).unwrap_or(0);
-                    Some(Cursor::new(last_line, last_col))
+                KeyAction::SwitchToInsert => {
+                    mode = Box::new(InsertMode::new());
+                    terminal.set_cursor_style(mode.cursor_style())?;
                 }
-                KeyCode::Home => Some(Cursor::new(cursor.line, 0)),
-                KeyCode::End => {
-                    let line_len = buffer.line_at(cursor.line).map(|l| l.len()).unwrap_or(0);
-                    Some(Cursor::new(cursor.line, line_len))
-                }
-                _ => None,
-            };
-
-            if let Some(new_cursor) = new_cursor {
-                window.set_cursor(new_cursor);
+                KeyAction::Quit => break,
+                KeyAction::None => { /* Ignore */ }
             }
         }
 

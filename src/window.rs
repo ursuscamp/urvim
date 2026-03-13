@@ -517,6 +517,47 @@ impl Window {
         self.buffer_view.set_cursor(cursor);
     }
 
+    pub fn move_cursor_left(&mut self) {
+        let cursor = self.buffer_view.cursor();
+        if let Some(new_cursor) = self.buffer_view.buffer().cursor_left(cursor) {
+            self.buffer_view.set_cursor(new_cursor);
+        }
+    }
+
+    pub fn move_cursor_right(&mut self) {
+        let cursor = self.buffer_view.cursor();
+        if let Some(new_cursor) = self.buffer_view.buffer().cursor_right(cursor) {
+            self.buffer_view.set_cursor(new_cursor);
+        }
+    }
+
+    pub fn move_cursor_up(&mut self) {
+        let cursor = self.buffer_view.cursor();
+        let visual_col = self.buffer_view.buffer().visual_col_at(cursor);
+        if let Some(new_cursor) = self.buffer_view.buffer().cursor_up(cursor, visual_col) {
+            self.buffer_view.set_cursor(new_cursor);
+        }
+    }
+
+    pub fn move_cursor_down(&mut self) {
+        let cursor = self.buffer_view.cursor();
+        let visual_col = self.buffer_view.buffer().visual_col_at(cursor);
+        if let Some(new_cursor) = self.buffer_view.buffer().cursor_down(cursor, visual_col) {
+            self.buffer_view.set_cursor(new_cursor);
+        }
+    }
+
+    pub fn insert_char(&mut self, c: char) {
+        let cursor = self.buffer_view.cursor();
+        let buffer = self.buffer_view.buffer_mut();
+        buffer.insert_char(cursor, c);
+        let new_cursor = match c {
+            '\n' => Cursor::new(cursor.line + 1, 0),
+            _ => Cursor::new(cursor.line, cursor.col + c.len_utf8()),
+        };
+        self.buffer_view.set_cursor(new_cursor);
+    }
+
     pub fn visual_cursor(&self) -> Option<Position> {
         // Get cursor position from render data
         if let Some(mut pos) = self

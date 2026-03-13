@@ -106,7 +106,10 @@ pub fn query_cursor_position<I: Read + AsFd, O: Write + AsFd>(
 #[allow(dead_code)]
 pub fn poll_input<T: AsFd>(fd: &T, timeout_ms: i32) -> bool {
     let poll_fd = PollFd::new(fd, PollFlags::IN);
-    poll(&mut [poll_fd], timeout_ms).is_ok()
+    match poll(&mut [poll_fd], timeout_ms) {
+        Ok(n) => n > 0, // True only if there's actual data (n > 0 means events ready)
+        Err(_) => false,
+    }
 }
 
 #[cfg(test)]
