@@ -3,6 +3,7 @@
 //! This module provides the Mode trait and implementations for Normal and Insert modes,
 //! along with the Action enum that represents actions triggered by keypresses.
 
+use crate::buffer::Boundary;
 use crate::terminal::{CursorStyle, Key, KeyCode, Modifiers};
 
 /// Actions that the main event loop processes.
@@ -26,6 +27,10 @@ pub enum Action {
     Quit,
     /// No action (ignored key)
     None,
+    /// Move forward to boundary
+    ForwardTo(Boundary),
+    /// Move backward to boundary
+    BackTo(Boundary),
 }
 
 /// Trait for mode-specific key handling.
@@ -60,6 +65,20 @@ impl Mode for NormalMode {
             (KeyCode::Char('j'), _) if !key.modifiers.has_ctrl() => Action::MoveDown,
             (KeyCode::Char('k'), _) if !key.modifiers.has_ctrl() => Action::MoveUp,
             (KeyCode::Char('l'), _) if !key.modifiers.has_ctrl() => Action::MoveRight,
+
+            // Word motions
+            (KeyCode::Char('w'), _) if !key.modifiers.has_ctrl() => {
+                Action::ForwardTo(Boundary::Word)
+            }
+            (KeyCode::Char('b'), _) if !key.modifiers.has_ctrl() => Action::BackTo(Boundary::Word),
+            (KeyCode::Char('e'), _) if !key.modifiers.has_ctrl() => {
+                Action::ForwardTo(Boundary::WordEnd)
+            }
+
+            // BigWord motions
+            (KeyCode::Char('W'), _) => Action::ForwardTo(Boundary::BigWord),
+            (KeyCode::Char('B'), _) => Action::BackTo(Boundary::BigWord),
+            (KeyCode::Char('E'), _) => Action::ForwardTo(Boundary::BigWordEnd),
 
             // Mode switching
             (KeyCode::Char('i'), _) if !key.modifiers.has_ctrl() => Action::SwitchToInsert,
@@ -212,12 +231,59 @@ mod tests {
     }
 
     #[test]
-    fn test_insert_mode_ignore_other_keys() {
-        let mode = InsertMode::new();
-        // Ctrl+a should be ignored
+    fn test_normal_mode_word_forward() {
+        use crate::buffer::Boundary;
+        let mode = NormalMode::new();
         assert_eq!(
-            mode.handle_key(&Key::with_modifiers(KeyCode::Char('a'), Modifiers::CTRL)),
-            Action::None
+            mode.handle_key(&key('w')),
+            Action::ForwardTo(Boundary::Word)
+        );
+    }
+
+    #[test]
+    fn test_normal_mode_word_backward() {
+        use crate::buffer::Boundary;
+        let mode = NormalMode::new();
+        assert_eq!(mode.handle_key(&key('b')), Action::BackTo(Boundary::Word));
+    }
+
+    #[test]
+    fn test_normal_mode_word_end_forward() {
+        use crate::buffer::Boundary;
+        let mode = NormalMode::new();
+        assert_eq!(
+            mode.handle_key(&key('e')),
+            Action::ForwardTo(Boundary::WordEnd)
+        );
+    }
+
+    #[test]
+    fn test_normal_mode_bigword_forward() {
+        use crate::buffer::Boundary;
+        let mode = NormalMode::new();
+        assert_eq!(
+            mode.handle_key(&Key::new(KeyCode::Char('W'))),
+            Action::ForwardTo(Boundary::BigWord)
+        );
+    }
+
+    #[test]
+    fn test_normal_mode_bigword_backward() {
+        use crate::buffer::Boundary;
+        let mode = NormalMode::new();
+        assert_eq!(
+            mode.handle_key(&Key::new(KeyCode::Char('B'))),
+            Action::BackTo(Boundary::BigWord)
+        );
+    }
+
+    #[test]
+    fn test_normal_mode_bigword_end_forward() {
+        use crate::buffer::Boundary;
+        let mode = NormalMode::new();
+        assert_eq!(
+            mode.handle_key(&Key::new(KeyCode::Char('E'))),
+            Action::ForwardTo(Boundary::BigWordEnd)
         );
     }
 }

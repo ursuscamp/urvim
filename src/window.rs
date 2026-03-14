@@ -5,7 +5,7 @@
 //! and size, and renders the buffer content starting from its origin.
 
 use crate::action::{ActionResult, ActionResult::NotHandled};
-use crate::buffer::{Buffer, Cursor};
+use crate::buffer::{Boundary, Buffer, Cursor};
 use crate::editor::Action;
 use crate::screen::Screen;
 use crate::terminal::Color;
@@ -550,6 +550,20 @@ impl Window {
         }
     }
 
+    pub fn move_cursor_forward_to(&mut self, boundary: Boundary) {
+        let cursor = self.buffer_view.cursor();
+        if let Some(new_cursor) = self.buffer_view.buffer().next_boundary(cursor, boundary) {
+            self.buffer_view.set_cursor(new_cursor);
+        }
+    }
+
+    pub fn move_cursor_back_to(&mut self, boundary: Boundary) {
+        let cursor = self.buffer_view.cursor();
+        if let Some(new_cursor) = self.buffer_view.buffer().prev_boundary(cursor, boundary) {
+            self.buffer_view.set_cursor(new_cursor);
+        }
+    }
+
     pub fn insert_char(&mut self, c: char) {
         let cursor = self.buffer_view.cursor();
         let buffer = self.buffer_view.buffer_mut();
@@ -603,6 +617,14 @@ impl Widget for Window {
             }
             Action::InsertChar(c) => {
                 self.insert_char(*c);
+                ActionResult::Handled
+            }
+            Action::ForwardTo(boundary) => {
+                self.move_cursor_forward_to(*boundary);
+                ActionResult::Handled
+            }
+            Action::BackTo(boundary) => {
+                self.move_cursor_back_to(*boundary);
                 ActionResult::Handled
             }
             // All other actions are not handled by window
