@@ -4,10 +4,13 @@
 //! for rendering its content to the screen. A window has a screen position (origin)
 //! and size, and renders the buffer content starting from its origin.
 
+use crate::action::{ActionResult, ActionResult::NotHandled};
 use crate::buffer::{Buffer, Cursor};
+use crate::editor::Action;
 use crate::screen::Screen;
 use crate::terminal::Color;
 use crate::terminal::Style;
+use crate::widget::Widget;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
@@ -575,6 +578,35 @@ impl Window {
             Some(pos)
         } else {
             None
+        }
+    }
+}
+
+impl Widget for Window {
+    fn process_action(&mut self, action: &Action) -> ActionResult {
+        match action {
+            Action::MoveLeft => {
+                self.move_cursor_left();
+                ActionResult::Handled
+            }
+            Action::MoveDown => {
+                self.move_cursor_down();
+                ActionResult::Handled
+            }
+            Action::MoveUp => {
+                self.move_cursor_up();
+                ActionResult::Handled
+            }
+            Action::MoveRight => {
+                self.move_cursor_right();
+                ActionResult::Handled
+            }
+            Action::InsertChar(c) => {
+                self.insert_char(*c);
+                ActionResult::Handled
+            }
+            // All other actions are not handled by window
+            _ => NotHandled,
         }
     }
 }

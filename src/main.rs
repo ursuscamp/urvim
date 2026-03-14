@@ -1,10 +1,12 @@
 use clap::Parser;
 use std::io;
 
+use urvim::action::ActionResult;
 use urvim::buffer::Buffer;
-use urvim::editor::{InsertMode, KeyAction, Mode, NormalMode};
+use urvim::editor::{Action, InsertMode, Mode, NormalMode};
 use urvim::screen::Screen;
 use urvim::terminal::{size::get_terminal_size, Event, Terminal};
+use urvim::widget::Widget;
 use urvim::window::{Position, Size, Window};
 
 #[derive(Parser)]
@@ -71,32 +73,22 @@ fn main() -> io::Result<()> {
         if let Event::Key(key) = event {
             let action = mode.handle_key(&key);
 
-            match action {
-                KeyAction::MoveLeft => {
-                    window.move_cursor_left();
+            // First, try to process action through the widget (window)
+            if window.process_action(&action) == ActionResult::NotHandled {
+                // Fall back to app-level handling
+                match action {
+                    Action::SwitchToNormal => {
+                        mode = Box::new(NormalMode::new());
+                        terminal.set_cursor_style(mode.cursor_style())?;
+                    }
+                    Action::SwitchToInsert => {
+                        mode = Box::new(InsertMode::new());
+                        terminal.set_cursor_style(mode.cursor_style())?;
+                    }
+                    Action::Quit => break,
+                    Action::None => { /* Ignore */ }
+                    _ => { /* Should have been handled by window */ }
                 }
-                KeyAction::MoveDown => {
-                    window.move_cursor_down();
-                }
-                KeyAction::MoveUp => {
-                    window.move_cursor_up();
-                }
-                KeyAction::MoveRight => {
-                    window.move_cursor_right();
-                }
-                KeyAction::InsertChar(c) => {
-                    window.insert_char(c);
-                }
-                KeyAction::SwitchToNormal => {
-                    mode = Box::new(NormalMode::new());
-                    terminal.set_cursor_style(mode.cursor_style())?;
-                }
-                KeyAction::SwitchToInsert => {
-                    mode = Box::new(InsertMode::new());
-                    terminal.set_cursor_style(mode.cursor_style())?;
-                }
-                KeyAction::Quit => break,
-                KeyAction::None => { /* Ignore */ }
             }
         }
 

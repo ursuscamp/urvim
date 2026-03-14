@@ -1,13 +1,13 @@
 //! Editor module for vim-style modal editing.
 //!
 //! This module provides the Mode trait and implementations for Normal and Insert modes,
-//! along with the KeyAction enum that represents actions triggered by keypresses.
+//! along with the Action enum that represents actions triggered by keypresses.
 
 use crate::terminal::{CursorStyle, Key, KeyCode, Modifiers};
 
 /// Actions that the main event loop processes.
 #[derive(Debug, Clone, PartialEq)]
-pub enum KeyAction {
+pub enum Action {
     /// Move cursor left
     MoveLeft,
     /// Move cursor down
@@ -31,7 +31,7 @@ pub enum KeyAction {
 /// Trait for mode-specific key handling.
 pub trait Mode {
     /// Process a key event and return the corresponding action.
-    fn handle_key(&self, key: &Key) -> KeyAction;
+    fn handle_key(&self, key: &Key) -> Action;
 
     /// Get the cursor style for this mode.
     fn cursor_style(&self) -> CursorStyle;
@@ -53,28 +53,28 @@ impl Default for NormalMode {
 }
 
 impl Mode for NormalMode {
-    fn handle_key(&self, key: &Key) -> KeyAction {
+    fn handle_key(&self, key: &Key) -> Action {
         match (key.code, key.modifiers) {
             // Movement keys (h, j, k, l)
-            (KeyCode::Char('h'), _) if !key.modifiers.has_ctrl() => KeyAction::MoveLeft,
-            (KeyCode::Char('j'), _) if !key.modifiers.has_ctrl() => KeyAction::MoveDown,
-            (KeyCode::Char('k'), _) if !key.modifiers.has_ctrl() => KeyAction::MoveUp,
-            (KeyCode::Char('l'), _) if !key.modifiers.has_ctrl() => KeyAction::MoveRight,
+            (KeyCode::Char('h'), _) if !key.modifiers.has_ctrl() => Action::MoveLeft,
+            (KeyCode::Char('j'), _) if !key.modifiers.has_ctrl() => Action::MoveDown,
+            (KeyCode::Char('k'), _) if !key.modifiers.has_ctrl() => Action::MoveUp,
+            (KeyCode::Char('l'), _) if !key.modifiers.has_ctrl() => Action::MoveRight,
 
             // Mode switching
-            (KeyCode::Char('i'), _) if !key.modifiers.has_ctrl() => KeyAction::SwitchToInsert,
+            (KeyCode::Char('i'), _) if !key.modifiers.has_ctrl() => Action::SwitchToInsert,
 
             // Quit (Ctrl-q)
-            (KeyCode::Char('q'), _) => KeyAction::Quit,
+            (KeyCode::Char('q'), _) => Action::Quit,
 
             // Arrow keys for convenience
-            (KeyCode::Left, _) => KeyAction::MoveLeft,
-            (KeyCode::Down, _) => KeyAction::MoveDown,
-            (KeyCode::Up, _) => KeyAction::MoveUp,
-            (KeyCode::Right, _) => KeyAction::MoveRight,
+            (KeyCode::Left, _) => Action::MoveLeft,
+            (KeyCode::Down, _) => Action::MoveDown,
+            (KeyCode::Up, _) => Action::MoveUp,
+            (KeyCode::Right, _) => Action::MoveRight,
 
             // Ignore other keys in normal mode
-            _ => KeyAction::None,
+            _ => Action::None,
         }
     }
 
@@ -99,28 +99,28 @@ impl Default for InsertMode {
 }
 
 impl Mode for InsertMode {
-    fn handle_key(&self, key: &Key) -> KeyAction {
+    fn handle_key(&self, key: &Key) -> Action {
         match (key.code, key.modifiers) {
             // Mode switching
-            (KeyCode::Esc, _) => KeyAction::SwitchToNormal,
+            (KeyCode::Esc, _) => Action::SwitchToNormal,
 
             // Quit (Ctrl-q)
-            (KeyCode::Char('q'), Modifiers::CTRL) => KeyAction::Quit,
+            (KeyCode::Char('q'), Modifiers::CTRL) => Action::Quit,
 
             // Character insertion
-            (KeyCode::Char(c), _) if !key.modifiers.has_ctrl() => KeyAction::InsertChar(c),
+            (KeyCode::Char(c), _) if !key.modifiers.has_ctrl() => Action::InsertChar(c),
 
             // Enter key inserts newline
-            (KeyCode::Enter, _) => KeyAction::InsertChar('\n'),
+            (KeyCode::Enter, _) => Action::InsertChar('\n'),
 
             // Arrow keys for cursor movement while in insert mode
-            (KeyCode::Left, _) => KeyAction::MoveLeft,
-            (KeyCode::Down, _) => KeyAction::MoveDown,
-            (KeyCode::Up, _) => KeyAction::MoveUp,
-            (KeyCode::Right, _) => KeyAction::MoveRight,
+            (KeyCode::Left, _) => Action::MoveLeft,
+            (KeyCode::Down, _) => Action::MoveDown,
+            (KeyCode::Up, _) => Action::MoveUp,
+            (KeyCode::Right, _) => Action::MoveRight,
 
             // Ignore other keys
-            _ => KeyAction::None,
+            _ => Action::None,
         }
     }
 
@@ -141,31 +141,31 @@ mod tests {
     #[test]
     fn test_normal_mode_move_left() {
         let mode = NormalMode::new();
-        assert_eq!(mode.handle_key(&key('h')), KeyAction::MoveLeft);
+        assert_eq!(mode.handle_key(&key('h')), Action::MoveLeft);
     }
 
     #[test]
     fn test_normal_mode_move_down() {
         let mode = NormalMode::new();
-        assert_eq!(mode.handle_key(&key('j')), KeyAction::MoveDown);
+        assert_eq!(mode.handle_key(&key('j')), Action::MoveDown);
     }
 
     #[test]
     fn test_normal_mode_move_up() {
         let mode = NormalMode::new();
-        assert_eq!(mode.handle_key(&key('k')), KeyAction::MoveUp);
+        assert_eq!(mode.handle_key(&key('k')), Action::MoveUp);
     }
 
     #[test]
     fn test_normal_mode_move_right() {
         let mode = NormalMode::new();
-        assert_eq!(mode.handle_key(&key('l')), KeyAction::MoveRight);
+        assert_eq!(mode.handle_key(&key('l')), Action::MoveRight);
     }
 
     #[test]
     fn test_normal_mode_switch_to_insert() {
         let mode = NormalMode::new();
-        assert_eq!(mode.handle_key(&key('i')), KeyAction::SwitchToInsert);
+        assert_eq!(mode.handle_key(&key('i')), Action::SwitchToInsert);
     }
 
     #[test]
@@ -177,7 +177,7 @@ mod tests {
     #[test]
     fn test_insert_mode_insert_char() {
         let mode = InsertMode::new();
-        assert_eq!(mode.handle_key(&key('a')), KeyAction::InsertChar('a'));
+        assert_eq!(mode.handle_key(&key('a')), Action::InsertChar('a'));
     }
 
     #[test]
@@ -185,7 +185,7 @@ mod tests {
         let mode = InsertMode::new();
         assert_eq!(
             mode.handle_key(&Key::new(KeyCode::Esc)),
-            KeyAction::SwitchToNormal
+            Action::SwitchToNormal
         );
     }
 
@@ -200,15 +200,15 @@ mod tests {
         let mode = InsertMode::new();
         assert_eq!(
             mode.handle_key(&Key::new(KeyCode::Enter)),
-            KeyAction::InsertChar('\n')
+            Action::InsertChar('\n')
         );
     }
 
     #[test]
     fn test_normal_mode_ignore_other_keys() {
         let mode = NormalMode::new();
-        assert_eq!(mode.handle_key(&key('x')), KeyAction::None);
-        assert_eq!(mode.handle_key(&key('a')), KeyAction::None);
+        assert_eq!(mode.handle_key(&key('x')), Action::None);
+        assert_eq!(mode.handle_key(&key('a')), Action::None);
     }
 
     #[test]
@@ -217,7 +217,7 @@ mod tests {
         // Ctrl+a should be ignored
         assert_eq!(
             mode.handle_key(&Key::with_modifiers(KeyCode::Char('a'), Modifiers::CTRL)),
-            KeyAction::None
+            Action::None
         );
     }
 }
