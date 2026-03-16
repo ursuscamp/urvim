@@ -3,7 +3,7 @@ use std::io;
 
 use urvim::action::ActionResult;
 use urvim::buffer::Buffer;
-use urvim::editor::{Action, InsertMode, Mode, NormalMode};
+use urvim::editor::{Action, HandleKeyResult, InsertMode, Mode, NormalMode};
 use urvim::screen::Screen;
 use urvim::terminal::{size::get_terminal_size, Event, Terminal};
 use urvim::widget::Widget;
@@ -71,23 +71,33 @@ fn main() -> io::Result<()> {
         let event = terminal.read_event()?;
 
         if let Event::Key(key) = event {
-            let action = mode.handle_key(&key);
+            let result = mode.handle_key(&key);
 
-            // First, try to process action through the widget (window)
-            if window.process_action(&action) == ActionResult::NotHandled {
-                // Fall back to app-level handling
-                match action {
-                    Action::SwitchToNormal => {
-                        mode = Box::new(NormalMode::new());
-                        terminal.set_cursor_style(mode.cursor_style())?;
+            match result {
+                HandleKeyResult::Complete(action) => {
+                    // First, try to process action through the widget (window)
+                    if window.process_action(&action) == ActionResult::NotHandled {
+                        // Fall back to app-level handling
+                        match action {
+                            Action::SwitchToNormal => {
+                                mode = Box::new(NormalMode::new());
+                                terminal.set_cursor_style(mode.cursor_style())?;
+                            }
+                            Action::SwitchToInsert => {
+                                mode = Box::new(InsertMode::new());
+                                terminal.set_cursor_style(mode.cursor_style())?;
+                            }
+                            Action::Quit => break,
+                            Action::None => { /* Ignore */ }
+                            _ => { /* Should have been handled by window */ }
+                        }
                     }
-                    Action::SwitchToInsert => {
-                        mode = Box::new(InsertMode::new());
-                        terminal.set_cursor_style(mode.cursor_style())?;
-                    }
-                    Action::Quit => break,
-                    Action::None => { /* Ignore */ }
-                    _ => { /* Should have been handled by window */ }
+                }
+                HandleKeyResult::WaitForMore => {
+                    // Continue waiting for more keys, no action taken
+                }
+                HandleKeyResult::InvalidSequence => {
+                    // Ignore invalid sequences
                 }
             }
         }
