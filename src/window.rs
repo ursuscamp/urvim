@@ -574,6 +574,30 @@ impl Window {
         }
     }
 
+    /// Move cursor to absolute start of line (column 0).
+    ///
+    /// If already at column 0, does nothing.
+    pub fn move_cursor_to_line_start(&mut self) {
+        let cursor = self.buffer_view.cursor();
+        if let Some(new_cursor) = self.buffer_view.buffer().cursor_start_of_line(cursor) {
+            self.buffer_view.set_cursor(new_cursor);
+        }
+    }
+
+    /// Move cursor to first non-whitespace of current line.
+    ///
+    /// If already at first non-whitespace, wraps to previous line's first non-whitespace.
+    pub fn move_cursor_to_line_content_start(&mut self) {
+        let cursor = self.buffer_view.cursor();
+        if let Some(new_cursor) = self
+            .buffer_view
+            .buffer()
+            .cursor_content_start_of_line(cursor)
+        {
+            self.buffer_view.set_cursor(new_cursor);
+        }
+    }
+
     pub fn insert_char(&mut self, c: char) {
         let cursor = self.buffer_view.cursor();
         let buffer = self.buffer_view.buffer_mut();
@@ -639,6 +663,14 @@ impl Widget for Window {
             }
             Action::MoveToLineEnd => {
                 self.move_cursor_to_line_end();
+                ActionResult::Handled
+            }
+            Action::MoveToLineStart => {
+                self.move_cursor_to_line_start();
+                ActionResult::Handled
+            }
+            Action::MoveToLineContentStart => {
+                self.move_cursor_to_line_content_start();
                 ActionResult::Handled
             }
             // All other actions are not handled by window

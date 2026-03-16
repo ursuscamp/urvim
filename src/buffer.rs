@@ -754,6 +754,132 @@ impl Buffer {
         None
     }
 
+    /// Move cursor to absolute start of line (column 0).
+    ///
+    /// If already at column 0, wraps to previous line's column 0.
+    /// Returns None if already at column 0 of first line.
+    ///
+    /// # Arguments
+    ///
+    /// * `cursor` - Current cursor position
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use urvim::buffer::{Buffer, Cursor};
+    ///
+    /// let buf = Buffer::from_str("  hello\n  world");
+    /// // In middle of line - move to column 0
+    /// assert_eq!(buf.cursor_start_of_line(Cursor::new(0, 5)), Some(Cursor::new(0, 0)));
+    /// // At column 0 on line 1 - wrap to previous line
+    /// assert_eq!(buf.cursor_start_of_line(Cursor::new(1, 0)), Some(Cursor::new(0, 0)));
+    /// // At column 0 on first line - no movement
+    /// assert_eq!(buf.cursor_start_of_line(Cursor::new(0, 0)), None);
+    /// ```
+    pub fn cursor_start_of_line(&self, cursor: Cursor) -> Option<Cursor> {
+        let total_lines = self.line_count();
+        if total_lines == 0 {
+            return None;
+        }
+
+        // If not at column 0, move to column 0
+        if cursor.col != 0 {
+            return Some(Cursor::new(cursor.line, 0));
+        }
+
+        // Already at column 0 - wrap to previous line if available
+        if cursor.line > 0 {
+            return Some(Cursor::new(cursor.line - 1, 0));
+        }
+
+        // Already at column 0 of first line - no movement
+        None
+    }
+
+    /// Move cursor to first non-whitespace character of current line.
+    ///
+    /// If already at first non-whitespace position, wraps to previous line.
+    /// Returns None if already at first non-whitespace of first line.
+    ///
+    /// # Arguments
+    ///
+    /// * `cursor` - Current cursor position
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use urvim::buffer::{Buffer, Cursor};
+    ///
+    /// let buf = Buffer::from_str("  hello\n  world");
+    /// // In middle of line - move to first non-whitespace
+    /// assert_eq!(buf.cursor_content_start_of_line(Cursor::new(0, 5)), Some(Cursor::new(0, 2)));
+    /// // At first non-whitespace on line 1 - move to previous line's first non-whitespace
+    /// assert_eq!(buf.cursor_content_start_of_line(Cursor::new(1, 2)), Some(Cursor::new(0, 2)));
+    /// // At first non-whitespace of first line - no movement (no previous line)
+    /// assert_eq!(buf.cursor_content_start_of_line(Cursor::new(0, 2)), None);
+    /// ```
+    pub fn cursor_content_start_of_line(&self, cursor: Cursor) -> Option<Cursor> {
+        let total_lines = self.line_count();
+        if total_lines == 0 {
+            return None;
+        }
+
+        let line = self.line_at(cursor.line)?;
+        let line_str = line.as_ref();
+
+        // Find first non-whitespace character position on current line
+        let mut first_non_ws = None;
+        for (idx, grapheme) in line_str.grapheme_indices(true) {
+            if !Self::is_whitespace_char(grapheme) {
+                first_non_ws = Some(idx);
+                break;
+            }
+        }
+
+        let content_start = match first_non_ws {
+            Some(pos) => pos,
+            None => {
+                // Line has no non-whitespace - return at column 0
+                if cursor.col > 0 {
+                    return Some(Cursor::new(cursor.line, 0));
+                }
+                return None;
+            }
+        };
+
+        // If cursor is not at the content start, move to it
+        // Otherwise, wrap to previous line
+        if cursor.col != content_start {
+            return Some(Cursor::new(cursor.line, content_start));
+        }
+
+        // Cursor is at content start - wrap to previous line if available
+        if cursor.line > 0 {
+            let prev_line_idx = cursor.line - 1;
+            let prev_line = self.line_at(prev_line_idx)?;
+            let prev_line_str = prev_line.as_ref();
+
+            // Find first non-whitespace on previous line
+            let mut prev_first_non_ws = None;
+            for (idx, grapheme) in prev_line_str.grapheme_indices(true) {
+                if !Self::is_whitespace_char(grapheme) {
+                    prev_first_non_ws = Some(idx);
+                    break;
+                }
+            }
+
+            if let Some(prev_pos) = prev_first_non_ws {
+                return Some(Cursor::new(prev_line_idx, prev_pos));
+            } else {
+                // Previous line has no non-whitespace - return at column 0
+                return Some(Cursor::new(prev_line_idx, 0));
+            }
+        }
+
+        // Already at first line at content start - no movement
+        None
+    }
+
     /// Returns the visual column (display width) at the cursor position.
     ///
     /// # Arguments
@@ -2193,6 +2319,99 @@ mod tests {
         // "hello" (5 bytes) + "😀" (4 bytes) = 9 bytes, then "world" (5 bytes) = 14 bytes total
         // Last char 'd' is at byte 13
         assert_eq!(buf.cursor_end_of_line(Cursor::new(0, 0)), Some(Cursor::new(0, 13)));
+    }
+
+    // cursor_start_of_line tests
+
+    #[test]
+    fn test_cursor_start_of_line_middle_of_line() {
+        let buf = Buffer::from_str("  hello");
+
+        // In middle of line - move to column 0
+        assert_eq!(buf.cursor_start_of_line(Cursor::new(0, 5)), Some(Cursor::new(0, 0)));
+    }
+
+    #[test]
+    fn test_cursor_start_of_line_at_column_zero_wraps() {
+        let buf = Buffer::from_str("  hello\n  world");
+
+        // At column 0 on line 1 - wrap to previous line
+        assert_eq!(buf.cursor_start_of_line(Cursor::new(1, 0)), Some(Cursor::new(0, 0)));
+    }
+
+    #[test]
+    fn test_cursor_start_of_line_at_first_line_no_wrap() {
+        let buf = Buffer::from_str("  hello");
+
+        // At column 0 on first line - no movement
+        assert_eq!(buf.cursor_start_of_line(Cursor::new(0, 0)), None);
+    }
+
+    #[test]
+    fn test_cursor_start_of_line_empty_buffer() {
+        let buf = Buffer::from_str("");
+
+        // Empty buffer - no movement
+        assert_eq!(buf.cursor_start_of_line(Cursor::new(0, 0)), None);
+    }
+
+    // cursor_content_start_of_line tests
+
+    #[test]
+    fn test_cursor_content_start_of_line_middle_of_line() {
+        let buf = Buffer::from_str("  hello");
+
+        // In middle of line - move to first non-whitespace
+        assert_eq!(buf.cursor_content_start_of_line(Cursor::new(0, 5)), Some(Cursor::new(0, 2)));
+    }
+
+    #[test]
+    fn test_cursor_content_start_of_line_at_first_non_ws() {
+        let buf = Buffer::from_str("  hello\n  world");
+
+        // At first non-whitespace on line 1 - wrap to previous line (line 0)
+        assert_eq!(buf.cursor_content_start_of_line(Cursor::new(1, 2)), Some(Cursor::new(0, 2)));
+    }
+
+    #[test]
+    fn test_cursor_content_start_of_line_at_first_line_no_wrap() {
+        let buf = Buffer::from_str("  hello");
+
+        // At first non-whitespace of first line - no movement
+        assert_eq!(buf.cursor_content_start_of_line(Cursor::new(0, 2)), None);
+    }
+
+    #[test]
+    fn test_cursor_content_start_of_line_no_leading_whitespace() {
+        let buf = Buffer::from_str("hello");
+
+        // No leading whitespace - already at first non-whitespace
+        assert_eq!(buf.cursor_content_start_of_line(Cursor::new(0, 0)), None);
+    }
+
+    #[test]
+    fn test_cursor_content_start_of_line_empty_buffer() {
+        let buf = Buffer::from_str("");
+
+        // Empty buffer - no movement
+        assert_eq!(buf.cursor_content_start_of_line(Cursor::new(0, 0)), None);
+    }
+
+    #[test]
+    fn test_cursor_content_start_of_line_empty_line() {
+        let buf = Buffer::from_str("  \nhello");
+
+        // At first non-whitespace on line 1 - wrap to previous line which is empty
+        // Previous line has no non-whitespace, so move to column 0
+        assert_eq!(buf.cursor_content_start_of_line(Cursor::new(1, 0)), Some(Cursor::new(0, 0)));
+    }
+
+    #[test]
+    fn test_cursor_content_start_of_line_with_wide_characters() {
+        let buf = Buffer::from_str("  hello😀world");
+
+        // First non-whitespace is 'h' at byte 2
+        assert_eq!(buf.cursor_content_start_of_line(Cursor::new(0, 5)), Some(Cursor::new(0, 2)));
     }
 
     // visual_col_at tests

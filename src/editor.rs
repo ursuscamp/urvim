@@ -33,6 +33,10 @@ pub enum Action {
     BackTo(Boundary),
     /// Move cursor to end of current line
     MoveToLineEnd,
+    /// Move cursor to absolute start of line (column 0)
+    MoveToLineStart,
+    /// Move cursor to first non-whitespace of line
+    MoveToLineContentStart,
 }
 
 /// Trait for mode-specific key handling.
@@ -84,6 +88,10 @@ impl Mode for NormalMode {
 
             // Line end navigation
             (KeyCode::Char('$'), _) if !key.modifiers.has_ctrl() => Action::MoveToLineEnd,
+
+            // Line start navigation
+            (KeyCode::Char('0'), _) if !key.modifiers.has_ctrl() => Action::MoveToLineStart,
+            (KeyCode::Char('^'), _) if !key.modifiers.has_ctrl() => Action::MoveToLineContentStart,
 
             // Mode switching
             (KeyCode::Char('i'), _) if !key.modifiers.has_ctrl() => Action::SwitchToInsert,
@@ -298,6 +306,24 @@ mod tests {
         assert_eq!(
             mode.handle_key(&Key::new(KeyCode::Char('$'))),
             Action::MoveToLineEnd
+        );
+    }
+
+    #[test]
+    fn test_normal_mode_move_to_line_start() {
+        let mode = NormalMode::new();
+        assert_eq!(
+            mode.handle_key(&Key::new(KeyCode::Char('0'))),
+            Action::MoveToLineStart
+        );
+    }
+
+    #[test]
+    fn test_normal_mode_move_to_line_content_start() {
+        let mode = NormalMode::new();
+        assert_eq!(
+            mode.handle_key(&Key::new(KeyCode::Char('^'))),
+            Action::MoveToLineContentStart
         );
     }
 }
