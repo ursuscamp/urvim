@@ -679,6 +679,81 @@ impl Buffer {
         Some(Cursor::new(prev_line, target_col))
     }
 
+    /// Move cursor to the end of the current line (last non-whitespace character).
+    ///
+    /// If the cursor is already at or beyond the end of the current line, moves to
+    /// the end of the next line. If on the last line at the end, returns None.
+    ///
+    /// # Arguments
+    ///
+    /// * `cursor` - Current cursor position
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use urvim::buffer::{Buffer, Cursor};
+    ///
+    /// let buf = Buffer::from_str("hello\nworld");
+    /// // In middle of line - move to end
+    /// assert_eq!(buf.cursor_end_of_line(Cursor::new(0, 2)), Some(Cursor::new(0, 4)));
+    /// // At end of line - move to next line's end
+    /// assert_eq!(buf.cursor_end_of_line(Cursor::new(0, 4)), Some(Cursor::new(1, 4)));
+    /// // At end of last line - no movement
+    /// assert_eq!(buf.cursor_end_of_line(Cursor::new(1, 4)), None);
+    /// ```
+    pub fn cursor_end_of_line(&self, cursor: Cursor) -> Option<Cursor> {
+        let total_lines = self.line_count();
+        if total_lines == 0 {
+            return None;
+        }
+
+        let line = self.line_at(cursor.line)?;
+        let line_str = line.as_ref();
+
+        // Find last non-whitespace character position on current line
+        let mut last_non_ws = None;
+        for (idx, grapheme) in line_str.grapheme_indices(true) {
+            if !Self::is_whitespace_char(grapheme) {
+                last_non_ws = Some(idx);
+            }
+        }
+
+        let end_pos = last_non_ws.unwrap_or(0);
+
+        // If cursor is before the end position, move to end
+        if cursor.col < end_pos {
+            return Some(Cursor::new(cursor.line, end_pos));
+        }
+
+        // Cursor is at or past end of current line
+        // Move to next line if available
+        if cursor.line + 1 < total_lines {
+            let next_line_idx = cursor.line + 1;
+            let next_line_len = self.line_len(next_line_idx);
+
+            if next_line_len > 0 {
+                // Find last non-whitespace on next line
+                let next_line = self.line_at(next_line_idx)?;
+                let next_line_str = next_line.as_ref();
+
+                let mut next_last_non_ws = None;
+                for (idx, grapheme) in next_line_str.grapheme_indices(true) {
+                    if !Self::is_whitespace_char(grapheme) {
+                        next_last_non_ws = Some(idx);
+                    }
+                }
+
+                return Some(Cursor::new(next_line_idx, next_last_non_ws.unwrap_or(0)));
+            } else {
+                // Next line is empty, return at position 0
+                return Some(Cursor::new(next_line_idx, 0));
+            }
+        }
+
+        // Already at end of last line - no movement
+        None
+    }
+
     /// Returns the visual column (display width) at the cursor position.
     ///
     /// # Arguments
@@ -2059,6 +2134,65 @@ mod tests {
 
         // At first line, should return None
         assert_eq!(buf.cursor_up(Cursor::new(0, 0), 0), None);
+    }
+
+    // cursor_end_of_line tests
+
+    #[test]
+    fn test_cursor_end_of_line_middle_of_line() {
+        let buf = Buffer::from_str("hello");
+
+        // In middle of line, move to end
+        assert_eq!(buf.cursor_end_of_line(Cursor::new(0, 2)), Some(Cursor::new(0, 4)));
+    }
+
+    #[test]
+    fn test_cursor_end_of_line_at_end_wraps() {
+        let buf = Buffer::from_str("hello\nworld");
+
+        // At end of line, wraps to next line's end
+        assert_eq!(buf.cursor_end_of_line(Cursor::new(0, 4)), Some(Cursor::new(1, 4)));
+    }
+
+    #[test]
+    fn test_cursor_end_of_line_at_end_of_last_line() {
+        let buf = Buffer::from_str("hello\nworld");
+
+        // At end of last line, no movement
+        assert_eq!(buf.cursor_end_of_line(Cursor::new(1, 4)), None);
+    }
+
+    #[test]
+    fn test_cursor_end_of_line_empty_buffer() {
+        let buf = Buffer::new();
+
+        // Empty buffer, no movement
+        assert_eq!(buf.cursor_end_of_line(Cursor::new(0, 0)), None);
+    }
+
+    #[test]
+    fn test_cursor_end_of_line_empty_line() {
+        let buf = Buffer::from_str("hello\n\nworld");
+
+        // Empty line in middle, wrap to next line (empty line)
+        assert_eq!(buf.cursor_end_of_line(Cursor::new(0, 4)), Some(Cursor::new(1, 0)));
+    }
+
+    #[test]
+    fn test_cursor_end_of_line_with_trailing_whitespace() {
+        let buf = Buffer::from_str("hello   ");
+
+        // Should move to last non-whitespace character
+        assert_eq!(buf.cursor_end_of_line(Cursor::new(0, 0)), Some(Cursor::new(0, 4)));
+    }
+
+    #[test]
+    fn test_cursor_end_of_line_with_wide_characters() {
+        let buf = Buffer::from_str("hello😀world");
+
+        // "hello" (5 bytes) + "😀" (4 bytes) = 9 bytes, then "world" (5 bytes) = 14 bytes total
+        // Last char 'd' is at byte 13
+        assert_eq!(buf.cursor_end_of_line(Cursor::new(0, 0)), Some(Cursor::new(0, 13)));
     }
 
     // visual_col_at tests

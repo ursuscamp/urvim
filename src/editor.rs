@@ -31,6 +31,8 @@ pub enum Action {
     ForwardTo(Boundary),
     /// Move backward to boundary
     BackTo(Boundary),
+    /// Move cursor to end of current line
+    MoveToLineEnd,
 }
 
 /// Trait for mode-specific key handling.
@@ -79,6 +81,9 @@ impl Mode for NormalMode {
             (KeyCode::Char('W'), _) => Action::ForwardTo(Boundary::BigWord),
             (KeyCode::Char('B'), _) => Action::BackTo(Boundary::BigWord),
             (KeyCode::Char('E'), _) => Action::ForwardTo(Boundary::BigWordEnd),
+
+            // Line end navigation
+            (KeyCode::Char('$'), _) if !key.modifiers.has_ctrl() => Action::MoveToLineEnd,
 
             // Mode switching
             (KeyCode::Char('i'), _) if !key.modifiers.has_ctrl() => Action::SwitchToInsert,
@@ -284,6 +289,15 @@ mod tests {
         assert_eq!(
             mode.handle_key(&Key::new(KeyCode::Char('E'))),
             Action::ForwardTo(Boundary::BigWordEnd)
+        );
+    }
+
+    #[test]
+    fn test_normal_mode_move_to_line_end() {
+        let mode = NormalMode::new();
+        assert_eq!(
+            mode.handle_key(&Key::new(KeyCode::Char('$'))),
+            Action::MoveToLineEnd
         );
     }
 }

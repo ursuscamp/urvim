@@ -564,6 +564,16 @@ impl Window {
         }
     }
 
+    /// Move cursor to end of current line.
+    ///
+    /// If already at end of line, moves to end of next line.
+    pub fn move_cursor_to_line_end(&mut self) {
+        let cursor = self.buffer_view.cursor();
+        if let Some(new_cursor) = self.buffer_view.buffer().cursor_end_of_line(cursor) {
+            self.buffer_view.set_cursor(new_cursor);
+        }
+    }
+
     pub fn insert_char(&mut self, c: char) {
         let cursor = self.buffer_view.cursor();
         let buffer = self.buffer_view.buffer_mut();
@@ -625,6 +635,10 @@ impl Widget for Window {
             }
             Action::BackTo(boundary) => {
                 self.move_cursor_back_to(*boundary);
+                ActionResult::Handled
+            }
+            Action::MoveToLineEnd => {
+                self.move_cursor_to_line_end();
                 ActionResult::Handled
             }
             // All other actions are not handled by window
