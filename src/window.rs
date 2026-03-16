@@ -609,6 +609,24 @@ impl Window {
         self.buffer_view.set_cursor(new_cursor);
     }
 
+    /// Delete the character before the cursor (backspace).
+    pub fn delete_char_before_cursor(&mut self) {
+        let cursor = self.buffer_view.cursor();
+        let buffer = self.buffer_view.buffer_mut();
+        if let Some(new_cursor) = buffer.delete_char_before_cursor(cursor) {
+            self.buffer_view.set_cursor(new_cursor);
+        }
+    }
+
+    /// Delete the character at the cursor (delete key).
+    pub fn delete_char_at_cursor(&mut self) {
+        let cursor = self.buffer_view.cursor();
+        let buffer = self.buffer_view.buffer_mut();
+        if let Some(new_cursor) = buffer.delete_char_at_cursor(cursor) {
+            self.buffer_view.set_cursor(new_cursor);
+        }
+    }
+
     pub fn visual_cursor(&self) -> Option<Position> {
         // Get cursor position from render data
         if let Some(mut pos) = self
@@ -671,6 +689,14 @@ impl Widget for Window {
             }
             Action::MoveToLineContentStart => {
                 self.move_cursor_to_line_content_start();
+                ActionResult::Handled
+            }
+            Action::DeleteBackward => {
+                self.delete_char_before_cursor();
+                ActionResult::Handled
+            }
+            Action::DeleteForward => {
+                self.delete_char_at_cursor();
                 ActionResult::Handled
             }
             // All other actions are not handled by window

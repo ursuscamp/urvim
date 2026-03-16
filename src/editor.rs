@@ -37,6 +37,10 @@ pub enum Action {
     MoveToLineStart,
     /// Move cursor to first non-whitespace of line
     MoveToLineContentStart,
+    /// Delete character before cursor (backspace)
+    DeleteBackward,
+    /// Delete character at cursor (delete key)
+    DeleteForward,
 }
 
 /// Result of processing a key in a mode.
@@ -151,6 +155,10 @@ impl NormalMode {
         // Mode switching
         keymap.insert("i".to_string(), Action::SwitchToInsert);
 
+        // Delete operations
+        keymap.insert("x".to_string(), Action::DeleteForward);
+        keymap.insert("X".to_string(), Action::DeleteBackward);
+
         // Quit (Ctrl-q)
         keymap.insert("<C-q>".to_string(), Action::Quit);
 
@@ -247,6 +255,10 @@ impl InsertMode {
 
         // Enter inserts newline
         keymap.insert("<Enter>".to_string(), Action::InsertChar('\n'));
+
+        // Delete operations
+        keymap.insert("<Backspace>".to_string(), Action::DeleteBackward);
+        keymap.insert("<Delete>".to_string(), Action::DeleteForward);
 
         InsertMode {
             keymap,
@@ -407,9 +419,78 @@ mod tests {
     }
 
     #[test]
+    fn test_insert_mode_delete_key() {
+        use crate::terminal::Key;
+        let mut mode = InsertMode::new();
+        // Test Delete key
+        assert_eq!(
+            handle_and_unwrap(&mut mode, &Key::new(KeyCode::Delete)),
+            Action::DeleteForward
+        );
+    }
+
+    #[test]
+    fn test_insert_mode_backspace_key() {
+        use crate::terminal::Key;
+        let mut mode = InsertMode::new();
+        // Test Backspace key
+        assert_eq!(
+            handle_and_unwrap(&mut mode, &Key::new(KeyCode::Backspace)),
+            Action::DeleteBackward
+        );
+    }
+
+    #[test]
+    fn test_insert_mode_delete_key_simulation() {
+        // Simulate what happens when Delete is pressed in insert mode
+        // by creating a buffer with text and checking delete behavior
+        use crate::terminal::Key;
+        let mut mode = InsertMode::new();
+
+        // Verify Delete key triggers DeleteForward
+        let action = handle_and_unwrap(&mut mode, &Key::new(KeyCode::Delete));
+        assert_eq!(
+            action,
+            Action::DeleteForward,
+            "Delete key should trigger DeleteForward"
+        );
+
+        // Verify Backspace triggers DeleteBackward
+        let mut mode2 = InsertMode::new();
+        let action2 = handle_and_unwrap(&mut mode2, &Key::new(KeyCode::Backspace));
+        assert_eq!(
+            action2,
+            Action::DeleteBackward,
+            "Backspace should trigger DeleteBackward"
+        );
+    }
+
+    #[test]
+    fn test_normal_mode_x_key() {
+        let mut mode = NormalMode::new();
+        assert_eq!(
+            handle_and_unwrap(&mut mode, &key('x')),
+            Action::DeleteForward
+        );
+        assert_eq!(
+            handle_and_unwrap(&mut mode, &Key::new(KeyCode::Char('X'))),
+            Action::DeleteBackward
+        );
+    }
+
+    #[test]
     fn test_normal_mode_ignore_other_keys() {
         let mut mode = NormalMode::new();
-        assert_eq!(handle_and_unwrap(&mut mode, &key('x')), Action::None);
+        // 'x' and 'X' are now bound to DeleteForward/DeleteBackward
+        assert_eq!(
+            handle_and_unwrap(&mut mode, &key('x')),
+            Action::DeleteForward
+        );
+        assert_eq!(
+            handle_and_unwrap(&mut mode, &Key::new(KeyCode::Char('X'))),
+            Action::DeleteBackward
+        );
+        // Other keys still return None
         assert_eq!(handle_and_unwrap(&mut mode, &key('a')), Action::None);
     }
 

@@ -476,6 +476,168 @@ impl Buffer {
         }
     }
 
+    /// Deletes the grapheme cluster before the cursor position.
+    ///
+    /// If the cursor is at the start of a line, joins the current line with the previous line.
+    /// Returns the new cursor position after deletion, or None if at document start.
+    ///
+    /// # Arguments
+    ///
+    /// * `cursor` - Current cursor position
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use urvim::buffer::{Buffer, Cursor};
+    ///
+    /// let mut buf = Buffer::from_str("hello");
+    /// let cursor = Cursor::new(0, 3);  // at 'l'
+    /// let new_cursor = buf.delete_char_before_cursor(cursor);
+    /// assert_eq!(new_cursor, Some(Cursor::new(0, 2)));  // cursor moves back
+    /// assert_eq!(buf.as_str(), "helo");
+    /// ```
+    pub fn delete_char_before_cursor(&mut self, cursor: Cursor) -> Option<Cursor> {
+        // If at start of line, join with previous line
+        if cursor.col == 0 {
+            if cursor.line == 0 {
+                // At document start, nothing to delete
+                return None;
+            }
+            // Join current line with previous line
+            let current_line = cursor.line;
+            let prev_line = current_line - 1;
+
+            // Get content before mutating
+            let current_content: String = self.lines
+                .get(current_line)
+                .map_or("", |s| s.as_ref())
+                .to_string();
+            let prev_content: String = self.lines
+                .get(prev_line)
+                .map_or("", |s| s.as_ref())
+                .to_string();
+            let prev_content_len = prev_content.len();
+
+            let merged = Arc::from(format!("{}{}", prev_content, current_content));
+
+            // Remove current line and previous line, insert merged
+            let mut left = self.lines.take(prev_line);
+            let right = self.lines.skip(current_line + 1);
+            left.push_back(merged);
+            left.append(right);
+            self.lines = left;
+
+            // Return cursor at the position where the join happened (end of previous content)
+            return Some(Cursor::new(prev_line, prev_content_len));
+        }
+
+        // Find the grapheme cluster before the cursor
+        let line = self.lines.get(cursor.line)?;
+        let line_str = line.as_ref();
+
+        // Find the grapheme that starts before cursor.col
+        // grapheme_indices gives us the START of each grapheme
+        // We want the LAST grapheme that starts before cursor
+        let mut prev_grapheme_start: Option<(usize, usize)> = None;
+        
+        for (byte_offset, grapheme) in line_str.grapheme_indices(true) {
+            if byte_offset < cursor.col {
+                // This grapheme starts before cursor, remember it (keep updating to get the last one)
+                prev_grapheme_start = Some((byte_offset, byte_offset + grapheme.len()));
+            } else {
+                // This grapheme starts at or after cursor, we're done looking
+                break;
+            }
+        }
+
+        // If we found a grapheme before cursor, delete it
+        if let Some((start, end)) = prev_grapheme_start {
+            self.remove(Cursor::new(cursor.line, start), Cursor::new(cursor.line, end));
+            return Some(Cursor::new(cursor.line, start));
+        }
+
+        // No previous grapheme found (cursor at start of line or other edge case)
+        Some(cursor)
+    }
+
+    /// Deletes the grapheme cluster at the cursor position.
+    ///
+    /// If the cursor is at the end of a line, joins the current line with the next line.
+    /// Returns the cursor position after deletion (typically the same position), or None if at document end.
+    ///
+    /// # Arguments
+    ///
+    /// * `cursor` - Current cursor position
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use urvim::buffer::{Buffer, Cursor};
+    ///
+    /// let mut buf = Buffer::from_str("hello");
+    /// let cursor = Cursor::new(0, 1);  // at 'e'
+    /// let new_cursor = buf.delete_char_at_cursor(cursor);
+    /// assert_eq!(new_cursor, Some(Cursor::new(0, 1)));  // cursor stays
+    /// assert_eq!(buf.as_str(), "hllo");
+    /// ```
+    pub fn delete_char_at_cursor(&mut self, cursor: Cursor) -> Option<Cursor> {
+        let line_len = self.line_len(cursor.line);
+
+        // If at end of line, join with next line
+        if cursor.col >= line_len {
+            if cursor.line >= self.lines.len() - 1 {
+                // At document end, nothing to delete
+                return None;
+            }
+
+            // Join current line with next line
+            let current_line = cursor.line;
+            let next_line = current_line + 1;
+
+            // Get content before mutating
+            let current_content: String = self.lines
+                .get(current_line)
+                .map_or("", |s| s.as_ref())
+                .to_string();
+            let next_content: String = self.lines
+                .get(next_line)
+                .map_or("", |s| s.as_ref())
+                .to_string();
+            let current_content_len = current_content.len();
+
+            let merged = Arc::from(format!("{}{}", current_content, next_content));
+
+            // Remove current line and next line, insert merged
+            let mut left = self.lines.take(current_line);
+            let right = self.lines.skip(next_line + 1);
+            left.push_back(merged);
+            left.append(right);
+            self.lines = left;
+
+            // Return cursor at the same visual position (where the join happened)
+            return Some(Cursor::new(current_line, current_content_len));
+        }
+
+        // Find the grapheme cluster at the cursor
+        let line = self.lines.get(cursor.line)?;
+        let line_str = line.as_ref();
+
+        // Find the grapheme that starts at or after cursor
+        // grapheme_indices gives us the START of each grapheme
+        for (byte_offset, grapheme) in line_str.grapheme_indices(true) {
+            if byte_offset >= cursor.col {
+                // Found a grapheme at or after cursor
+                let start = byte_offset;
+                let end = byte_offset + grapheme.len();
+                self.remove(Cursor::new(cursor.line, start), Cursor::new(cursor.line, end));
+                return Some(Cursor::new(cursor.line, start));
+            }
+        }
+
+        // No grapheme found (shouldn't happen for valid cursor), return current position
+        Some(cursor)
+    }
+
     /// Returns the byte length of a line.
     ///
     /// # Arguments
@@ -2819,5 +2981,168 @@ mod tests {
         let buf = Buffer::from_str("hello world");
         let result = buf.next_boundary(Cursor::new(0, 4), Boundary::BigWordEnd);
         assert_eq!(result, Some(Cursor::new(0, 10))); // end of "world"
+    }
+
+    // Delete character tests
+
+    #[test]
+    fn test_delete_char_before_cursor_in_middle() {
+        let mut buf = Buffer::from_str("hello");
+        let cursor = Cursor::new(0, 3); // at 'l'
+        let new_cursor = buf.delete_char_before_cursor(cursor);
+        assert_eq!(new_cursor, Some(Cursor::new(0, 2))); // cursor moves back
+        assert_eq!(buf.as_str(), "helo");
+    }
+
+    #[test]
+    fn test_delete_char_before_cursor_at_start() {
+        let mut buf = Buffer::from_str("hello");
+        let cursor = Cursor::new(0, 0); // at start
+        let new_cursor = buf.delete_char_before_cursor(cursor);
+        assert_eq!(new_cursor, None); // nothing to delete
+        assert_eq!(buf.as_str(), "hello");
+    }
+
+    #[test]
+    fn test_delete_char_before_cursor_at_doc_start() {
+        let mut buf = Buffer::from_str("hello");
+        let cursor = Cursor::new(0, 0);
+        let new_cursor = buf.delete_char_before_cursor(cursor);
+        assert_eq!(new_cursor, None);
+    }
+
+    #[test]
+    fn test_delete_char_before_cursor_joins_lines() {
+        let mut buf = Buffer::from_str("hello\nworld");
+        let cursor = Cursor::new(1, 0); // at start of line 1
+        let new_cursor = buf.delete_char_before_cursor(cursor);
+        assert_eq!(new_cursor, Some(Cursor::new(0, 5))); // at end of "hello"
+        assert_eq!(buf.as_str(), "helloworld");
+        assert_eq!(buf.line_count(), 1);
+    }
+
+    #[test]
+    fn test_delete_char_before_cursor_unicode() {
+        // "héllo" - 'é' is a single grapheme (2 bytes: é = [0xc3, 0xa9])
+        // Byte layout: h(0), é(1-2), l(3), l(4), o(5)
+        // Cursor at byte 3 (first 'l'), should delete 'é' (bytes 1-2)
+        let mut buf = Buffer::from_str("héllo");
+        let cursor = Cursor::new(0, 3); // at first 'l' (byte 3)
+        let new_cursor = buf.delete_char_before_cursor(cursor);
+        assert_eq!(new_cursor, Some(Cursor::new(0, 1))); // cursor at start of 'é'
+        assert_eq!(buf.as_str(), "hllo"); // "é" removed as single unit
+    }
+
+    #[test]
+    fn test_delete_char_before_cursor_emoji() {
+        // "a👍b" - emoji is 4 bytes, single grapheme
+        // Byte layout: a(0), 👍(1-4), b(5)
+        let mut buf = Buffer::from_str("a👍b");
+        let cursor = Cursor::new(0, 5); // at 'b' (byte 5)
+        let new_cursor = buf.delete_char_before_cursor(cursor);
+        assert_eq!(new_cursor, Some(Cursor::new(0, 1))); // cursor at 'a'
+        assert_eq!(buf.as_str(), "ab"); // "👍" removed as single unit
+    }
+
+    #[test]
+    fn test_delete_char_at_cursor_in_middle() {
+        let mut buf = Buffer::from_str("hello");
+        let cursor = Cursor::new(0, 1); // at 'e'
+        let new_cursor = buf.delete_char_at_cursor(cursor);
+        assert_eq!(new_cursor, Some(Cursor::new(0, 1))); // cursor stays
+        assert_eq!(buf.as_str(), "hllo");
+    }
+
+    #[test]
+    fn test_delete_char_at_cursor_at_end() {
+        let mut buf = Buffer::from_str("hello");
+        let cursor = Cursor::new(0, 5); // at end
+        let new_cursor = buf.delete_char_at_cursor(cursor);
+        assert_eq!(new_cursor, None); // nothing to delete at end
+        assert_eq!(buf.as_str(), "hello");
+    }
+
+    #[test]
+    fn test_delete_char_at_cursor_at_doc_end() {
+        let mut buf = Buffer::from_str("hello");
+        let cursor = Cursor::new(0, 5); // at end of single line
+        let new_cursor = buf.delete_char_at_cursor(cursor);
+        assert_eq!(new_cursor, None);
+    }
+
+    #[test]
+    fn test_delete_char_at_cursor_joins_lines() {
+        let mut buf = Buffer::from_str("hello\nworld");
+        let cursor = Cursor::new(0, 5); // at end of line 0
+        let new_cursor = buf.delete_char_at_cursor(cursor);
+        assert_eq!(new_cursor, Some(Cursor::new(0, 5))); // cursor stays at end of first line
+        assert_eq!(buf.as_str(), "helloworld");
+        assert_eq!(buf.line_count(), 1);
+    }
+
+    #[test]
+    fn test_delete_char_at_cursor_unicode() {
+        // "héllo" - 'é' is a single grapheme (2 bytes)
+        // Byte layout: h(0), é(1-2), l(3), l(4), o(5)
+        // Cursor at byte 0 (at 'h'), should delete 'h'
+        let mut buf = Buffer::from_str("héllo");
+        let cursor = Cursor::new(0, 0); // at 'h' (byte 0)
+        let new_cursor = buf.delete_char_at_cursor(cursor);
+        assert_eq!(new_cursor, Some(Cursor::new(0, 0))); // cursor stays at start
+        assert_eq!(buf.as_str(), "éllo"); // "h" removed
+    }
+
+    #[test]
+    fn test_delete_char_at_cursor_emoji() {
+        // "a👍b" - emoji is 4 bytes, single grapheme
+        let mut buf = Buffer::from_str("a👍b");
+        let cursor = Cursor::new(0, 1); // at emoji
+        let new_cursor = buf.delete_char_at_cursor(cursor);
+        assert_eq!(new_cursor, Some(Cursor::new(0, 1))); // cursor stays at position
+        assert_eq!(buf.as_str(), "ab"); // "👍" removed as single unit
+    }
+
+    #[test]
+    fn test_delete_char_at_cursor_last_line_joins_next() {
+        // When at end of last line, should try to join with next line (but none exists)
+        let mut buf = Buffer::from_str("hello\nworld");
+        let cursor = Cursor::new(1, 5); // at end of line 1 (last line)
+        let new_cursor = buf.delete_char_at_cursor(cursor);
+        assert_eq!(new_cursor, None); // nothing to join with
+        assert_eq!(buf.as_str(), "hello\nworld");
+    }
+
+    #[test]
+    fn test_delete_char_at_cursor_not_at_end_joins_next() {
+        // When in middle of line, delete just removes character (no line join)
+        let mut buf = Buffer::from_str("ab\ncd");
+        let cursor = Cursor::new(0, 1); // at 'b' (not at end which is col 2)
+        let new_cursor = buf.delete_char_at_cursor(cursor);
+        assert_eq!(new_cursor, Some(Cursor::new(0, 1))); // cursor stays
+        assert_eq!(buf.as_str(), "a\ncd"); // 'b' removed, lines not joined
+    }
+
+    #[test]
+    fn test_insert_mode_delete_at_position_1() {
+        // Simulate insert mode: cursor at position 1 in "abc"
+        // This is between 'a' (pos 0) and 'b' (pos 1)
+        // Delete should remove 'b' (at cursor), cursor stays at 1
+        let mut buf = Buffer::from_str("abc");
+        let cursor = Cursor::new(0, 1);
+        let new_cursor = buf.delete_char_at_cursor(cursor);
+        assert_eq!(new_cursor, Some(Cursor::new(0, 1))); // cursor stays at position 1
+        assert_eq!(buf.as_str(), "ac"); // 'b' removed
+    }
+
+    #[test]
+    fn test_insert_mode_backspace_at_position_1() {
+        // Simulate insert mode: cursor at position 1 in "abc" 
+        // This is between 'a' (pos 0) and 'b' (pos 1)
+        // Backspace should remove 'a' (before cursor), cursor moves to 0
+        let mut buf = Buffer::from_str("abc");
+        let cursor = Cursor::new(0, 1);
+        let new_cursor = buf.delete_char_before_cursor(cursor);
+        assert_eq!(new_cursor, Some(Cursor::new(0, 0))); // cursor moves back to position 0
+        assert_eq!(buf.as_str(), "bc"); // 'a' removed
     }
 }
