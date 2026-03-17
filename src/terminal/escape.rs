@@ -381,7 +381,9 @@ pub fn try_parse_dsr(data: &[u8]) -> Option<(usize, Event)> {
 /// - OP, OQ, OR, OS: F1-F4
 /// - OH, OF: Home, End
 /// - OV, OW: PageUp, PageDown
-/// - Op, Oq: Insert, Delete
+///
+/// Note: Insert and Delete are NOT defined in SS3 format per Kitty spec.
+/// They should be sent via CSI-tilde sequences (`\x1b[2~`, `\x1b[3~`).
 ///
 /// Returns `Some((bytes_consumed, event))` if successful, `None` otherwise.
 pub fn try_parse_ss3(data: &[u8]) -> Option<(usize, Event)> {
@@ -398,8 +400,8 @@ pub fn try_parse_ss3(data: &[u8]) -> Option<(usize, Event)> {
         b'F' => KeyCode::End,
         b'V' => KeyCode::PageUp,
         b'W' => KeyCode::PageDown,
-        b'p' => KeyCode::Insert,
-        b'q' => KeyCode::Delete,
+        // Insert and Delete are NOT standard SS3 codes per Kitty protocol
+        // They should use CSI-tilde sequences: \x1b[2~ for Insert, \x1b[3~ for Delete
         _ => return None,
     };
 
