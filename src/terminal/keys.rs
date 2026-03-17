@@ -76,18 +76,21 @@ impl Modifiers {
 
     /// Converts a Kitty keyboard protocol encoding to `Modifiers`.
     ///
-    /// The Kitty protocol uses values 0-7 where:
+    /// The Kitty protocol uses values where:
     /// - 0: no modifiers
-    /// - 2: Shift
-    /// - 3: Alt
-    /// - 4: Ctrl
-    /// - 5: Ctrl+Shift
-    /// - 6: Alt+Ctrl
-    /// - 7: Alt+Ctrl+Shift
+    /// - 2: Shift (1+1)
+    /// - 3: Alt (1+2)
+    /// - 5: Ctrl (1+4)
+    /// - 6: Ctrl+Shift (1+4+1)
+    /// - 7: Alt+Ctrl (1+2+4)
+    /// - 8: Alt+Ctrl+Shift (1+2+4+1)
+    /// - And higher values for Super, Hyper, Meta combinations
     ///
-    /// This function subtracts 1 from the value to convert to the internal bitmask.
+    /// Invalid values (1, 4) return no modifiers to avoid incorrect behavior.
     pub fn from_kitty_encoding(value: u8) -> Self {
-        if value == 0 {
+        // Value 1 is invalid (would be 1+0 = no modifiers encoded, but that's ambiguous)
+        // Value 4 is invalid (would be 1+3, which is not a valid modifier combination)
+        if value == 0 || value == 1 || value == 4 {
             return Self::default();
         }
         Self(value.saturating_sub(1))

@@ -1388,6 +1388,22 @@ mod tests {
     }
 
     #[test]
+    fn test_modifiers_from_kitty_encoding_invalid_values() {
+        // Value 1 is invalid (ambiguous encoding)
+        assert_eq!(
+            Modifiers::from_kitty_encoding(1),
+            Modifiers::default(),
+            "Invalid value 1 should return default modifiers"
+        );
+        // Value 4 is invalid (not a valid modifier combination)
+        assert_eq!(
+            Modifiers::from_kitty_encoding(4),
+            Modifiers::default(),
+            "Invalid value 4 should return default modifiers"
+        );
+    }
+
+    #[test]
     fn test_modifiers_super() {
         let mut terminal = create_terminal(b"\x1b[1;9A".to_vec());
         let event = terminal.read_event().unwrap();
