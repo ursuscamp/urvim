@@ -14,3 +14,4 @@ urvim is a terminal based text editor.
 - create documentation comments for public modules, types and methods
 - prefer calling trait methods like `value.trait_method()` rather than `TraitType::method(value)`
 - struct methods should be ordered: constructor/new, static methods, getters, setters, public methods, private methods
+- when adding/update vim motions, update docs/motions.md
