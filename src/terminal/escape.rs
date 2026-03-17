@@ -36,6 +36,7 @@ use crate::terminal::keys::{Event, KeyCode, Modifiers};
 /// cursor position reports.
 pub fn parse_event_with_buffer(buf: &mut ByteBuffer) -> Event {
     let first = buf.peek_byte().unwrap_or(0);
+    tracing::debug!("parse_event: first byte=0x{:02x}", first);
     match first {
         // Null byte (empty input)
         0 => {
@@ -44,6 +45,8 @@ pub fn parse_event_with_buffer(buf: &mut ByteBuffer) -> Event {
         }
         // Escape character - start of escape sequence
         b'\x1b' => {
+            let data = buf.peek_n(buf.filled_len()).unwrap_or(&[]);
+            tracing::debug!("escape sequence: {:02x?}", data);
             buf.consume(1);
             parse_escape_seq_with_buffer(buf)
         }
@@ -59,11 +62,13 @@ pub fn parse_event_with_buffer(buf: &mut ByteBuffer) -> Event {
         }
         // Delete/Backspace (0x7f)
         b'\x7f' => {
+            tracing::debug!("got 0x7f (DEL/Backspace)");
             buf.consume(1);
             KeyCode::Backspace.event()
         }
         // Backspace (0x08) - some terminals send this
         0x08 => {
+            tracing::debug!("got 0x08 (Backspace)");
             buf.consume(1);
             KeyCode::Backspace.event()
         }
@@ -201,6 +206,7 @@ pub fn try_parse_csi_u(data: &[u8]) -> Option<(usize, Event)> {
     }
 
     let key_code: u32 = parts[0].parse().ok()?;
+    tracing::debug!("CSI-u: code={}, params={}", key_code, param_str);
 
     // Parse modifiers from second parameter (if present)
     let modifiers = if parts.len() > 1 {
@@ -218,7 +224,7 @@ pub fn try_parse_csi_u(data: &[u8]) -> Option<(usize, Event)> {
         0 => return None, // Invalid key code
         1 => KeyCode::Esc,
         2 => KeyCode::Tab,
-        3 => KeyCode::Backspace,
+        // 3 is not used in CSI-u format (Delete is CSI 3~)
         4 => KeyCode::Enter,
         5 => KeyCode::Home,
         6 => KeyCode::End,
@@ -238,11 +244,13 @@ pub fn try_parse_csi_u(data: &[u8]) -> Option<(usize, Event)> {
         20 => KeyCode::F10,
         21 => KeyCode::F11,
         22 => KeyCode::F12,
-        23 => KeyCode::Delete,
+        // 23 is not Delete in CSI-u (Delete is CSI 3~, not CSI u)
         24 => KeyCode::Up,
         25 => KeyCode::Down,
         26 => KeyCode::Right,
         27 => KeyCode::Left,
+        // 127 is Backspace in Kitty CSI-u format
+        127 => KeyCode::Backspace,
         // ASCII printable characters (33-126)
         n @ 33..=126 => KeyCode::Char(n as u8 as char),
         _ => return None,

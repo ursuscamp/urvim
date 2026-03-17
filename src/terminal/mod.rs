@@ -66,9 +66,9 @@ const CLEAR_SCREEN: &str = "\x1b[2J\x1b[H";
 /// Escape sequence to exit the alternate screen buffer.
 const EXIT_ALTERNATIVE_SCREEN: &str = "\x1b[?1049l";
 /// Escape sequence to enable CSI-u mode (Kitty keyboard protocol).
-const ENABLE_CSI_U: &str = "\x1b[=1u";
+const ENABLE_CSI_U: &str = "\x1b[>1u";
 /// Escape sequence to disable CSI-u mode.
-const DISABLE_CSI_U: &str = "\x1b[=0u";
+const DISABLE_CSI_U: &str = "\x1b[<u";
 /// Escape sequence to enable bracketed paste mode.
 const ENABLE_BRACKETED_PASTE: &str = "\x1b[?2004h";
 /// Escape sequence to disable bracketed paste mode.
