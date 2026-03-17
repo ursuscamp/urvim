@@ -1399,6 +1399,122 @@ mod tests {
     }
 
     #[test]
+    fn test_kitty_csi_u_keys() {
+        // CSI-u code 2 = Tab
+        let mut terminal = create_terminal(b"\x1b[2u".to_vec());
+        let event = terminal.read_event().unwrap();
+        assert_eq!(event, Event::Key(Key::new(KeyCode::Tab)));
+
+        // CSI-u code 4 = Enter
+        let mut terminal = create_terminal(b"\x1b[4u".to_vec());
+        let event = terminal.read_event().unwrap();
+        assert_eq!(event, Event::Key(Key::new(KeyCode::Enter)));
+
+        // CSI-u code 5 = Home
+        let mut terminal = create_terminal(b"\x1b[5u".to_vec());
+        let event = terminal.read_event().unwrap();
+        assert_eq!(event, Event::Key(Key::new(KeyCode::Home)));
+
+        // CSI-u code 6 = End
+        let mut terminal = create_terminal(b"\x1b[6u".to_vec());
+        let event = terminal.read_event().unwrap();
+        assert_eq!(event, Event::Key(Key::new(KeyCode::End)));
+
+        // CSI-u code 7 = PageUp
+        let mut terminal = create_terminal(b"\x1b[7u".to_vec());
+        let event = terminal.read_event().unwrap();
+        assert_eq!(event, Event::Key(Key::new(KeyCode::PageUp)));
+
+        // CSI-u code 8 = PageDown
+        let mut terminal = create_terminal(b"\x1b[8u".to_vec());
+        let event = terminal.read_event().unwrap();
+        assert_eq!(event, Event::Key(Key::new(KeyCode::PageDown)));
+
+        // CSI-u code 10 = Insert
+        let mut terminal = create_terminal(b"\x1b[10u".to_vec());
+        let event = terminal.read_event().unwrap();
+        assert_eq!(event, Event::Key(Key::new(KeyCode::Insert)));
+
+        // CSI-u code 24 = Up
+        let mut terminal = create_terminal(b"\x1b[24u".to_vec());
+        let event = terminal.read_event().unwrap();
+        assert_eq!(event, Event::Key(Key::new(KeyCode::Up)));
+
+        // CSI-u code 25 = Down
+        let mut terminal = create_terminal(b"\x1b[25u".to_vec());
+        let event = terminal.read_event().unwrap();
+        assert_eq!(event, Event::Key(Key::new(KeyCode::Down)));
+
+        // CSI-u code 26 = Right
+        let mut terminal = create_terminal(b"\x1b[26u".to_vec());
+        let event = terminal.read_event().unwrap();
+        assert_eq!(event, Event::Key(Key::new(KeyCode::Right)));
+
+        // CSI-u code 27 = Left
+        let mut terminal = create_terminal(b"\x1b[27u".to_vec());
+        let event = terminal.read_event().unwrap();
+        assert_eq!(event, Event::Key(Key::new(KeyCode::Left)));
+
+        // CSI-u code 127 = Backspace
+        let mut terminal = create_terminal(b"\x1b[127u".to_vec());
+        let event = terminal.read_event().unwrap();
+        assert_eq!(event, Event::Key(Key::new(KeyCode::Backspace)));
+    }
+
+    #[test]
+    fn test_kitty_csi_u_with_modifiers() {
+        // Shift+Tab: CSI 2;2u
+        let mut terminal = create_terminal(b"\x1b[2;2u".to_vec());
+        let event = terminal.read_event().unwrap();
+        assert_eq!(
+            event,
+            Event::Key(Key::with_modifiers(KeyCode::Tab, Modifiers::SHIFT))
+        );
+
+        // Shift+Enter: CSI 4;2u
+        let mut terminal = create_terminal(b"\x1b[4;2u".to_vec());
+        let event = terminal.read_event().unwrap();
+        assert_eq!(
+            event,
+            Event::Key(Key::with_modifiers(KeyCode::Enter, Modifiers::SHIFT))
+        );
+
+        // Shift+Insert: CSI 10;2u
+        let mut terminal = create_terminal(b"\x1b[10;2u".to_vec());
+        let event = terminal.read_event().unwrap();
+        assert_eq!(
+            event,
+            Event::Key(Key::with_modifiers(KeyCode::Insert, Modifiers::SHIFT))
+        );
+
+        // Shift+Backspace: CSI 127;2u
+        let mut terminal = create_terminal(b"\x1b[127;2u".to_vec());
+        let event = terminal.read_event().unwrap();
+        assert_eq!(
+            event,
+            Event::Key(Key::with_modifiers(KeyCode::Backspace, Modifiers::SHIFT))
+        );
+    }
+
+    #[test]
+    fn test_legacy_csi_tilde_alternates() {
+        // CSI 1~ = Home (alternate)
+        let mut terminal = create_terminal(b"\x1b[1~".to_vec());
+        let event = terminal.read_event().unwrap();
+        assert_eq!(event, Event::Key(Key::new(KeyCode::Home)));
+
+        // CSI 7~ = Home (alternate)
+        let mut terminal = create_terminal(b"\x1b[7~".to_vec());
+        let event = terminal.read_event().unwrap();
+        assert_eq!(event, Event::Key(Key::new(KeyCode::Home)));
+
+        // CSI 8~ = End (alternate)
+        let mut terminal = create_terminal(b"\x1b[8~".to_vec());
+        let event = terminal.read_event().unwrap();
+        assert_eq!(event, Event::Key(Key::new(KeyCode::End)));
+    }
+
+    #[test]
     fn test_modifiers_from_kitty_encoding() {
         assert_eq!(Modifiers::from_kitty_encoding(0), Modifiers::default());
         assert_eq!(Modifiers::from_kitty_encoding(2), Modifiers::SHIFT);
