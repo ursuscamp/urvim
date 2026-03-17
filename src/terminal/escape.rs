@@ -460,6 +460,7 @@ pub fn try_parse_csi_tilde(data: &[u8]) -> Option<(usize, Event)> {
         21 => KeyCode::F11,
         23 => KeyCode::F12,
         24 => KeyCode::F12,
+        29 => KeyCode::Menu,  // Menu key
         _ => return None,
     };
 

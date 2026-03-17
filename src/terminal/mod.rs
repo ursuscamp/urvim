@@ -1067,6 +1067,33 @@ mod tests {
     }
 
     #[test]
+    fn test_menu_key() {
+        // Test CSI 29~ sequence for Menu key (Kitty protocol)
+        let mut terminal = create_terminal(b"\x1b[29~".to_vec());
+        let event = terminal.read_event().unwrap();
+        assert_eq!(event, Event::Key(Key::new(KeyCode::Menu)));
+    }
+
+    #[test]
+    fn test_menu_key_with_modifiers() {
+        // Test Shift+Menu: CSI 29;2~
+        let mut terminal = create_terminal(b"\x1b[29;2~".to_vec());
+        let event = terminal.read_event().unwrap();
+        assert_eq!(
+            event,
+            Event::Key(Key::with_modifiers(KeyCode::Menu, Modifiers::SHIFT))
+        );
+
+        // Test Ctrl+Menu: CSI 29;5~
+        let mut terminal = create_terminal(b"\x1b[29;5~".to_vec());
+        let event = terminal.read_event().unwrap();
+        assert_eq!(
+            event,
+            Event::Key(Key::with_modifiers(KeyCode::Menu, Modifiers::CTRL))
+        );
+    }
+
+    #[test]
     fn test_function_keys_f5_f12() {
         let mut terminal = create_terminal(b"\x1b[15~".to_vec());
         let event = terminal.read_event().unwrap();

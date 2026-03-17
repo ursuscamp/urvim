@@ -182,6 +182,8 @@ pub enum KeyCode {
     F12,
     /// Insert key.
     Insert,
+    /// Menu/Application/Context menu key.
+    Menu,
     /// Null key (typically from empty input).
     Null,
 }
@@ -235,6 +237,7 @@ impl KeyCode {
             KeyCode::F11 => Some("F11"),
             KeyCode::F12 => Some("F12"),
             KeyCode::Insert => Some("Insert"),
+            KeyCode::Menu => Some("Menu"),
             KeyCode::Null => Some("Null"),
         }
     }
@@ -651,6 +654,7 @@ mod tests {
             (KeyCode::Backspace, "<Backspace>"),
             (KeyCode::Delete, "<Delete>"),
             (KeyCode::Insert, "<Insert>"),
+            (KeyCode::Menu, "<Menu>"),
             (KeyCode::Esc, "<Esc>"),
             (KeyCode::Null, "<Null>"),
         ];
