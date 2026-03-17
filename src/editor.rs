@@ -41,6 +41,9 @@ pub enum Action {
     DeleteBackward,
     /// Delete character at cursor (delete key)
     DeleteForward,
+    /// Count prefix: repeats the inner action the specified number of times,
+    /// or goes to the target absolute line number for line actions.
+    Count(usize, Box<Action>),
 }
 
 impl Action {
@@ -66,6 +69,40 @@ impl Action {
     /// and update the remembered visual column.
     pub fn uses_remembered_column(&self) -> bool {
         matches!(self, Action::MoveUp | Action::MoveDown)
+    }
+
+    /// Returns true if this action is a repeatable motion that can be executed
+    /// multiple times with a count prefix. These actions repeat from current position.
+    /// Examples: h, j, k, l, w, b, e, W, B, E
+    pub fn is_countable(&self) -> bool {
+        matches!(
+            self,
+            Action::MoveLeft
+                | Action::MoveRight
+                | Action::MoveUp
+                | Action::MoveDown
+                | Action::ForwardTo(_)
+                | Action::BackTo(_)
+        )
+    }
+
+    /// Returns true if this action is a line action that takes an absolute line count.
+    /// The count specifies the target line number (1-indexed), then performs the action.
+    /// Examples: $, 0, ^
+    pub fn is_line_action(&self) -> bool {
+        matches!(
+            self,
+            Action::MoveToLineEnd | Action::MoveToLineStart | Action::MoveToLineContentStart
+        )
+    }
+
+    /// Wraps this action in a Count variant if it's countable or a line action.
+    pub fn with_count(self, count: usize) -> Option<Action> {
+        if (self.is_countable() || self.is_line_action()) && count > 0 && count < 10000 {
+            Some(Action::Count(count, Box::new(self)))
+        } else {
+            None
+        }
     }
 }
 
@@ -149,6 +186,7 @@ pub struct NormalMode {
     keymap: SimpleKeymap,
     buffer: Vec<String>,
     waiting: bool,
+    pending_count: Option<usize>,
 }
 
 impl NormalMode {
@@ -198,6 +236,41 @@ impl NormalMode {
             keymap,
             buffer: Vec::new(),
             waiting: false,
+            pending_count: None,
+        }
+    }
+
+    /// Check if a key string represents a digit that can be part of a count.
+    fn is_count_digit(s: &str) -> bool {
+        s.len() == 1
+            && s.chars()
+                .next()
+                .map(|c| c.is_ascii_digit())
+                .unwrap_or(false)
+    }
+
+    /// Check if a string is a valid count (at least one non-zero digit).
+    /// Pattern: [1-9][0-9]*
+    fn is_valid_count(s: &str) -> bool {
+        if s.is_empty() {
+            return false;
+        }
+        // Must start with 1-9 (non-zero)
+        let first_char = s.chars().next().unwrap();
+        if !('1'..='9').contains(&first_char) {
+            return false;
+        }
+        // All characters must be digits
+        s.chars().all(|c| c.is_ascii_digit())
+    }
+
+    /// Parse the current buffer as a count value.
+    fn count_from_buffer(&self) -> Option<usize> {
+        let combined: String = self.buffer.iter().cloned().collect();
+        if Self::is_valid_count(&combined) {
+            combined.parse().ok()
+        } else {
+            None
         }
     }
 }
@@ -214,16 +287,63 @@ impl Mode for NormalMode {
         if key.code == KeyCode::Esc {
             self.buffer.clear();
             self.waiting = false;
+            self.pending_count = None;
             return HandleKeyResult::InvalidSequence;
         }
 
         // Convert key to canonical string
         let key_str = key.canonical_string();
 
-        // Add to buffer
+        // Check if this is a digit that could start or continue a count
+        if Self::is_count_digit(&key_str) {
+            // Add digit to buffer
+            self.buffer.push(key_str.clone());
+
+            // Check if buffer now forms a valid count
+            if Self::is_valid_count(&self.buffer.iter().cloned().collect::<String>()) {
+                // Valid count - wait for motion key
+                self.pending_count = self.count_from_buffer();
+                self.waiting = true;
+                return HandleKeyResult::WaitForMore;
+            } else if self.buffer.len() == 1 {
+                // Single digit "0" - not a valid count, but could be a motion key
+                // Clear buffer and fall through to normal key handling
+                self.buffer.clear();
+            } else {
+                // Invalid count (e.g., "05" starts with 0) - clear everything
+                self.buffer.clear();
+                self.waiting = false;
+                self.pending_count = None;
+                return HandleKeyResult::InvalidSequence;
+            }
+        }
+
+        // Not a digit - check if it's a motion key with a pending count
+        if let Some(count) = self.pending_count {
+            // Try to match just the current key as a motion
+            let key_str_ref = std::slice::from_ref(&key_str);
+            if let Some(action) = self.keymap.get_action(key_str_ref) {
+                // Got a motion - wrap it with the count
+                self.buffer.clear();
+                self.waiting = false;
+                self.pending_count = None;
+
+                // Wrap action with count if it's countable/line action
+                if let Some(counted_action) = action.clone().with_count(count) {
+                    return HandleKeyResult::Complete(counted_action);
+                } else {
+                    // Not a countable action - just execute it without count
+                    return HandleKeyResult::Complete(action);
+                }
+            }
+            // Not a valid motion with count - clear and fall through to check as regular key
+            self.pending_count = None;
+        }
+
+        // Add to buffer for normal key sequence matching
         self.buffer.push(key_str);
 
-        // Check for exact match
+        // Check for exact match (no count prefix)
         if let Some(action) = self.keymap.get_action(&self.buffer) {
             self.buffer.clear();
             self.waiting = false;
@@ -239,6 +359,7 @@ impl Mode for NormalMode {
         // No match - clear buffer and return invalid
         self.buffer.clear();
         self.waiting = false;
+        self.pending_count = None;
         HandleKeyResult::InvalidSequence
     }
 
@@ -253,6 +374,7 @@ impl Mode for NormalMode {
     fn clear_buffer(&mut self) {
         self.buffer.clear();
         self.waiting = false;
+        self.pending_count = None;
     }
 }
 
@@ -313,7 +435,8 @@ impl Mode for InsertMode {
         let key_str = key.canonical_string();
 
         // Check for special key bindings first
-        if let Some(action) = self.keymap.get_action(&[key_str.clone()]) {
+        let key_str_ref = std::slice::from_ref(&key_str);
+        if let Some(action) = self.keymap.get_action(key_str_ref) {
             self.buffer.clear();
             self.waiting = false;
             return HandleKeyResult::Complete(action);
@@ -605,5 +728,153 @@ mod tests {
             handle_and_unwrap(&mut mode, &Key::new(KeyCode::Char('^'))),
             Action::MoveToLineContentStart
         );
+    }
+
+    // Count parsing tests
+
+    #[test]
+    fn test_is_valid_count() {
+        // Valid counts (must start with 1-9)
+        assert!(NormalMode::is_valid_count("1"));
+        assert!(NormalMode::is_valid_count("5"));
+        assert!(NormalMode::is_valid_count("9"));
+        assert!(NormalMode::is_valid_count("10"));
+        assert!(NormalMode::is_valid_count("99"));
+        assert!(NormalMode::is_valid_count("100"));
+        assert!(NormalMode::is_valid_count("9999"));
+
+        // Invalid counts
+        assert!(!NormalMode::is_valid_count(""));
+        assert!(!NormalMode::is_valid_count("0")); // Starts with 0
+        assert!(!NormalMode::is_valid_count("05")); // Starts with 0
+        assert!(!NormalMode::is_valid_count("00")); // Starts with 0
+    }
+
+    #[test]
+    fn test_action_is_countable() {
+        // Repeatable motions
+        assert!(Action::MoveLeft.is_countable());
+        assert!(Action::MoveRight.is_countable());
+        assert!(Action::MoveUp.is_countable());
+        assert!(Action::MoveDown.is_countable());
+        assert!(Action::ForwardTo(Boundary::Word).is_countable());
+        assert!(Action::BackTo(Boundary::Word).is_countable());
+
+        // Not countable
+        assert!(!Action::SwitchToInsert.is_countable());
+        assert!(!Action::InsertChar('a').is_countable());
+    }
+
+    #[test]
+    fn test_action_is_line_action() {
+        // Line actions
+        assert!(Action::MoveToLineEnd.is_line_action());
+        assert!(Action::MoveToLineStart.is_line_action());
+        assert!(Action::MoveToLineContentStart.is_line_action());
+
+        // Not line actions
+        assert!(!Action::MoveLeft.is_line_action());
+        assert!(!Action::MoveDown.is_line_action());
+    }
+
+    #[test]
+    fn test_action_with_count() {
+        // Test countable actions
+        let action = Action::MoveDown.clone().with_count(5);
+        assert!(action.is_some());
+        match action {
+            Some(Action::Count(count, inner)) => {
+                assert_eq!(count, 5);
+                assert_eq!(*inner, Action::MoveDown);
+            }
+            _ => panic!("Expected Count variant"),
+        }
+
+        // Test line actions
+        let action = Action::MoveToLineEnd.clone().with_count(3);
+        assert!(action.is_some());
+        match action {
+            Some(Action::Count(count, inner)) => {
+                assert_eq!(count, 3);
+                assert_eq!(*inner, Action::MoveToLineEnd);
+            }
+            _ => panic!("Expected Count variant"),
+        }
+
+        // Test non-countable actions return None
+        let action = Action::SwitchToInsert.clone().with_count(5);
+        assert!(action.is_none());
+
+        // Test invalid counts return None
+        let action = Action::MoveDown.clone().with_count(0);
+        assert!(action.is_none());
+    }
+
+    #[test]
+    fn test_count_prefix_single_digit() {
+        let mut mode = NormalMode::new();
+
+        // Press '5' - should wait for more
+        let result = mode.handle_key(&key('5'));
+        assert!(matches!(result, HandleKeyResult::WaitForMore));
+
+        // Then press 'j' - should get Count(5, MoveDown)
+        let result = mode.handle_key(&key('j'));
+        assert!(matches!(
+            result,
+            HandleKeyResult::Complete(Action::Count(5, _))
+        ));
+    }
+
+    #[test]
+    fn test_count_prefix_multi_digit() {
+        let mut mode = NormalMode::new();
+
+        // Press '1' - should wait for more
+        let result = mode.handle_key(&key('1'));
+        assert!(matches!(result, HandleKeyResult::WaitForMore));
+
+        // Press '0' - should still be valid count "10"
+        let result = mode.handle_key(&key('0'));
+        assert!(matches!(result, HandleKeyResult::WaitForMore));
+
+        // Then press 'w' - should get Count(10, ForwardTo(Word))
+        let result = mode.handle_key(&key('w'));
+        assert!(matches!(
+            result,
+            HandleKeyResult::Complete(Action::Count(10, _))
+        ));
+    }
+
+    #[test]
+    fn test_count_prefix_escape_clears() {
+        let mut mode = NormalMode::new();
+
+        // Press '5' - should wait for more
+        let result = mode.handle_key(&key('5'));
+        assert!(matches!(result, HandleKeyResult::WaitForMore));
+
+        // Press Escape - should clear and return invalid
+        let result = mode.handle_key(&Key::new(KeyCode::Esc));
+        assert!(matches!(result, HandleKeyResult::InvalidSequence));
+
+        // Now pressing 'j' should give MoveDown, not Count
+        let result = mode.handle_key(&key('j'));
+        assert!(matches!(
+            result,
+            HandleKeyResult::Complete(Action::MoveDown)
+        ));
+    }
+
+    #[test]
+    fn test_zero_key_is_line_start() {
+        let mut mode = NormalMode::new();
+
+        // Press '0' directly - should be MoveToLineStart, not count
+        let result = mode.handle_key(&key('0'));
+        assert!(matches!(
+            result,
+            HandleKeyResult::Complete(Action::MoveToLineStart)
+        ));
     }
 }

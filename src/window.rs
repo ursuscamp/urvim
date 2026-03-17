@@ -723,6 +723,25 @@ impl Widget for Window {
                 self.delete_char_at_cursor();
                 ActionResult::Handled
             }
+            Action::Count(count, inner) => {
+                if inner.is_line_action() {
+                    // Line action: go to target absolute line, then perform action
+                    // Lines are 0-indexed internally, count is 1-indexed
+                    let target_line = (*count as isize - 1).max(0) as usize;
+                    let current_cursor = self.buffer_view.cursor();
+                    // Move to target line, preserving column if possible
+                    self.buffer_view
+                        .set_cursor(Cursor::new(target_line, current_cursor.col));
+                    // Then execute the line action
+                    self.process_action(inner)
+                } else {
+                    // Repeatable action: execute motion count times
+                    for _ in 0..*count {
+                        self.process_action(inner);
+                    }
+                    ActionResult::Handled
+                }
+            }
             // All other actions are not handled by window
             _ => NotHandled,
         };
