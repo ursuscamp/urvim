@@ -43,6 +43,32 @@ pub enum Action {
     DeleteForward,
 }
 
+impl Action {
+    /// Returns true if this action is a horizontal movement that should reset
+    /// the remembered visual column to the current position.
+    pub fn resets_remembered_column(&self) -> bool {
+        matches!(
+            self,
+            Action::MoveLeft
+                | Action::MoveRight
+                | Action::ForwardTo(_)
+                | Action::BackTo(_)
+                | Action::MoveToLineEnd
+                | Action::MoveToLineStart
+                | Action::MoveToLineContentStart
+                | Action::InsertChar(_)
+                | Action::DeleteBackward
+                | Action::DeleteForward
+        )
+    }
+
+    /// Returns true if this action is a vertical movement that should use
+    /// and update the remembered visual column.
+    pub fn uses_remembered_column(&self) -> bool {
+        matches!(self, Action::MoveUp | Action::MoveDown)
+    }
+}
+
 /// Result of processing a key in a mode.
 #[derive(Debug, Clone, PartialEq)]
 pub enum HandleKeyResult {

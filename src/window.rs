@@ -267,6 +267,7 @@ pub struct BufferView {
     buffer: Buffer,
     scroll_offset: Position,
     cursor: Cursor,
+    remembered_visual_col: Option<usize>,
 }
 
 impl BufferView {
@@ -275,6 +276,7 @@ impl BufferView {
             buffer,
             scroll_offset: Position::new(0, 0),
             cursor: Cursor::new(0, 0),
+            remembered_visual_col: None,
         }
     }
 
@@ -300,6 +302,26 @@ impl BufferView {
 
     pub fn set_cursor(&mut self, cursor: Cursor) {
         self.cursor = cursor;
+    }
+
+    /// Get the target column for vertical movement.
+    /// Returns remembered column if set, otherwise calculates from current position.
+    pub fn get_or_compute_target_col(&self) -> usize {
+        if let Some(col) = self.remembered_visual_col {
+            return col;
+        }
+        // First vertical move: use current position
+        self.buffer.visual_col_at(self.cursor)
+    }
+
+    /// Update remembered column from current cursor position.
+    pub fn update_remembered_to_current(&mut self) {
+        self.remembered_visual_col = Some(self.buffer.visual_col_at(self.cursor));
+    }
+
+    /// Set remembered column to a specific value.
+    pub fn set_remembered_visual_col(&mut self, col: usize) {
+        self.remembered_visual_col = Some(col);
     }
 
     /// Adjusts scroll offset to ensure the cursor is visible in the viewport.
@@ -534,18 +556,16 @@ impl Window {
         }
     }
 
-    pub fn move_cursor_up(&mut self) {
+    pub fn move_cursor_up(&mut self, target_col: usize) {
         let cursor = self.buffer_view.cursor();
-        let visual_col = self.buffer_view.buffer().visual_col_at(cursor);
-        if let Some(new_cursor) = self.buffer_view.buffer().cursor_up(cursor, visual_col) {
+        if let Some(new_cursor) = self.buffer_view.buffer().cursor_up(cursor, target_col) {
             self.buffer_view.set_cursor(new_cursor);
         }
     }
 
-    pub fn move_cursor_down(&mut self) {
+    pub fn move_cursor_down(&mut self, target_col: usize) {
         let cursor = self.buffer_view.cursor();
-        let visual_col = self.buffer_view.buffer().visual_col_at(cursor);
-        if let Some(new_cursor) = self.buffer_view.buffer().cursor_down(cursor, visual_col) {
+        if let Some(new_cursor) = self.buffer_view.buffer().cursor_down(cursor, target_col) {
             self.buffer_view.set_cursor(new_cursor);
         }
     }
@@ -650,17 +670,21 @@ impl Window {
 
 impl Widget for Window {
     fn process_action(&mut self, action: &Action) -> ActionResult {
-        match action {
+        let result = match action {
             Action::MoveLeft => {
                 self.move_cursor_left();
                 ActionResult::Handled
             }
             Action::MoveDown => {
-                self.move_cursor_down();
+                let target_col = self.buffer_view.get_or_compute_target_col();
+                self.move_cursor_down(target_col);
+                self.buffer_view.set_remembered_visual_col(target_col);
                 ActionResult::Handled
             }
             Action::MoveUp => {
-                self.move_cursor_up();
+                let target_col = self.buffer_view.get_or_compute_target_col();
+                self.move_cursor_up(target_col);
+                self.buffer_view.set_remembered_visual_col(target_col);
                 ActionResult::Handled
             }
             Action::MoveRight => {
@@ -701,7 +725,14 @@ impl Widget for Window {
             }
             // All other actions are not handled by window
             _ => NotHandled,
+        };
+
+        // Centralized column preservation logic
+        if action.resets_remembered_column() {
+            self.buffer_view.update_remembered_to_current();
         }
+
+        result
     }
 }
 
@@ -1102,5 +1133,126 @@ mod tests {
         assert_eq!(screen.get_cell_mut(0, 2).unwrap().text, "1");
         assert_eq!(screen.get_cell_mut(0, 3).unwrap().text, "0");
         assert_eq!(screen.get_cell_mut(0, 4).unwrap().text, " ");
+    }
+
+    // Column preservation tests
+
+    #[test]
+    fn test_column_preservation_first_vertical_move() {
+        // First vertical move should use current column and remember it
+        let buffer = Buffer::from_str("abcdefgh\nij");
+        let mut window = Window::new(buffer);
+
+        // Position at column 5 on first line
+        window.buffer_view.set_cursor(Cursor::new(0, 5));
+
+        // First move down via Window - should use current column (5), remember it
+        window.process_action(&Action::MoveDown);
+        assert_eq!(window.buffer_view.cursor().line, 1);
+        // Line 2 is "ij" (length 2), so column 5 should clamp to 2
+        assert_eq!(window.buffer_view.cursor().col, 2);
+    }
+
+    #[test]
+    fn test_column_preservation_consecutive_vertical_moves() {
+        // Consecutive vertical moves should preserve remembered column
+        let buffer = Buffer::from_str("abcdefgh\nabcdefgh\nabcdefgh");
+        let mut window = Window::new(buffer);
+
+        // Position at column 5 on first line
+        window.buffer_view.set_cursor(Cursor::new(0, 5));
+
+        // Move down - remembers column 5
+        window.process_action(&Action::MoveDown);
+        assert_eq!(window.buffer_view.cursor(), Cursor::new(1, 5));
+
+        // Move down again - should use remembered column 5
+        window.process_action(&Action::MoveDown);
+        assert_eq!(window.buffer_view.cursor(), Cursor::new(2, 5));
+
+        // Move up - should use remembered column 5
+        window.process_action(&Action::MoveUp);
+        assert_eq!(window.buffer_view.cursor(), Cursor::new(1, 5));
+    }
+
+    #[test]
+    fn test_column_preservation_horizontal_resets() {
+        // Horizontal movement should reset remembered column
+        use crate::editor::Action;
+
+        let buffer = Buffer::from_str("abcdefgh\nabcdefgh\nabcdefgh");
+        let mut window = Window::new(buffer);
+
+        // Position at column 5 on first line
+        window.buffer_view.set_cursor(Cursor::new(0, 5));
+
+        // Move down - remembers column 5
+        window.process_action(&Action::MoveDown);
+        assert_eq!(window.buffer_view.cursor(), Cursor::new(1, 5));
+
+        // Move right - should reset remembered column to current (now at column 6)
+        window.process_action(&Action::MoveRight);
+        // Now at column 6 on line 1
+
+        // Move down again - should use new column 6 and go to line 2
+        window.process_action(&Action::MoveDown);
+        assert_eq!(window.buffer_view.cursor(), Cursor::new(2, 6));
+    }
+
+    #[test]
+    fn test_column_preservation_clamp_on_short_line() {
+        // Moving to shorter line should clamp to end of line
+        let buffer = Buffer::from_str("abcdefgh\nij\nabcdefgh");
+        let mut window = Window::new(buffer);
+
+        // Position at column 5 on first line
+        window.buffer_view.set_cursor(Cursor::new(0, 5));
+
+        // Move down to shorter line "ij" (length 2)
+        window.process_action(&Action::MoveDown);
+        // Should clamp to column 2 (end of "ij")
+        assert_eq!(window.buffer_view.cursor(), Cursor::new(1, 2));
+
+        // Move down to longer line - should use remembered column 5
+        window.process_action(&Action::MoveDown);
+        assert_eq!(window.buffer_view.cursor(), Cursor::new(2, 5));
+    }
+
+    #[test]
+    fn test_action_resets_remembered_column() {
+        use crate::buffer::Boundary;
+        use crate::editor::Action;
+
+        // Horizontal movements should reset
+        assert!(Action::MoveLeft.resets_remembered_column());
+        assert!(Action::MoveRight.resets_remembered_column());
+        assert!(Action::ForwardTo(Boundary::Word).resets_remembered_column());
+        assert!(Action::BackTo(Boundary::Word).resets_remembered_column());
+        assert!(Action::MoveToLineEnd.resets_remembered_column());
+        assert!(Action::MoveToLineStart.resets_remembered_column());
+        assert!(Action::MoveToLineContentStart.resets_remembered_column());
+
+        // Vertical movements should NOT reset
+        assert!(!Action::MoveUp.resets_remembered_column());
+        assert!(!Action::MoveDown.resets_remembered_column());
+
+        // Other actions should not reset
+        assert!(!Action::SwitchToInsert.resets_remembered_column());
+        assert!(Action::InsertChar('a').resets_remembered_column());
+        assert!(Action::DeleteBackward.resets_remembered_column());
+        assert!(Action::DeleteForward.resets_remembered_column());
+    }
+
+    #[test]
+    fn test_action_uses_remembered_column() {
+        use crate::editor::Action;
+
+        // Vertical movements should use remembered column
+        assert!(Action::MoveUp.uses_remembered_column());
+        assert!(Action::MoveDown.uses_remembered_column());
+
+        // Other movements should NOT
+        assert!(!Action::MoveLeft.uses_remembered_column());
+        assert!(!Action::MoveRight.uses_remembered_column());
     }
 }
