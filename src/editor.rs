@@ -41,6 +41,12 @@ pub enum Action {
     MoveToFirstLine,
     /// Move cursor to last line of file (or line N with count)
     MoveToLastLine,
+    /// Move cursor to top of screen (or N lines from top with count)
+    MoveToScreenTop,
+    /// Move cursor to middle of screen
+    MoveToScreenMiddle,
+    /// Move cursor to bottom of screen (or N lines from bottom with count)
+    MoveToScreenBottom,
     /// Delete character before cursor (backspace)
     DeleteBackward,
     /// Delete character at cursor (delete key)
@@ -83,13 +89,19 @@ impl Action {
     pub fn uses_remembered_column(&self) -> bool {
         matches!(
             self,
-            Action::MoveUp | Action::MoveDown | Action::MoveToFirstLine | Action::MoveToLastLine
+            Action::MoveUp
+                | Action::MoveDown
+                | Action::MoveToFirstLine
+                | Action::MoveToLastLine
+                | Action::MoveToScreenTop
+                | Action::MoveToScreenMiddle
+                | Action::MoveToScreenBottom
         )
     }
 
     /// Returns true if this action is a repeatable motion that can be executed
     /// multiple times with a count prefix. These actions repeat from current position.
-    /// Examples: h, j, k, l, w, b, e, W, B, E, gg, G
+    /// Examples: h, j, k, l, w, b, e, W, B, E, gg, G, H, L
     pub fn is_countable(&self) -> bool {
         matches!(
             self,
@@ -101,6 +113,8 @@ impl Action {
                 | Action::BackTo(_)
                 | Action::MoveToFirstLine
                 | Action::MoveToLastLine
+                | Action::MoveToScreenTop
+                | Action::MoveToScreenBottom
         )
     }
 
@@ -266,6 +280,11 @@ impl NormalMode {
             Action::MoveToFirstLine,
         );
         keymap.insert("G".to_string(), Action::MoveToLastLine);
+
+        // H/M/L screen-relative motions
+        keymap.insert("H".to_string(), Action::MoveToScreenTop);
+        keymap.insert("M".to_string(), Action::MoveToScreenMiddle);
+        keymap.insert("L".to_string(), Action::MoveToScreenBottom);
 
         // Mode switching
         keymap.insert("i".to_string(), Action::SwitchToInsert);

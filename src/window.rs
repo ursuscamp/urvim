@@ -733,6 +733,59 @@ impl Widget for Window {
                 self.buffer_view.set_remembered_visual_col(target_col);
                 ActionResult::Handled
             }
+            Action::MoveToScreenTop => {
+                // H: Move to top of viewport (or N lines from top)
+                // Viewport info comes from the Window's size
+                let viewport_rows = self.size.rows as usize;
+                if viewport_rows == 0 {
+                    return ActionResult::Handled;
+                }
+                let start_line = self.buffer_view.scroll_offset().row as usize;
+                let target_line =
+                    start_line.min(self.buffer_view.buffer().line_count().saturating_sub(1));
+                let target_col = self.buffer_view.get_or_compute_target_col();
+                self.buffer_view
+                    .set_cursor(Cursor::new(target_line, target_col));
+                self.buffer_view.set_remembered_visual_col(target_col);
+                ActionResult::Handled
+            }
+            Action::MoveToScreenMiddle => {
+                // M: Move to middle of viewport
+                let viewport_rows = self.size.rows as usize;
+                if viewport_rows == 0 {
+                    return ActionResult::Handled;
+                }
+                let start_line = self.buffer_view.scroll_offset().row as usize;
+                let line_count = self.buffer_view.buffer().line_count();
+                if line_count == 0 {
+                    return ActionResult::Handled;
+                }
+                let target_line = (start_line + viewport_rows / 2).min(line_count - 1);
+                let target_col = self.buffer_view.get_or_compute_target_col();
+                self.buffer_view
+                    .set_cursor(Cursor::new(target_line, target_col));
+                self.buffer_view.set_remembered_visual_col(target_col);
+                ActionResult::Handled
+            }
+            Action::MoveToScreenBottom => {
+                // L: Move to bottom of viewport (or N lines from bottom)
+                let viewport_rows = self.size.rows as usize;
+                if viewport_rows == 0 {
+                    return ActionResult::Handled;
+                }
+                let start_line = self.buffer_view.scroll_offset().row as usize;
+                let line_count = self.buffer_view.buffer().line_count();
+                if line_count == 0 {
+                    return ActionResult::Handled;
+                }
+                let end_line = (start_line + viewport_rows - 1).min(line_count - 1);
+                let target_line = end_line;
+                let target_col = self.buffer_view.get_or_compute_target_col();
+                self.buffer_view
+                    .set_cursor(Cursor::new(target_line, target_col));
+                self.buffer_view.set_remembered_visual_col(target_col);
+                ActionResult::Handled
+            }
             Action::DeleteBackward => {
                 self.delete_char_before_cursor();
                 ActionResult::Handled
@@ -773,6 +826,45 @@ impl Widget for Window {
                     self.buffer_view
                         .set_cursor(Cursor::new(target_line, target_col));
                     // Update remembered column like vertical motions do
+                    self.buffer_view.set_remembered_visual_col(target_col);
+                    ActionResult::Handled
+                } else if matches!(inner.as_ref(), Action::MoveToScreenTop) {
+                    // H with count: go to N lines from top of viewport
+                    let viewport_rows = self.size.rows as usize;
+                    if viewport_rows == 0 {
+                        return ActionResult::Handled;
+                    }
+                    let start_line = self.buffer_view.scroll_offset().row as usize;
+                    let line_count = self.buffer_view.buffer().line_count();
+                    if line_count == 0 {
+                        return ActionResult::Handled;
+                    }
+                    let offset = count.saturating_sub(1);
+                    let target_line = (start_line + offset)
+                        .min(start_line + viewport_rows - 1)
+                        .min(line_count - 1);
+                    let target_col = self.buffer_view.get_or_compute_target_col();
+                    self.buffer_view
+                        .set_cursor(Cursor::new(target_line, target_col));
+                    self.buffer_view.set_remembered_visual_col(target_col);
+                    ActionResult::Handled
+                } else if matches!(inner.as_ref(), Action::MoveToScreenBottom) {
+                    // L with count: go to N lines from bottom of viewport
+                    let viewport_rows = self.size.rows as usize;
+                    if viewport_rows == 0 {
+                        return ActionResult::Handled;
+                    }
+                    let start_line = self.buffer_view.scroll_offset().row as usize;
+                    let line_count = self.buffer_view.buffer().line_count();
+                    if line_count == 0 {
+                        return ActionResult::Handled;
+                    }
+                    let end_line = (start_line + viewport_rows - 1).min(line_count - 1);
+                    let offset = count.saturating_sub(1);
+                    let target_line = (end_line - offset).max(start_line);
+                    let target_col = self.buffer_view.get_or_compute_target_col();
+                    self.buffer_view
+                        .set_cursor(Cursor::new(target_line, target_col));
                     self.buffer_view.set_remembered_visual_col(target_col);
                     ActionResult::Handled
                 } else if inner.is_line_action() {

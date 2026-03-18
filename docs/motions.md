@@ -203,6 +203,45 @@ Examples:
 - `I` -> moves to first non-whitespace of current line, enters insert mode
 - `3I` -> goes to line 3, moves to its first non-whitespace, enters insert mode
 
+## Screen-Relative Motions
+
+These motions move the cursor to positions relative to the currently visible viewport, without scrolling.
+
+### H - Move to Top
+
+Moves the cursor to the first visible line of the viewport (top of screen).
+
+- **Count**: Yes - moves to `count` lines from the top of the viewport
+- **Vim difference**: urvim uses capital H (lowercase h is move left)
+
+Examples:
+- `H` -> moves to the first visible line
+- `3H` -> moves to the 3rd line from the top of the viewport
+
+### M - Move to Middle
+
+Moves the cursor to the middle visible line of the viewport.
+
+- **Count**: No - count is ignored
+- **Vim difference**: urvim uses capital M
+
+### L - Move to Bottom
+
+Moves the cursor to the last visible line of the viewport (bottom of screen).
+
+- **Count**: Yes - moves to `count` lines from the bottom of the viewport
+- **Vim difference**: urvim uses capital L (lowercase l is move right)
+
+Examples:
+- `L` -> moves to the last visible line
+- `3L` -> moves to the 3rd line from the bottom of the viewport
+
+### Column Preservation
+
+H, M, and L behave like vertical motions (`j`/`k`) for column preservation:
+- They use the remembered column when moving (like j/k)
+- They update the remembered column after moving
+
 ## Operator Motion Differences Summary
 
 | Motion | urvim Behavior | Vim Behavior |
