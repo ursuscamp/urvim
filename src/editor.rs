@@ -45,6 +45,12 @@ pub enum Action {
     DeleteBackward,
     /// Delete character at cursor (delete key)
     DeleteForward,
+    /// Append after cursor position and enter insert mode
+    AppendAfterCursor,
+    /// Append to end of line and enter insert mode
+    AppendToLineEnd,
+    /// Insert at first non-whitespace of line and enter insert mode
+    InsertAtLineStart,
     /// Count prefix: repeats the inner action the specified number of times,
     /// or goes to the target absolute line number for line actions.
     Count(usize, Box<Action>),
@@ -66,6 +72,9 @@ impl Action {
                 | Action::InsertChar(_)
                 | Action::DeleteBackward
                 | Action::DeleteForward
+                | Action::AppendAfterCursor
+                | Action::AppendToLineEnd
+                | Action::InsertAtLineStart
         )
     }
 
@@ -97,7 +106,7 @@ impl Action {
 
     /// Returns true if this action is a line action that takes an absolute line count.
     /// The count specifies the target line number (1-indexed), then performs the action.
-    /// Examples: $, 0, ^, gg, G
+    /// Examples: $, 0, ^, gg, G, A, I
     pub fn is_line_action(&self) -> bool {
         matches!(
             self,
@@ -106,6 +115,8 @@ impl Action {
                 | Action::MoveToLineContentStart
                 | Action::MoveToFirstLine
                 | Action::MoveToLastLine
+                | Action::AppendToLineEnd
+                | Action::InsertAtLineStart
         )
     }
 
@@ -115,6 +126,19 @@ impl Action {
             Some(Action::Count(count, Box::new(self)))
         } else {
             None
+        }
+    }
+
+    /// Returns true if this action switches to insert mode.
+    /// For Count actions, recursively checks the inner action.
+    pub fn switches_to_insert_mode(&self) -> bool {
+        match self {
+            Action::SwitchToInsert
+            | Action::AppendAfterCursor
+            | Action::AppendToLineEnd
+            | Action::InsertAtLineStart => true,
+            Action::Count(_, inner) => inner.switches_to_insert_mode(),
+            _ => false,
         }
     }
 }
@@ -245,6 +269,9 @@ impl NormalMode {
 
         // Mode switching
         keymap.insert("i".to_string(), Action::SwitchToInsert);
+        keymap.insert("a".to_string(), Action::AppendAfterCursor);
+        keymap.insert("A".to_string(), Action::AppendToLineEnd);
+        keymap.insert("I".to_string(), Action::InsertAtLineStart);
 
         // Delete operations
         keymap.insert("x".to_string(), Action::DeleteForward);
@@ -708,8 +735,21 @@ mod tests {
             handle_and_unwrap(&mut mode, &Key::new(KeyCode::Char('X'))),
             Action::DeleteBackward
         );
+        // 'a', 'A', 'I' are now bound to mode-change motions
+        assert_eq!(
+            handle_and_unwrap(&mut mode, &key('a')),
+            Action::AppendAfterCursor
+        );
+        assert_eq!(
+            handle_and_unwrap(&mut mode, &Key::new(KeyCode::Char('A'))),
+            Action::AppendToLineEnd
+        );
+        assert_eq!(
+            handle_and_unwrap(&mut mode, &Key::new(KeyCode::Char('I'))),
+            Action::InsertAtLineStart
+        );
         // Other keys still return None
-        assert_eq!(handle_and_unwrap(&mut mode, &key('a')), Action::None);
+        assert_eq!(handle_and_unwrap(&mut mode, &key('z')), Action::None);
     }
 
     #[test]
@@ -829,9 +869,12 @@ mod tests {
         assert!(Action::ForwardTo(Boundary::Word).is_countable());
         assert!(Action::BackTo(Boundary::Word).is_countable());
 
-        // Not countable
+        // Not countable - mode change motions
         assert!(!Action::SwitchToInsert.is_countable());
         assert!(!Action::InsertChar('a').is_countable());
+        assert!(!Action::AppendAfterCursor.is_countable());
+        assert!(!Action::AppendToLineEnd.is_countable());
+        assert!(!Action::InsertAtLineStart.is_countable());
     }
 
     #[test]
@@ -840,10 +883,14 @@ mod tests {
         assert!(Action::MoveToLineEnd.is_line_action());
         assert!(Action::MoveToLineStart.is_line_action());
         assert!(Action::MoveToLineContentStart.is_line_action());
+        // Mode-change line actions
+        assert!(Action::AppendToLineEnd.is_line_action());
+        assert!(Action::InsertAtLineStart.is_line_action());
 
         // Not line actions
         assert!(!Action::MoveLeft.is_line_action());
         assert!(!Action::MoveDown.is_line_action());
+        assert!(!Action::AppendAfterCursor.is_line_action());
     }
 
     #[test]
@@ -874,6 +921,31 @@ mod tests {
         let action = Action::SwitchToInsert.clone().with_count(5);
         assert!(action.is_none());
 
+        // Test mode-change line actions (A and I) work with count
+        let action = Action::AppendToLineEnd.clone().with_count(3);
+        assert!(action.is_some());
+        match action {
+            Some(Action::Count(count, inner)) => {
+                assert_eq!(count, 3);
+                assert_eq!(*inner, Action::AppendToLineEnd);
+            }
+            _ => panic!("Expected Count variant"),
+        }
+
+        let action = Action::InsertAtLineStart.clone().with_count(5);
+        assert!(action.is_some());
+        match action {
+            Some(Action::Count(count, inner)) => {
+                assert_eq!(count, 5);
+                assert_eq!(*inner, Action::InsertAtLineStart);
+            }
+            _ => panic!("Expected Count variant"),
+        }
+
+        // Test a (AppendAfterCursor) is not countable or line action
+        let action = Action::AppendAfterCursor.clone().with_count(5);
+        assert!(action.is_none());
+
         // Test invalid counts return None
         let action = Action::MoveDown.clone().with_count(0);
         assert!(action.is_none());
@@ -888,6 +960,32 @@ mod tests {
             }
             _ => panic!("Expected Count variant"),
         }
+    }
+
+    #[test]
+    fn test_action_switches_to_insert_mode() {
+        // Actions that switch to insert mode
+        assert!(Action::SwitchToInsert.switches_to_insert_mode());
+        assert!(Action::AppendAfterCursor.switches_to_insert_mode());
+        assert!(Action::AppendToLineEnd.switches_to_insert_mode());
+        assert!(Action::InsertAtLineStart.switches_to_insert_mode());
+
+        // Other actions do not switch to insert mode
+        assert!(!Action::MoveLeft.switches_to_insert_mode());
+        assert!(!Action::MoveDown.switches_to_insert_mode());
+        assert!(!Action::MoveToLineEnd.switches_to_insert_mode());
+        assert!(!Action::SwitchToNormal.switches_to_insert_mode());
+
+        // Count actions with mode-change inner actions should switch to insert mode
+        let action = Action::Count(3, Box::new(Action::AppendToLineEnd));
+        assert!(action.switches_to_insert_mode());
+
+        let action = Action::Count(5, Box::new(Action::InsertAtLineStart));
+        assert!(action.switches_to_insert_mode());
+
+        // Count actions with non-mode-change inner actions should not switch
+        let action = Action::Count(3, Box::new(Action::MoveDown));
+        assert!(!action.switches_to_insert_mode());
     }
 
     #[test]

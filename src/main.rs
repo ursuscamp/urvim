@@ -76,7 +76,8 @@ fn main() -> io::Result<()> {
             match result {
                 HandleKeyResult::Complete(action) => {
                     // First, try to process action through the widget (window)
-                    if window.process_action(&action) == ActionResult::NotHandled {
+                    let action_result = window.process_action(&action);
+                    if action_result == ActionResult::NotHandled {
                         // Fall back to app-level handling
                         match action {
                             Action::SwitchToNormal => {
@@ -90,6 +91,12 @@ fn main() -> io::Result<()> {
                             Action::Quit => break,
                             Action::None => { /* Ignore */ }
                             _ => { /* Should have been handled by window */ }
+                        }
+                    } else if action_result == ActionResult::Handled {
+                        // Check if this action switches to insert mode (handles Count actions recursively)
+                        if action.switches_to_insert_mode() {
+                            mode = Box::new(InsertMode::new());
+                            terminal.set_cursor_style(mode.cursor_style())?;
                         }
                     }
                 }

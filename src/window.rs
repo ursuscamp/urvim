@@ -741,6 +741,22 @@ impl Widget for Window {
                 self.delete_char_at_cursor();
                 ActionResult::Handled
             }
+            Action::AppendAfterCursor => {
+                self.move_cursor_right();
+                ActionResult::Handled
+            }
+            Action::AppendToLineEnd => {
+                // A should move to after the last character (line_len), not last non-whitespace
+                let cursor = self.buffer_view.cursor();
+                let line_len = self.buffer_view.buffer.line_len(cursor.line);
+                self.buffer_view
+                    .set_cursor(Cursor::new(cursor.line, line_len));
+                ActionResult::Handled
+            }
+            Action::InsertAtLineStart => {
+                self.move_cursor_to_line_content_start();
+                ActionResult::Handled
+            }
             Action::Count(count, inner) => {
                 // gg and G with count: go to specified line (count-1, clamped to file bounds)
                 // These motions don't need a secondary action

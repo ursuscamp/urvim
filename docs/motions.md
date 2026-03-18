@@ -169,6 +169,40 @@ Both `gg` and `G` behave like vertical motions (`j`/`k`) for the purposes of col
 
 This matches Vim's behavior where gg/G set the jump cursor and affect the remembered column.
 
+## Mode-Change Motions
+
+### a - Append After Cursor
+
+Moves the cursor one character to the right and enters insert mode.
+
+- **Count**: No count support
+- **Vim difference**: urvim is grapheme-aware (handles multi-byte characters like emoji properly)
+
+Example: On "hel|lo" (cursor before 'l'):
+- `a` -> "hell|o" (enters insert mode after the second 'l')
+
+### A - Append to Line End
+
+Moves the cursor to the end of the current line and enters insert mode.
+
+- **Count**: As a line action - goes to line `count` (1-indexed), then moves to end and enters insert mode
+- **Vim difference**: urvim is grapheme-aware
+
+Examples:
+- `A` -> moves to end of current line, enters insert mode
+- `3A` -> goes to line 3, moves to its end, enters insert mode
+
+### I - Insert at Line Start
+
+Moves the cursor to the first non-whitespace character of the current line and enters insert mode.
+
+- **Count**: As a line action - goes to line `count` (1-indexed), then moves to first non-whitespace and enters insert mode
+- **Vim difference**: urvim is grapheme-aware
+
+Examples:
+- `I` -> moves to first non-whitespace of current line, enters insert mode
+- `3I` -> goes to line 3, moves to its first non-whitespace, enters insert mode
+
 ## Operator Motion Differences Summary
 
 | Motion | urvim Behavior | Vim Behavior |
