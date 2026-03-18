@@ -227,7 +227,7 @@ impl Screen {
                     let width = UnicodeWidthStr::width(cell.text.as_str()).max(1);
 
                     if width > 1 {
-                        let cells_to_clear = (width as usize).min((self.cols - col) as usize);
+                        let cells_to_clear = width.min((self.cols - col) as usize);
                         for clear_offset in 0..cells_to_clear {
                             terminal.set_cursor_position(row + 1, col + 1 + clear_offset as u16)?;
                             terminal.write_text(" ")?;

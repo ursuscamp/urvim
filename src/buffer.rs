@@ -508,11 +508,13 @@ impl Buffer {
             let prev_line = current_line - 1;
 
             // Get content before mutating
-            let current_content: String = self.lines
+            let current_content: String = self
+                .lines
                 .get(current_line)
                 .map_or("", |s| s.as_ref())
                 .to_string();
-            let prev_content: String = self.lines
+            let prev_content: String = self
+                .lines
                 .get(prev_line)
                 .map_or("", |s| s.as_ref())
                 .to_string();
@@ -539,7 +541,7 @@ impl Buffer {
         // grapheme_indices gives us the START of each grapheme
         // We want the LAST grapheme that starts before cursor
         let mut prev_grapheme_start: Option<(usize, usize)> = None;
-        
+
         for (byte_offset, grapheme) in line_str.grapheme_indices(true) {
             if byte_offset < cursor.col {
                 // This grapheme starts before cursor, remember it (keep updating to get the last one)
@@ -552,7 +554,10 @@ impl Buffer {
 
         // If we found a grapheme before cursor, delete it
         if let Some((start, end)) = prev_grapheme_start {
-            self.remove(Cursor::new(cursor.line, start), Cursor::new(cursor.line, end));
+            self.remove(
+                Cursor::new(cursor.line, start),
+                Cursor::new(cursor.line, end),
+            );
             return Some(Cursor::new(cursor.line, start));
         }
 
@@ -595,11 +600,13 @@ impl Buffer {
             let next_line = current_line + 1;
 
             // Get content before mutating
-            let current_content: String = self.lines
+            let current_content: String = self
+                .lines
                 .get(current_line)
                 .map_or("", |s| s.as_ref())
                 .to_string();
-            let next_content: String = self.lines
+            let next_content: String = self
+                .lines
                 .get(next_line)
                 .map_or("", |s| s.as_ref())
                 .to_string();
@@ -629,7 +636,10 @@ impl Buffer {
                 // Found a grapheme at or after cursor
                 let start = byte_offset;
                 let end = byte_offset + grapheme.len();
-                self.remove(Cursor::new(cursor.line, start), Cursor::new(cursor.line, end));
+                self.remove(
+                    Cursor::new(cursor.line, start),
+                    Cursor::new(cursor.line, end),
+                );
                 return Some(Cursor::new(cursor.line, start));
             }
         }
@@ -683,7 +693,12 @@ impl Buffer {
     /// assert_eq!(cursor, Some(Cursor::new(0, 11))); // "hello world" has 11 chars
     /// assert_eq!(buf.as_str(), "hello world");
     /// ```
-    pub fn join_lines(&mut self, start_line: usize, line_count: usize, with_space: bool) -> Option<Cursor> {
+    pub fn join_lines(
+        &mut self,
+        start_line: usize,
+        line_count: usize,
+        with_space: bool,
+    ) -> Option<Cursor> {
         // Validate inputs
         if line_count < 2 {
             return None;
@@ -1424,30 +1439,31 @@ impl Buffer {
                             .get(check_col..)
                             .and_then(|s| s.graphemes(true).next());
                         if let Some(gg) = g
-                            && !Self::is_word_char(gg) && !Self::is_whitespace_char(gg)
+                            && !Self::is_word_char(gg)
+                            && !Self::is_whitespace_char(gg)
                         {
                             if started_at_word_char {
-                                    // We came from a word - this non-word sequence is a separate word
-                                    // Return the start of it
-                                    return Some(Cursor::new(line_idx, check_col));
-                                } else {
-                                    // We started at a non-word - skip through the sequence
-                                    while check_col < line_len {
-                                        let g = line_str
-                                            .get(check_col..)
-                                            .and_then(|s| s.graphemes(true).next());
-                                        match g {
-                                            Some(gg)
-                                                if !Self::is_word_char(gg)
-                                                    && !Self::is_whitespace_char(gg) =>
-                                            {
-                                                check_col += gg.len();
-                                            }
-                                            _ => break,
+                                // We came from a word - this non-word sequence is a separate word
+                                // Return the start of it
+                                return Some(Cursor::new(line_idx, check_col));
+                            } else {
+                                // We started at a non-word - skip through the sequence
+                                while check_col < line_len {
+                                    let g = line_str
+                                        .get(check_col..)
+                                        .and_then(|s| s.graphemes(true).next());
+                                    match g {
+                                        Some(gg)
+                                            if !Self::is_word_char(gg)
+                                                && !Self::is_whitespace_char(gg) =>
+                                        {
+                                            check_col += gg.len();
                                         }
+                                        _ => break,
                                     }
                                 }
                             }
+                        }
                     }
 
                     // Skip whitespace to find the next word
@@ -1605,29 +1621,30 @@ impl Buffer {
                                     .get(check_col..)
                                     .and_then(|s| s.graphemes(true).next());
                                 if let Some(gg) = g
-                                    && !Self::is_word_char(gg) && !Self::is_whitespace_char(gg)
+                                    && !Self::is_word_char(gg)
+                                    && !Self::is_whitespace_char(gg)
                                 {
-                                        // We're at a non-word, non-whitespace sequence
-                                        // Find its end and return
-                                        let mut end_col = check_col;
-                                        while end_col < line_len {
-                                            let g = line_str
-                                                .get(end_col..)
-                                                .and_then(|s| s.graphemes(true).next());
-                                            match g {
-                                                Some(gg)
-                                                    if !Self::is_word_char(gg)
-                                                        && !Self::is_whitespace_char(gg) =>
-                                                {
-                                                    end_col += gg.len();
-                                                }
-                                                _ => break,
+                                    // We're at a non-word, non-whitespace sequence
+                                    // Find its end and return
+                                    let mut end_col = check_col;
+                                    while end_col < line_len {
+                                        let g = line_str
+                                            .get(end_col..)
+                                            .and_then(|s| s.graphemes(true).next());
+                                        match g {
+                                            Some(gg)
+                                                if !Self::is_word_char(gg)
+                                                    && !Self::is_whitespace_char(gg) =>
+                                            {
+                                                end_col += gg.len();
                                             }
-                                        }
-                                        if end_col > check_col {
-                                            return Some(Cursor::new(line_idx, end_col - 1));
+                                            _ => break,
                                         }
                                     }
+                                    if end_col > check_col {
+                                        return Some(Cursor::new(line_idx, end_col - 1));
+                                    }
+                                }
                             }
 
                             // Find next word start (skip whitespace only)
@@ -1823,11 +1840,13 @@ impl Buffer {
                     // If we moved forward past the starting position, check what comes after
                     if check_col > start_col {
                         let after_current = if check_col < line_len {
-                            line_str.get(check_col..).and_then(|s| s.graphemes(true).next())
+                            line_str
+                                .get(check_col..)
+                                .and_then(|s| s.graphemes(true).next())
                         } else {
                             None
                         };
-                        
+
                         match after_current {
                             Some(gg) if Self::is_bigword_char(gg) => {
                                 // Another word right after - continue to find it
@@ -1851,7 +1870,7 @@ impl Buffer {
                     // Try to find next word on current line (skip whitespace, find word)
                     // Track original position to know if we found whitespace
                     let pre_whitespace_col = check_col;
-                    
+
                     // Skip whitespace to find next bigword
                     while check_col < line_len {
                         let g = line_str
@@ -1883,7 +1902,7 @@ impl Buffer {
                     let found_next_word = check_col > pre_whitespace_col && check_col > start_col;
                     // Special case: if we started at position 0 (wrapped from previous line) and found a word
                     let started_at_zero = start_col == 0 && check_col > 0;
-                    
+
                     if (found_next_word || started_at_zero) && check_col <= line_len + 1 {
                         return Some(Cursor::new(line_idx, check_col - 1));
                     }
@@ -2434,7 +2453,7 @@ mod tests {
             buf.cursor_down(Cursor::new(0, 1), 1),
             Some(Cursor::new(1, 1))
         ); // after 'a'
-           // visual col 2 would be in middle of emoji, should clamp to end of next line
+        // visual col 2 would be in middle of emoji, should clamp to end of next line
         assert_eq!(
             buf.cursor_down(Cursor::new(0, 5), 3),
             Some(Cursor::new(1, 1))
@@ -2505,7 +2524,10 @@ mod tests {
         let buf = Buffer::from_str("hello");
 
         // In middle of line, move to end
-        assert_eq!(buf.cursor_end_of_line(Cursor::new(0, 2)), Some(Cursor::new(0, 4)));
+        assert_eq!(
+            buf.cursor_end_of_line(Cursor::new(0, 2)),
+            Some(Cursor::new(0, 4))
+        );
     }
 
     #[test]
@@ -2513,7 +2535,10 @@ mod tests {
         let buf = Buffer::from_str("hello\nworld");
 
         // At end of line, wraps to next line's end
-        assert_eq!(buf.cursor_end_of_line(Cursor::new(0, 4)), Some(Cursor::new(1, 4)));
+        assert_eq!(
+            buf.cursor_end_of_line(Cursor::new(0, 4)),
+            Some(Cursor::new(1, 4))
+        );
     }
 
     #[test]
@@ -2537,7 +2562,10 @@ mod tests {
         let buf = Buffer::from_str("hello\n\nworld");
 
         // Empty line in middle, wrap to next line (empty line)
-        assert_eq!(buf.cursor_end_of_line(Cursor::new(0, 4)), Some(Cursor::new(1, 0)));
+        assert_eq!(
+            buf.cursor_end_of_line(Cursor::new(0, 4)),
+            Some(Cursor::new(1, 0))
+        );
     }
 
     #[test]
@@ -2545,7 +2573,10 @@ mod tests {
         let buf = Buffer::from_str("hello   ");
 
         // Should move to last non-whitespace character
-        assert_eq!(buf.cursor_end_of_line(Cursor::new(0, 0)), Some(Cursor::new(0, 4)));
+        assert_eq!(
+            buf.cursor_end_of_line(Cursor::new(0, 0)),
+            Some(Cursor::new(0, 4))
+        );
     }
 
     #[test]
@@ -2554,7 +2585,10 @@ mod tests {
 
         // "hello" (5 bytes) + "😀" (4 bytes) = 9 bytes, then "world" (5 bytes) = 14 bytes total
         // Last char 'd' is at byte 13
-        assert_eq!(buf.cursor_end_of_line(Cursor::new(0, 0)), Some(Cursor::new(0, 13)));
+        assert_eq!(
+            buf.cursor_end_of_line(Cursor::new(0, 0)),
+            Some(Cursor::new(0, 13))
+        );
     }
 
     // cursor_start_of_line tests
@@ -2564,7 +2598,10 @@ mod tests {
         let buf = Buffer::from_str("  hello");
 
         // In middle of line - move to column 0
-        assert_eq!(buf.cursor_start_of_line(Cursor::new(0, 5)), Some(Cursor::new(0, 0)));
+        assert_eq!(
+            buf.cursor_start_of_line(Cursor::new(0, 5)),
+            Some(Cursor::new(0, 0))
+        );
     }
 
     #[test]
@@ -2572,7 +2609,10 @@ mod tests {
         let buf = Buffer::from_str("  hello\n  world");
 
         // At column 0 on line 1 - wrap to previous line
-        assert_eq!(buf.cursor_start_of_line(Cursor::new(1, 0)), Some(Cursor::new(0, 0)));
+        assert_eq!(
+            buf.cursor_start_of_line(Cursor::new(1, 0)),
+            Some(Cursor::new(0, 0))
+        );
     }
 
     #[test]
@@ -2598,7 +2638,10 @@ mod tests {
         let buf = Buffer::from_str("  hello");
 
         // In middle of line - move to first non-whitespace
-        assert_eq!(buf.cursor_content_start_of_line(Cursor::new(0, 5)), Some(Cursor::new(0, 2)));
+        assert_eq!(
+            buf.cursor_content_start_of_line(Cursor::new(0, 5)),
+            Some(Cursor::new(0, 2))
+        );
     }
 
     #[test]
@@ -2606,7 +2649,10 @@ mod tests {
         let buf = Buffer::from_str("  hello\n  world");
 
         // At first non-whitespace on line 1 - wrap to previous line (line 0)
-        assert_eq!(buf.cursor_content_start_of_line(Cursor::new(1, 2)), Some(Cursor::new(0, 2)));
+        assert_eq!(
+            buf.cursor_content_start_of_line(Cursor::new(1, 2)),
+            Some(Cursor::new(0, 2))
+        );
     }
 
     #[test]
@@ -2639,7 +2685,10 @@ mod tests {
 
         // At first non-whitespace on line 1 - wrap to previous line which is empty
         // Previous line has no non-whitespace, so move to column 0
-        assert_eq!(buf.cursor_content_start_of_line(Cursor::new(1, 0)), Some(Cursor::new(0, 0)));
+        assert_eq!(
+            buf.cursor_content_start_of_line(Cursor::new(1, 0)),
+            Some(Cursor::new(0, 0))
+        );
     }
 
     #[test]
@@ -2647,7 +2696,10 @@ mod tests {
         let buf = Buffer::from_str("  hello😀world");
 
         // First non-whitespace is 'h' at byte 2
-        assert_eq!(buf.cursor_content_start_of_line(Cursor::new(0, 5)), Some(Cursor::new(0, 2)));
+        assert_eq!(
+            buf.cursor_content_start_of_line(Cursor::new(0, 5)),
+            Some(Cursor::new(0, 2))
+        );
     }
 
     // visual_col_at tests
@@ -3210,7 +3262,7 @@ mod tests {
 
     #[test]
     fn test_insert_mode_backspace_at_position_1() {
-        // Simulate insert mode: cursor at position 1 in "abc" 
+        // Simulate insert mode: cursor at position 1 in "abc"
         // This is between 'a' (pos 0) and 'b' (pos 1)
         // Backspace should remove 'a' (before cursor), cursor moves to 0
         let mut buf = Buffer::from_str("abc");

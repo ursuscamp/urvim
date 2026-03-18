@@ -464,6 +464,12 @@ pub struct NormalMode {
     waiting: bool,
 }
 
+impl Default for NormalMode {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl NormalMode {
     pub fn new() -> Self {
         let mut keymap = TrieKeymap::new();
@@ -594,11 +600,10 @@ impl Mode for NormalMode {
                 self.waiting = false;
 
                 // Only wrap with Count if count > 1 and action supports counting
-                if total_count > 1 {
-                    if let Some(counted_action) = action.clone().with_count(total_count) {
+                if total_count > 1
+                    && let Some(counted_action) = action.clone().with_count(total_count) {
                         return HandleKeyResult::Complete(counted_action);
                     }
-                }
                 return HandleKeyResult::Complete(action);
             }
 
@@ -626,11 +631,10 @@ impl Mode for NormalMode {
             self.waiting = false;
 
             // Only wrap with Count if count > 1 and action supports counting
-            if count > 1 {
-                if let Some(counted_action) = action.clone().with_count(count) {
+            if count > 1
+                && let Some(counted_action) = action.clone().with_count(count) {
                     return HandleKeyResult::Complete(counted_action);
                 }
-            }
             // Return action without wrapping (count is 1 or action doesn't support counting)
             return HandleKeyResult::Complete(action);
         }
@@ -733,13 +737,12 @@ impl Mode for InsertMode {
         }
 
         // For printable characters without Ctrl, insert them
-        if let KeyCode::Char(c) = key.code {
-            if !key.modifiers.has_ctrl() {
+        if let KeyCode::Char(c) = key.code
+            && !key.modifiers.has_ctrl() {
                 self.buffer.clear();
                 self.waiting = false;
                 return HandleKeyResult::Complete(Action::InsertChar(c));
             }
-        }
 
         // No match - clear buffer
         self.buffer.clear();
