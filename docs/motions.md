@@ -242,6 +242,39 @@ H, M, and L behave like vertical motions (`j`/`k`) for column preservation:
 - They use the remembered column when moving (like j/k)
 - They update the remembered column after moving
 
+## Join Line Motions
+
+These motions join multiple lines together.
+
+### J - Join with Space
+
+Joins the current line with the next line(s), inserting a single space between joined lines.
+
+- **Count**: Yes - joins `count + 1` lines (e.g., `3J` joins 4 lines)
+- **Cursor position**: After the join, the cursor is positioned at the end of the joined content
+- **Vim difference**: Same behavior as Vim
+
+Examples:
+- `J` on "hello\nworld" -> "hello world" (cursor at end)
+- `2J` on "a\nb\nc\nd" -> "a b c" (joins 4 lines: a, b, c, d with spaces)
+
+### gJ - Join without Space
+
+Joins the current line with the next line(s) without inserting any space between them.
+
+- **Count**: Yes - joins `count + 1` lines
+- **Cursor position**: After the join, the cursor is positioned at the end of the joined content
+- **Vim difference**: Same behavior as Vim
+
+Examples:
+- `gJ` on "hello\nworld" -> "helloworld" (cursor at end)
+- `2gJ` on "a\nb\nc\nd" -> "abcd" (joins 4 lines without spaces)
+
+### Edge Cases
+
+- Joining from the last line: No operation (nothing to join with)
+- Joining when there are fewer lines than count: Joins all available lines
+
 ## Operator Motion Differences Summary
 
 | Motion | urvim Behavior | Vim Behavior |

@@ -659,6 +659,80 @@ impl Buffer {
         self.lines.get(line_idx).map_or(0, |s| s.len())
     }
 
+    /// Join multiple lines starting from the specified line.
+    ///
+    /// Joins `line_count` lines starting from `start_line`. If `with_space` is true,
+    /// inserts a single space between joined lines.
+    ///
+    /// # Arguments
+    ///
+    /// * `start_line` - The line index to start joining from (0-indexed)
+    /// * `line_count` - Number of lines to join (at least 2 for meaningful join)
+    /// * `with_space` - Whether to insert a space between joined lines
+    ///
+    /// Returns the cursor position at the end of the joined content, or None if
+    /// the operation cannot be performed (e.g., not enough lines, invalid start line).
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use urvim::buffer::{Buffer, Cursor};
+    ///
+    /// let mut buf = Buffer::from_str("hello\nworld");
+    /// let cursor = buf.join_lines(0, 2, true);
+    /// assert_eq!(cursor, Some(Cursor::new(0, 11))); // "hello world" has 11 chars
+    /// assert_eq!(buf.as_str(), "hello world");
+    /// ```
+    pub fn join_lines(&mut self, start_line: usize, line_count: usize, with_space: bool) -> Option<Cursor> {
+        // Validate inputs
+        if line_count < 2 {
+            return None;
+        }
+
+        let total_lines = self.lines.len();
+        if start_line >= total_lines {
+            return None;
+        }
+
+        // Clamp line_count to available lines
+        let actual_line_count = (total_lines - start_line).min(line_count);
+        if actual_line_count < 2 {
+            return None;
+        }
+
+        // Collect content from all lines to join
+        let mut joined_content = String::new();
+
+        for i in 0..actual_line_count {
+            let line_idx = start_line + i;
+            if let Some(line) = self.lines.get(line_idx) {
+                if i > 0 {
+                    // Add space before content of subsequent lines (if with_space is true)
+                    if with_space {
+                        joined_content.push(' ');
+                    }
+                }
+                joined_content.push_str(line);
+            }
+        }
+
+        // Get remaining lines after the joined section
+        let end_line = start_line + actual_line_count;
+        let right = self.lines.skip(end_line);
+
+        // Calculate length before moving
+        let joined_len = joined_content.len();
+
+        // Replace the lines
+        let mut left = self.lines.take(start_line);
+        left.push_back(Arc::from(joined_content));
+        left.append(right);
+        self.lines = left;
+
+        // Return cursor at end of joined content
+        Some(Cursor::new(start_line, joined_len))
+    }
+
     /// Checks if a cursor position is valid.
     ///
     /// # Arguments
@@ -3144,5 +3218,82 @@ mod tests {
         let new_cursor = buf.delete_char_before_cursor(cursor);
         assert_eq!(new_cursor, Some(Cursor::new(0, 0))); // cursor moves back to position 0
         assert_eq!(buf.as_str(), "bc"); // 'a' removed
+    }
+
+    // Join lines tests
+
+    #[test]
+    fn test_join_lines_with_space() {
+        let mut buf = Buffer::from_str("hello\nworld");
+        let cursor = buf.join_lines(0, 2, true);
+        assert_eq!(cursor, Some(Cursor::new(0, 11))); // "hello world" has 11 chars
+        assert_eq!(buf.as_str(), "hello world");
+        assert_eq!(buf.line_count(), 1);
+    }
+
+    #[test]
+    fn test_join_lines_without_space() {
+        let mut buf = Buffer::from_str("hello\nworld");
+        let cursor = buf.join_lines(0, 2, false);
+        assert_eq!(cursor, Some(Cursor::new(0, 10))); // "helloworld" has 10 chars
+        assert_eq!(buf.as_str(), "helloworld");
+        assert_eq!(buf.line_count(), 1);
+    }
+
+    #[test]
+    fn test_join_lines_multiple_with_space() {
+        let mut buf = Buffer::from_str("a\nb\nc\nd");
+        let cursor = buf.join_lines(0, 4, true);
+        assert_eq!(cursor, Some(Cursor::new(0, 7))); // "a b c d" has 7 chars
+        assert_eq!(buf.as_str(), "a b c d");
+        assert_eq!(buf.line_count(), 1);
+    }
+
+    #[test]
+    fn test_join_lines_multiple_without_space() {
+        let mut buf = Buffer::from_str("a\nb\nc\nd");
+        let cursor = buf.join_lines(0, 4, false);
+        assert_eq!(cursor, Some(Cursor::new(0, 4))); // "abcd" has 4 chars
+        assert_eq!(buf.as_str(), "abcd");
+        assert_eq!(buf.line_count(), 1);
+    }
+
+    #[test]
+    fn test_join_lines_on_last_line_returns_none() {
+        let mut buf = Buffer::from_str("hello\nworld");
+        let cursor = buf.join_lines(1, 2, true); // Try to join from last line
+        assert_eq!(cursor, None);
+        assert_eq!(buf.as_str(), "hello\nworld"); // Unchanged
+    }
+
+    #[test]
+    fn test_join_lines_insufficient_lines() {
+        let mut buf = Buffer::from_str("hello\nworld");
+        let cursor = buf.join_lines(0, 5, true); // Only 2 lines available
+        assert_eq!(cursor, Some(Cursor::new(0, 11))); // Still joins the 2 lines
+        assert_eq!(buf.as_str(), "hello world");
+    }
+
+    #[test]
+    fn test_join_lines_with_empty_line() {
+        let mut buf = Buffer::from_str("hello\n\nworld");
+        // Join all 3 lines (hello, empty, world) with space
+        let cursor = buf.join_lines(0, 3, true);
+        assert_eq!(cursor, Some(Cursor::new(0, 12))); // "hello  world" (2 spaces) has 12 chars
+        assert_eq!(buf.as_str(), "hello  world");
+    }
+
+    #[test]
+    fn test_join_lines_invalid_start_line() {
+        let mut buf = Buffer::from_str("hello\nworld");
+        let cursor = buf.join_lines(5, 2, true);
+        assert_eq!(cursor, None);
+    }
+
+    #[test]
+    fn test_join_lines_count_one_returns_none() {
+        let mut buf = Buffer::from_str("hello\nworld");
+        let cursor = buf.join_lines(0, 1, true); // line_count < 2
+        assert_eq!(cursor, None);
     }
 }

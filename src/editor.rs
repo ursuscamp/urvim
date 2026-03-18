@@ -51,6 +51,10 @@ pub enum Action {
     DeleteBackward,
     /// Delete character at cursor (delete key)
     DeleteForward,
+    /// Join current line with next line (with space)
+    JoinWithSpace,
+    /// Join current line with next line (without space)
+    JoinWithoutSpace,
     /// Append after cursor position and enter insert mode
     AppendAfterCursor,
     /// Append to end of line and enter insert mode
@@ -78,6 +82,8 @@ impl Action {
                 | Action::InsertChar(_)
                 | Action::DeleteBackward
                 | Action::DeleteForward
+                | Action::JoinWithSpace
+                | Action::JoinWithoutSpace
                 | Action::AppendAfterCursor
                 | Action::AppendToLineEnd
                 | Action::InsertAtLineStart
@@ -115,6 +121,8 @@ impl Action {
                 | Action::MoveToLastLine
                 | Action::MoveToScreenTop
                 | Action::MoveToScreenBottom
+                | Action::JoinWithSpace
+                | Action::JoinWithoutSpace
         )
     }
 
@@ -285,6 +293,13 @@ impl NormalMode {
         keymap.insert("H".to_string(), Action::MoveToScreenTop);
         keymap.insert("M".to_string(), Action::MoveToScreenMiddle);
         keymap.insert("L".to_string(), Action::MoveToScreenBottom);
+
+        // Join line motions
+        keymap.insert("J".to_string(), Action::JoinWithSpace);
+        keymap.insert_sequence(
+            vec!["g".to_string(), "J".to_string()],
+            Action::JoinWithoutSpace,
+        );
 
         // Mode switching
         keymap.insert("i".to_string(), Action::SwitchToInsert);
@@ -1135,5 +1150,52 @@ mod tests {
             result,
             HandleKeyResult::Complete(Action::Count(5, _))
         ));
+    }
+
+    #[test]
+    fn test_j_key_join_with_space() {
+        let mut mode = NormalMode::new();
+        assert_eq!(
+            handle_and_unwrap(&mut mode, &key('J')),
+            Action::JoinWithSpace
+        );
+    }
+
+    #[test]
+    fn test_gj_key_join_without_space() {
+        let mut mode = NormalMode::new();
+
+        // Press 'g' - should wait for more
+        let result = mode.handle_key(&key('g'));
+        assert!(matches!(result, HandleKeyResult::WaitForMore));
+
+        // Then press 'J' - should get JoinWithoutSpace
+        let result = mode.handle_key(&key('J'));
+        assert!(matches!(
+            result,
+            HandleKeyResult::Complete(Action::JoinWithoutSpace)
+        ));
+    }
+
+    #[test]
+    fn test_j_with_count() {
+        let mut mode = NormalMode::new();
+
+        // Press '5' - should wait for more
+        let result = mode.handle_key(&key('5'));
+        assert!(matches!(result, HandleKeyResult::WaitForMore));
+
+        // Then press 'J' - should get Count(5, JoinWithSpace)
+        let result = mode.handle_key(&key('J'));
+        assert!(matches!(
+            result,
+            HandleKeyResult::Complete(Action::Count(5, inner)) if *inner == Action::JoinWithSpace
+        ));
+    }
+
+    #[test]
+    fn test_action_join_is_countable() {
+        assert!(Action::JoinWithSpace.is_countable());
+        assert!(Action::JoinWithoutSpace.is_countable());
     }
 }

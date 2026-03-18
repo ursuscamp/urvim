@@ -647,6 +647,26 @@ impl Window {
         }
     }
 
+    /// Join current line with next line, inserting a space between them.
+    pub fn join_lines_with_space(&mut self) {
+        let cursor = self.buffer_view.cursor();
+        let buffer = self.buffer_view.buffer_mut();
+        // Join 2 lines (current and next) with space
+        if let Some(new_cursor) = buffer.join_lines(cursor.line, 2, true) {
+            self.buffer_view.set_cursor(new_cursor);
+        }
+    }
+
+    /// Join current line with next line without inserting a space.
+    pub fn join_lines_without_space(&mut self) {
+        let cursor = self.buffer_view.cursor();
+        let buffer = self.buffer_view.buffer_mut();
+        // Join 2 lines (current and next) without space
+        if let Some(new_cursor) = buffer.join_lines(cursor.line, 2, false) {
+            self.buffer_view.set_cursor(new_cursor);
+        }
+    }
+
     pub fn visual_cursor(&self) -> Option<Position> {
         // Get cursor position from render data
         if let Some(mut pos) = self
@@ -810,6 +830,14 @@ impl Widget for Window {
                 self.move_cursor_to_line_content_start();
                 ActionResult::Handled
             }
+            Action::JoinWithSpace => {
+                self.join_lines_with_space();
+                ActionResult::Handled
+            }
+            Action::JoinWithoutSpace => {
+                self.join_lines_without_space();
+                ActionResult::Handled
+            }
             Action::Count(count, inner) => {
                 // gg and G with count: go to specified line (count-1, clamped to file bounds)
                 // These motions don't need a secondary action
@@ -877,6 +905,24 @@ impl Widget for Window {
                         .set_cursor(Cursor::new(target_line, current_cursor.col));
                     // Then execute the line action
                     self.process_action(inner)
+                } else if matches!(
+                    inner.as_ref(),
+                    Action::JoinWithSpace | Action::JoinWithoutSpace
+                ) {
+                    // Special handling for join with count: join count+1 lines at once
+                    // e.g., 2J joins 3 lines (current + 2 more)
+                    let with_space = matches!(inner.as_ref(), Action::JoinWithSpace);
+                    let cursor = self.buffer_view.cursor();
+                    let actual_count = *count + 1;
+
+                    if let Some(new_cursor) =
+                        self.buffer_view
+                            .buffer
+                            .join_lines(cursor.line, actual_count, with_space)
+                    {
+                        self.buffer_view.set_cursor(new_cursor);
+                    }
+                    ActionResult::Handled
                 } else {
                     // Repeatable action: execute motion count times
                     for _ in 0..*count {
