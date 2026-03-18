@@ -5,6 +5,7 @@
 
 use crate::buffer::Boundary;
 use crate::terminal::{CursorStyle, Key, KeyCode};
+use std::collections::BTreeMap;
 
 /// Actions that the main event loop processes.
 #[derive(Debug, Clone, PartialEq)]
@@ -185,54 +186,263 @@ pub trait Keymap {
     fn is_prefix(&self, keys: &[String]) -> bool;
 }
 
-/// A simple keymap implementation using Vec.
-/// Supports both single-key and multi-key sequences.
-pub struct SimpleKeymap {
-    /// Vec of (key sequence, action) - linear search for now, can upgrade to trie later.
-    bindings: Vec<(Vec<String>, Action)>,
+/// Maximum count value to prevent overflow.
+const MAX_COUNT: usize = 9999;
+
+/// Extract leading count digits from a key sequence.
+/// Returns (leading_count, remaining_keys).
+/// For example: ["1", "0", "w", "d"] → (10, ["w", "d"])
+fn extract_leading_count(keys: &[String]) -> (usize, Vec<String>) {
+    let mut count_str = String::new();
+    let mut remaining = Vec::new();
+    let mut found_non_digit = false;
+
+    for key in keys {
+        let is_digit = key.len() == 1
+            && key
+                .chars()
+                .next()
+                .map(|c| c.is_ascii_digit())
+                .unwrap_or(false);
+
+        if !found_non_digit && is_digit {
+            count_str.push_str(key);
+        } else {
+            found_non_digit = true;
+            remaining.push(key.clone());
+        }
+    }
+
+    // Check if the count string forms a valid count
+    if count_str.is_empty() || !CountParser::is_valid_count(&count_str) {
+        return (0, keys.to_vec());
+    }
+
+    let count: usize = count_str.parse().unwrap_or(0);
+    (count, remaining)
 }
 
-impl SimpleKeymap {
+/// A node in the trie, representing a partial key sequence.
+struct TrieNode {
+    /// Child nodes keyed by the next key in the sequence.
+    /// Using BTreeMap for deterministic iteration order (useful for debugging).
+    children: std::collections::BTreeMap<String, TrieNode>,
+    /// Action associated with this complete key sequence (if any).
+    action: Option<Action>,
+}
+
+impl TrieNode {
+    fn new() -> Self {
+        Self {
+            children: BTreeMap::new(),
+            action: None,
+        }
+    }
+}
+
+/// Trie-based keymap for efficient key sequence matching.
+///
+/// Time complexity:
+/// - get_action: O(k) where k = key sequence length
+/// - is_prefix: O(k) where k = key sequence length
+pub struct TrieKeymap {
+    root: TrieNode,
+}
+
+impl TrieKeymap {
     /// Creates a new empty keymap.
     pub fn new() -> Self {
         Self {
-            bindings: Vec::new(),
+            root: TrieNode::new(),
         }
     }
 
     /// Inserts a single-key binding.
     pub fn insert(&mut self, key: String, action: Action) {
-        self.bindings.push((vec![key], action));
+        self.insert_sequence(vec![key], action);
     }
 
     /// Inserts a multi-key sequence binding.
     pub fn insert_sequence(&mut self, keys: Vec<String>, action: Action) {
-        self.bindings.push((keys, action));
+        let mut current = &mut self.root;
+        for key in &keys {
+            current = current
+                .children
+                .entry(key.clone())
+                .or_insert_with(TrieNode::new);
+        }
+        current.action = Some(action);
+    }
+
+    /// Get the action for a key sequence, if one exists.
+    pub fn get_action(&self, keys: &[String]) -> Option<Action> {
+        let mut current = &self.root;
+        for key in keys {
+            match current.children.get(key) {
+                Some(node) => current = node,
+                None => return None,
+            }
+        }
+        current.action.clone()
+    }
+
+    /// Check if the given key sequence could be a prefix of a longer binding.
+    pub fn is_prefix(&self, keys: &[String]) -> bool {
+        let mut current = &self.root;
+        for key in keys {
+            match current.children.get(key) {
+                Some(node) => current = node,
+                None => return false,
+            }
+        }
+        // Has children OR has an action (complete sequence is also a prefix of itself)
+        !current.children.is_empty() || current.action.is_some()
+    }
+
+    /// Check if the given key sequence has children (could be extended).
+    /// Returns true if there are possible extensions, false otherwise.
+    pub fn has_children(&self, keys: &[String]) -> bool {
+        let mut current = &self.root;
+        for key in keys {
+            match current.children.get(key) {
+                Some(node) => current = node,
+                None => return false,
+            }
+        }
+        !current.children.is_empty()
     }
 }
 
-impl Keymap for SimpleKeymap {
+impl Keymap for TrieKeymap {
     fn get_action(&self, keys: &[String]) -> Option<Action> {
-        // Linear search - acceptable for small number of bindings
-        self.bindings
-            .iter()
-            .find(|(binding_keys, _)| binding_keys == keys)
-            .map(|(_, action)| action.clone())
+        TrieKeymap::get_action(self, keys)
     }
 
     fn is_prefix(&self, keys: &[String]) -> bool {
-        // Check if any binding starts with the given keys
-        self.bindings
-            .iter()
-            .any(|(binding_keys, _)| binding_keys.starts_with(keys))
+        TrieKeymap::is_prefix(self, keys)
     }
 }
 
-impl Default for SimpleKeymap {
+impl Default for TrieKeymap {
     fn default() -> Self {
         Self::new()
     }
 }
+
+/// Parser that extracts action keys and multiplicative count from key sequences.
+pub struct CountParser;
+
+impl CountParser {
+    /// Check if a key string is a count digit (1-9).
+    /// Note: "0" is NOT a count digit when starting a count (it's MoveToLineStart).
+    /// But "0" CAN be part of a multi-digit count (e.g., "10", "100").
+    pub fn is_count_digit(s: &str) -> bool {
+        s.len() == 1
+            && s.chars()
+                .next()
+                .map(|c| ('1'..='9').contains(&c))
+                .unwrap_or(false)
+    }
+
+    /// Check if a string is a valid count that can start with 1-9 and contain any digits.
+    /// This is different from is_count_digit - it checks the entire string.
+    pub fn is_valid_count(s: &str) -> bool {
+        if s.is_empty() {
+            return false;
+        }
+        // Must start with 1-9 (non-zero)
+        let first_char = s.chars().next().unwrap();
+        if !('1'..='9').contains(&first_char) {
+            return false;
+        }
+        // All characters must be digits
+        s.chars().all(|c| c.is_ascii_digit())
+    }
+
+    /// Check if a string is a valid count digit that should be treated as part of a count.
+    /// This is different from is_count_digit because it includes "0" when it follows other digits.
+    /// This should only be called when we know we're building a count (i.e., after seeing a 1-9).
+    fn is_count_continuation(s: &str, is_accumulating_count: bool) -> bool {
+        // If we're already accumulating a count, allow 0-9
+        // If we're starting fresh, only allow 1-9
+        if is_accumulating_count {
+            Self::is_count_digit(s)
+        } else {
+            // Only 1-9 when starting fresh (can't have "0" as first digit)
+            s.len() == 1
+                && s.chars()
+                    .next()
+                    .map(|c| ('1'..='9').contains(&c))
+                    .unwrap_or(false)
+        }
+    }
+
+    /// Parse a key sequence to extract action keys and total count.
+    ///
+    /// Returns (action_keys, total_count) where:
+    /// - action_keys: The keys that form the actual keybinding (counts removed)
+    /// - total_count: The multiplicative product of all count components (always >= 1)
+    ///
+    /// Rules:
+    /// - Leading digits form a multi-digit count (e.g., "55" → 55)
+    /// - After each action key, a new sub-count starts (resets accumulator)
+    /// - Digits after an action form a new sub-count that multiplies with previous
+    /// - "0" alone is NOT a count (it's MoveToLineStart)
+    ///
+    /// Examples:
+    /// - ["5", "j"] → action_keys: ["j"], count: 5
+    /// - ["5", "5", "d", "d"] → action_keys: ["d", "d"], count: 55
+    /// - ["d", "5", "d"] → action_keys: ["d", "d"], count: 5
+    /// - ["d", "5", "5", "d"] → action_keys: ["d", "d"], count: 55
+    /// - ["2", "d", "2", "d"] → action_keys: ["d", "d"], count: 4 (2*2)
+    /// - ["5", "d", "5", "d", "5", "d"] → action_keys: ["d", "d", "d"], count: 125 (5*5*5)
+    /// - ["1", "2", "d", "3", "4", "d"] → action_keys: ["d", "d"], count: 408 (12*34)
+    /// - ["0"] → action_keys: ["0"], count: 1 (special case: 0 is motion)
+    pub fn parse(keys: &[String]) -> (Vec<String>, usize) {
+        let mut action_keys = Vec::new();
+        let mut total_count: usize = 1;
+        let mut current_count: usize = 0;
+        let mut has_seen_action = false;
+
+        for key in keys {
+            if Self::is_count_digit(key) {
+                // This is a count digit (1-9)
+                let digit: usize = key.parse().unwrap_or(0);
+
+                if has_seen_action {
+                    // After an action, digits form a NEW sub-count
+                    current_count = current_count * 10 + digit;
+                } else {
+                    // Before first action, accumulate multi-digit count
+                    current_count = current_count * 10 + digit;
+                }
+            } else {
+                // This is an action key
+                if current_count > 0 {
+                    total_count = total_count.saturating_mul(current_count);
+                    // Cap at MAX_COUNT to prevent overflow
+                    if total_count > MAX_COUNT {
+                        total_count = MAX_COUNT;
+                    }
+                    current_count = 0;
+                }
+                has_seen_action = true;
+                action_keys.push(key.clone());
+            }
+        }
+
+        // Multiply in any remaining count
+        if current_count > 0 {
+            total_count = total_count.saturating_mul(current_count);
+            if total_count > MAX_COUNT {
+                total_count = MAX_COUNT;
+            }
+        }
+
+        (action_keys, total_count)
+    }
+}
+
 pub trait Mode {
     /// Process a key event and return the corresponding result.
     fn handle_key(&mut self, key: &Key) -> HandleKeyResult;
@@ -249,15 +459,14 @@ pub trait Mode {
 
 /// Normal mode for vim-style navigation and commands.
 pub struct NormalMode {
-    keymap: SimpleKeymap,
+    keymap: TrieKeymap,
     buffer: Vec<String>,
     waiting: bool,
-    pending_count: Option<usize>,
 }
 
 impl NormalMode {
     pub fn new() -> Self {
-        let mut keymap = SimpleKeymap::new();
+        let mut keymap = TrieKeymap::new();
 
         // Movement keys (h, j, k, l)
         keymap.insert("h".to_string(), Action::MoveLeft);
@@ -324,48 +533,7 @@ impl NormalMode {
             keymap,
             buffer: Vec::new(),
             waiting: false,
-            pending_count: None,
         }
-    }
-
-    /// Check if a key string represents a digit that can be part of a count.
-    fn is_count_digit(s: &str) -> bool {
-        s.len() == 1
-            && s.chars()
-                .next()
-                .map(|c| c.is_ascii_digit())
-                .unwrap_or(false)
-    }
-
-    /// Check if a string is a valid count (at least one non-zero digit).
-    /// Pattern: [1-9][0-9]*
-    fn is_valid_count(s: &str) -> bool {
-        if s.is_empty() {
-            return false;
-        }
-        // Must start with 1-9 (non-zero)
-        let first_char = s.chars().next().unwrap();
-        if !('1'..='9').contains(&first_char) {
-            return false;
-        }
-        // All characters must be digits
-        s.chars().all(|c| c.is_ascii_digit())
-    }
-
-    /// Parse the current buffer as a count value.
-    fn count_from_buffer(&self) -> Option<usize> {
-        let combined: String = self.buffer.iter().cloned().collect();
-        if Self::is_valid_count(&combined) {
-            combined.parse().ok()
-        } else {
-            None
-        }
-    }
-}
-
-impl Default for NormalMode {
-    fn default() -> Self {
-        NormalMode::new()
     }
 }
 
@@ -375,121 +543,107 @@ impl Mode for NormalMode {
         if key.code == KeyCode::Esc {
             self.buffer.clear();
             self.waiting = false;
-            self.pending_count = None;
             return HandleKeyResult::InvalidSequence;
         }
 
         // Convert key to canonical string
         let key_str = key.canonical_string();
 
-        // Check if this is a digit that could start or continue a count
-        if Self::is_count_digit(&key_str) {
-            // Add digit to buffer
-            self.buffer.push(key_str.clone());
+        // Add key to buffer
+        self.buffer.push(key_str.clone());
 
-            // Check if buffer now forms a valid count
-            if Self::is_valid_count(&self.buffer.iter().cloned().collect::<String>()) {
-                // Valid count - wait for motion key
-                self.pending_count = self.count_from_buffer();
-                self.waiting = true;
-                return HandleKeyResult::WaitForMore;
-            } else if self.buffer.len() == 1 {
-                // Single digit "0" - not a valid count, but could be a motion key
-                // Clear buffer and fall through to normal key handling
-                self.buffer.clear();
-            } else {
-                // Invalid count (e.g., "05" starts with 0) - clear everything
-                self.buffer.clear();
-                self.waiting = false;
-                self.pending_count = None;
-                return HandleKeyResult::InvalidSequence;
-            }
-        }
+        // Check if buffer could be a valid count prefix (e.g., "1", "10", "100")
+        // If the buffer consists entirely of digits (including 0 in multi-digit numbers)
+        // and forms a valid count, wait for more
+        let buffer_str: String = self.buffer.iter().cloned().collect();
+        let all_digits = self.buffer.iter().all(|k| {
+            k.len() == 1
+                && k.chars()
+                    .next()
+                    .map(|c| c.is_ascii_digit())
+                    .unwrap_or(false)
+        });
 
-        // Not a digit - check if it's a motion key with a pending count
-        if let Some(count) = self.pending_count {
-            // Try to match just the current key as a motion
-            let key_str_ref = std::slice::from_ref(&key_str);
-            if let Some(action) = self.keymap.get_action(key_str_ref) {
-                // Got a motion - wrap it with the count
-                self.buffer.clear();
-                self.waiting = false;
-                self.pending_count = None;
-
-                // Wrap action with count if it's countable/line action
-                if let Some(counted_action) = action.clone().with_count(count) {
-                    return HandleKeyResult::Complete(counted_action);
-                } else {
-                    // Not a countable action - just execute it without count
-                    return HandleKeyResult::Complete(action);
-                }
-            }
-            // Not a valid single-key motion - add to buffer and check full sequence
-            self.buffer.push(key_str.clone());
-
-            // Check if the full buffer is an exact match
-            if let Some(action) = self.keymap.get_action(&self.buffer) {
-                self.buffer.clear();
-                self.waiting = false;
-                // Apply the count to the action
-                if let Some(counted_action) = action.clone().with_count(count) {
-                    self.pending_count = None;
-                    return HandleKeyResult::Complete(counted_action);
-                }
-                self.pending_count = None;
-                return HandleKeyResult::Complete(action);
-            }
-
-            // Check if the full buffer could be a prefix of a longer sequence
-            if self.keymap.is_prefix(&self.buffer) {
-                // Preserve count and wait for more keys
-                self.waiting = true;
-                return HandleKeyResult::WaitForMore;
-            }
-
-            // Not a valid sequence - check if the key ALONE could start a valid sequence
-            // If so, treat this as if we abandoned the count and started fresh with this key
-            let key_only = std::slice::from_ref(&key_str);
-            if self.keymap.is_prefix(key_only) {
-                // Start fresh - buffer contains just this key, waiting for more
-                self.buffer.clear();
-                self.buffer.push(key_str);
-                self.waiting = true;
-                return HandleKeyResult::WaitForMore;
-            }
-
-            // Not a valid sequence at all - clear and fall through
-            self.buffer.clear();
-            self.pending_count = None;
-        }
-
-        // Add to buffer for normal key sequence matching
-        self.buffer.push(key_str);
-
-        // Check for exact match (no count prefix)
-        if let Some(action) = self.keymap.get_action(&self.buffer) {
-            self.buffer.clear();
-            self.waiting = false;
-
-            // If there's a pending count, wrap the action with it
-            if let Some(count) = self.pending_count.take() {
-                if let Some(counted_action) = action.clone().with_count(count) {
-                    return HandleKeyResult::Complete(counted_action);
-                }
-            }
-            return HandleKeyResult::Complete(action);
-        }
-
-        // Check if we could be waiting for more keys
-        if self.keymap.is_prefix(&self.buffer) {
+        if all_digits && CountParser::is_valid_count(&buffer_str) {
+            // Could be a count prefix - wait for more keys
             self.waiting = true;
             return HandleKeyResult::WaitForMore;
         }
 
-        // No match - clear buffer and return invalid
+        // Not a valid count prefix - extract leading count digits, then use CountParser for the rest
+        // This handles cases like "10w" where "10" is the count and "w" is the action
+        let (leading_count, remaining_keys) = extract_leading_count(&self.buffer);
+
+        // If we have a leading count, check if remaining keys form a valid action sequence
+        if leading_count > 0 && !remaining_keys.is_empty() {
+            // Parse remaining keys for action and any additional counts
+            let (action_keys, sub_count) = CountParser::parse(&remaining_keys);
+
+            // Combine counts: leading_count * sub_count
+            let total_count = leading_count.saturating_mul(sub_count).min(MAX_COUNT);
+
+            // Try to find action
+            if let Some(action) = self.keymap.get_action(&action_keys) {
+                // Check if there could be a longer sequence
+                if self.keymap.has_children(&action_keys) {
+                    self.waiting = true;
+                    return HandleKeyResult::WaitForMore;
+                }
+
+                self.buffer.clear();
+                self.waiting = false;
+
+                // Only wrap with Count if count > 1 and action supports counting
+                if total_count > 1 {
+                    if let Some(counted_action) = action.clone().with_count(total_count) {
+                        return HandleKeyResult::Complete(counted_action);
+                    }
+                }
+                return HandleKeyResult::Complete(action);
+            }
+
+            // Check if it could be a prefix
+            if self.keymap.is_prefix(&action_keys) {
+                self.waiting = true;
+                return HandleKeyResult::WaitForMore;
+            }
+        }
+
+        // Fall back to simple parsing
+        let (action_keys, count) = CountParser::parse(&self.buffer);
+
+        // Check 1: Is there an exact match?
+        if let Some(action) = self.keymap.get_action(&action_keys) {
+            // Check if there could be a longer sequence (has children)
+            // If yes, wait for more keys. If no, complete the action.
+            if self.keymap.has_children(&action_keys) {
+                self.waiting = true;
+                return HandleKeyResult::WaitForMore;
+            }
+
+            // Exact match with no possible extension - complete the action
+            self.buffer.clear();
+            self.waiting = false;
+
+            // Only wrap with Count if count > 1 and action supports counting
+            if count > 1 {
+                if let Some(counted_action) = action.clone().with_count(count) {
+                    return HandleKeyResult::Complete(counted_action);
+                }
+            }
+            // Return action without wrapping (count is 1 or action doesn't support counting)
+            return HandleKeyResult::Complete(action);
+        }
+
+        // Check 2: Could action_keys be a prefix of a longer sequence?
+        if self.keymap.is_prefix(&action_keys) {
+            self.waiting = true;
+            return HandleKeyResult::WaitForMore;
+        }
+
+        // No match found - clear buffer and return invalid
         self.buffer.clear();
         self.waiting = false;
-        self.pending_count = None;
         HandleKeyResult::InvalidSequence
     }
 
@@ -504,20 +658,19 @@ impl Mode for NormalMode {
     fn clear_buffer(&mut self) {
         self.buffer.clear();
         self.waiting = false;
-        self.pending_count = None;
     }
 }
 
 /// Insert mode for text input.
 pub struct InsertMode {
-    keymap: SimpleKeymap,
+    keymap: TrieKeymap,
     buffer: Vec<String>,
     waiting: bool,
 }
 
 impl InsertMode {
     pub fn new() -> Self {
-        let mut keymap = SimpleKeymap::new();
+        let mut keymap = TrieKeymap::new();
 
         // Mode switching
         keymap.insert("<Esc>".to_string(), Action::SwitchToNormal);
@@ -878,19 +1031,19 @@ mod tests {
     #[test]
     fn test_is_valid_count() {
         // Valid counts (must start with 1-9)
-        assert!(NormalMode::is_valid_count("1"));
-        assert!(NormalMode::is_valid_count("5"));
-        assert!(NormalMode::is_valid_count("9"));
-        assert!(NormalMode::is_valid_count("10"));
-        assert!(NormalMode::is_valid_count("99"));
-        assert!(NormalMode::is_valid_count("100"));
-        assert!(NormalMode::is_valid_count("9999"));
+        assert!(CountParser::is_valid_count("1"));
+        assert!(CountParser::is_valid_count("5"));
+        assert!(CountParser::is_valid_count("9"));
+        assert!(CountParser::is_valid_count("10"));
+        assert!(CountParser::is_valid_count("99"));
+        assert!(CountParser::is_valid_count("100"));
+        assert!(CountParser::is_valid_count("9999"));
 
         // Invalid counts
-        assert!(!NormalMode::is_valid_count(""));
-        assert!(!NormalMode::is_valid_count("0")); // Starts with 0
-        assert!(!NormalMode::is_valid_count("05")); // Starts with 0
-        assert!(!NormalMode::is_valid_count("00")); // Starts with 0
+        assert!(!CountParser::is_valid_count(""));
+        assert!(!CountParser::is_valid_count("0")); // Starts with 0
+        assert!(!CountParser::is_valid_count("05")); // Starts with 0
+        assert!(!CountParser::is_valid_count("00")); // Starts with 0
     }
 
     #[test]
