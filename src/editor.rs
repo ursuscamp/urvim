@@ -37,6 +37,10 @@ pub enum Action {
     MoveToLineStart,
     /// Move cursor to first non-whitespace of line
     MoveToLineContentStart,
+    /// Move cursor to first line of file (or line N with count)
+    MoveToFirstLine,
+    /// Move cursor to last line of file (or line N with count)
+    MoveToLastLine,
     /// Delete character before cursor (backspace)
     DeleteBackward,
     /// Delete character at cursor (delete key)
@@ -68,12 +72,15 @@ impl Action {
     /// Returns true if this action is a vertical movement that should use
     /// and update the remembered visual column.
     pub fn uses_remembered_column(&self) -> bool {
-        matches!(self, Action::MoveUp | Action::MoveDown)
+        matches!(
+            self,
+            Action::MoveUp | Action::MoveDown | Action::MoveToFirstLine | Action::MoveToLastLine
+        )
     }
 
     /// Returns true if this action is a repeatable motion that can be executed
     /// multiple times with a count prefix. These actions repeat from current position.
-    /// Examples: h, j, k, l, w, b, e, W, B, E
+    /// Examples: h, j, k, l, w, b, e, W, B, E, gg, G
     pub fn is_countable(&self) -> bool {
         matches!(
             self,
@@ -83,16 +90,22 @@ impl Action {
                 | Action::MoveDown
                 | Action::ForwardTo(_)
                 | Action::BackTo(_)
+                | Action::MoveToFirstLine
+                | Action::MoveToLastLine
         )
     }
 
     /// Returns true if this action is a line action that takes an absolute line count.
     /// The count specifies the target line number (1-indexed), then performs the action.
-    /// Examples: $, 0, ^
+    /// Examples: $, 0, ^, gg, G
     pub fn is_line_action(&self) -> bool {
         matches!(
             self,
-            Action::MoveToLineEnd | Action::MoveToLineStart | Action::MoveToLineContentStart
+            Action::MoveToLineEnd
+                | Action::MoveToLineStart
+                | Action::MoveToLineContentStart
+                | Action::MoveToFirstLine
+                | Action::MoveToLastLine
         )
     }
 
@@ -126,39 +139,46 @@ pub trait Keymap {
     fn is_prefix(&self, keys: &[String]) -> bool;
 }
 
-/// A simple single-key keymap implementation using HashMap.
+/// A simple keymap implementation using Vec.
+/// Supports both single-key and multi-key sequences.
 pub struct SimpleKeymap {
-    bindings: std::collections::HashMap<String, Action>,
+    /// Vec of (key sequence, action) - linear search for now, can upgrade to trie later.
+    bindings: Vec<(Vec<String>, Action)>,
 }
 
 impl SimpleKeymap {
     /// Creates a new empty keymap.
     pub fn new() -> Self {
         Self {
-            bindings: std::collections::HashMap::new(),
+            bindings: Vec::new(),
         }
     }
 
-    /// Inserts a key-action binding.
+    /// Inserts a single-key binding.
     pub fn insert(&mut self, key: String, action: Action) {
-        self.bindings.insert(key, action);
+        self.bindings.push((vec![key], action));
+    }
+
+    /// Inserts a multi-key sequence binding.
+    pub fn insert_sequence(&mut self, keys: Vec<String>, action: Action) {
+        self.bindings.push((keys, action));
     }
 }
 
 impl Keymap for SimpleKeymap {
     fn get_action(&self, keys: &[String]) -> Option<Action> {
-        // For now, only support single-key lookups
-        if keys.len() == 1 {
-            self.bindings.get(&keys[0]).cloned()
-        } else {
-            None
-        }
+        // Linear search - acceptable for small number of bindings
+        self.bindings
+            .iter()
+            .find(|(binding_keys, _)| binding_keys == keys)
+            .map(|(_, action)| action.clone())
     }
 
-    fn is_prefix(&self, _keys: &[String]) -> bool {
-        // For single-key maps, no sequence is a prefix of another
-        // This will change when multi-key bindings are added
-        false
+    fn is_prefix(&self, keys: &[String]) -> bool {
+        // Check if any binding starts with the given keys
+        self.bindings
+            .iter()
+            .any(|(binding_keys, _)| binding_keys.starts_with(keys))
     }
 }
 
@@ -215,6 +235,13 @@ impl NormalMode {
         // Line start navigation
         keymap.insert("0".to_string(), Action::MoveToLineStart);
         keymap.insert("^".to_string(), Action::MoveToLineContentStart);
+
+        // gg and G line motions
+        keymap.insert_sequence(
+            vec!["g".to_string(), "g".to_string()],
+            Action::MoveToFirstLine,
+        );
+        keymap.insert("G".to_string(), Action::MoveToLastLine);
 
         // Mode switching
         keymap.insert("i".to_string(), Action::SwitchToInsert);
@@ -336,7 +363,42 @@ impl Mode for NormalMode {
                     return HandleKeyResult::Complete(action);
                 }
             }
-            // Not a valid motion with count - clear and fall through to check as regular key
+            // Not a valid single-key motion - add to buffer and check full sequence
+            self.buffer.push(key_str.clone());
+
+            // Check if the full buffer is an exact match
+            if let Some(action) = self.keymap.get_action(&self.buffer) {
+                self.buffer.clear();
+                self.waiting = false;
+                // Apply the count to the action
+                if let Some(counted_action) = action.clone().with_count(count) {
+                    self.pending_count = None;
+                    return HandleKeyResult::Complete(counted_action);
+                }
+                self.pending_count = None;
+                return HandleKeyResult::Complete(action);
+            }
+
+            // Check if the full buffer could be a prefix of a longer sequence
+            if self.keymap.is_prefix(&self.buffer) {
+                // Preserve count and wait for more keys
+                self.waiting = true;
+                return HandleKeyResult::WaitForMore;
+            }
+
+            // Not a valid sequence - check if the key ALONE could start a valid sequence
+            // If so, treat this as if we abandoned the count and started fresh with this key
+            let key_only = std::slice::from_ref(&key_str);
+            if self.keymap.is_prefix(key_only) {
+                // Start fresh - buffer contains just this key, waiting for more
+                self.buffer.clear();
+                self.buffer.push(key_str);
+                self.waiting = true;
+                return HandleKeyResult::WaitForMore;
+            }
+
+            // Not a valid sequence at all - clear and fall through
+            self.buffer.clear();
             self.pending_count = None;
         }
 
@@ -347,6 +409,13 @@ impl Mode for NormalMode {
         if let Some(action) = self.keymap.get_action(&self.buffer) {
             self.buffer.clear();
             self.waiting = false;
+
+            // If there's a pending count, wrap the action with it
+            if let Some(count) = self.pending_count.take() {
+                if let Some(counted_action) = action.clone().with_count(count) {
+                    return HandleKeyResult::Complete(counted_action);
+                }
+            }
             return HandleKeyResult::Complete(action);
         }
 
@@ -808,6 +877,17 @@ mod tests {
         // Test invalid counts return None
         let action = Action::MoveDown.clone().with_count(0);
         assert!(action.is_none());
+
+        // Test MoveToFirstLine with count
+        let action = Action::MoveToFirstLine.clone().with_count(5);
+        assert!(action.is_some());
+        match action {
+            Some(Action::Count(count, inner)) => {
+                assert_eq!(count, 5);
+                assert_eq!(*inner, Action::MoveToFirstLine);
+            }
+            _ => panic!("Expected Count variant"),
+        }
     }
 
     #[test]
@@ -875,6 +955,68 @@ mod tests {
         assert!(matches!(
             result,
             HandleKeyResult::Complete(Action::MoveToLineStart)
+        ));
+    }
+
+    #[test]
+    fn test_gg_motion() {
+        let mut mode = NormalMode::new();
+
+        // Press 'g' twice - should get MoveToFirstLine
+        let result = mode.handle_key(&key('g'));
+        assert!(matches!(result, HandleKeyResult::WaitForMore));
+
+        let result = mode.handle_key(&key('g'));
+        assert!(matches!(
+            result,
+            HandleKeyResult::Complete(Action::MoveToFirstLine)
+        ));
+    }
+
+    #[test]
+    fn test_g_motion() {
+        let mut mode = NormalMode::new();
+
+        // Press 'G' - should get MoveToLastLine
+        let result = mode.handle_key(&key('G'));
+        assert!(matches!(
+            result,
+            HandleKeyResult::Complete(Action::MoveToLastLine)
+        ));
+    }
+
+    #[test]
+    fn test_gg_with_count() {
+        let mut mode = NormalMode::new();
+
+        // Press '5' - should wait for more
+        let result = mode.handle_key(&key('5'));
+        assert!(matches!(result, HandleKeyResult::WaitForMore));
+
+        // Then press 'g' twice - should get Count(5, MoveToFirstLine)
+        let result = mode.handle_key(&key('g'));
+        assert!(matches!(result, HandleKeyResult::WaitForMore));
+
+        let result = mode.handle_key(&key('g'));
+        assert!(matches!(
+            result,
+            HandleKeyResult::Complete(Action::Count(5, _))
+        ));
+    }
+
+    #[test]
+    fn test_g_with_count() {
+        let mut mode = NormalMode::new();
+
+        // Press '5' - should wait for more
+        let result = mode.handle_key(&key('5'));
+        assert!(matches!(result, HandleKeyResult::WaitForMore));
+
+        // Then press 'G' - should get Count(5, MoveToLastLine)
+        let result = mode.handle_key(&key('G'));
+        assert!(matches!(
+            result,
+            HandleKeyResult::Complete(Action::Count(5, _))
         ));
     }
 }

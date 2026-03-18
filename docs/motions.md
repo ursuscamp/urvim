@@ -139,6 +139,36 @@ Example: At first non-whitespace of line 1:
 - Vim: `^` -> stays at current position
 - urvim: `^` -> wraps to previous line's first non-whitespace
 
+### gg - Go to First Line
+
+Moves the cursor to the first line of the file.
+
+- **Count**: Yes - as a line action, goes to line `count` (1-indexed)
+- **Vim difference**: Same behavior as Vim
+
+Examples:
+- `gg` -> goes to line 1
+- `5gg` -> goes to line 5
+
+### G - Go to Line
+
+Moves the cursor to the last line of the file, or to the specified line with a count prefix.
+
+- **Count**: Yes - as a line action, goes to line `count` (1-indexed)
+- **Vim difference**: Same behavior as Vim
+
+Examples:
+- `G` -> goes to last line
+- `5G` -> goes to line 5
+
+### Column Preservation
+
+Both `gg` and `G` behave like vertical motions (`j`/`k`) for the purposes of column preservation:
+- They use the remembered column when moving (like j/k)
+- They update the remembered column after moving (so subsequent j/k movements use this column)
+
+This matches Vim's behavior where gg/G set the jump cursor and affect the remembered column.
+
 ## Operator Motion Differences Summary
 
 | Motion | urvim Behavior | Vim Behavior |
@@ -148,3 +178,5 @@ Example: At first non-whitespace of line 1:
 | $      | Wraps to next line when at EOL | Stays at EOL |
 | 0      | Wraps to previous line at column 0 | Stays at column 0 |
 | ^      | Wraps to previous line when at first non-ws | Stays at current position |
+| gg     | Goes to line 1 (or line N with count) | Same |
+| G      | Goes to last line (or line N with count) | Same |

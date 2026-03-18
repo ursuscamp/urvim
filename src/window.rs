@@ -715,6 +715,24 @@ impl Widget for Window {
                 self.move_cursor_to_line_content_start();
                 ActionResult::Handled
             }
+            Action::MoveToFirstLine => {
+                // Go to first line (or specified line with count - handled in Count branch)
+                let target_col = self.buffer_view.get_or_compute_target_col();
+                self.buffer_view.set_cursor(Cursor::new(0, target_col));
+                // Update remembered column like vertical motions do
+                self.buffer_view.set_remembered_visual_col(target_col);
+                ActionResult::Handled
+            }
+            Action::MoveToLastLine => {
+                // Go to last line (or specified line with count - handled in Count branch)
+                let target_line = self.buffer_view.buffer.line_count().saturating_sub(1);
+                let target_col = self.buffer_view.get_or_compute_target_col();
+                self.buffer_view
+                    .set_cursor(Cursor::new(target_line, target_col));
+                // Update remembered column like vertical motions do
+                self.buffer_view.set_remembered_visual_col(target_col);
+                ActionResult::Handled
+            }
             Action::DeleteBackward => {
                 self.delete_char_before_cursor();
                 ActionResult::Handled
@@ -724,8 +742,25 @@ impl Widget for Window {
                 ActionResult::Handled
             }
             Action::Count(count, inner) => {
-                if inner.is_line_action() {
-                    // Line action: go to target absolute line, then perform action
+                // gg and G with count: go to specified line (count-1, clamped to file bounds)
+                // These motions don't need a secondary action
+                if matches!(
+                    inner.as_ref(),
+                    Action::MoveToFirstLine | Action::MoveToLastLine
+                ) {
+                    let line_count = self.buffer_view.buffer.line_count();
+                    if line_count == 0 {
+                        return ActionResult::Handled;
+                    }
+                    let target_line = (*count - 1).min(line_count - 1);
+                    let target_col = self.buffer_view.get_or_compute_target_col();
+                    self.buffer_view
+                        .set_cursor(Cursor::new(target_line, target_col));
+                    // Update remembered column like vertical motions do
+                    self.buffer_view.set_remembered_visual_col(target_col);
+                    ActionResult::Handled
+                } else if inner.is_line_action() {
+                    // Other line action: go to target absolute line, then perform action
                     // Lines are 0-indexed internally, count is 1-indexed
                     let target_line = (*count as isize - 1).max(0) as usize;
                     let current_cursor = self.buffer_view.cursor();
