@@ -2,6 +2,34 @@
 
 This document describes the motions implemented in urvim and how they differ from Vim behavior.
 
+## Supported Motions Cheat Sheet
+
+| Motion | Description |
+|--------|-------------|
+| `h` | Move left |
+| `j` | Move down |
+| `k` | Move up |
+| `l` | Move right |
+| `w` | Word forward |
+| `b` | Word backward |
+| `e` | Word end |
+| `W` | BigWord forward |
+| `B` | BigWord backward |
+| `E` | BigWord end |
+| `0` | Line start (column 0) |
+| `^` | Line content start (first non-whitespace) |
+| `$` | Line end (last non-whitespace) |
+| `gg` | Go to first line (or line N with count) |
+| `G` | Go to last line (or line N with count) |
+| `H` | Move to top of viewport |
+| `M` | Move to middle of viewport |
+| `L` | Move to bottom of viewport |
+| `a` | Append after cursor (enter insert mode) |
+| `A` | Append to line end (enter insert mode) |
+| `I` | Insert at line start (enter insert mode) |
+| `J` | Join lines with space |
+| `gJ` | Join lines without space |
+
 ## Count Support
 
 urvim supports count prefixes for most motions. There are two types of count behaviors:
