@@ -15,3 +15,4 @@ urvim is a terminal based text editor.
 - prefer calling trait methods like `value.trait_method()` rather than `TraitType::method(value)`
 - struct methods should be ordered: constructor/new, static methods, getters, setters, public methods, private methods
 - when adding/update vim motions, update docs/motions.md
+- don't deprecate methods, remove them
