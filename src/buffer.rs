@@ -748,6 +748,80 @@ impl Buffer {
         Some(Cursor::new(start_line, joined_len))
     }
 
+    /// Delete multiple lines starting from the specified line.
+    ///
+    /// Deletes `count` lines starting from `start_line`. The newline characters
+    /// between deleted lines are also removed.
+    ///
+    /// # Arguments
+    ///
+    /// * `start_line` - The line index to start deleting from (0-indexed)
+    /// * `count` - Number of lines to delete
+    ///
+    /// Returns the cursor position at the start of the next line (or previous line
+    /// if deleting the last line), or None if the operation cannot be performed.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use urvim::buffer::{Buffer, Cursor};
+    ///
+    /// let mut buf = Buffer::from_str("line1\nline2\nline3");
+    /// let cursor = buf.delete_lines(0, 1);
+    /// assert_eq!(cursor, Some(Cursor::new(0, 0))); // Now at "line2"
+    /// assert_eq!(buf.as_str(), "line2\nline3");
+    /// ```
+    pub fn delete_lines(&mut self, start_line: usize, count: usize) -> Option<Cursor> {
+        let total_lines = self.lines.len();
+        
+        // Handle empty buffer
+        if total_lines == 0 {
+            return Some(Cursor::new(0, 0));
+        }
+        
+        // Validate start_line
+        if start_line >= total_lines {
+            return None;
+        }
+        
+        // Clamp count to available lines
+        let actual_count = (total_lines - start_line).min(count);
+        if actual_count == 0 {
+            return Some(Cursor::new(start_line, 0));
+        }
+        
+        // Calculate end position (line after the last deleted line)
+        let end_line = start_line + actual_count;
+        
+        if end_line >= total_lines {
+            // Deleting to end of file
+            // Keep lines before start_line
+            let mut left = self.lines.take(start_line);
+            if left.is_empty() {
+                // Was at or past all lines, add empty line
+                left.push_back(Arc::from(""));
+            }
+            self.lines = left;
+        } else {
+            // Deleting in middle of file
+            // Keep lines before start_line and lines after end_line
+            let mut left = self.lines.take(start_line);
+            let right = self.lines.skip(end_line);
+            left.append(right);
+            self.lines = left;
+        }
+        
+        // Return new cursor position
+        let new_line_count = self.lines.len();
+        if new_line_count == 0 {
+            Some(Cursor::new(0, 0))
+        } else if start_line >= new_line_count {
+            Some(Cursor::new(new_line_count - 1, 0))
+        } else {
+            Some(Cursor::new(start_line, 0))
+        }
+    }
+
     /// Checks if a cursor position is valid.
     ///
     /// # Arguments
@@ -3347,5 +3421,75 @@ mod tests {
         let mut buf = Buffer::from_str("hello\nworld");
         let cursor = buf.join_lines(0, 1, true); // line_count < 2
         assert_eq!(cursor, None);
+    }
+
+    #[test]
+    fn test_delete_lines_single_line() {
+        let mut buf = Buffer::from_str("line1\nline2\nline3");
+        let cursor = buf.delete_lines(0, 1);
+        assert_eq!(cursor, Some(Cursor::new(0, 0)));
+        assert_eq!(buf.line_count(), 2);
+        assert_eq!(buf.as_str(), "line2\nline3");
+    }
+
+    #[test]
+    fn test_delete_lines_multiple_lines() {
+        let mut buf = Buffer::from_str("line1\nline2\nline3\nline4");
+        let cursor = buf.delete_lines(0, 2);
+        assert_eq!(cursor, Some(Cursor::new(0, 0)));
+        assert_eq!(buf.line_count(), 2);
+        assert_eq!(buf.as_str(), "line3\nline4");
+    }
+
+    #[test]
+    fn test_delete_lines_from_middle() {
+        let mut buf = Buffer::from_str("line1\nline2\nline3\nline4\nline5");
+        let cursor = buf.delete_lines(1, 2);
+        assert_eq!(cursor, Some(Cursor::new(1, 0)));
+        assert_eq!(buf.line_count(), 3);
+        assert_eq!(buf.as_str(), "line1\nline4\nline5");
+    }
+
+    #[test]
+    fn test_delete_lines_from_last_line() {
+        let mut buf = Buffer::from_str("line1\nline2\nline3");
+        let cursor = buf.delete_lines(2, 1);
+        assert_eq!(cursor, Some(Cursor::new(1, 0)));
+        assert_eq!(buf.line_count(), 2);
+        assert_eq!(buf.as_str(), "line1\nline2");
+    }
+
+    #[test]
+    fn test_delete_lines_only_line() {
+        let mut buf = Buffer::from_str("only line");
+        let cursor = buf.delete_lines(0, 1);
+        assert_eq!(cursor, Some(Cursor::new(0, 0)));
+        assert_eq!(buf.line_count(), 1);
+        assert_eq!(buf.as_str(), "");
+    }
+
+    #[test]
+    fn test_delete_lines_count_exceeds_available() {
+        let mut buf = Buffer::from_str("line1\nline2\nline3");
+        let cursor = buf.delete_lines(1, 10); // Only 2 lines from index 1
+        assert_eq!(cursor, Some(Cursor::new(0, 0))); // Only line1 remains, at index 0
+        assert_eq!(buf.line_count(), 1);
+        assert_eq!(buf.as_str(), "line1");
+    }
+
+    #[test]
+    fn test_delete_lines_invalid_start_line() {
+        let mut buf = Buffer::from_str("line1\nline2");
+        let cursor = buf.delete_lines(5, 1);
+        assert_eq!(cursor, None);
+    }
+
+    #[test]
+    fn test_delete_lines_empty_buffer() {
+        let mut buf = Buffer::new();
+        let cursor = buf.delete_lines(0, 1);
+        assert_eq!(cursor, Some(Cursor::new(0, 0)));
+        assert_eq!(buf.line_count(), 1);
+        assert_eq!(buf.as_str(), "");
     }
 }

@@ -29,12 +29,13 @@ This document describes the motions implemented in urvim and how they differ fro
 | `I` | Insert at line start (enter insert mode) |
 | `J` | Join lines with space |
 | `gJ` | Join lines without space |
+| `dd` | Delete line (or N lines with count) |
 
 ## Count Support
 
 urvim supports count prefixes for most motions. There are two types of count behaviors:
 
-1. **Repeatable motions** (h, j, k, l, w, b, e, W, B, E): The motion is executed `count` times from the current position.
+1. **Repeatable motions** (h, j, k, l, w, b, e, W, B, E, dd): The motion is executed `count` times from the current position.
 
 2. **Line actions** (0, $, ^): The count specifies an absolute 1-indexed line number to jump to, then performs the action on that line.
 
@@ -302,6 +303,29 @@ Examples:
 
 - Joining from the last line: No operation (nothing to join with)
 - Joining when there are fewer lines than count: Joins all available lines
+
+## Delete Line Operations
+
+These operations delete entire lines from the buffer.
+
+### dd - Delete Line
+
+Deletes the current line (or N lines starting from the cursor position).
+
+- **Count**: Yes - deletes `count` lines starting from the current line
+- **Cursor position**: After deletion, the cursor moves to the start of the next line (or the previous line if the deleted line was the last)
+- **Vim difference**: Same behavior as Vim
+
+Examples:
+- `dd` on line 2 in "a\nb\nc" -> "a\nc" (cursor at line 2, now "c")
+- `2dd` on line 1 in "a\nb\nc\nd" -> "c\nd" (deletes lines 1 and 2)
+- `dd` on last line "a\nb" -> "a" (cursor at line 1, now "a")
+
+### Edge Cases
+
+- Deleting from the last line: Cursor moves to the previous line
+- Deleting when there is only one line: Buffer becomes empty (one empty line remains)
+- Count exceeds available lines: Deletes all available lines from the starting position
 
 ## Operator Motion Differences Summary
 

@@ -838,6 +838,13 @@ impl Widget for Window {
                 self.join_lines_without_space();
                 ActionResult::Handled
             }
+            Action::DeleteLine => {
+                let cursor = self.buffer_view.cursor();
+                if let Some(new_cursor) = self.buffer_view.buffer.delete_lines(cursor.line, 1) {
+                    self.buffer_view.set_cursor(new_cursor);
+                }
+                ActionResult::Handled
+            }
             Action::Count(count, inner) => {
                 // gg and G with count: go to specified line (count-1, clamped to file bounds)
                 // These motions don't need a secondary action
@@ -919,6 +926,16 @@ impl Widget for Window {
                         self.buffer_view
                             .buffer
                             .join_lines(cursor.line, actual_count, with_space)
+                    {
+                        self.buffer_view.set_cursor(new_cursor);
+                    }
+                    ActionResult::Handled
+                } else if matches!(inner.as_ref(), Action::DeleteLine) {
+                    // dd with count: delete N lines starting from cursor
+                    // e.g., 2dd deletes 2 lines
+                    let cursor = self.buffer_view.cursor();
+                    if let Some(new_cursor) =
+                        self.buffer_view.buffer.delete_lines(cursor.line, *count)
                     {
                         self.buffer_view.set_cursor(new_cursor);
                     }

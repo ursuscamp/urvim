@@ -56,6 +56,8 @@ pub enum Action {
     JoinWithSpace,
     /// Join current line with next line (without space)
     JoinWithoutSpace,
+    /// Delete current line (or N lines with count prefix)
+    DeleteLine,
     /// Append after cursor position and enter insert mode
     AppendAfterCursor,
     /// Append to end of line and enter insert mode
@@ -83,6 +85,7 @@ impl Action {
                 | Action::InsertChar(_)
                 | Action::DeleteBackward
                 | Action::DeleteForward
+                | Action::DeleteLine
                 | Action::JoinWithSpace
                 | Action::JoinWithoutSpace
                 | Action::AppendAfterCursor
@@ -124,6 +127,7 @@ impl Action {
                 | Action::MoveToScreenBottom
                 | Action::JoinWithSpace
                 | Action::JoinWithoutSpace
+                | Action::DeleteLine
         )
     }
 
@@ -525,6 +529,10 @@ impl NormalMode {
         // Delete operations
         keymap.insert("x".to_string(), Action::DeleteForward);
         keymap.insert("X".to_string(), Action::DeleteBackward);
+        keymap.insert_sequence(
+            vec!["d".to_string(), "d".to_string()],
+            Action::DeleteLine,
+        );
 
         // Quit (Ctrl-q)
         keymap.insert("<C-q>".to_string(), Action::Quit);
@@ -1334,6 +1342,42 @@ mod tests {
     }
 
     #[test]
+    fn test_dd_key_delete_line() {
+        let mut mode = NormalMode::new();
+
+        // Press 'd' - should wait for more
+        let result = mode.handle_key(&key('d'));
+        assert!(matches!(result, HandleKeyResult::WaitForMore));
+
+        // Then press 'd' - should get DeleteLine
+        let result = mode.handle_key(&key('d'));
+        assert!(matches!(
+            result,
+            HandleKeyResult::Complete(Action::DeleteLine)
+        ));
+    }
+
+    #[test]
+    fn test_nd_with_count() {
+        let mut mode = NormalMode::new();
+
+        // Press '5' - should wait for more
+        let result = mode.handle_key(&key('5'));
+        assert!(matches!(result, HandleKeyResult::WaitForMore));
+
+        // Then press 'd' - should wait for more
+        let result = mode.handle_key(&key('d'));
+        assert!(matches!(result, HandleKeyResult::WaitForMore));
+
+        // Then press 'd' - should get Count(5, DeleteLine)
+        let result = mode.handle_key(&key('d'));
+        assert!(matches!(
+            result,
+            HandleKeyResult::Complete(Action::Count(5, inner)) if *inner == Action::DeleteLine
+        ));
+    }
+
+    #[test]
     fn test_j_with_count() {
         let mut mode = NormalMode::new();
 
@@ -1353,5 +1397,15 @@ mod tests {
     fn test_action_join_is_countable() {
         assert!(Action::JoinWithSpace.is_countable());
         assert!(Action::JoinWithoutSpace.is_countable());
+    }
+
+    #[test]
+    fn test_action_delete_line_is_countable() {
+        assert!(Action::DeleteLine.is_countable());
+    }
+
+    #[test]
+    fn test_action_delete_line_resets_remembered_column() {
+        assert!(Action::DeleteLine.resets_remembered_column());
     }
 }
