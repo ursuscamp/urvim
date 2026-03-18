@@ -861,7 +861,7 @@ impl Widget for Window {
                     }
                     let end_line = (start_line + viewport_rows - 1).min(line_count - 1);
                     let offset = count.saturating_sub(1);
-                    let target_line = (end_line - offset).max(start_line);
+                    let target_line = end_line.saturating_sub(offset).max(start_line);
                     let target_col = self.buffer_view.get_or_compute_target_col();
                     self.buffer_view
                         .set_cursor(Cursor::new(target_line, target_col));
