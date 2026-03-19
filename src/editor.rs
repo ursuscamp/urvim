@@ -66,6 +66,10 @@ pub enum Action {
     AppendToLineEnd,
     /// Insert at first non-whitespace of line and enter insert mode
     InsertAtLineStart,
+    /// Open a new line below current line and enter insert mode
+    OpenLineBelow,
+    /// Open a new line above current line and enter insert mode
+    OpenLineAbove,
     /// Count prefix: repeats the inner action the specified number of times,
     /// or goes to the target absolute line number for line actions.
     Count(usize, Box<Action>),
@@ -94,6 +98,8 @@ impl Action {
                 | Action::AppendAfterCursor
                 | Action::AppendToLineEnd
                 | Action::InsertAtLineStart
+                | Action::OpenLineBelow
+                | Action::OpenLineAbove
         )
     }
 
@@ -132,6 +138,8 @@ impl Action {
                 | Action::JoinWithoutSpace
                 | Action::DeleteLine
                 | Action::ChangeLine
+                | Action::OpenLineBelow
+                | Action::OpenLineAbove
         )
     }
 
@@ -168,7 +176,9 @@ impl Action {
             | Action::AppendAfterCursor
             | Action::AppendToLineEnd
             | Action::InsertAtLineStart
-            | Action::ChangeLine => true,
+            | Action::ChangeLine
+            | Action::OpenLineBelow
+            | Action::OpenLineAbove => true,
             Action::Count(_, inner) => inner.switches_to_insert_mode(),
             _ => false,
         }
@@ -530,6 +540,10 @@ impl NormalMode {
         keymap.insert("a".to_string(), Action::AppendAfterCursor);
         keymap.insert("A".to_string(), Action::AppendToLineEnd);
         keymap.insert("I".to_string(), Action::InsertAtLineStart);
+
+        // Open line below/above
+        keymap.insert("o".to_string(), Action::OpenLineBelow);
+        keymap.insert("O".to_string(), Action::OpenLineAbove);
 
         // Delete operations
         keymap.insert("x".to_string(), Action::DeleteForward);
@@ -1443,5 +1457,72 @@ mod tests {
         } else {
             panic!("Expected Count action");
         }
+    }
+
+    #[test]
+    fn test_o_key_opens_line_below() {
+        let mut mode = NormalMode::new();
+        let result = mode.handle_key(&key('o'));
+        assert!(matches!(
+            result,
+            HandleKeyResult::Complete(Action::OpenLineBelow)
+        ));
+    }
+
+    #[test]
+    fn test_o_key_is_countable() {
+        assert!(Action::OpenLineBelow.is_countable());
+    }
+
+    #[test]
+    fn test_o_with_count() {
+        let mut mode = NormalMode::new();
+
+        // Press '3' - should wait for more
+        let result = mode.handle_key(&key('3'));
+        assert!(matches!(result, HandleKeyResult::WaitForMore));
+
+        // Then press 'o' - should get Count(3, OpenLineBelow)
+        let result = mode.handle_key(&key('o'));
+        assert!(matches!(
+            result,
+            HandleKeyResult::Complete(Action::Count(3, inner)) if *inner == Action::OpenLineBelow
+        ));
+    }
+
+    #[test]
+    fn test_O_key_opens_line_above() {
+        let mut mode = NormalMode::new();
+        let result = mode.handle_key(&key('O'));
+        assert!(matches!(
+            result,
+            HandleKeyResult::Complete(Action::OpenLineAbove)
+        ));
+    }
+
+    #[test]
+    fn test_O_key_is_countable() {
+        // O supports count prefix (e.g., 3O creates 3 lines above)
+        assert!(Action::OpenLineAbove.is_countable());
+    }
+
+    #[test]
+    fn test_action_open_line_below_resets_remembered_column() {
+        assert!(Action::OpenLineBelow.resets_remembered_column());
+    }
+
+    #[test]
+    fn test_action_open_line_above_resets_remembered_column() {
+        assert!(Action::OpenLineAbove.resets_remembered_column());
+    }
+
+    #[test]
+    fn test_action_open_line_below_switches_to_insert_mode() {
+        assert!(Action::OpenLineBelow.switches_to_insert_mode());
+    }
+
+    #[test]
+    fn test_action_open_line_above_switches_to_insert_mode() {
+        assert!(Action::OpenLineAbove.switches_to_insert_mode());
     }
 }

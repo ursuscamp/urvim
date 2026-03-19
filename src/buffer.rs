@@ -884,6 +884,66 @@ impl Buffer {
         Some(Cursor::new(start_line, 0))
     }
 
+    /// Inserts `count` empty lines AFTER the given line index.
+    /// Returns the cursor position at the start of the first inserted line.
+    ///
+    /// # Arguments
+    ///
+    /// * `line` - The line index to insert after (0-indexed)
+    /// * `count` - The number of empty lines to insert
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use urvim::buffer::{Buffer, Cursor};
+    ///
+    /// let mut buf = Buffer::from_str("line1\nline2\nline3");
+    /// let cursor = buf.insert_lines_after(0, 1);  // Insert after line 1
+    /// assert_eq!(cursor, Some(Cursor::new(1, 0))); // At new line 2
+    /// assert_eq!(buf.as_str(), "line1\n\nline2\nline3");
+    /// ```
+    pub fn insert_lines_after(&mut self, line: usize, count: usize) -> Option<Cursor> {
+        let total_lines = self.lines.len();
+        
+        // Handle empty buffer - create first line if inserting into empty
+        if total_lines == 0 {
+            if count > 0 {
+                self.lines.push_back(Arc::from(""));
+            }
+            return Some(Cursor::new(0, 0));
+        }
+        
+        // Clamp line to valid range (insert after last line means append)
+        let insert_after = line.min(total_lines);
+        
+        // If count is 0, just return cursor at the given line (no insertion)
+        if count == 0 {
+            return Some(Cursor::new(line, 0));
+        }
+        
+        // Insert the empty lines
+        if insert_after >= total_lines {
+            // Appending to end of file
+            for _ in 0..count {
+                self.lines.push_back(Arc::from(""));
+            }
+            // Cursor at the first inserted line (which is the old total_lines)
+            Some(Cursor::new(total_lines, 0))
+        } else {
+            // Inserting in middle or at beginning
+            // take() gets first insert_after + 1 lines, skip() gets the rest
+            let mut left = self.lines.take(insert_after + 1);
+            let right = self.lines.skip(insert_after + 1);
+            for _ in 0..count {
+                left.push_back(Arc::from(""));
+            }
+            left.append(right);
+            self.lines = left;
+            // Cursor at the first inserted line (which is insert_after + 1)
+            Some(Cursor::new(insert_after + 1, 0))
+        }
+    }
+
     /// Checks if a cursor position is valid.
     ///
     /// # Arguments
@@ -3624,5 +3684,69 @@ mod tests {
         assert_eq!(cursor, Some(Cursor::new(0, 0)));
         assert_eq!(buf.line_count(), 1);
         assert_eq!(buf.as_str(), "");
+    }
+
+    #[test]
+    fn test_insert_lines_after_first_line() {
+        let mut buf = Buffer::from_str("line1\nline2\nline3");
+        let cursor = buf.insert_lines_after(0, 1);  // Insert after line 1
+        assert_eq!(cursor, Some(Cursor::new(1, 0))); // At new line 2
+        assert_eq!(buf.line_count(), 4);
+        assert_eq!(buf.as_str(), "line1\n\nline2\nline3");
+    }
+
+    #[test]
+    fn test_insert_lines_after_middle_line() {
+        let mut buf = Buffer::from_str("line1\nline2\nline3");
+        let cursor = buf.insert_lines_after(1, 1);  // Insert after line 2
+        assert_eq!(cursor, Some(Cursor::new(2, 0))); // At new line 3
+        assert_eq!(buf.line_count(), 4);
+        assert_eq!(buf.as_str(), "line1\nline2\n\nline3");
+    }
+
+    #[test]
+    fn test_insert_lines_after_last_line() {
+        let mut buf = Buffer::from_str("line1\nline2");
+        let cursor = buf.insert_lines_after(1, 1);  // Insert after last line
+        assert_eq!(cursor, Some(Cursor::new(2, 0))); // At new line 3 (index 2)
+        assert_eq!(buf.line_count(), 3);
+        assert_eq!(buf.as_str(), "line1\nline2\n");
+    }
+
+    #[test]
+    fn test_insert_lines_after_empty_buffer() {
+        let mut buf = Buffer::new();  // Creates buffer with 1 empty line
+        let cursor = buf.insert_lines_after(0, 1);
+        assert_eq!(cursor, Some(Cursor::new(1, 0)));  // Cursor at new line (index 1)
+        assert_eq!(buf.line_count(), 2);
+        assert_eq!(buf.as_str(), "\n");  // Two empty lines
+    }
+
+    #[test]
+    fn test_insert_lines_after_multiple_lines() {
+        let mut buf = Buffer::from_str("line1\nline2");
+        let cursor = buf.insert_lines_after(0, 3);  // Insert 3 lines after line 1
+        assert_eq!(cursor, Some(Cursor::new(1, 0))); // At first inserted line
+        assert_eq!(buf.line_count(), 5);
+        assert_eq!(buf.as_str(), "line1\n\n\n\nline2");
+    }
+
+    #[test]
+    fn test_insert_lines_after_zero_count() {
+        let mut buf = Buffer::from_str("line1\nline2");
+        let cursor = buf.insert_lines_after(0, 0);  // No lines to insert
+        assert_eq!(cursor, Some(Cursor::new(0, 0))); // Cursor at line 0
+        assert_eq!(buf.line_count(), 2);  // No change
+        assert_eq!(buf.as_str(), "line1\nline2");
+    }
+
+    #[test]
+    fn test_insert_lines_after_count_exceeds() {
+        let mut buf = Buffer::from_str("line1\nline2");
+        // Insert after line 5 (beyond available), should append
+        let cursor = buf.insert_lines_after(5, 2);
+        assert_eq!(cursor, Some(Cursor::new(2, 0))); // At first inserted line
+        assert_eq!(buf.line_count(), 4);
+        assert_eq!(buf.as_str(), "line1\nline2\n\n");
     }
 }

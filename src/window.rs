@@ -852,6 +852,25 @@ impl Widget for Window {
                 }
                 ActionResult::Handled
             }
+            Action::OpenLineBelow => {
+                let cursor = self.buffer_view.cursor();
+                if let Some(new_cursor) = self.buffer_view.buffer.insert_lines_after(cursor.line, 1)
+                {
+                    self.buffer_view.set_cursor(new_cursor);
+                }
+                ActionResult::Handled
+            }
+            Action::OpenLineAbove => {
+                let cursor = self.buffer_view.cursor();
+                // Insert after line-1 (or after line 0 if on first line)
+                let insert_after = cursor.line.saturating_sub(1);
+                if let Some(new_cursor) =
+                    self.buffer_view.buffer.insert_lines_after(insert_after, 1)
+                {
+                    self.buffer_view.set_cursor(new_cursor);
+                }
+                ActionResult::Handled
+            }
             Action::Count(count, inner) => {
                 // gg and G with count: go to specified line (count-1, clamped to file bounds)
                 // These motions don't need a secondary action
@@ -953,6 +972,31 @@ impl Widget for Window {
                     let cursor = self.buffer_view.cursor();
                     if let Some(new_cursor) =
                         self.buffer_view.buffer.change_lines(cursor.line, *count)
+                    {
+                        self.buffer_view.set_cursor(new_cursor);
+                    }
+                    ActionResult::Handled
+                } else if matches!(inner.as_ref(), Action::OpenLineBelow) {
+                    // o with count: create N lines below current
+                    // e.g., 3o creates 3 lines below
+                    let cursor = self.buffer_view.cursor();
+                    if let Some(new_cursor) = self
+                        .buffer_view
+                        .buffer
+                        .insert_lines_after(cursor.line, *count)
+                    {
+                        self.buffer_view.set_cursor(new_cursor);
+                    }
+                    ActionResult::Handled
+                } else if matches!(inner.as_ref(), Action::OpenLineAbove) {
+                    // O with count: create N lines above current
+                    // e.g., 3O creates 3 lines above
+                    let cursor = self.buffer_view.cursor();
+                    let insert_after = cursor.line.saturating_sub(1);
+                    if let Some(new_cursor) = self
+                        .buffer_view
+                        .buffer
+                        .insert_lines_after(insert_after, *count)
                     {
                         self.buffer_view.set_cursor(new_cursor);
                     }

@@ -31,12 +31,14 @@ This document describes the motions implemented in urvim and how they differ fro
 | `gJ` | Join lines without space |
 | `dd` | Delete line (or N lines with count) |
 | `cc` | Change line: delete line(s) and enter insert mode, leaving one blank line |
+| `o` | Open line below: create new empty line below and enter insert mode |
+| `O` | Open line above: create new empty line above and enter insert mode |
 
 ## Count Support
 
 urvim supports count prefixes for most motions. There are two types of count behaviors:
 
-1. **Repeatable motions** (h, j, k, l, w, b, e, W, B, E, dd): The motion is executed `count` times from the current position.
+1. **Repeatable motions** (h, j, k, l, w, b, e, W, B, E, dd, cc, o, O): The motion is executed `count` times from the current position.
 
 2. **Line actions** (0, $, ^): The count specifies an absolute 1-indexed line number to jump to, then performs the action on that line.
 
@@ -351,6 +353,40 @@ Examples:
 - Changing when there is only one line: Buffer has one empty line, cursor in insert mode
 - Count exceeds available lines: Replaces all available lines with one blank line
 
+## Open Line Operations
+
+These operations create new empty lines and enter insert mode.
+
+### o - Open Line Below
+
+Creates a new empty line below the current line and enters insert mode at the start of that line.
+
+- **Count**: Yes - creates `count` empty lines below the current line
+- **Mode**: After execution, enters insert mode at column 0 of the new line
+- **Vim difference**: Same as Vim.
+
+Examples:
+- `o` on line 2 in "a\nb\nc" -> "a\nb\n\nc" (cursor in insert mode on empty line 3)
+- `3o` on line 1 in "a\nb\nc" -> "a\n\n\n\nb\nc" (creates 3 empty lines below)
+
+### O - Open Line Above
+
+Creates a new empty line above the current line and enters insert mode at the start of that line.
+
+- **Count**: Yes - creates `count` empty lines above the current line
+- **Mode**: After execution, enters insert mode at column 0 of the new line
+- **Vim difference**: Same as Vim.
+
+Examples:
+- `O` on line 2 in "a\nb\nc" -> "a\n\nb\nc" (cursor in insert mode on empty line 2)
+- `3O` on line 2 in "a\nb\nc" -> "a\n\n\nb\nc" (creates 3 empty lines above)
+
+### Edge Cases
+
+- `o` on the last line: Creates new line at the end of the buffer
+- `O` on the first line: Creates new line at the beginning of the buffer
+- Empty buffer: Both create a single empty line and enter insert mode
+
 ## Operator Motion Differences Summary
 
 | Motion | urvim Behavior | Vim Behavior |
@@ -362,3 +398,5 @@ Examples:
 | ^      | Wraps to previous line when at first non-ws | Stays at current position |
 | gg     | Goes to line 1 (or line N with count) | Same |
 | G      | Goes to last line (or line N with count) | Same |
+| o      | Same as Vim | Same as Vim |
+| O      | Same as Vim | Same as Vim |
