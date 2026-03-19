@@ -822,6 +822,68 @@ impl Buffer {
         }
     }
 
+    /// Changes `count` lines starting from `start_line`.
+    /// Deletes the lines and replaces them with a single empty line.
+    /// Returns the new cursor position.
+    ///
+    /// # Arguments
+    ///
+    /// * `start_line` - The line index to start changing from (0-indexed)
+    /// * `count` - The number of lines to change
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use urvim::buffer::{Buffer, Cursor};
+    ///
+    /// let mut buf = Buffer::from_str("line1\nline2\nline3");
+    /// let cursor = buf.change_lines(0, 1);
+    /// assert_eq!(cursor, Some(Cursor::new(0, 0)));
+    /// assert_eq!(buf.as_str(), "\nline2\nline3");  // line replaced with blank
+    /// ```
+    pub fn change_lines(&mut self, start_line: usize, count: usize) -> Option<Cursor> {
+        let total_lines = self.lines.len();
+
+        // Handle empty buffer - create one empty line
+        if total_lines == 0 {
+            self.lines.push_back(Arc::from(""));
+            return Some(Cursor::new(0, 0));
+        }
+
+        // Validate start_line
+        if start_line >= total_lines {
+            return None;
+        }
+
+        // Clamp count to available lines
+        let actual_count = (total_lines - start_line).min(count);
+        if actual_count == 0 {
+            return Some(Cursor::new(start_line, 0));
+        }
+
+        // Delete the lines (similar to delete_lines)
+        let end_line = start_line + actual_count;
+
+        if end_line >= total_lines {
+            // Changing to end of file - replace deleted lines with one blank line
+            let mut left = self.lines.take(start_line);
+            // Always add one blank line to replace the changed line(s)
+            left.push_back(Arc::from(""));
+            self.lines = left;
+        } else {
+            // Deleting in middle of file
+            // Keep lines before start_line, add blank line, then lines after end_line
+            let mut left = self.lines.take(start_line);
+            left.push_back(Arc::from("")); // Insert blank line
+            let right = self.lines.skip(end_line);
+            left.append(right);
+            self.lines = left;
+        }
+
+        // Return new cursor position (at start of blank line)
+        Some(Cursor::new(start_line, 0))
+    }
+
     /// Checks if a cursor position is valid.
     ///
     /// # Arguments
@@ -3488,6 +3550,77 @@ mod tests {
     fn test_delete_lines_empty_buffer() {
         let mut buf = Buffer::new();
         let cursor = buf.delete_lines(0, 1);
+        assert_eq!(cursor, Some(Cursor::new(0, 0)));
+        assert_eq!(buf.line_count(), 1);
+        assert_eq!(buf.as_str(), "");
+    }
+
+    #[test]
+    fn test_change_lines_single_line() {
+        let mut buf = Buffer::from_str("hello\nworld\ntest");
+        let cursor = buf.change_lines(0, 1);
+        assert_eq!(cursor, Some(Cursor::new(0, 0)));
+        assert_eq!(buf.line_count(), 3);
+        assert_eq!(buf.as_str(), "\nworld\ntest");  // First line replaced with blank
+    }
+
+    #[test]
+    fn test_change_lines_multiple_lines() {
+        let mut buf = Buffer::from_str("line1\nline2\nline3\nline4");
+        let cursor = buf.change_lines(0, 2);  // Change 2 lines, leave 1 blank
+        assert_eq!(cursor, Some(Cursor::new(0, 0)));
+        assert_eq!(buf.line_count(), 3);
+        assert_eq!(buf.as_str(), "\nline3\nline4");  // 2 lines replaced with 1 blank
+    }
+
+    #[test]
+    fn test_change_lines_from_middle() {
+        let mut buf = Buffer::from_str("line1\nline2\nline3\nline4");
+        let cursor = buf.change_lines(1, 1);  // Change line 2
+        assert_eq!(cursor, Some(Cursor::new(1, 0)));
+        assert_eq!(buf.line_count(), 4);
+        assert_eq!(buf.as_str(), "line1\n\nline3\nline4");  // line2 replaced with blank
+    }
+
+    #[test]
+    fn test_change_lines_from_last_line() {
+        let mut buf = Buffer::from_str("line1\nline2");
+        let cursor = buf.change_lines(1, 1);  // Change last line
+        assert_eq!(cursor, Some(Cursor::new(1, 0)));
+        assert_eq!(buf.line_count(), 2);
+        assert_eq!(buf.as_str(), "line1\n");  // last line replaced with blank
+    }
+
+    #[test]
+    fn test_change_lines_only_line() {
+        let mut buf = Buffer::from_str("only line");
+        let cursor = buf.change_lines(0, 1);
+        assert_eq!(cursor, Some(Cursor::new(0, 0)));
+        assert_eq!(buf.line_count(), 1);
+        assert_eq!(buf.as_str(), "");  // Line replaced with blank
+    }
+
+    #[test]
+    fn test_change_lines_count_exceeds_available() {
+        let mut buf = Buffer::from_str("line1\nline2\nline3");
+        let cursor = buf.change_lines(0, 5);  // Try to change 5 lines, only 3 exist
+        assert_eq!(cursor, Some(Cursor::new(0, 0)));
+        assert_eq!(buf.line_count(), 1);  // Should leave 1 blank line
+        assert_eq!(buf.as_str(), "");  // All 3 lines replaced with 1 blank
+    }
+
+    #[test]
+    fn test_change_lines_invalid_start_line() {
+        let mut buf = Buffer::from_str("line1\nline2");
+        let cursor = buf.change_lines(5, 1);  // Start beyond available lines
+        assert_eq!(cursor, None);
+        assert_eq!(buf.as_str(), "line1\nline2");  // No change
+    }
+
+    #[test]
+    fn test_change_lines_empty_buffer() {
+        let mut buf = Buffer::new();
+        let cursor = buf.change_lines(0, 1);
         assert_eq!(cursor, Some(Cursor::new(0, 0)));
         assert_eq!(buf.line_count(), 1);
         assert_eq!(buf.as_str(), "");

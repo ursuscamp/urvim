@@ -30,6 +30,7 @@ This document describes the motions implemented in urvim and how they differ fro
 | `J` | Join lines with space |
 | `gJ` | Join lines without space |
 | `dd` | Delete line (or N lines with count) |
+| `cc` | Change line: delete line(s) and enter insert mode, leaving one blank line |
 
 ## Count Support
 
@@ -326,6 +327,29 @@ Examples:
 - Deleting from the last line: Cursor moves to the previous line
 - Deleting when there is only one line: Buffer becomes empty (one empty line remains)
 - Count exceeds available lines: Deletes all available lines from the starting position
+
+## Change Line Operations
+
+These operations replace entire lines with a blank line and enter insert mode.
+
+### cc - Change Line
+
+Changes the current line (or N lines starting from the cursor position) by deleting the line(s) and entering insert mode with a single blank line.
+
+- **Count**: Yes - changes `count` lines starting from the current line
+- **Mode**: After execution, enters insert mode at the start of the blank line
+- **Vim difference**: Same behavior as Vim
+
+Examples:
+- `cc` on line 2 in "a\nb\nc" -> "a\n\nc" (cursor in insert mode on empty line 2)
+- `2cc` on line 1 in "a\nb\nc\nd" -> "\nd" (lines 1 and 2 replaced with 1 blank line)
+- `cc` on last line "a\nb" -> "a\n" (cursor in insert mode on empty line 2)
+
+### Edge Cases
+
+- Changing from the last line: Cursor on blank line at previous position
+- Changing when there is only one line: Buffer has one empty line, cursor in insert mode
+- Count exceeds available lines: Replaces all available lines with one blank line
 
 ## Operator Motion Differences Summary
 

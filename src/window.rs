@@ -845,6 +845,13 @@ impl Widget for Window {
                 }
                 ActionResult::Handled
             }
+            Action::ChangeLine => {
+                let cursor = self.buffer_view.cursor();
+                if let Some(new_cursor) = self.buffer_view.buffer.change_lines(cursor.line, 1) {
+                    self.buffer_view.set_cursor(new_cursor);
+                }
+                ActionResult::Handled
+            }
             Action::Count(count, inner) => {
                 // gg and G with count: go to specified line (count-1, clamped to file bounds)
                 // These motions don't need a secondary action
@@ -936,6 +943,16 @@ impl Widget for Window {
                     let cursor = self.buffer_view.cursor();
                     if let Some(new_cursor) =
                         self.buffer_view.buffer.delete_lines(cursor.line, *count)
+                    {
+                        self.buffer_view.set_cursor(new_cursor);
+                    }
+                    ActionResult::Handled
+                } else if matches!(inner.as_ref(), Action::ChangeLine) {
+                    // cc with count: change N lines starting from cursor
+                    // e.g., 3cc changes 3 lines, leaving 1 blank line
+                    let cursor = self.buffer_view.cursor();
+                    if let Some(new_cursor) =
+                        self.buffer_view.buffer.change_lines(cursor.line, *count)
                     {
                         self.buffer_view.set_cursor(new_cursor);
                     }

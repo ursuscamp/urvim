@@ -58,6 +58,8 @@ pub enum Action {
     JoinWithoutSpace,
     /// Delete current line (or N lines with count prefix)
     DeleteLine,
+    /// Change current line: delete line(s) and enter insert mode, leaving one blank line
+    ChangeLine,
     /// Append after cursor position and enter insert mode
     AppendAfterCursor,
     /// Append to end of line and enter insert mode
@@ -86,6 +88,7 @@ impl Action {
                 | Action::DeleteBackward
                 | Action::DeleteForward
                 | Action::DeleteLine
+                | Action::ChangeLine
                 | Action::JoinWithSpace
                 | Action::JoinWithoutSpace
                 | Action::AppendAfterCursor
@@ -128,6 +131,7 @@ impl Action {
                 | Action::JoinWithSpace
                 | Action::JoinWithoutSpace
                 | Action::DeleteLine
+                | Action::ChangeLine
         )
     }
 
@@ -163,7 +167,8 @@ impl Action {
             Action::SwitchToInsert
             | Action::AppendAfterCursor
             | Action::AppendToLineEnd
-            | Action::InsertAtLineStart => true,
+            | Action::InsertAtLineStart
+            | Action::ChangeLine => true,
             Action::Count(_, inner) => inner.switches_to_insert_mode(),
             _ => false,
         }
@@ -532,6 +537,10 @@ impl NormalMode {
         keymap.insert_sequence(
             vec!["d".to_string(), "d".to_string()],
             Action::DeleteLine,
+        );
+        keymap.insert_sequence(
+            vec!["c".to_string(), "c".to_string()],
+            Action::ChangeLine,
         );
 
         // Quit (Ctrl-q)
@@ -1407,5 +1416,32 @@ mod tests {
     #[test]
     fn test_action_delete_line_resets_remembered_column() {
         assert!(Action::DeleteLine.resets_remembered_column());
+    }
+
+    #[test]
+    fn test_action_change_line_is_countable() {
+        assert!(Action::ChangeLine.is_countable());
+    }
+
+    #[test]
+    fn test_action_change_line_resets_remembered_column() {
+        assert!(Action::ChangeLine.resets_remembered_column());
+    }
+
+    #[test]
+    fn test_action_change_line_switches_to_insert_mode() {
+        assert!(Action::ChangeLine.switches_to_insert_mode());
+    }
+
+    #[test]
+    fn test_action_change_line_with_count() {
+        let action = Action::ChangeLine.clone().with_count(5);
+        assert!(action.is_some());
+        if let Some(Action::Count(count, inner)) = action {
+            assert_eq!(count, 5);
+            assert_eq!(*inner, Action::ChangeLine);
+        } else {
+            panic!("Expected Count action");
+        }
     }
 }
