@@ -6,3 +6,7 @@ This is a list, in no particular order, of things that need to be addressed whic
   - Repeatable o/O (inserted text is repeated, along with lines)
 - operations + text objects
 - registers
+- { and } motions
+- setup an initial glossary of terms
+- count with ^ not working as expected
+- O on first line opening BELOW line instead of above

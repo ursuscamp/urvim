@@ -686,6 +686,175 @@ impl Window {
             None
         }
     }
+
+    /// Main dispatcher for Count actions - routes to appropriate handler based on inner action type.
+    pub(crate) fn handle_count(&mut self, count: usize, inner: &Action) -> ActionResult {
+        match inner {
+            // gg and G with count: go to specified line (count-1, clamped to file bounds)
+            Action::MoveToFirstLine | Action::MoveToLastLine => {
+                self.handle_count_line_motion(count, inner)
+            }
+
+            // H with count: go to N lines from top of viewport
+            Action::MoveToScreenTop => self.handle_count_screen_motion(count, inner),
+
+            // L with count: go to N lines from bottom of viewport
+            Action::MoveToScreenBottom => self.handle_count_screen_motion(count, inner),
+
+            // Join with count: join count+1 lines at once
+            Action::JoinWithSpace | Action::JoinWithoutSpace => {
+                self.handle_count_join(count, inner)
+            }
+
+            // dd with count: delete N lines
+            Action::DeleteLine => self.handle_count_delete_line(count),
+
+            // cc with count: change N lines
+            Action::ChangeLine => self.handle_count_change_line(count),
+
+            // o with count: create N lines below
+            Action::OpenLineBelow => self.handle_count_open_line_below(count),
+
+            // O with count: create N lines above
+            Action::OpenLineAbove => self.handle_count_open_line_above(count),
+
+            // Line actions: go to target absolute line, then perform action
+            // (must check after specific action types above)
+            _ if inner.is_line_action() => self.handle_count_line_action(count, inner),
+
+            // Default: repeatable action - execute count times
+            _ => self.handle_count_repeatable(count, inner),
+        }
+    }
+
+    /// Handles line motions (gg, G) with count - go to absolute line.
+    fn handle_count_line_motion(&mut self, count: usize, _action: &Action) -> ActionResult {
+        let line_count = self.buffer_view.buffer.line_count();
+        if line_count == 0 {
+            return ActionResult::Handled;
+        }
+        let target_line = (count - 1).min(line_count - 1);
+        let target_col = self.buffer_view.get_or_compute_target_col();
+        self.buffer_view
+            .set_cursor(Cursor::new(target_line, target_col));
+        // Update remembered column like vertical motions do
+        self.buffer_view.set_remembered_visual_col(target_col);
+        ActionResult::Handled
+    }
+
+    /// Handles screen-relative motions (H, L) with count - N lines from top/bottom of viewport.
+    fn handle_count_screen_motion(&mut self, count: usize, action: &Action) -> ActionResult {
+        let viewport_rows = self.size.rows as usize;
+        if viewport_rows == 0 {
+            return ActionResult::Handled;
+        }
+        let start_line = self.buffer_view.scroll_offset().row as usize;
+        let line_count = self.buffer_view.buffer().line_count();
+        if line_count == 0 {
+            return ActionResult::Handled;
+        }
+
+        let target_line = if matches!(action, Action::MoveToScreenTop) {
+            // H: go to N lines from top of viewport
+            let offset = count.saturating_sub(1);
+            (start_line + offset)
+                .min(start_line + viewport_rows - 1)
+                .min(line_count - 1)
+        } else {
+            // L: go to N lines from bottom of viewport
+            let end_line = (start_line + viewport_rows - 1).min(line_count - 1);
+            let offset = count.saturating_sub(1);
+            end_line.saturating_sub(offset).max(start_line)
+        };
+
+        let target_col = self.buffer_view.get_or_compute_target_col();
+        self.buffer_view
+            .set_cursor(Cursor::new(target_line, target_col));
+        self.buffer_view.set_remembered_visual_col(target_col);
+        ActionResult::Handled
+    }
+
+    /// Handles line actions (0, $, ^, A, I) with count - go to target line then execute.
+    fn handle_count_line_action(&mut self, count: usize, action: &Action) -> ActionResult {
+        // Lines are 0-indexed internally, count is 1-indexed
+        let target_line = (count as isize - 1).max(0) as usize;
+        let current_cursor = self.buffer_view.cursor();
+        // Move to target line, preserving column if possible
+        self.buffer_view
+            .set_cursor(Cursor::new(target_line, current_cursor.col));
+        // Then execute the line action
+        self.process_action(action)
+    }
+
+    /// Handles join motions (J, gJ) with count - join N+1 lines.
+    fn handle_count_join(&mut self, count: usize, action: &Action) -> ActionResult {
+        // e.g., 2J joins 3 lines (current + 2 more)
+        let with_space = matches!(action, Action::JoinWithSpace);
+        let cursor = self.buffer_view.cursor();
+        let actual_count = count + 1;
+
+        if let Some(new_cursor) =
+            self.buffer_view
+                .buffer
+                .join_lines(cursor.line, actual_count, with_space)
+        {
+            self.buffer_view.set_cursor(new_cursor);
+        }
+        ActionResult::Handled
+    }
+
+    /// Handles DeleteLine (dd) with count - delete N lines starting from cursor.
+    fn handle_count_delete_line(&mut self, count: usize) -> ActionResult {
+        let cursor = self.buffer_view.cursor();
+        if let Some(new_cursor) = self.buffer_view.buffer.delete_lines(cursor.line, count) {
+            self.buffer_view.set_cursor(new_cursor);
+        }
+        ActionResult::Handled
+    }
+
+    /// Handles ChangeLine (cc) with count - change N lines starting from cursor.
+    fn handle_count_change_line(&mut self, count: usize) -> ActionResult {
+        let cursor = self.buffer_view.cursor();
+        if let Some(new_cursor) = self.buffer_view.buffer.change_lines(cursor.line, count) {
+            self.buffer_view.set_cursor(new_cursor);
+        }
+        ActionResult::Handled
+    }
+
+    /// Handles OpenLineBelow (o) with count - create N lines below current.
+    fn handle_count_open_line_below(&mut self, count: usize) -> ActionResult {
+        let cursor = self.buffer_view.cursor();
+        if let Some(new_cursor) = self
+            .buffer_view
+            .buffer
+            .insert_lines_after(cursor.line, count)
+        {
+            self.buffer_view.set_cursor(new_cursor);
+        }
+        ActionResult::Handled
+    }
+
+    /// Handles OpenLineAbove (O) with count - create N lines above current.
+    fn handle_count_open_line_above(&mut self, count: usize) -> ActionResult {
+        let cursor = self.buffer_view.cursor();
+        let insert_after = cursor.line.saturating_sub(1);
+        if let Some(new_cursor) = self
+            .buffer_view
+            .buffer
+            .insert_lines_after(insert_after, count)
+        {
+            self.buffer_view.set_cursor(new_cursor);
+        }
+        ActionResult::Handled
+    }
+
+    /// Default handler: execute repeatable action N times.
+    fn handle_count_repeatable(&mut self, count: usize, action: &Action) -> ActionResult {
+        for _ in 0..count {
+            self.process_action(action);
+        }
+        ActionResult::Handled
+    }
 }
 
 impl Widget for Window {
@@ -881,142 +1050,7 @@ impl Widget for Window {
                 ActionResult::Handled
             }
             Action::Count(count, inner) => {
-                // gg and G with count: go to specified line (count-1, clamped to file bounds)
-                // These motions don't need a secondary action
-                if matches!(
-                    inner.as_ref(),
-                    Action::MoveToFirstLine | Action::MoveToLastLine
-                ) {
-                    let line_count = self.buffer_view.buffer.line_count();
-                    if line_count == 0 {
-                        return ActionResult::Handled;
-                    }
-                    let target_line = (*count - 1).min(line_count - 1);
-                    let target_col = self.buffer_view.get_or_compute_target_col();
-                    self.buffer_view
-                        .set_cursor(Cursor::new(target_line, target_col));
-                    // Update remembered column like vertical motions do
-                    self.buffer_view.set_remembered_visual_col(target_col);
-                    ActionResult::Handled
-                } else if matches!(inner.as_ref(), Action::MoveToScreenTop) {
-                    // H with count: go to N lines from top of viewport
-                    let viewport_rows = self.size.rows as usize;
-                    if viewport_rows == 0 {
-                        return ActionResult::Handled;
-                    }
-                    let start_line = self.buffer_view.scroll_offset().row as usize;
-                    let line_count = self.buffer_view.buffer().line_count();
-                    if line_count == 0 {
-                        return ActionResult::Handled;
-                    }
-                    let offset = count.saturating_sub(1);
-                    let target_line = (start_line + offset)
-                        .min(start_line + viewport_rows - 1)
-                        .min(line_count - 1);
-                    let target_col = self.buffer_view.get_or_compute_target_col();
-                    self.buffer_view
-                        .set_cursor(Cursor::new(target_line, target_col));
-                    self.buffer_view.set_remembered_visual_col(target_col);
-                    ActionResult::Handled
-                } else if matches!(inner.as_ref(), Action::MoveToScreenBottom) {
-                    // L with count: go to N lines from bottom of viewport
-                    let viewport_rows = self.size.rows as usize;
-                    if viewport_rows == 0 {
-                        return ActionResult::Handled;
-                    }
-                    let start_line = self.buffer_view.scroll_offset().row as usize;
-                    let line_count = self.buffer_view.buffer().line_count();
-                    if line_count == 0 {
-                        return ActionResult::Handled;
-                    }
-                    let end_line = (start_line + viewport_rows - 1).min(line_count - 1);
-                    let offset = count.saturating_sub(1);
-                    let target_line = end_line.saturating_sub(offset).max(start_line);
-                    let target_col = self.buffer_view.get_or_compute_target_col();
-                    self.buffer_view
-                        .set_cursor(Cursor::new(target_line, target_col));
-                    self.buffer_view.set_remembered_visual_col(target_col);
-                    ActionResult::Handled
-                } else if inner.is_line_action() {
-                    // Other line action: go to target absolute line, then perform action
-                    // Lines are 0-indexed internally, count is 1-indexed
-                    let target_line = (*count as isize - 1).max(0) as usize;
-                    let current_cursor = self.buffer_view.cursor();
-                    // Move to target line, preserving column if possible
-                    self.buffer_view
-                        .set_cursor(Cursor::new(target_line, current_cursor.col));
-                    // Then execute the line action
-                    self.process_action(inner)
-                } else if matches!(
-                    inner.as_ref(),
-                    Action::JoinWithSpace | Action::JoinWithoutSpace
-                ) {
-                    // Special handling for join with count: join count+1 lines at once
-                    // e.g., 2J joins 3 lines (current + 2 more)
-                    let with_space = matches!(inner.as_ref(), Action::JoinWithSpace);
-                    let cursor = self.buffer_view.cursor();
-                    let actual_count = *count + 1;
-
-                    if let Some(new_cursor) =
-                        self.buffer_view
-                            .buffer
-                            .join_lines(cursor.line, actual_count, with_space)
-                    {
-                        self.buffer_view.set_cursor(new_cursor);
-                    }
-                    ActionResult::Handled
-                } else if matches!(inner.as_ref(), Action::DeleteLine) {
-                    // dd with count: delete N lines starting from cursor
-                    // e.g., 2dd deletes 2 lines
-                    let cursor = self.buffer_view.cursor();
-                    if let Some(new_cursor) =
-                        self.buffer_view.buffer.delete_lines(cursor.line, *count)
-                    {
-                        self.buffer_view.set_cursor(new_cursor);
-                    }
-                    ActionResult::Handled
-                } else if matches!(inner.as_ref(), Action::ChangeLine) {
-                    // cc with count: change N lines starting from cursor
-                    // e.g., 3cc changes 3 lines, leaving 1 blank line
-                    let cursor = self.buffer_view.cursor();
-                    if let Some(new_cursor) =
-                        self.buffer_view.buffer.change_lines(cursor.line, *count)
-                    {
-                        self.buffer_view.set_cursor(new_cursor);
-                    }
-                    ActionResult::Handled
-                } else if matches!(inner.as_ref(), Action::OpenLineBelow) {
-                    // o with count: create N lines below current
-                    // e.g., 3o creates 3 lines below
-                    let cursor = self.buffer_view.cursor();
-                    if let Some(new_cursor) = self
-                        .buffer_view
-                        .buffer
-                        .insert_lines_after(cursor.line, *count)
-                    {
-                        self.buffer_view.set_cursor(new_cursor);
-                    }
-                    ActionResult::Handled
-                } else if matches!(inner.as_ref(), Action::OpenLineAbove) {
-                    // O with count: create N lines above current
-                    // e.g., 3O creates 3 lines above
-                    let cursor = self.buffer_view.cursor();
-                    let insert_after = cursor.line.saturating_sub(1);
-                    if let Some(new_cursor) = self
-                        .buffer_view
-                        .buffer
-                        .insert_lines_after(insert_after, *count)
-                    {
-                        self.buffer_view.set_cursor(new_cursor);
-                    }
-                    ActionResult::Handled
-                } else {
-                    // Repeatable action: execute motion count times
-                    for _ in 0..*count {
-                        self.process_action(inner);
-                    }
-                    ActionResult::Handled
-                }
+                return self.handle_count(*count, inner);
             }
             // All other actions are not handled by window
             _ => NotHandled,
