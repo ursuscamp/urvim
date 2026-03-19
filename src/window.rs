@@ -615,19 +615,41 @@ impl Window {
     }
 
     /// Move cursor to the position before the next occurrence of target character.
-    /// Searches forward from cursor + 1, finds count-th occurrence,
+    /// Searches forward from cursor + 1 grapheme, finds count-th occurrence,
     /// and lands one position BEFORE the character.
     pub fn move_cursor_till_forward(&mut self, target: char, count: usize) {
         let cursor = self.buffer_view.cursor();
-        if let Some(new_cursor) = self
-            .buffer_view
-            .buffer()
-            .find_char_forward(cursor, target, count)
-        {
+        let buffer = self.buffer_view.buffer();
+
+        // Calculate the starting position for the search
+        // After a till motion, we land BEFORE the found character
+        // To find the NEXT occurrence, we need to search from after the grapheme
+        // where we landed. This handles repeated t motions correctly.
+        let line = buffer
+            .line_at(cursor.line)
+            .map(|l| l.as_ref())
+            .unwrap_or("");
+        let search_start_col = if cursor.col == 0 {
+            0
+        } else {
+            // Find the grapheme at or after cursor position and get its width
+            // This ensures we skip past the current grapheme on repeated searches
+            let mut col = cursor.col;
+            for (byte_offset, grapheme) in line.grapheme_indices(true) {
+                if byte_offset >= cursor.col {
+                    col = byte_offset + grapheme.len();
+                    break;
+                }
+            }
+            col
+        };
+
+        let search_cursor = Cursor::new(cursor.line, search_start_col);
+        if let Some(new_cursor) = buffer.find_char_forward(search_cursor, target, count) {
             // Land one position before the found character
             let new_col = new_cursor.col.saturating_sub(1);
             self.buffer_view
-                .set_cursor(crate::buffer::Cursor::new(new_cursor.line, new_col));
+                .set_cursor(Cursor::new(new_cursor.line, new_col));
         }
         // If not found, cursor stays in place (do nothing)
     }
@@ -1813,5 +1835,33 @@ mod tests {
         // 'l' appears at columns 2, 3, and 9
         // Going backward from 'd' at 10: 1st 'l' is at 9, 2nd 'l' is at 3
         assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 3));
+    }
+
+    #[test]
+    fn test_find_backward_skips_current_char_on_duplicate() {
+        // "helllo" - cursor on 3rd 'l', Fl should find 2nd 'l'
+        let buffer = Buffer::from_str("helllo");
+        let mut window = Window::new(buffer);
+
+        window.buffer_view.set_cursor(Cursor::new(0, 3)); // at 3rd 'l'
+        window.process_action(&Action::FindBackward('l'));
+        // Should find 2nd 'l' at column 2, not 3rd 'l' at column 3
+        assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 2));
+    }
+
+    #[test]
+    fn test_till_forward_repeated_finds_next_occurrence() {
+        // "hello" - tl repeated should find subsequent 'l's
+        let buffer = Buffer::from_str("hello");
+        let mut window = Window::new(buffer);
+
+        window.buffer_view.set_cursor(Cursor::new(0, 0)); // at 'h'
+        window.process_action(&Action::TillForward('l'));
+        // First 'l' at column 2, land before it at column 1
+        assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 1));
+
+        window.process_action(&Action::TillForward('l'));
+        // Second 'l' at column 3, land before it at column 2
+        assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 2));
     }
 }

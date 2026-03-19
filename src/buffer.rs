@@ -2332,14 +2332,19 @@ impl Buffer {
         let line = self.line_at(line_idx)?;
         let line_str = line.as_ref();
 
-        // Start searching from cursor.col + 1
+        // Start searching from cursor.col + 1 grapheme forward
+        // Use grapheme_indices to properly handle Unicode grapheme clusters
         let start_col = cursor.col + 1;
 
         // Collect all occurrences of target character from start_col onwards
+        // grapheme_indices(true) gives us byte offsets of each grapheme cluster start
         let mut occurrences: Vec<usize> = Vec::new();
-        for (char_idx, ch) in line_str.char_indices() {
-            if char_idx >= start_col && ch == target {
-                occurrences.push(char_idx);
+        for (grapheme_idx, grapheme) in line_str.grapheme_indices(true) {
+            if grapheme_idx >= start_col {
+                // Check if the grapheme starts with the target character
+                if grapheme.starts_with(target) {
+                    occurrences.push(grapheme_idx);
+                }
             }
         }
 
@@ -2363,13 +2368,27 @@ impl Buffer {
         let line = self.line_at(line_idx)?;
         let line_str = line.as_ref();
 
-        // Start searching from cursor.col - 1 backwards
-        let start_col = cursor.col.saturating_sub(1);
+        // When searching backward, we need to find characters BEFORE cursor position.
+        // If cursor is ON the target character, we should skip it and find the previous one.
+        // The issue: when cursor is at position P which is the start of a grapheme,
+        // searching from P-1 with idx <= P-1 might not include P-1 if P-1 is the target.
+        //
+        // For "helllo" with cursor on 3rd 'l' at position 3:
+        // - We want to find 2nd 'l' at position 2
+        // - Search from position 2 (cursor.col - 1), include idx >= 2 that match
+        //
+        // For "hello" with cursor on 1st 'l' at position 2:
+        // - We want to find nothing (no 'l' before position 2)
+        // - Search from position 1, but only idx < 2 that match (excludes idx 2)
+        //
+        // The key insight: search with idx < cursor.col, which includes all positions
+        // strictly before the cursor. Then take the last 'count' occurrences.
 
-        // Collect all occurrences of target character before start_col
+        // Collect all occurrences of target character with idx < cursor.col
+        // Use grapheme_indices(true) to properly handle Unicode grapheme clusters
         let occurrences: Vec<usize> = line_str
-            .char_indices()
-            .filter(|&(idx, ch)| ch == target && idx < start_col)
+            .grapheme_indices(true)
+            .filter(|&(idx, grapheme)| idx < cursor.col && grapheme.starts_with(target))
             .map(|(idx, _)| idx)
             .collect();
 

@@ -7,6 +7,9 @@ This is a list, in no particular order, of things that need to be addressed whic
 - operations + text objects
 - registers
 - { and } motions
-- setup an initial glossary of terms
 - count with ^ not working as expected
-- O on first line opening BELOW line instead of above
+- refactor character iteration where necessary by adding next_cursor/prev_cursor helpers
+
+character scan motions
+
+- cursor should advance by grapheme, not by byte
