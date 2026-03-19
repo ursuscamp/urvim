@@ -837,11 +837,10 @@ impl Window {
     /// Handles OpenLineAbove (O) with count - create N lines above current.
     fn handle_count_open_line_above(&mut self, count: usize) -> ActionResult {
         let cursor = self.buffer_view.cursor();
-        let insert_after = cursor.line.saturating_sub(1);
         if let Some(new_cursor) = self
             .buffer_view
             .buffer
-            .insert_lines_after(insert_after, count)
+            .insert_lines_before(cursor.line, count)
         {
             self.buffer_view.set_cursor(new_cursor);
         }
@@ -1031,10 +1030,8 @@ impl Widget for Window {
             }
             Action::OpenLineAbove => {
                 let cursor = self.buffer_view.cursor();
-                // Insert after line-1 (or after line 0 if on first line)
-                let insert_after = cursor.line.saturating_sub(1);
                 if let Some(new_cursor) =
-                    self.buffer_view.buffer.insert_lines_after(insert_after, 1)
+                    self.buffer_view.buffer.insert_lines_before(cursor.line, 1)
                 {
                     self.buffer_view.set_cursor(new_cursor);
                 }

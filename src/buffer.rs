@@ -944,6 +944,65 @@ impl Buffer {
         }
     }
 
+    /// Inserts N empty lines BEFORE the specified line index.
+    ///
+    /// When line == 0, inserts at the beginning of the buffer.
+    /// Returns the cursor position at the first inserted line.
+    ///
+    /// # Arguments
+    ///
+    /// * `line` - Line number to insert before (0-indexed)
+    /// * `count` - Number of empty lines to insert
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use urvim::buffer::{Buffer, Cursor};
+    ///
+    /// let mut buf = Buffer::from_str("line1\nline2\nline3");
+    /// let cursor = buf.insert_lines_before(0, 1);  // Insert before line 1
+    /// assert_eq!(cursor, Some(Cursor::new(0, 0))); // At new line 1
+    /// assert_eq!(buf.as_str(), "\nline1\nline2\nline3");
+    /// ```
+    pub fn insert_lines_before(&mut self, line: usize, count: usize) -> Option<Cursor> {
+        let total_lines = self.lines.len();
+
+        if total_lines == 0 {
+            if count > 0 {
+                self.lines.push_back(Arc::from(""));
+            }
+            return Some(Cursor::new(0, 0));
+        }
+
+        if count == 0 {
+            return Some(Cursor::new(line, 0));
+        }
+
+        if line == 0 {
+            for _ in 0..count {
+                self.lines.push_front(Arc::from(""));
+            }
+            Some(Cursor::new(0, 0))
+        } else {
+            let insert_before = line.saturating_sub(1);
+            if insert_before >= total_lines {
+                for _ in 0..count {
+                    self.lines.push_back(Arc::from(""));
+                }
+                Some(Cursor::new(total_lines, 0))
+            } else {
+                let mut left = self.lines.take(insert_before + 1);
+                let right = self.lines.skip(insert_before + 1);
+                for _ in 0..count {
+                    left.push_back(Arc::from(""));
+                }
+                left.append(right);
+                self.lines = left;
+                Some(Cursor::new(insert_before + 1, 0))
+            }
+        }
+    }
+
     /// Checks if a cursor position is valid.
     ///
     /// # Arguments
@@ -3745,6 +3804,70 @@ mod tests {
         let mut buf = Buffer::from_str("line1\nline2");
         // Insert after line 5 (beyond available), should append
         let cursor = buf.insert_lines_after(5, 2);
+        assert_eq!(cursor, Some(Cursor::new(2, 0))); // At first inserted line
+        assert_eq!(buf.line_count(), 4);
+        assert_eq!(buf.as_str(), "line1\nline2\n\n");
+    }
+
+    #[test]
+    fn test_insert_lines_before_first_line() {
+        let mut buf = Buffer::from_str("line1\nline2\nline3");
+        let cursor = buf.insert_lines_before(0, 1);  // Insert before line 1
+        assert_eq!(cursor, Some(Cursor::new(0, 0))); // At new line 1
+        assert_eq!(buf.line_count(), 4);
+        assert_eq!(buf.as_str(), "\nline1\nline2\nline3");
+    }
+
+    #[test]
+    fn test_insert_lines_before_middle_line() {
+        let mut buf = Buffer::from_str("line1\nline2\nline3");
+        let cursor = buf.insert_lines_before(1, 1);  // Insert before line 2
+        assert_eq!(cursor, Some(Cursor::new(1, 0))); // At new line 2
+        assert_eq!(buf.line_count(), 4);
+        assert_eq!(buf.as_str(), "line1\n\nline2\nline3");
+    }
+
+    #[test]
+    fn test_insert_lines_before_last_line() {
+        let mut buf = Buffer::from_str("line1\nline2");
+        let cursor = buf.insert_lines_before(1, 1);  // Insert before line 2
+        assert_eq!(cursor, Some(Cursor::new(1, 0))); // At new line 2
+        assert_eq!(buf.line_count(), 3);
+        assert_eq!(buf.as_str(), "line1\n\nline2");
+    }
+
+    #[test]
+    fn test_insert_lines_before_empty_buffer() {
+        let mut buf = Buffer::new();
+        let cursor = buf.insert_lines_before(0, 1);
+        assert_eq!(cursor, Some(Cursor::new(0, 0)));
+        assert_eq!(buf.line_count(), 2);
+        assert_eq!(buf.as_str(), "\n");
+    }
+
+    #[test]
+    fn test_insert_lines_before_multiple_lines() {
+        let mut buf = Buffer::from_str("line1\nline2");
+        let cursor = buf.insert_lines_before(0, 3);  // Insert 3 lines before line 1
+        assert_eq!(cursor, Some(Cursor::new(0, 0))); // At first inserted line
+        assert_eq!(buf.line_count(), 5);
+        assert_eq!(buf.as_str(), "\n\n\nline1\nline2");
+    }
+
+    #[test]
+    fn test_insert_lines_before_zero_count() {
+        let mut buf = Buffer::from_str("line1\nline2");
+        let cursor = buf.insert_lines_before(0, 0);  // No lines to insert
+        assert_eq!(cursor, Some(Cursor::new(0, 0))); // Cursor at line 0
+        assert_eq!(buf.line_count(), 2);
+        assert_eq!(buf.as_str(), "line1\nline2");
+    }
+
+    #[test]
+    fn test_insert_lines_before_count_exceeds() {
+        let mut buf = Buffer::from_str("line1\nline2");
+        // Insert before line 5 (beyond available), should append
+        let cursor = buf.insert_lines_before(5, 2);
         assert_eq!(cursor, Some(Cursor::new(2, 0))); // At first inserted line
         assert_eq!(buf.line_count(), 4);
         assert_eq!(buf.as_str(), "line1\nline2\n\n");
