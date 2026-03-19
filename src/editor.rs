@@ -60,6 +60,8 @@ pub enum Action {
     DeleteLine,
     /// Change current line: delete line(s) and enter insert mode, leaving one blank line
     ChangeLine,
+    /// Change from cursor to end of line: delete to EOL and enter insert mode
+    ChangeToLineEnd,
     /// Append after cursor position and enter insert mode
     AppendAfterCursor,
     /// Append to end of line and enter insert mode
@@ -95,6 +97,7 @@ impl Action {
                 | Action::DeleteForward
                 | Action::DeleteLine
                 | Action::ChangeLine
+                | Action::ChangeToLineEnd
                 | Action::JoinWithSpace
                 | Action::JoinWithoutSpace
                 | Action::AppendAfterCursor
@@ -140,6 +143,7 @@ impl Action {
                 | Action::JoinWithoutSpace
                 | Action::DeleteLine
                 | Action::ChangeLine
+                | Action::ChangeToLineEnd
                 | Action::OpenLineBelow
                 | Action::OpenLineAbove
         )
@@ -179,6 +183,7 @@ impl Action {
             | Action::AppendToLineEnd
             | Action::InsertAtLineStart
             | Action::ChangeLine
+            | Action::ChangeToLineEnd
             | Action::OpenLineBelow
             | Action::OpenLineAbove => true,
             Action::Count(_, inner) => inner.switches_to_insert_mode(),
@@ -558,6 +563,8 @@ impl NormalMode {
             vec!["c".to_string(), "c".to_string()],
             Action::ChangeLine,
         );
+        // Change to end of line
+        keymap.insert("C".to_string(), Action::ChangeToLineEnd);
 
         // Bracket matching
         keymap.insert("%".to_string(), Action::MoveToMatchingBracket);
@@ -1462,6 +1469,43 @@ mod tests {
         } else {
             panic!("Expected Count action");
         }
+    }
+
+    #[test]
+    fn test_action_change_to_line_end_is_countable() {
+        assert!(Action::ChangeToLineEnd.is_countable());
+    }
+
+    #[test]
+    fn test_action_change_to_line_end_resets_remembered_column() {
+        assert!(Action::ChangeToLineEnd.resets_remembered_column());
+    }
+
+    #[test]
+    fn test_action_change_to_line_end_switches_to_insert_mode() {
+        assert!(Action::ChangeToLineEnd.switches_to_insert_mode());
+    }
+
+    #[test]
+    fn test_action_change_to_line_end_with_count() {
+        let action = Action::ChangeToLineEnd.clone().with_count(5);
+        assert!(action.is_some());
+        if let Some(Action::Count(count, inner)) = action {
+            assert_eq!(count, 5);
+            assert_eq!(*inner, Action::ChangeToLineEnd);
+        } else {
+            panic!("Expected Count action");
+        }
+    }
+
+    #[test]
+    fn test_c_key_change_to_line_end() {
+        let mut mode = NormalMode::new();
+        let result = mode.handle_key(&key('C'));
+        assert!(matches!(
+            result,
+            HandleKeyResult::Complete(Action::ChangeToLineEnd)
+        ));
     }
 
     #[test]

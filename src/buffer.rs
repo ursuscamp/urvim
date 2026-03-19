@@ -884,6 +884,59 @@ impl Buffer {
         Some(Cursor::new(start_line, 0))
     }
 
+    /// Changes text from cursor to end of `count` lines.
+    /// Deletes from `start` cursor to end of `count` lines.
+    /// Returns the new cursor position at the end of the remaining text on the first line.
+    ///
+    /// # Arguments
+    ///
+    /// * `start` - Cursor position to start deletion from (on first line)
+    /// * `count` - Number of lines to affect (starting from start.line)
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use urvim::buffer::{Buffer, Cursor};
+    ///
+    /// let mut buf = Buffer::from_str("hello world");
+    /// let cursor = Cursor::new(0, 5);  // after "hello"
+    /// let new_cursor = buf.change_to_line_end(cursor, 1);
+    /// assert_eq!(new_cursor, Some(Cursor::new(0, 5)));  // at "hello"
+    /// assert_eq!(buf.as_str(), "hello");
+    /// ```
+    pub fn change_to_line_end(&mut self, start: Cursor, count: usize) -> Option<Cursor> {
+        let total_lines = self.lines.len();
+
+        // Handle empty buffer
+        if total_lines == 0 {
+            return Some(Cursor::new(0, 0));
+        }
+
+        // Validate start position
+        if start.line >= total_lines {
+            return None;
+        }
+
+        // Clamp count to available lines
+        let actual_count = (total_lines - start.line).min(count);
+        if actual_count == 0 {
+            return Some(start);
+        }
+
+        // Calculate end position: end of line (start.line + actual_count - 1)
+        let end_line = start.line + actual_count - 1;
+        let end_col = self.line_len(end_line);
+
+        // Create end cursor at end of last line
+        let end = Cursor::new(end_line, end_col);
+
+        // Use remove to delete from start to end
+        self.remove(start, end);
+
+        // Return cursor at the original start position (which is now at end of truncated text)
+        Some(start)
+    }
+
     /// Inserts `count` empty lines AFTER the given line index.
     /// Returns the cursor position at the start of the first inserted line.
     ///
@@ -3743,6 +3796,79 @@ mod tests {
         assert_eq!(cursor, Some(Cursor::new(0, 0)));
         assert_eq!(buf.line_count(), 1);
         assert_eq!(buf.as_str(), "");
+    }
+
+    // Tests for change_to_line_end
+
+    #[test]
+    fn test_change_to_line_end_middle_of_line() {
+        let mut buf = Buffer::from_str("hello world");
+        // Cursor after "hello" (position 5)
+        let cursor = buf.change_to_line_end(Cursor::new(0, 5), 1);
+        assert_eq!(cursor, Some(Cursor::new(0, 5)));
+        assert_eq!(buf.as_str(), "hello");
+    }
+
+    #[test]
+    fn test_change_to_line_end_at_start_of_line() {
+        let mut buf = Buffer::from_str("hello world");
+        // Cursor at position 0 (before "h")
+        let cursor = buf.change_to_line_end(Cursor::new(0, 0), 1);
+        assert_eq!(cursor, Some(Cursor::new(0, 0)));
+        assert_eq!(buf.as_str(), "");
+    }
+
+    #[test]
+    fn test_change_to_line_end_at_end_of_line() {
+        let mut buf = Buffer::from_str("hello");
+        // Cursor at end of line (position 5)
+        let cursor = buf.change_to_line_end(Cursor::new(0, 5), 1);
+        assert_eq!(cursor, Some(Cursor::new(0, 5)));
+        assert_eq!(buf.as_str(), "hello");  // No change
+    }
+
+    #[test]
+    fn test_change_to_line_end_multiple_lines() {
+        let mut buf = Buffer::from_str("hello world\nsecond line\nthird line");
+        // Cursor after "hello" (position 5 on line 0), count=2 means lines 0 and 1
+        // Delete from (0,5) to end of line 1
+        // Result: "hello" + "third line" (line 2 remains)
+        let cursor = buf.change_to_line_end(Cursor::new(0, 5), 2);
+        assert_eq!(cursor, Some(Cursor::new(0, 5)));
+        assert_eq!(buf.as_str(), "hello\nthird line");
+    }
+
+    #[test]
+    fn test_change_to_line_end_count_exceeds_available() {
+        let mut buf = Buffer::from_str("line1\nline2");
+        // 10C on 2-line buffer should clamp to 2
+        let cursor = buf.change_to_line_end(Cursor::new(0, 3), 10);
+        assert_eq!(cursor, Some(Cursor::new(0, 3)));
+        assert_eq!(buf.as_str(), "lin");
+    }
+
+    #[test]
+    fn test_change_to_line_end_invalid_start_line() {
+        let mut buf = Buffer::from_str("line1\nline2");
+        let cursor = buf.change_to_line_end(Cursor::new(5, 0), 1);
+        assert_eq!(cursor, None);
+        assert_eq!(buf.as_str(), "line1\nline2");  // No change
+    }
+
+    #[test]
+    fn test_change_to_line_end_empty_buffer() {
+        let mut buf = Buffer::new();
+        let cursor = buf.change_to_line_end(Cursor::new(0, 0), 1);
+        assert_eq!(cursor, Some(Cursor::new(0, 0)));
+        assert_eq!(buf.as_str(), "");
+    }
+
+    #[test]
+    fn test_change_to_line_end_zero_count() {
+        let mut buf = Buffer::from_str("hello world");
+        let cursor = buf.change_to_line_end(Cursor::new(0, 5), 0);
+        assert_eq!(cursor, Some(Cursor::new(0, 5)));
+        assert_eq!(buf.as_str(), "hello world");  // No change
     }
 
     #[test]

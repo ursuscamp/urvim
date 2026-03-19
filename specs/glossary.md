@@ -10,6 +10,9 @@ A text storage data structure backed by `imbl::Vector<Arc<str>>`. Each line is s
 ### Cursor
 A position in the buffer represented by `line` and `col` (byte position within line). The column can be from 0 to line byte length (inclusive, meaning cursor is at end of line).
 
+### Cursor On a Character
+In normal mode, the block cursor visually covers a character, indicating the cursor is positioned **before** that character. The notation "cursor on 'o'" means the cursor is positioned between the preceding character and 'o', i.e., "hell|o" represents cursor on 'o'. This is the Vim convention where the cursor selects the character beneath it.
+
 ### Action
 An enum representing operations that the editor can perform in response to keypresses. Examples include `MoveLeft`, `MoveDown`, `InsertChar`, `SwitchToNormal`, etc.
 

@@ -31,6 +31,7 @@ This document describes the motions implemented in urvim and how they differ fro
 | `gJ` | Join lines without space |
 | `dd` | Delete line (or N lines with count) |
 | `cc` | Change line: delete line(s) and enter insert mode, leaving one blank line |
+| `C` | Change to end of line: delete from cursor to EOL and enter insert mode |
 | `o` | Open line below: create new empty line below and enter insert mode |
 | `O` | Open line above: create new empty line above and enter insert mode |
 | `%` | Jump to matching bracket (parentheses, square brackets, curly braces) |
@@ -353,6 +354,25 @@ Examples:
 - Changing from the last line: Cursor on blank line at previous position
 - Changing when there is only one line: Buffer has one empty line, cursor in insert mode
 - Count exceeds available lines: Replaces all available lines with one blank line
+
+### C - Change to End of Line
+
+Changes text from the cursor position to the end of the current line (or N lines) by deleting the text and entering insert mode at the truncation point.
+
+- **Count**: Yes - changes from cursor to end of `count` lines (e.g., `2C` deletes cursor to end of current line plus the next line)
+- **Mode**: After execution, enters insert mode at the end of the remaining text
+- **Vim difference**: Same behavior as Vim's `c$`
+
+Examples:
+- `C` on "hell|o world" -> "hell" (cursor in insert mode after "hell")
+- `C` on "|hello" -> "" (cursor in insert mode at beginning of empty line)
+- `2C` on "hello| world\nsecond line\nthird" -> "hello" (deletes cursor to end of line 0 plus all of line 1)
+
+### Edge Cases
+
+- Cursor at end of line: No deletion occurs, but enters insert mode at same position (like `a`)
+- Count exceeds available lines: Deletes to end of last available line
+- Empty buffer: Cursor at position 0, enters insert mode
 
 ## Open Line Operations
 

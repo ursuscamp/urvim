@@ -712,6 +712,9 @@ impl Window {
             // cc with count: change N lines
             Action::ChangeLine => self.handle_count_change_line(count),
 
+            // C with count: change from cursor to end of N lines
+            Action::ChangeToLineEnd => self.handle_count_change_to_line_end(count),
+
             // o with count: create N lines below
             Action::OpenLineBelow => self.handle_count_open_line_below(count),
 
@@ -816,6 +819,15 @@ impl Window {
     fn handle_count_change_line(&mut self, count: usize) -> ActionResult {
         let cursor = self.buffer_view.cursor();
         if let Some(new_cursor) = self.buffer_view.buffer.change_lines(cursor.line, count) {
+            self.buffer_view.set_cursor(new_cursor);
+        }
+        ActionResult::Handled
+    }
+
+    /// Handles ChangeToLineEnd (C) with count - change from cursor to end of N lines.
+    fn handle_count_change_to_line_end(&mut self, count: usize) -> ActionResult {
+        let cursor = self.buffer_view.cursor();
+        if let Some(new_cursor) = self.buffer_view.buffer.change_to_line_end(cursor, count) {
             self.buffer_view.set_cursor(new_cursor);
         }
         ActionResult::Handled
@@ -1018,6 +1030,10 @@ impl Widget for Window {
                 if let Some(new_cursor) = self.buffer_view.buffer.change_lines(cursor.line, 1) {
                     self.buffer_view.set_cursor(new_cursor);
                 }
+                ActionResult::Handled
+            }
+            Action::ChangeToLineEnd => {
+                self.handle_count_change_to_line_end(1);
                 ActionResult::Handled
             }
             Action::OpenLineBelow => {
