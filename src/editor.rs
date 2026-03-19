@@ -4,6 +4,8 @@
 //! along with the Action enum that represents actions triggered by keypresses.
 
 use crate::buffer::Boundary;
+use crate::motion::chained_keymap::ChainedKeymap;
+use crate::motion::char_scan_keymap::CharScanKeymap;
 use crate::terminal::{CursorStyle, Key, KeyCode};
 use std::collections::BTreeMap;
 
@@ -74,6 +76,14 @@ pub enum Action {
     OpenLineAbove,
     /// Move cursor to matching bracket
     MoveToMatchingBracket,
+    /// Find forward: move cursor to the next occurrence of char
+    FindForward(char),
+    /// Find backward: move cursor to the previous occurrence of char
+    FindBackward(char),
+    /// Till forward: move cursor to the position before the next occurrence of char
+    TillForward(char),
+    /// Till backward: move cursor to the position after the previous occurrence of char
+    TillBackward(char),
     /// Count prefix: repeats the inner action the specified number of times,
     /// or goes to the target absolute line number for line actions.
     Count(usize, Box<Action>),
@@ -105,6 +115,10 @@ impl Action {
                 | Action::InsertAtLineStart
                 | Action::OpenLineBelow
                 | Action::OpenLineAbove
+                | Action::FindForward(_)
+                | Action::FindBackward(_)
+                | Action::TillForward(_)
+                | Action::TillBackward(_)
         )
     }
 
@@ -146,6 +160,10 @@ impl Action {
                 | Action::ChangeToLineEnd
                 | Action::OpenLineBelow
                 | Action::OpenLineAbove
+                | Action::FindForward(_)
+                | Action::FindBackward(_)
+                | Action::TillForward(_)
+                | Action::TillBackward(_)
         )
     }
 
@@ -210,6 +228,10 @@ pub trait Keymap {
 
     /// Check if the given key sequence could be a prefix of a longer binding.
     fn is_prefix(&self, keys: &[String]) -> bool;
+
+    /// Check if the given key sequence has children (could be extended).
+    /// Returns true if there are possible extensions, false otherwise.
+    fn has_children(&self, keys: &[String]) -> bool;
 }
 
 /// Maximum count value to prevent overflow.
@@ -346,6 +368,10 @@ impl Keymap for TrieKeymap {
 
     fn is_prefix(&self, keys: &[String]) -> bool {
         TrieKeymap::is_prefix(self, keys)
+    }
+
+    fn has_children(&self, keys: &[String]) -> bool {
+        TrieKeymap::has_children(self, keys)
     }
 }
 
@@ -485,7 +511,7 @@ pub trait Mode {
 
 /// Normal mode for vim-style navigation and commands.
 pub struct NormalMode {
-    keymap: TrieKeymap,
+    keymap: ChainedKeymap,
     buffer: Vec<String>,
     waiting: bool,
 }
@@ -498,85 +524,90 @@ impl Default for NormalMode {
 
 impl NormalMode {
     pub fn new() -> Self {
-        let mut keymap = TrieKeymap::new();
+        let mut trie_keymap = TrieKeymap::new();
 
         // Movement keys (h, j, k, l)
-        keymap.insert("h".to_string(), Action::MoveLeft);
-        keymap.insert("j".to_string(), Action::MoveDown);
-        keymap.insert("k".to_string(), Action::MoveUp);
-        keymap.insert("l".to_string(), Action::MoveRight);
+        trie_keymap.insert("h".to_string(), Action::MoveLeft);
+        trie_keymap.insert("j".to_string(), Action::MoveDown);
+        trie_keymap.insert("k".to_string(), Action::MoveUp);
+        trie_keymap.insert("l".to_string(), Action::MoveRight);
 
         // Word motions
-        keymap.insert("w".to_string(), Action::ForwardTo(Boundary::Word));
-        keymap.insert("b".to_string(), Action::BackTo(Boundary::Word));
-        keymap.insert("e".to_string(), Action::ForwardTo(Boundary::WordEnd));
+        trie_keymap.insert("w".to_string(), Action::ForwardTo(Boundary::Word));
+        trie_keymap.insert("b".to_string(), Action::BackTo(Boundary::Word));
+        trie_keymap.insert("e".to_string(), Action::ForwardTo(Boundary::WordEnd));
 
         // BigWord motions
-        keymap.insert("W".to_string(), Action::ForwardTo(Boundary::BigWord));
-        keymap.insert("B".to_string(), Action::BackTo(Boundary::BigWord));
-        keymap.insert("E".to_string(), Action::ForwardTo(Boundary::BigWordEnd));
+        trie_keymap.insert("W".to_string(), Action::ForwardTo(Boundary::BigWord));
+        trie_keymap.insert("B".to_string(), Action::BackTo(Boundary::BigWord));
+        trie_keymap.insert("E".to_string(), Action::ForwardTo(Boundary::BigWordEnd));
 
         // Line end navigation
-        keymap.insert("$".to_string(), Action::MoveToLineEnd);
+        trie_keymap.insert("$".to_string(), Action::MoveToLineEnd);
 
         // Line start navigation
-        keymap.insert("0".to_string(), Action::MoveToLineStart);
-        keymap.insert("^".to_string(), Action::MoveToLineContentStart);
+        trie_keymap.insert("0".to_string(), Action::MoveToLineStart);
+        trie_keymap.insert("^".to_string(), Action::MoveToLineContentStart);
 
         // gg and G line motions
-        keymap.insert_sequence(
+        trie_keymap.insert_sequence(
             vec!["g".to_string(), "g".to_string()],
             Action::MoveToFirstLine,
         );
-        keymap.insert("G".to_string(), Action::MoveToLastLine);
+        trie_keymap.insert("G".to_string(), Action::MoveToLastLine);
 
         // H/M/L screen-relative motions
-        keymap.insert("H".to_string(), Action::MoveToScreenTop);
-        keymap.insert("M".to_string(), Action::MoveToScreenMiddle);
-        keymap.insert("L".to_string(), Action::MoveToScreenBottom);
+        trie_keymap.insert("H".to_string(), Action::MoveToScreenTop);
+        trie_keymap.insert("M".to_string(), Action::MoveToScreenMiddle);
+        trie_keymap.insert("L".to_string(), Action::MoveToScreenBottom);
 
         // Join line motions
-        keymap.insert("J".to_string(), Action::JoinWithSpace);
-        keymap.insert_sequence(
+        trie_keymap.insert("J".to_string(), Action::JoinWithSpace);
+        trie_keymap.insert_sequence(
             vec!["g".to_string(), "J".to_string()],
             Action::JoinWithoutSpace,
         );
 
         // Mode switching
-        keymap.insert("i".to_string(), Action::SwitchToInsert);
-        keymap.insert("a".to_string(), Action::AppendAfterCursor);
-        keymap.insert("A".to_string(), Action::AppendToLineEnd);
-        keymap.insert("I".to_string(), Action::InsertAtLineStart);
+        trie_keymap.insert("i".to_string(), Action::SwitchToInsert);
+        trie_keymap.insert("a".to_string(), Action::AppendAfterCursor);
+        trie_keymap.insert("A".to_string(), Action::AppendToLineEnd);
+        trie_keymap.insert("I".to_string(), Action::InsertAtLineStart);
 
         // Open line below/above
-        keymap.insert("o".to_string(), Action::OpenLineBelow);
-        keymap.insert("O".to_string(), Action::OpenLineAbove);
+        trie_keymap.insert("o".to_string(), Action::OpenLineBelow);
+        trie_keymap.insert("O".to_string(), Action::OpenLineAbove);
 
         // Delete operations
-        keymap.insert("x".to_string(), Action::DeleteForward);
-        keymap.insert("X".to_string(), Action::DeleteBackward);
-        keymap.insert_sequence(
+        trie_keymap.insert("x".to_string(), Action::DeleteForward);
+        trie_keymap.insert("X".to_string(), Action::DeleteBackward);
+        trie_keymap.insert_sequence(
             vec!["d".to_string(), "d".to_string()],
             Action::DeleteLine,
         );
-        keymap.insert_sequence(
+        trie_keymap.insert_sequence(
             vec!["c".to_string(), "c".to_string()],
             Action::ChangeLine,
         );
         // Change to end of line
-        keymap.insert("C".to_string(), Action::ChangeToLineEnd);
+        trie_keymap.insert("C".to_string(), Action::ChangeToLineEnd);
 
         // Bracket matching
-        keymap.insert("%".to_string(), Action::MoveToMatchingBracket);
+        trie_keymap.insert("%".to_string(), Action::MoveToMatchingBracket);
 
         // Quit (Ctrl-q)
-        keymap.insert("<C-q>".to_string(), Action::Quit);
+        trie_keymap.insert("<C-q>".to_string(), Action::Quit);
 
         // Arrow keys for convenience
-        keymap.insert("<Left>".to_string(), Action::MoveLeft);
-        keymap.insert("<Down>".to_string(), Action::MoveDown);
-        keymap.insert("<Up>".to_string(), Action::MoveUp);
-        keymap.insert("<Right>".to_string(), Action::MoveRight);
+        trie_keymap.insert("<Left>".to_string(), Action::MoveLeft);
+        trie_keymap.insert("<Down>".to_string(), Action::MoveDown);
+        trie_keymap.insert("<Up>".to_string(), Action::MoveUp);
+        trie_keymap.insert("<Right>".to_string(), Action::MoveRight);
+
+        // Create chained keymap: trie first, then char scan as fallback
+        let mut keymap = ChainedKeymap::new();
+        keymap.add(Box::new(trie_keymap));
+        keymap.add(Box::new(CharScanKeymap::new()));
 
         NormalMode {
             keymap,

@@ -35,6 +35,10 @@ This document describes the motions implemented in urvim and how they differ fro
 | `o` | Open line below: create new empty line below and enter insert mode |
 | `O` | Open line above: create new empty line above and enter insert mode |
 | `%` | Jump to matching bracket (parentheses, square brackets, curly braces) |
+| `f` | Find forward: move to next occurrence of character |
+| `F` | Find backward: move to previous occurrence of character |
+| `t` | Till forward: move to position before next occurrence of character |
+| `T` | Till backward: move to position after previous occurrence of character |
 
 ## Count Support
 
@@ -443,3 +447,71 @@ Examples:
 - On a non-bracket character: No movement (silent fail)
 - No matching bracket exists: No movement (silent fail)
 - Nested brackets: Correctly handles nesting (e.g., `((foo))` - first `%` goes to middle, second to end)
+
+## Character Scan Motions
+
+Character scan motions allow quick navigation to or past a specified character in the current line.
+
+### f - Find Forward
+
+Moves the cursor to the next occurrence of the specified character.
+
+- **Count**: Yes - finds the `count`th occurrence
+- **Search direction**: Forward from cursor (searches the character after the cursor position)
+- **Cursor position**: Lands ON the found character
+
+Examples:
+- `f o` on "hello| world" -> "hello w|orld" (cursor on 'o' in "world")
+- `2f x` on "xxx" -> lands on third 'x'
+- `f z` on "hello" (no 'z') -> cursor stays in place (no movement)
+
+### F - Find Backward
+
+Moves the cursor to the previous occurrence of the specified character.
+
+- **Count**: Yes - finds the `count`th previous occurrence
+- **Search direction**: Backward from cursor (searches the character before the cursor position)
+- **Cursor position**: Lands ON the found character
+
+Examples:
+- `F h` on "|hello" -> cursor on 'h' (stays in place since already at 'h')
+- `F e` on "he|llo" -> cursor on 'e' (searches backward, finds first 'e')
+- `F z` on "hello" (no 'z') -> cursor stays in place (no movement)
+
+### t - Till Forward
+
+Moves the cursor to the position just before the next occurrence of the specified character.
+
+- **Count**: Yes - till the `count`th occurrence
+- **Search direction**: Forward from cursor
+- **Cursor position**: Lands one position BEFORE the found character
+
+Examples:
+- `t o` on "hel|lo world" -> "hel l|o world" (cursor on 'l' before 'o')
+- `2t x` on "x x x" -> cursor on first 'x' (position before second 'x')
+
+### T - Till Backward
+
+Moves the cursor to the position just after the previous occurrence of the specified character.
+
+- **Count**: Yes - till the `count`th previous occurrence
+- **Search direction**: Backward from cursor
+- **Cursor position**: Lands one position AFTER the found character
+
+Examples:
+- `T h` on "he|llo" -> "h|ello" (cursor on 'e', which is after 'h')
+- `T e` on "|hello" -> cursor stays (no character before to land after)
+
+### Character Scan Motion Details
+
+- **Case sensitive**: `fX` searches for uppercase 'X', not lowercase 'x'
+- **Current line only**: Search is limited to the current line (does not wrap to next/previous line)
+- **Not found behavior**: If the target character is not found, the cursor stays in place (no movement)
+- **Boundary clamping**: For till motions, if the offset would place the cursor outside the line, it is clamped to the line boundary
+
+### Edge Cases
+
+- **Cursor at line start**: `F` and `T` search before the cursor, so starting at column 0 means no characters before to search
+- **Cursor at line end**: `f` and `t` search after the cursor, so starting at the last column means no characters after to search
+- **Count exceeds occurrences**: Lands on the last available occurrence (or stays in place if none found)
+- **Till at line boundary**: `t` on last char of line lands on last char; `T` on first char stays at column 0

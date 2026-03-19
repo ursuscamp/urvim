@@ -584,6 +584,73 @@ impl Window {
         }
     }
 
+    /// Move cursor forward to the next occurrence of target character.
+    /// Searches from cursor position + 1, finds the count-th occurrence,
+    /// and lands ON the character.
+    pub fn move_cursor_to_char_forward(&mut self, target: char, count: usize) {
+        let cursor = self.buffer_view.cursor();
+        if let Some(new_cursor) = self
+            .buffer_view
+            .buffer()
+            .find_char_forward(cursor, target, count)
+        {
+            self.buffer_view.set_cursor(new_cursor);
+        }
+        // If not found, cursor stays in place (do nothing)
+    }
+
+    /// Move cursor backward to the previous occurrence of target character.
+    /// Searches from cursor position - 1, finds the count-th occurrence,
+    /// and lands ON the character.
+    pub fn move_cursor_to_char_backward(&mut self, target: char, count: usize) {
+        let cursor = self.buffer_view.cursor();
+        if let Some(new_cursor) = self
+            .buffer_view
+            .buffer()
+            .find_char_backward(cursor, target, count)
+        {
+            self.buffer_view.set_cursor(new_cursor);
+        }
+        // If not found, cursor stays in place (do nothing)
+    }
+
+    /// Move cursor to the position before the next occurrence of target character.
+    /// Searches forward from cursor + 1, finds count-th occurrence,
+    /// and lands one position BEFORE the character.
+    pub fn move_cursor_till_forward(&mut self, target: char, count: usize) {
+        let cursor = self.buffer_view.cursor();
+        if let Some(new_cursor) = self
+            .buffer_view
+            .buffer()
+            .find_char_forward(cursor, target, count)
+        {
+            // Land one position before the found character
+            let new_col = new_cursor.col.saturating_sub(1);
+            self.buffer_view
+                .set_cursor(crate::buffer::Cursor::new(new_cursor.line, new_col));
+        }
+        // If not found, cursor stays in place (do nothing)
+    }
+
+    /// Move cursor to the position after the previous occurrence of target character.
+    /// Searches backward from cursor - 1, finds count-th occurrence,
+    /// and lands one position AFTER the character.
+    pub fn move_cursor_till_backward(&mut self, target: char, count: usize) {
+        let cursor = self.buffer_view.cursor();
+        if let Some(new_cursor) = self
+            .buffer_view
+            .buffer()
+            .find_char_backward(cursor, target, count)
+        {
+            // Land one position after the found character
+            let line_len = self.buffer_view.buffer.line_len(new_cursor.line);
+            let new_col = (new_cursor.col + 1).min(line_len);
+            self.buffer_view
+                .set_cursor(crate::buffer::Cursor::new(new_cursor.line, new_col));
+        }
+        // If not found, cursor stays in place (do nothing)
+    }
+
     /// Move cursor to end of current line.
     ///
     /// If already at end of line, moves to end of next line.
@@ -1060,6 +1127,22 @@ impl Widget for Window {
                 if let Some(new_cursor) = find_matching_bracket(&self.buffer_view.buffer, cursor) {
                     self.buffer_view.set_cursor(new_cursor);
                 }
+                ActionResult::Handled
+            }
+            Action::FindForward(target) => {
+                self.move_cursor_to_char_forward(*target, 1);
+                ActionResult::Handled
+            }
+            Action::FindBackward(target) => {
+                self.move_cursor_to_char_backward(*target, 1);
+                ActionResult::Handled
+            }
+            Action::TillForward(target) => {
+                self.move_cursor_till_forward(*target, 1);
+                ActionResult::Handled
+            }
+            Action::TillBackward(target) => {
+                self.move_cursor_till_backward(*target, 1);
                 ActionResult::Handled
             }
             Action::Count(count, inner) => {
@@ -1596,5 +1679,139 @@ mod tests {
         // Other movements should NOT
         assert!(!Action::MoveLeft.uses_remembered_column());
         assert!(!Action::MoveRight.uses_remembered_column());
+    }
+
+    // Character Scan Motion Tests
+
+    #[test]
+    fn test_find_forward_moves_to_char() {
+        // "hello world" - cursor at 'h', find 'o'
+        let buffer = Buffer::from_str("hello world");
+        let mut window = Window::new(buffer);
+
+        window.buffer_view.set_cursor(Cursor::new(0, 0)); // at 'h'
+        window.process_action(&Action::FindForward('o'));
+        assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 4)); // 'o' is at column 4
+    }
+
+    #[test]
+    fn test_find_forward_finds_third_occurrence() {
+        // "x x x" - find 3rd 'x'
+        let buffer = Buffer::from_str("x x x");
+        let mut window = Window::new(buffer);
+
+        window.buffer_view.set_cursor(Cursor::new(0, 0));
+        window.process_action(&Action::Count(3, Box::new(Action::FindForward('x'))));
+        // Third 'x' is at column 4
+        assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 4));
+    }
+
+    #[test]
+    fn test_find_forward_not_found_stays_in_place() {
+        // "hello" - find 'z' (doesn't exist)
+        let buffer = Buffer::from_str("hello");
+        let mut window = Window::new(buffer);
+
+        window.buffer_view.set_cursor(Cursor::new(0, 2)); // at 'l'
+        window.process_action(&Action::FindForward('z'));
+        // Cursor should stay at column 2
+        assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 2));
+    }
+
+    #[test]
+    fn test_find_backward_moves_to_char() {
+        // "hello world" - cursor at 'd', find 'o' (first when going backward from cursor)
+        let buffer = Buffer::from_str("hello world");
+        let mut window = Window::new(buffer);
+
+        window.buffer_view.set_cursor(Cursor::new(0, 10)); // at 'd'
+        window.process_action(&Action::FindBackward('o'));
+        // First 'o' when going backward from position 10 is at column 7
+        assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 7));
+    }
+
+    #[test]
+    fn test_find_backward_not_found_stays_in_place() {
+        // "hello" - cursor at 'h', find 'x' (doesn't exist before)
+        let buffer = Buffer::from_str("hello");
+        let mut window = Window::new(buffer);
+
+        window.buffer_view.set_cursor(Cursor::new(0, 0)); // at 'h'
+        window.process_action(&Action::FindBackward('x'));
+        // Cursor should stay at column 0
+        assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
+    }
+
+    #[test]
+    fn test_till_forward_lands_before_char() {
+        // "hello" - cursor at 'h', till 'o' should land on 'l' (column 3)
+        let buffer = Buffer::from_str("hello");
+        let mut window = Window::new(buffer);
+
+        window.buffer_view.set_cursor(Cursor::new(0, 0)); // at 'h'
+        window.process_action(&Action::TillForward('o'));
+        assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 3)); // 'l' is at column 3
+    }
+
+    #[test]
+    fn test_till_forward_clamp_at_line_start() {
+        // "hello" - cursor at 'h', till 'h' should clamp to column 0
+        let buffer = Buffer::from_str("hello");
+        let mut window = Window::new(buffer);
+
+        window.buffer_view.set_cursor(Cursor::new(0, 0)); // at 'h'
+        window.process_action(&Action::TillForward('h'));
+        // Till lands one before 'h', which would be column -1, clamped to 0
+        assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
+    }
+
+    #[test]
+    fn test_till_backward_lands_after_char() {
+        // "hello" - cursor at 'l', till 'e' should land on 'e' (column 1)
+        let buffer = Buffer::from_str("hello");
+        let mut window = Window::new(buffer);
+
+        window.buffer_view.set_cursor(Cursor::new(0, 4)); // at 'o'
+        window.process_action(&Action::TillBackward('h'));
+        // Till backward 'h' from 'o': 'h' is at 0, +1 = column 1
+        assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 1));
+    }
+
+    #[test]
+    fn test_till_backward_clamp_at_line_end() {
+        // "hello" - cursor at 'o', till 'o' - no previous 'o' to find, so stays
+        let buffer = Buffer::from_str("hello");
+        let mut window = Window::new(buffer);
+
+        window.buffer_view.set_cursor(Cursor::new(0, 4)); // at 'o'
+        window.process_action(&Action::TillBackward('o'));
+        // Till backward 'o' from 'o': there's no 'o' before position 4, so cursor stays
+        assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 4));
+    }
+
+    #[test]
+    fn test_find_forward_with_count() {
+        // "hello world" - 2fx finds 2nd 'o'
+        let buffer = Buffer::from_str("hello world");
+        let mut window = Window::new(buffer);
+
+        window.buffer_view.set_cursor(Cursor::new(0, 0));
+        // Use Count wrapper for the action
+        window.process_action(&Action::Count(2, Box::new(Action::FindForward('o'))));
+        // 'o' appears at column 4 and 7
+        assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 7)); // second 'o'
+    }
+
+    #[test]
+    fn test_find_backward_with_count() {
+        // "hello world" - 2Fl finds 2nd 'l' when going backward from 'd'
+        let buffer = Buffer::from_str("hello world");
+        let mut window = Window::new(buffer);
+
+        window.buffer_view.set_cursor(Cursor::new(0, 10)); // at 'd'
+        window.process_action(&Action::Count(2, Box::new(Action::FindBackward('l'))));
+        // 'l' appears at columns 2, 3, and 9
+        // Going backward from 'd' at 10: 1st 'l' is at 9, 2nd 'l' is at 3
+        assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 3));
     }
 }

@@ -31,7 +31,13 @@ A double-buffered terminal renderer. Maintains current and previous frame buffer
 The left margin area that displays line numbers. Shows a distinct background color to separate it from content.
 
 ### Keymap
-A data structure (implemented as a Trie) that maps key sequences to actions. Supports multi-key bindings like `dd` (delete line) or `gg` (go to first line).
+A data structure that maps key sequences to actions. Supports multi-key bindings like `dd` (delete line) or `gg` (go to first line). Implementations include Trie-based keymaps for fixed sequences, character scan keymaps for parameter-based motions, and chained keymaps that combine multiple keymaps.
+
+### Character Scan Keymap
+A stateless keymap that matches two-key sequences for character scan motions (f, F, t, T). The first key is the trigger (f/F/t/T) and the second key is the target character. Returns the corresponding action with the character as a parameter.
+
+### Chained Keymap
+A keymap wrapper that delegates `get_action` and `is_prefix` calls to multiple sub-keymaps in sequence, trying each until one returns a non-None result. Used to combine trie-based keymaps with character scan keymaps.
 
 ## Text Navigation
 
@@ -113,6 +119,10 @@ The position in the buffer that corresponds to the top-left of the viewport.
 - `MoveToFirstLine` - Go to first line (gg)
 - `MoveToLastLine` - Go to last line (G)
 - `MoveToScreenTop/Middle/Bottom` - H/M/L viewport navigation
+- `FindForward(char)` - Move to next occurrence of char (f)
+- `FindBackward(char)` - Move to previous occurrence of char (F)
+- `TillForward(char)` - Move to position before next occurrence (t)
+- `TillBackward(char)` - Move to position after previous occurrence (T)
 
 ### Edit Actions
 - `InsertChar(c)` - Insert a character

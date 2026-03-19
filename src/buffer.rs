@@ -2316,6 +2316,69 @@ impl Buffer {
             col = self.line_len(line_idx);
         }
     }
+
+    /// Find the next occurrence of a character forward from cursor position.
+    /// Searches from cursor.col + 1 onwards within the same line.
+    /// Returns the cursor position ON the found character.
+    /// If count > 1, finds the count-th occurrence.
+    /// Returns None if character not found.
+    pub fn find_char_forward(
+        &self,
+        cursor: Cursor,
+        target: char,
+        count: usize,
+    ) -> Option<Cursor> {
+        let line_idx = cursor.line;
+        let line = self.line_at(line_idx)?;
+        let line_str = line.as_ref();
+
+        // Start searching from cursor.col + 1
+        let start_col = cursor.col + 1;
+
+        // Collect all occurrences of target character from start_col onwards
+        let mut occurrences: Vec<usize> = Vec::new();
+        for (char_idx, ch) in line_str.char_indices() {
+            if char_idx >= start_col && ch == target {
+                occurrences.push(char_idx);
+            }
+        }
+
+        // Return the count-th occurrence (1-indexed, so count-1)
+        let target_idx = occurrences.get(count.saturating_sub(1))?;
+        Some(Cursor::new(line_idx, *target_idx))
+    }
+
+    /// Find the previous occurrence of a character backward from cursor position.
+    /// Searches from cursor.col - 1 backwards within the same line.
+    /// Returns the cursor position ON the found character.
+    /// If count > 1, finds the count-th previous occurrence.
+    /// Returns None if character not found.
+    pub fn find_char_backward(
+        &self,
+        cursor: Cursor,
+        target: char,
+        count: usize,
+    ) -> Option<Cursor> {
+        let line_idx = cursor.line;
+        let line = self.line_at(line_idx)?;
+        let line_str = line.as_ref();
+
+        // Start searching from cursor.col - 1 backwards
+        let start_col = cursor.col.saturating_sub(1);
+
+        // Collect all occurrences of target character before start_col
+        let occurrences: Vec<usize> = line_str
+            .char_indices()
+            .filter(|&(idx, ch)| ch == target && idx < start_col)
+            .map(|(idx, _)| idx)
+            .collect();
+
+        // Get the count-th occurrence from the end (rightmost = first when going backward)
+        // occurrences is in ascending order, so rightmost is at len-1
+        let target_idx = occurrences.len().saturating_sub(count);
+        let idx = *occurrences.get(target_idx)?;
+        Some(Cursor::new(line_idx, idx))
+    }
 }
 
 /// Calculates the display width of a string.
