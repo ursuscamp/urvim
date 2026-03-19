@@ -1,0 +1,25 @@
+function(foo) {
+    return foo;
+}
+
+[array of items]
+
+{nested: {objects: {deep: value}}}
+
+({[()]})
+
+// Test various positions - place cursor on each bracket and press %
+function test() {
+    if (condition) {
+        doSomething();
+    }
+}
+
+((double parens))
+
+[[double brackets]]
+
+{{double braces}}
+
+// Mixed
+({[test]})

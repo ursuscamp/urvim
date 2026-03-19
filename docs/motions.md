@@ -33,6 +33,7 @@ This document describes the motions implemented in urvim and how they differ fro
 | `cc` | Change line: delete line(s) and enter insert mode, leaving one blank line |
 | `o` | Open line below: create new empty line below and enter insert mode |
 | `O` | Open line above: create new empty line above and enter insert mode |
+| `%` | Jump to matching bracket (parentheses, square brackets, curly braces) |
 
 ## Count Support
 
@@ -400,3 +401,25 @@ Examples:
 | G      | Goes to last line (or line N with count) | Same |
 | o      | Same as Vim | Same as Vim |
 | O      | Same as Vim | Same as Vim |
+
+## Bracket Matching
+
+### % - Jump to Matching Bracket
+
+Moves the cursor to the matching opening or closing bracket.
+
+- **Count**: No - not countable
+- **Supported brackets**: `()`, `[]`, `{}`
+- **Vim difference**: urvim matches Vim behavior for basic bracket matching
+
+Examples:
+- On `(` in `function(foo)` -> jumps to the matching `)`
+- On `)` in `function(foo)` -> jumps back to `(`
+- On `[` in `[1, 2, 3]` -> jumps to `]`
+- On `{` in `{ a: 1 }` -> jumps to `}`
+
+### Edge Cases
+
+- On a non-bracket character: No movement (silent fail)
+- No matching bracket exists: No movement (silent fail)
+- Nested brackets: Correctly handles nesting (e.g., `((foo))` - first `%` goes to middle, second to end)

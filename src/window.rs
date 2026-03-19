@@ -871,6 +871,15 @@ impl Widget for Window {
                 }
                 ActionResult::Handled
             }
+            Action::MoveToMatchingBracket => {
+                use crate::motion::bracket_matcher::find_matching_bracket;
+
+                let cursor = self.buffer_view.cursor();
+                if let Some(new_cursor) = find_matching_bracket(&self.buffer_view.buffer, cursor) {
+                    self.buffer_view.set_cursor(new_cursor);
+                }
+                ActionResult::Handled
+            }
             Action::Count(count, inner) => {
                 // gg and G with count: go to specified line (count-1, clamped to file bounds)
                 // These motions don't need a secondary action

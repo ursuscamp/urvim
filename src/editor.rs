@@ -70,6 +70,8 @@ pub enum Action {
     OpenLineBelow,
     /// Open a new line above current line and enter insert mode
     OpenLineAbove,
+    /// Move cursor to matching bracket
+    MoveToMatchingBracket,
     /// Count prefix: repeats the inner action the specified number of times,
     /// or goes to the target absolute line number for line actions.
     Count(usize, Box<Action>),
@@ -556,6 +558,9 @@ impl NormalMode {
             vec!["c".to_string(), "c".to_string()],
             Action::ChangeLine,
         );
+
+        // Bracket matching
+        keymap.insert("%".to_string(), Action::MoveToMatchingBracket);
 
         // Quit (Ctrl-q)
         keymap.insert("<C-q>".to_string(), Action::Quit);
@@ -1524,5 +1529,20 @@ mod tests {
     #[test]
     fn test_action_open_line_above_switches_to_insert_mode() {
         assert!(Action::OpenLineAbove.switches_to_insert_mode());
+    }
+
+    #[test]
+    fn test_percent_key_moves_to_matching_bracket() {
+        let mut mode = NormalMode::new();
+        let result = mode.handle_key(&Key::new(KeyCode::Char('%')));
+        assert!(matches!(
+            result,
+            HandleKeyResult::Complete(Action::MoveToMatchingBracket)
+        ));
+    }
+
+    #[test]
+    fn test_percent_key_is_not_countable() {
+        assert!(!Action::MoveToMatchingBracket.is_countable());
     }
 }
