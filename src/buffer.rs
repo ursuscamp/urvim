@@ -1439,6 +1439,130 @@ impl Buffer {
         None
     }
 
+    /// Check if a line is blank (empty or whitespace only).
+    ///
+    /// # Arguments
+    ///
+    /// * `line_idx` - Line index to check
+    ///
+    fn is_blank_line(&self, line_idx: usize) -> bool {
+        let line = match self.line_at(line_idx) {
+            Some(l) => l,
+            None => return false,
+        };
+        line.chars().all(|c| c.is_whitespace())
+    }
+
+    /// Move cursor to the blank line before the previous paragraph.
+    ///
+    /// A paragraph is a consecutive sequence of non-empty lines.
+    /// If on a non-blank line (inside paragraph), finds the blank line BEFORE it.
+    /// If on a blank line, finds the blank line before the previous paragraph.
+    /// Returns None if no previous blank line/paragraph is found.
+    ///
+    /// # Arguments
+    ///
+    /// * `cursor` - Current cursor position
+    ///
+    pub fn cursor_paragraph_backward(&self, cursor: Cursor) -> Option<Cursor> {
+        let total_lines = self.line_count();
+        if total_lines == 0 {
+            return None;
+        }
+
+        let mut line_idx = cursor.line;
+
+        // If on non-blank line (inside paragraph), find blank line BEFORE it
+        if !self.is_blank_line(line_idx) {
+            while line_idx > 0 && !self.is_blank_line(line_idx) {
+                line_idx -= 1;
+            }
+            // Now at blank line or line 0
+            if self.is_blank_line(line_idx) {
+                return Some(Cursor::new(line_idx, 0));
+            }
+            return None; // No blank line found
+        }
+
+        // On blank line - find previous blank line
+        // Skip blank lines upward
+        while line_idx > 0 && self.is_blank_line(line_idx) {
+            line_idx -= 1;
+        }
+
+        // Skip any non-blank lines (previous paragraph)
+        while line_idx > 0 && !self.is_blank_line(line_idx) {
+            line_idx -= 1;
+        }
+
+        // Now at line 0 or at a blank line
+        // If we're at line 0 and it's non-blank, there's no previous blank line
+        if line_idx == 0 && !self.is_blank_line(0) {
+            return None;
+        }
+
+        // If we're still at line 0 and it's blank, we couldn't move to a previous blank line
+        if line_idx == 0 {
+            return None;
+        }
+
+        // line_idx is now at a blank line (not line 0)
+        if self.is_blank_line(line_idx) {
+            Some(Cursor::new(line_idx, 0))
+        } else {
+            None // No blank line found
+        }
+    }
+
+    /// Move cursor to the blank line before the next paragraph.
+    ///
+    /// A paragraph is a consecutive sequence of non-empty lines.
+    /// If on a non-blank line (inside paragraph), finds the blank line AFTER it.
+    /// If on a blank line, finds the next blank line.
+    /// Returns None if no next blank line/paragraph is found.
+    ///
+    /// # Arguments
+    ///
+    /// * `cursor` - Current cursor position
+    ///
+    pub fn cursor_paragraph_forward(&self, cursor: Cursor) -> Option<Cursor> {
+        let total_lines = self.line_count();
+        if total_lines == 0 {
+            return None;
+        }
+
+        let mut line_idx = cursor.line;
+
+        // If on non-blank line (inside paragraph), find blank line AFTER current paragraph
+        if !self.is_blank_line(line_idx) {
+            while line_idx < total_lines && !self.is_blank_line(line_idx) {
+                line_idx += 1;
+            }
+            // Now at blank line or past EOF
+            if line_idx < total_lines && self.is_blank_line(line_idx) {
+                return Some(Cursor::new(line_idx, 0));
+            }
+            return None;
+        }
+
+        // On blank line - find next blank line
+        while line_idx < total_lines && self.is_blank_line(line_idx) {
+            line_idx += 1;
+        }
+
+        // Skip non-blank paragraph lines
+        while line_idx < total_lines && !self.is_blank_line(line_idx) {
+            line_idx += 1;
+        }
+
+        // Now at blank line or past EOF
+        if line_idx < total_lines && self.is_blank_line(line_idx) {
+            Some(Cursor::new(line_idx, 0))
+        } else {
+            None // No blank line found
+        }
+    }
+
     /// Returns the visual column (display width) at the cursor position.
     ///
     /// # Arguments
@@ -4079,5 +4203,211 @@ mod tests {
         assert_eq!(cursor, Some(Cursor::new(2, 0))); // At first inserted line
         assert_eq!(buf.line_count(), 4);
         assert_eq!(buf.as_str(), "line1\nline2\n\n");
+    }
+
+    // Paragraph motion tests
+
+    #[test]
+    fn test_is_blank_line() {
+        let buf = Buffer::from_str("hello\n\n  \n\tworld\n");
+        // Line 0: "hello" - not blank
+        assert!(!buf.is_blank_line(0));
+        // Line 1: "" - blank (empty between \n\n)
+        assert!(buf.is_blank_line(1));
+        // Line 2: "  " - blank (spaces only)
+        assert!(buf.is_blank_line(2));
+        // Line 3: "\tworld" - NOT blank (tab + "world" has non-whitespace)
+        assert!(!buf.is_blank_line(3));
+        // Note: trailing \n does NOT create an empty line in Rust's lines()
+    }
+
+    #[test]
+    fn test_is_blank_line_out_of_bounds() {
+        let buf = Buffer::from_str("hello");
+        // Out of bounds should return false
+        assert!(!buf.is_blank_line(5));
+        assert!(!buf.is_blank_line(100));
+    }
+
+    #[test]
+    fn test_cursor_paragraph_backward_from_paragraph() {
+        // Buffer:
+        // 0: "Para 1 line 1"
+        // 1: "" (blank)
+        // 2: "Para 2 line 1"
+        // 3: "Para 2 line 2"
+        // 4: "" (blank)
+        // 5: "Para 3 line 1"
+        let buf = Buffer::from_str("Para 1 line 1\n\nPara 2 line 1\nPara 2 line 2\n\nPara 3 line 1");
+
+        // From middle of Para 2 (line 2), should find blank line before it (line 1)
+        let cursor = Cursor::new(2, 5);
+        let result = buf.cursor_paragraph_backward(cursor);
+        assert_eq!(result, Some(Cursor::new(1, 0)));
+
+        // From line 3 (Para 2 line 2), should find blank line before Para 2 (line 1)
+        let cursor = Cursor::new(3, 5);
+        let result = buf.cursor_paragraph_backward(cursor);
+        assert_eq!(result, Some(Cursor::new(1, 0)));
+
+        // From Para 1 (line 0), should find no previous blank line
+        let cursor = Cursor::new(0, 5);
+        let result = buf.cursor_paragraph_backward(cursor);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_cursor_paragraph_backward_from_blank_line() {
+        // Buffer:
+        // 0: "Para 1 line 1"
+        // 1: "" (blank)
+        // 2: "Para 2 line 1"
+        // 3: "Para 2 line 2"
+        // 4: "" (blank)
+        // 5: "Para 3 line 1"
+        let buf = Buffer::from_str("Para 1 line 1\n\nPara 2 line 1\nPara 2 line 2\n\nPara 3 line 1");
+
+        // From blank line 1, should find blank line before Para 1 (none, returns None)
+        let cursor = Cursor::new(1, 0);
+        let result = buf.cursor_paragraph_backward(cursor);
+        assert_eq!(result, None);
+
+        // From blank line 4, should find blank line before Para 2 (line 1)
+        let cursor = Cursor::new(4, 0);
+        let result = buf.cursor_paragraph_backward(cursor);
+        assert_eq!(result, Some(Cursor::new(1, 0)));
+    }
+
+    #[test]
+    fn test_cursor_paragraph_backward_multiple_paragraphs() {
+        // Buffer:
+        // 0: "Para 1"
+        // 1: "" (blank)
+        // 2: "Para 2"
+        // 3: "" (blank)
+        // 4: "Para 3"
+        let buf = Buffer::from_str("Para 1\n\nPara 2\n\nPara 3");
+
+        // From Para 3 (line 4), one paragraph backward
+        let cursor = Cursor::new(4, 0);
+        let result = buf.cursor_paragraph_backward(cursor);
+        assert_eq!(result, Some(Cursor::new(3, 0)));
+
+        // From Para 2 (line 2), one paragraph backward
+        let cursor = Cursor::new(2, 0);
+        let result = buf.cursor_paragraph_backward(cursor);
+        assert_eq!(result, Some(Cursor::new(1, 0)));
+
+        // From Para 1 (line 0), no previous paragraph
+        let cursor = Cursor::new(0, 0);
+        let result = buf.cursor_paragraph_backward(cursor);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_cursor_paragraph_forward_from_paragraph() {
+        // Buffer:
+        // 0: "Para 1 line 1"
+        // 1: "" (blank)
+        // 2: "Para 2 line 1"
+        // 3: "Para 2 line 2"
+        // 4: "" (blank)
+        // 5: "Para 3 line 1"
+        let buf = Buffer::from_str("Para 1 line 1\n\nPara 2 line 1\nPara 2 line 2\n\nPara 3 line 1");
+
+        // From Para 1 (line 0), should find blank line after Para 1 (line 1)
+        let cursor = Cursor::new(0, 5);
+        let result = buf.cursor_paragraph_forward(cursor);
+        assert_eq!(result, Some(Cursor::new(1, 0)));
+
+        // From Para 2 line 1 (line 2), should find blank line after Para 2 (line 4)
+        let cursor = Cursor::new(2, 5);
+        let result = buf.cursor_paragraph_forward(cursor);
+        assert_eq!(result, Some(Cursor::new(4, 0)));
+    }
+
+    #[test]
+    fn test_cursor_paragraph_forward_from_blank_line() {
+        // Buffer:
+        // 0: "Para 1 line 1"
+        // 1: "" (blank)
+        // 2: "Para 2 line 1"
+        // 3: "Para 2 line 2"
+        // 4: "" (blank)
+        // 5: "Para 3 line 1"
+        let buf = Buffer::from_str("Para 1 line 1\n\nPara 2 line 1\nPara 2 line 2\n\nPara 3 line 1");
+
+        // From blank line 1, should find blank line after Para 2 (line 4)
+        let cursor = Cursor::new(1, 0);
+        let result = buf.cursor_paragraph_forward(cursor);
+        assert_eq!(result, Some(Cursor::new(4, 0)));
+
+        // From blank line 4, should find no next paragraph (None)
+        let cursor = Cursor::new(4, 0);
+        let result = buf.cursor_paragraph_forward(cursor);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_cursor_paragraph_forward_multiple_paragraphs() {
+        // Buffer:
+        // 0: "Para 1"
+        // 1: "" (blank)
+        // 2: "Para 2"
+        // 3: "" (blank)
+        // 4: "Para 3"
+        let buf = Buffer::from_str("Para 1\n\nPara 2\n\nPara 3");
+
+        // From Para 1 (line 0), one paragraph forward
+        let cursor = Cursor::new(0, 0);
+        let result = buf.cursor_paragraph_forward(cursor);
+        assert_eq!(result, Some(Cursor::new(1, 0)));
+
+        // From Para 2 (line 2), one paragraph forward
+        let cursor = Cursor::new(2, 0);
+        let result = buf.cursor_paragraph_forward(cursor);
+        assert_eq!(result, Some(Cursor::new(3, 0)));
+
+        // From Para 3 (line 4), no next paragraph
+        let cursor = Cursor::new(4, 0);
+        let result = buf.cursor_paragraph_forward(cursor);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_cursor_paragraph_whitespace_only_lines() {
+        // Buffer with whitespace-only lines treated as blank
+        // 0: "Para 1"
+        // 1: "   " (spaces - blank)
+        // 2: "Para 2"
+        let buf = Buffer::from_str("Para 1\n   \nPara 2");
+
+        // From Para 1, should find blank line after it (line 1)
+        let cursor = Cursor::new(0, 0);
+        let result = buf.cursor_paragraph_forward(cursor);
+        assert_eq!(result, Some(Cursor::new(1, 0)));
+
+        // From Para 2, backward should find blank line before it (line 1)
+        let cursor = Cursor::new(2, 0);
+        let result = buf.cursor_paragraph_backward(cursor);
+        assert_eq!(result, Some(Cursor::new(1, 0)));
+    }
+
+    #[test]
+    fn test_cursor_paragraph_empty_buffer() {
+        let buf = Buffer::new();
+        let cursor = Cursor::new(0, 0);
+        assert_eq!(buf.cursor_paragraph_backward(cursor), None);
+        assert_eq!(buf.cursor_paragraph_forward(cursor), None);
+    }
+
+    #[test]
+    fn test_cursor_paragraph_single_line() {
+        // Buffer with only one line (not blank)
+        let buf = Buffer::from_str("Single line");
+
+        let cursor = Cursor::new(0, 5);
+        assert_eq!(buf.cursor_paragraph_backward(cursor), None);
+        assert_eq!(buf.cursor_paragraph_forward(cursor), None);
     }
 }

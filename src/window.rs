@@ -707,6 +707,32 @@ impl Window {
         }
     }
 
+    /// Move cursor to the blank line before the previous paragraph.
+    ///
+    /// Uses and updates the remembered visual column (like vertical motions).
+    pub fn move_cursor_to_previous_paragraph(&mut self) {
+        let cursor = self.buffer_view.cursor();
+        let target_col = self.buffer_view.get_or_compute_target_col();
+        if let Some(new_cursor) = self.buffer_view.buffer().cursor_paragraph_backward(cursor) {
+            self.buffer_view
+                .set_cursor(Cursor::new(new_cursor.line, target_col));
+            self.buffer_view.set_remembered_visual_col(target_col);
+        }
+    }
+
+    /// Move cursor to the blank line before the next paragraph.
+    ///
+    /// Uses and updates the remembered visual column (like vertical motions).
+    pub fn move_cursor_to_next_paragraph(&mut self) {
+        let cursor = self.buffer_view.cursor();
+        let target_col = self.buffer_view.get_or_compute_target_col();
+        if let Some(new_cursor) = self.buffer_view.buffer().cursor_paragraph_forward(cursor) {
+            self.buffer_view
+                .set_cursor(Cursor::new(new_cursor.line, target_col));
+            self.buffer_view.set_remembered_visual_col(target_col);
+        }
+    }
+
     pub fn insert_char(&mut self, c: char) {
         let cursor = self.buffer_view.cursor();
         let buffer = self.buffer_view.buffer_mut();
@@ -1149,6 +1175,14 @@ impl Widget for Window {
                 if let Some(new_cursor) = find_matching_bracket(&self.buffer_view.buffer, cursor) {
                     self.buffer_view.set_cursor(new_cursor);
                 }
+                ActionResult::Handled
+            }
+            Action::MoveToPreviousParagraph => {
+                self.move_cursor_to_previous_paragraph();
+                ActionResult::Handled
+            }
+            Action::MoveToNextParagraph => {
+                self.move_cursor_to_next_paragraph();
                 ActionResult::Handled
             }
             Action::FindForward(target) => {

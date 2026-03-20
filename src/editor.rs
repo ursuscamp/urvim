@@ -76,6 +76,10 @@ pub enum Action {
     OpenLineAbove,
     /// Move cursor to matching bracket
     MoveToMatchingBracket,
+    /// Move cursor to blank line before the previous paragraph
+    MoveToPreviousParagraph,
+    /// Move cursor to blank line before the next paragraph
+    MoveToNextParagraph,
     /// Find forward: move cursor to the next occurrence of char
     FindForward(char),
     /// Find backward: move cursor to the previous occurrence of char
@@ -134,6 +138,8 @@ impl Action {
                 | Action::MoveToScreenTop
                 | Action::MoveToScreenMiddle
                 | Action::MoveToScreenBottom
+                | Action::MoveToPreviousParagraph
+                | Action::MoveToNextParagraph
         )
     }
 
@@ -164,6 +170,8 @@ impl Action {
                 | Action::FindBackward(_)
                 | Action::TillForward(_)
                 | Action::TillBackward(_)
+                | Action::MoveToPreviousParagraph
+                | Action::MoveToNextParagraph
         )
     }
 
@@ -560,6 +568,10 @@ impl NormalMode {
         trie_keymap.insert("H".to_string(), Action::MoveToScreenTop);
         trie_keymap.insert("M".to_string(), Action::MoveToScreenMiddle);
         trie_keymap.insert("L".to_string(), Action::MoveToScreenBottom);
+
+        // Paragraph motions
+        trie_keymap.insert("{".to_string(), Action::MoveToPreviousParagraph);
+        trie_keymap.insert("}".to_string(), Action::MoveToNextParagraph);
 
         // Join line motions
         trie_keymap.insert("J".to_string(), Action::JoinWithSpace);

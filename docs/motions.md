@@ -24,6 +24,8 @@ This document describes the motions implemented in urvim and how they differ fro
 | `H` | Move to top of viewport |
 | `M` | Move to middle of viewport |
 | `L` | Move to bottom of viewport |
+| `{` | Move to blank line before the previous paragraph |
+| `}` | Move to blank line before the next paragraph |
 | `a` | Append after cursor (enter insert mode) |
 | `A` | Append to line end (enter insert mode) |
 | `I` | Insert at line start (enter insert mode) |
@@ -515,3 +517,65 @@ Examples:
 - **Cursor at line end**: `f` and `t` search after the cursor, so starting at the last column means no characters after to search
 - **Count exceeds occurrences**: Lands on the last available occurrence (or stays in place if none found)
 - **Till at line boundary**: `t` on last char of line lands on last char; `T` on first char stays at column 0
+
+## Paragraph Motions
+
+Paragraph motions allow navigation between blocks of text separated by blank lines.
+
+### Definitions
+
+- **Paragraph**: A consecutive sequence of non-empty lines (lines with at least one non-whitespace character)
+- **Blank line**: A line that is empty or contains only whitespace characters (spaces and/or tabs)
+
+### { - Move to Previous Paragraph
+
+Moves the cursor to the blank line before the previous paragraph.
+
+- **Count**: Yes - moves up `count` paragraphs
+- **Behavior**:
+  - If on a non-blank line (inside a paragraph), moves to the blank line **before** the current paragraph
+  - If on a blank line, moves to the blank line **before** the previous paragraph (skips any non-blank lines above)
+
+Example buffer:
+```
+Para 1 line 1
+Para 1 line 2
+
+Para 2 line 1
+```
+
+- `{` on "Para 2 line 1" -> moves to the blank line between Para 1 and Para 2
+- `2{` on "Para 2 line 1" -> moves up 2 paragraphs (to blank line before Para 1, which doesn't exist - stays in place)
+
+### } - Move to Next Paragraph
+
+Moves the cursor to the blank line after the next paragraph.
+
+- **Count**: Yes - moves down `count` paragraphs
+- **Behavior**:
+  - If on a non-blank line (inside a paragraph), moves to the blank line **after** the current paragraph
+  - If on a blank line, moves to the next blank line (or blank line after next paragraph if non-blank lines follow)
+
+Example buffer:
+```
+Para 1 line 1
+Para 1 line 2
+
+Para 2 line 1
+```
+
+- `}` on "Para 1 line 2" -> moves to the blank line between Para 1 and Para 2
+- `}` on the blank line itself -> moves to the next blank line (if any) or stays in place
+
+### Column Preservation
+
+Paragraph motions behave like vertical motions (`j`/`k`) for column preservation:
+- They use the remembered column when moving
+- They update the remembered column after moving
+
+### Edge Cases
+
+- **No previous/next paragraph**: Cursor stays in place (no movement)
+- **Multiple consecutive blank lines**: Treated as a single blank line boundary
+- **Whitespace-only lines**: Treated as blank lines
+- **Empty buffer**: No movement (cursor stays in place)
