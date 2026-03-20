@@ -7,6 +7,7 @@
 use crate::action::{ActionResult, ActionResult::NotHandled};
 use crate::buffer::{Boundary, Buffer, Cursor};
 use crate::editor::Action;
+use crate::globals;
 use crate::screen::Screen;
 use crate::terminal::Color;
 use crate::terminal::Style;
@@ -1186,19 +1187,78 @@ impl Widget for Window {
                 ActionResult::Handled
             }
             Action::FindForward(target) => {
+                globals::set_last_find(globals::FindState {
+                    target_char: *target,
+                    kind: globals::FindKind::Find,
+                    direction: globals::Direction::Forward,
+                });
                 self.move_cursor_to_char_forward(*target, 1);
                 ActionResult::Handled
             }
             Action::FindBackward(target) => {
+                globals::set_last_find(globals::FindState {
+                    target_char: *target,
+                    kind: globals::FindKind::Find,
+                    direction: globals::Direction::Backward,
+                });
                 self.move_cursor_to_char_backward(*target, 1);
                 ActionResult::Handled
             }
             Action::TillForward(target) => {
+                globals::set_last_find(globals::FindState {
+                    target_char: *target,
+                    kind: globals::FindKind::Till,
+                    direction: globals::Direction::Forward,
+                });
                 self.move_cursor_till_forward(*target, 1);
                 ActionResult::Handled
             }
             Action::TillBackward(target) => {
+                globals::set_last_find(globals::FindState {
+                    target_char: *target,
+                    kind: globals::FindKind::Till,
+                    direction: globals::Direction::Backward,
+                });
                 self.move_cursor_till_backward(*target, 1);
+                ActionResult::Handled
+            }
+            Action::RepeatLastFind => {
+                if let Some(state) = globals::get_last_find() {
+                    match (state.kind, state.direction) {
+                        (globals::FindKind::Find, globals::Direction::Forward) => {
+                            self.move_cursor_to_char_forward(state.target_char, 1)
+                        }
+                        (globals::FindKind::Find, globals::Direction::Backward) => {
+                            self.move_cursor_to_char_backward(state.target_char, 1)
+                        }
+                        (globals::FindKind::Till, globals::Direction::Forward) => {
+                            self.move_cursor_till_forward(state.target_char, 1)
+                        }
+                        (globals::FindKind::Till, globals::Direction::Backward) => {
+                            self.move_cursor_till_backward(state.target_char, 1)
+                        }
+                    }
+                }
+                ActionResult::Handled
+            }
+            Action::RepeatLastFindReverse => {
+                if let Some(state) = globals::get_last_find() {
+                    // Reverse direction: Forward -> Backward, Backward -> Forward
+                    match (state.kind, state.direction) {
+                        (globals::FindKind::Find, globals::Direction::Forward) => {
+                            self.move_cursor_to_char_backward(state.target_char, 1)
+                        }
+                        (globals::FindKind::Find, globals::Direction::Backward) => {
+                            self.move_cursor_to_char_forward(state.target_char, 1)
+                        }
+                        (globals::FindKind::Till, globals::Direction::Forward) => {
+                            self.move_cursor_till_backward(state.target_char, 1)
+                        }
+                        (globals::FindKind::Till, globals::Direction::Backward) => {
+                            self.move_cursor_till_forward(state.target_char, 1)
+                        }
+                    }
+                }
                 ActionResult::Handled
             }
             Action::Count(count, inner) => {

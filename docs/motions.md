@@ -518,6 +518,56 @@ Examples:
 - **Count exceeds occurrences**: Lands on the last available occurrence (or stays in place if none found)
 - **Till at line boundary**: `t` on last char of line lands on last char; `T` on first char stays at column 0
 
+## Repeat Character Search Motions
+
+Character scan motions (f, F, t, T) can be repeated using `;` and `,`.
+
+### ; - Repeat Last Search (Same Direction)
+
+Repeats the last character search motion in the same direction.
+
+- **Count**: Yes - repeats `count` times
+- **Search direction**: Same as the original search (f/F/t/T)
+- **State persistence**: The last search state persists across mode switches
+
+Examples:
+- `f x` then `;` → finds next 'x' forward
+- `F x` then `;` → finds previous 'x' backward
+- `t x` then `;` → till before next 'x' forward
+- `3 f x` then `2 ;` → finds 3rd 'x', then finds 5th 'x'
+
+### , - Repeat Last Search (Opposite Direction)
+
+Repeats the last character search motion in the opposite direction.
+
+- **Count**: Yes - repeats `count` times
+- **Search direction**: Opposite of the original search (f/F/t/T)
+- **State persistence**: The last search state persists across mode switches
+
+Examples:
+- `f x` then `,` → finds previous 'x' backward (opposite direction)
+- `F x` then `,` → finds next 'x' forward (opposite direction)
+- `t x` then `,` → till after previous 'x' backward
+- `T x` then `,` → till before next 'x' forward
+
+### State Persistence
+
+The last character search state is stored globally and persists when:
+- Switching to insert mode and back to normal mode
+- Using multiple windows (future feature)
+
+This allows you to:
+1. Press `f x` to find 'x'
+2. Press `i` to enter insert mode
+3. Type some text
+4. Press `<Esc>` to return to normal mode
+5. Press `;` to find 'x' again
+
+### Edge Cases
+
+- **No previous search**: If `;` or `,` is pressed with no previous character search, the cursor stays in place (silent fail)
+- **; and , do not update state**: These actions only read from the stored state, never write to it. Pressing `;` after `,` does not change the stored direction.
+
 ## Paragraph Motions
 
 Paragraph motions allow navigation between blocks of text separated by blank lines.

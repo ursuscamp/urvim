@@ -8,3 +8,4 @@ This is a list, in no particular order, of things that need to be addressed whic
 - registers
 - count with ^ not working as expected
 - refactor character iteration where necessary by adding next_cursor/prev_cursor helpers
+- Tx multiple times isn't working

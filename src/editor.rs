@@ -88,6 +88,10 @@ pub enum Action {
     TillForward(char),
     /// Till backward: move cursor to the position after the previous occurrence of char
     TillBackward(char),
+    /// Repeat the last character search in the same direction (';')
+    RepeatLastFind,
+    /// Repeat the last character search in the opposite direction (',')
+    RepeatLastFindReverse,
     /// Count prefix: repeats the inner action the specified number of times,
     /// or goes to the target absolute line number for line actions.
     Count(usize, Box<Action>),
@@ -123,6 +127,8 @@ impl Action {
                 | Action::FindBackward(_)
                 | Action::TillForward(_)
                 | Action::TillBackward(_)
+                | Action::RepeatLastFind
+                | Action::RepeatLastFindReverse
         )
     }
 
@@ -170,6 +176,8 @@ impl Action {
                 | Action::FindBackward(_)
                 | Action::TillForward(_)
                 | Action::TillBackward(_)
+                | Action::RepeatLastFind
+                | Action::RepeatLastFindReverse
                 | Action::MoveToPreviousParagraph
                 | Action::MoveToNextParagraph
         )
@@ -606,6 +614,10 @@ impl NormalMode {
 
         // Bracket matching
         trie_keymap.insert("%".to_string(), Action::MoveToMatchingBracket);
+
+        // Repeat character search (after f/F/t/T)
+        trie_keymap.insert(";".to_string(), Action::RepeatLastFind);
+        trie_keymap.insert(",".to_string(), Action::RepeatLastFindReverse);
 
         // Quit (Ctrl-q)
         trie_keymap.insert("<C-q>".to_string(), Action::Quit);
