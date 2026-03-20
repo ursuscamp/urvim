@@ -656,17 +656,27 @@ impl Window {
     }
 
     /// Move cursor to the position after the previous occurrence of target character.
-    /// Searches backward from cursor - 1, finds count-th occurrence,
+    /// Searches backward, finds count-th occurrence,
     /// and lands one position AFTER the character.
+    ///
+    /// After landing (which is after the found character), the next search must
+    /// start from before that position to avoid re-finding the same character.
+    /// This allows repeated T presses to find subsequent occurrences.
     pub fn move_cursor_till_backward(&mut self, target: char, count: usize) {
         let cursor = self.buffer_view.cursor();
-        if let Some(new_cursor) = self
-            .buffer_view
-            .buffer()
-            .find_char_backward(cursor, target, count)
-        {
+        let buffer = self.buffer_view.buffer();
+
+        // Calculate the starting position for the search.
+        // After a till motion, we land AFTER the found character at cursor.col.
+        // To find the NEXT occurrence (previous in the line), we need to search
+        // from before where we landed. Passing (cursor.col - 1) ensures we look
+        // at positions before where we currently are, not including the character
+        // we just found.
+        let search_cursor = Cursor::new(cursor.line, cursor.col.saturating_sub(1));
+
+        if let Some(new_cursor) = buffer.find_char_backward(search_cursor, target, count) {
             // Land one position after the found character
-            let line_len = self.buffer_view.buffer.line_len(new_cursor.line);
+            let line_len = buffer.line_len(new_cursor.line);
             let new_col = (new_cursor.col + 1).min(line_len);
             self.buffer_view
                 .set_cursor(crate::buffer::Cursor::new(new_cursor.line, new_col));
@@ -1957,5 +1967,25 @@ mod tests {
         window.process_action(&Action::TillForward('l'));
         // Second 'l' at column 3, land before it at column 2
         assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 2));
+    }
+
+    #[test]
+    fn test_till_backward_repeated_finds_previous_occurrence() {
+        // "hhello" - Th repeated should find previous 'h's
+        let buffer = Buffer::from_str("hhello");
+        let mut window = Window::new(buffer);
+
+        window.buffer_view.set_cursor(Cursor::new(0, 5)); // at 'o'
+        window.process_action(&Action::TillBackward('h'));
+        // First 'h' at column 1, land after it at column 2
+        assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 2));
+
+        window.process_action(&Action::TillBackward('h'));
+        // Second 'h' at column 0, land after it at column 1
+        assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 1));
+
+        window.process_action(&Action::TillBackward('h'));
+        // No more 'h' before column 0, cursor stays at column 1
+        assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 1));
     }
 }
