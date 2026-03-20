@@ -1492,7 +1492,9 @@ impl Buffer {
                 if cursor.col > 0 {
                     return Some(Cursor::new(cursor.line, 0));
                 }
-                return None;
+                // cursor.col == 0 on blank line - continue to wrap logic
+                // so we can find the previous line's first non-whitespace
+                0
             }
         };
 

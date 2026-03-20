@@ -6,4 +6,3 @@ This is a list, in no particular order, of things that need to be addressed whic
   - Repeatable o/O (inserted text is repeated, along with lines)
 - operations + text objects
 - registers
-- count with ^ not working as expected
