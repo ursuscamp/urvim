@@ -4,6 +4,7 @@
 //! square brackets, and curly braces) for the percent key motion.
 
 use crate::buffer::{Buffer, Cursor};
+use unicode_segmentation::UnicodeSegmentation;
 
 /// Mapping from opening brackets to their matching closing brackets.
 const OPENING_BRACKETS: &[(char, char)] = &[('(', ')'), ('[', ']'), ('{', '}')];
@@ -35,7 +36,14 @@ const CLOSING_BRACKETS: &[(char, char)] = &[(')', '('), (']', '['), ('}', '{')];
 /// ```
 pub fn find_matching_bracket(buffer: &Buffer, cursor: Cursor) -> Option<Cursor> {
     let line = buffer.line_at(cursor.line)?;
-    let ch = line.chars().nth(cursor.col)?;
+    let line_str = line.as_ref();
+
+    // Get the grapheme at cursor.col (byte offset)
+    // cursor.col is a byte offset, not a char index, so we use grapheme_indices
+    let ch = line_str[cursor.col..]
+        .grapheme_indices(true)
+        .next()
+        .and_then(|(_, g)| g.chars().next())?;
 
     // Check if it's an opening bracket
     for (open, close) in OPENING_BRACKETS {
@@ -64,33 +72,49 @@ fn find_matching_forward(
 ) -> Option<Cursor> {
     let mut depth = 0;
     let mut line_idx = start.line;
-    let mut col_idx = start.col + 1; // Start searching after the opening bracket
 
     let total_lines = buffer.line_count();
 
     while line_idx < total_lines {
         let line = buffer.line_at(line_idx)?;
+        let line_str = line.as_ref();
 
-        // Process each character in the line
-        let chars: Vec<char> = line.chars().collect();
-        while col_idx < chars.len() {
-            let ch = chars[col_idx];
+        // On the first line, start searching after the opening bracket
+        // On subsequent lines, search from the beginning of the line
+        let search_start = if line_idx == start.line {
+            start.col + 1
+        } else {
+            0
+        };
 
-            if ch == open {
-                depth += 1;
-            } else if ch == close {
-                if depth == 0 {
-                    return Some(Cursor::new(line_idx, col_idx));
+        let search_range = line_str[search_start..].grapheme_indices(true);
+
+        // Track absolute byte offset as we iterate
+        let base_offset = if line_idx == start.line {
+            search_start
+        } else {
+            0
+        };
+
+        for (rel_offset, grapheme) in search_range {
+            let abs_byte_offset = base_offset + rel_offset;
+
+            // Check if this grapheme starts with open or close bracket
+            // (brackets are ASCII, so checking first char is sufficient)
+            if let Some(ch) = grapheme.chars().next() {
+                if ch == open {
+                    depth += 1;
+                } else if ch == close {
+                    if depth == 0 {
+                        return Some(Cursor::new(line_idx, abs_byte_offset));
+                    }
+                    depth -= 1;
                 }
-                depth -= 1;
             }
-
-            col_idx += 1;
         }
 
         // Move to next line
         line_idx += 1;
-        col_idx = 0;
     }
 
     None
@@ -105,40 +129,48 @@ fn find_matching_backward(
 ) -> Option<Cursor> {
     let mut depth = 0;
     let mut line_idx = start.line;
-    let mut col_idx: isize = start.col as isize - 1; // Start searching before the closing bracket
 
-    while line_idx > 0 || col_idx >= 0 {
-        // If we've gone past the start of the current line, move to previous line
-        if col_idx < 0 {
-            if line_idx == 0 {
-                break;
-            }
-            line_idx -= 1;
-            let line = buffer.line_at(line_idx)?;
-            col_idx = line.len() as isize - 1;
-            continue;
-        }
+    // Search from byte position before the closing bracket
+    // Use substring up to start.col to avoid iterating entire line
+    let mut search_end = start.col;
 
+    while line_idx > 0 || search_end > 0 {
+        // Get the line to search
         let line = buffer.line_at(line_idx)?;
-        let chars: Vec<char> = line.chars().collect();
+        let line_str = line.as_ref();
 
-        if col_idx as usize >= chars.len() {
-            col_idx = chars.len() as isize - 1;
-            continue;
-        }
+        // On the first iteration (start line), search before start.col
+        // On subsequent iterations (previous lines), search from end of line
+        let current_search_end = if line_idx == start.line {
+            search_end
+        } else {
+            // After moving to previous line, search from end of that line
+            line_str.len()
+        };
 
-        let ch = chars[col_idx as usize];
+        // Use reversed grapheme iterator to search backward
+        for (rel_offset, grapheme) in line_str[..current_search_end].grapheme_indices(true).rev() {
+            let abs_byte_offset = rel_offset;
 
-        if ch == close {
-            depth += 1;
-        } else if ch == open {
-            if depth == 0 {
-                return Some(Cursor::new(line_idx, col_idx as usize));
+            if let Some(ch) = grapheme.chars().next() {
+                if ch == close {
+                    depth += 1;
+                } else if ch == open {
+                    if depth == 0 {
+                        return Some(Cursor::new(line_idx, abs_byte_offset));
+                    }
+                    depth -= 1;
+                }
             }
-            depth -= 1;
         }
 
-        col_idx -= 1;
+        // Move to previous line for next iteration
+        if line_idx == 0 {
+            break;
+        }
+        line_idx -= 1;
+        // For the next iteration, search_end will be the full length of the new current line
+        search_end = buffer.line_at(line_idx).map(|l| l.len()).unwrap_or(0);
     }
 
     None

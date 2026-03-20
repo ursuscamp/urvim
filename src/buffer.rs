@@ -1091,13 +1091,14 @@ impl Buffer {
         }
     }
 
-    /// Moves cursor right by one grapheme.
+    /// Returns the cursor at the next grapheme cluster.
     ///
-    /// Returns None if cursor is at end of last line.
+    /// If at end of line, wraps to start of next line.
+    /// Returns None only if at end of last line.
     ///
     /// # Arguments
     ///
-    /// * `cursor` - Starting cursor position
+    /// * `cursor` - Current cursor position
     ///
     /// # Example
     ///
@@ -1106,10 +1107,10 @@ impl Buffer {
     ///
     /// let buf = Buffer::from_str("ab");
     /// let cursor = Cursor::new(0, 0);
-    /// let next = buf.cursor_right(cursor);
+    /// let next = buf.next_cursor(cursor);
     /// assert_eq!(next, Some(Cursor::new(0, 1)));
     /// ```
-    pub fn cursor_right(&self, cursor: Cursor) -> Option<Cursor> {
+    pub fn next_cursor(&self, cursor: Cursor) -> Option<Cursor> {
         let line_len = self.line_len(cursor.line);
 
         if cursor.col < line_len {
@@ -1117,13 +1118,14 @@ impl Buffer {
             let line = self.lines.get(cursor.line)?;
             let line_str = line.as_ref();
 
-            // Find next grapheme (skip current if at boundary)
-            for (byte_offset, _grapheme) in line_str.grapheme_indices(true) {
-                if byte_offset > cursor.col {
-                    return Some(Cursor::new(cursor.line, byte_offset));
+            // Search only the substring after cursor
+            for (relative_offset, _grapheme) in line_str[cursor.col..].grapheme_indices(true) {
+                if relative_offset == 0 {
+                    continue;
                 }
+                return Some(Cursor::new(cursor.line, cursor.col + relative_offset));
             }
-            // At last grapheme, move to end of line
+            // At last grapheme, return end of line
             Some(Cursor::new(cursor.line, line_len))
         } else if cursor.line < self.lines.len() - 1 {
             // Move to start of next line
@@ -1134,13 +1136,14 @@ impl Buffer {
         }
     }
 
-    /// Moves cursor left by one grapheme.
+    /// Returns the cursor at the previous grapheme cluster.
     ///
-    /// Returns None if cursor is at start of first line.
+    /// If at start of line, wraps to end of previous line.
+    /// Returns None only if at start of first line.
     ///
     /// # Arguments
     ///
-    /// * `cursor` - Starting cursor position
+    /// * `cursor` - Current cursor position
     ///
     /// # Example
     ///
@@ -1149,25 +1152,24 @@ impl Buffer {
     ///
     /// let buf = Buffer::from_str("ab");
     /// let cursor = Cursor::new(0, 1);
-    /// let prev = buf.cursor_left(cursor);
+    /// let prev = buf.prev_cursor(cursor);
     /// assert_eq!(prev, Some(Cursor::new(0, 0)));
     /// ```
-    pub fn cursor_left(&self, cursor: Cursor) -> Option<Cursor> {
+    pub fn prev_cursor(&self, cursor: Cursor) -> Option<Cursor> {
         if cursor.col > 0 {
             // Move within current line
             let line = self.lines.get(cursor.line)?;
             let line_str = line.as_ref();
 
-            // Find previous grapheme start
-            let mut prev_offset = 0;
-            for (byte_offset, _grapheme) in line_str.grapheme_indices(true) {
-                if byte_offset >= cursor.col {
-                    return Some(Cursor::new(cursor.line, prev_offset));
-                }
-                prev_offset = byte_offset;
-            }
-            // Should not reach here if cursor.col > 0 and <= line_len
-            Some(Cursor::new(cursor.line, prev_offset))
+            let prefix = &line_str[..cursor.col];
+
+            let last_grapheme_offset = prefix
+                .grapheme_indices(true)
+                .rev()
+                .next()
+                .map(|(offset, _)| offset)?;
+
+            Some(Cursor::new(cursor.line, last_grapheme_offset))
         } else if cursor.line > 0 {
             // Move to end of previous line
             let prev_line_len = self.line_len(cursor.line - 1);
@@ -1176,6 +1178,94 @@ impl Buffer {
             // At start of first line, stay in place
             None
         }
+    }
+
+    /// Returns the cursor at the next grapheme cluster in the same line.
+    ///
+    /// Returns None if cursor is at or past the last grapheme in the line.
+    /// Does NOT wrap to the next line.
+    ///
+    /// # Arguments
+    ///
+    /// * `cursor` - Current cursor position (must be valid within buffer)
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use urvim::buffer::{Buffer, Cursor};
+    ///
+    /// let buf = Buffer::from_str("a👨‍👩‍👧‍👦b");
+    /// let cursor = Cursor::new(0, 0);  // at 'a'
+    /// let next = buf.next_cursor_line(cursor);
+    /// // Returns cursor at start of emoji (byte ~1)
+    /// ```
+    pub fn next_cursor_line(&self, cursor: Cursor) -> Option<Cursor> {
+        let line_len = self.line_len(cursor.line);
+
+        if cursor.col >= line_len {
+            return None;
+        }
+
+        let line = self.lines.get(cursor.line)?;
+        let line_str = line.as_ref();
+
+        // Search only the substring after cursor, starting from cursor.col
+        // grapheme_indices(true) on a substring gives us byte offsets relative to that substring
+        // so we need to add cursor.col to get absolute byte offsets
+        for (relative_offset, _grapheme) in line_str[cursor.col..].grapheme_indices(true) {
+            if relative_offset == 0 {
+                // We're at the first grapheme of the substring, which is the current grapheme
+                continue;
+            }
+            return Some(Cursor::new(cursor.line, cursor.col + relative_offset));
+        }
+
+        // At last grapheme, return end of line
+        Some(Cursor::new(cursor.line, line_len))
+    }
+
+    /// Returns the cursor at the previous grapheme cluster in the same line.
+    ///
+    /// Returns None if cursor is at the first grapheme in the line.
+    /// Does NOT wrap to the previous line.
+    ///
+    /// # Arguments
+    ///
+    /// * `cursor` - Current cursor position (must be valid within buffer)
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use urvim::buffer::{Buffer, Cursor};
+    ///
+    /// let buf = Buffer::from_str("a👨‍👩‍👧‍👦b");
+    /// let cursor = Cursor::new(0, 5);  // after emoji
+    /// let prev = buf.prev_cursor_line(cursor);
+    /// // Returns cursor at 'a' (byte 0)
+    /// ```
+    pub fn prev_cursor_line(&self, cursor: Cursor) -> Option<Cursor> {
+        if cursor.col == 0 {
+            return None;
+        }
+
+        let line = self.lines.get(cursor.line)?;
+        let line_str = line.as_ref();
+
+        // Search only the substring before cursor using double-ended iterator
+        // The grapheme iterator is DoubleEndedIterator, so we can use .rev().next()
+        // to efficiently find the last grapheme in the prefix without O(n) iteration
+        let prefix = &line_str[..cursor.col];
+
+        // Get the last grapheme's byte offset in the prefix
+        // .rev() reverses the iterator (O(1) for double-ended)
+        // .next() gets the last element (now first in reversed order)
+        let last_grapheme_offset = prefix
+            .grapheme_indices(true)
+            .rev()
+            .next()
+            .map(|(offset, _)| offset)?;
+
+        Some(Cursor::new(cursor.line, last_grapheme_offset))
     }
 
     /// Moves cursor down to the next line, preserving visual column.
@@ -2840,97 +2930,169 @@ mod tests {
         assert!(!buf.is_valid_cursor(Cursor::new(2, 0)));
     }
 
-    // cursor_right tests
+    // next_cursor tests
 
     #[test]
-    fn test_cursor_right_ascii() {
+    fn test_next_cursor_ascii() {
         let buf = Buffer::from_str("hello");
 
-        assert_eq!(buf.cursor_right(Cursor::new(0, 0)), Some(Cursor::new(0, 1)));
-        assert_eq!(buf.cursor_right(Cursor::new(0, 1)), Some(Cursor::new(0, 2)));
-        assert_eq!(buf.cursor_right(Cursor::new(0, 4)), Some(Cursor::new(0, 5)));
-        assert_eq!(buf.cursor_right(Cursor::new(0, 5)), None); // at end of line, last line
+        assert_eq!(buf.next_cursor(Cursor::new(0, 0)), Some(Cursor::new(0, 1)));
+        assert_eq!(buf.next_cursor(Cursor::new(0, 1)), Some(Cursor::new(0, 2)));
+        assert_eq!(buf.next_cursor(Cursor::new(0, 4)), Some(Cursor::new(0, 5)));
+        assert_eq!(buf.next_cursor(Cursor::new(0, 5)), None); // at end of line, last line
     }
 
     #[test]
-    fn test_cursor_right_multibyte() {
+    fn test_next_cursor_multibyte() {
         let buf = Buffer::from_str("aβc"); // 'β' is 2 bytes
 
-        assert_eq!(buf.cursor_right(Cursor::new(0, 0)), Some(Cursor::new(0, 1)));
-        assert_eq!(buf.cursor_right(Cursor::new(0, 1)), Some(Cursor::new(0, 3))); // jump over β
-        assert_eq!(buf.cursor_right(Cursor::new(0, 3)), Some(Cursor::new(0, 4)));
+        assert_eq!(buf.next_cursor(Cursor::new(0, 0)), Some(Cursor::new(0, 1)));
+        assert_eq!(buf.next_cursor(Cursor::new(0, 1)), Some(Cursor::new(0, 3))); // jump over β
+        assert_eq!(buf.next_cursor(Cursor::new(0, 3)), Some(Cursor::new(0, 4)));
     }
 
     #[test]
-    fn test_cursor_right_emoji() {
+    fn test_next_cursor_emoji() {
         let buf = Buffer::from_str("a😀c"); // emoji is 4 bytes
 
-        assert_eq!(buf.cursor_right(Cursor::new(0, 0)), Some(Cursor::new(0, 1)));
-        assert_eq!(buf.cursor_right(Cursor::new(0, 1)), Some(Cursor::new(0, 5))); // jump over emoji
-        assert_eq!(buf.cursor_right(Cursor::new(0, 5)), Some(Cursor::new(0, 6)));
+        assert_eq!(buf.next_cursor(Cursor::new(0, 0)), Some(Cursor::new(0, 1)));
+        assert_eq!(buf.next_cursor(Cursor::new(0, 1)), Some(Cursor::new(0, 5))); // jump over emoji
+        assert_eq!(buf.next_cursor(Cursor::new(0, 5)), Some(Cursor::new(0, 6)));
     }
 
     #[test]
-    fn test_cursor_right_across_newline() {
+    fn test_next_cursor_across_newline() {
         let buf = Buffer::from_str("ab\ncd");
 
         // "ab" has byte len 2, "cd" has byte len 2
-        assert_eq!(buf.cursor_right(Cursor::new(0, 0)), Some(Cursor::new(0, 1)));
-        assert_eq!(buf.cursor_right(Cursor::new(0, 1)), Some(Cursor::new(0, 2)));
-        assert_eq!(buf.cursor_right(Cursor::new(0, 2)), Some(Cursor::new(1, 0))); // cross newline
-        assert_eq!(buf.cursor_right(Cursor::new(1, 0)), Some(Cursor::new(1, 1)));
+        assert_eq!(buf.next_cursor(Cursor::new(0, 0)), Some(Cursor::new(0, 1)));
+        assert_eq!(buf.next_cursor(Cursor::new(0, 1)), Some(Cursor::new(0, 2)));
+        assert_eq!(buf.next_cursor(Cursor::new(0, 2)), Some(Cursor::new(1, 0))); // cross newline
+        assert_eq!(buf.next_cursor(Cursor::new(1, 0)), Some(Cursor::new(1, 1)));
         // At col 2 (end of "cd"), moving right goes past end -> None
-        assert_eq!(buf.cursor_right(Cursor::new(1, 2)), None);
+        assert_eq!(buf.next_cursor(Cursor::new(1, 2)), None);
     }
 
     #[test]
-    fn test_cursor_right_at_end_of_last_line() {
+    fn test_next_cursor_at_end_of_last_line() {
         let buf = Buffer::from_str("ab\ncd");
 
         // At end of last line, moving right stays in place (returns None)
-        assert_eq!(buf.cursor_right(Cursor::new(1, 2)), None);
+        assert_eq!(buf.next_cursor(Cursor::new(1, 2)), None);
     }
 
-    // cursor_left tests
+    // prev_cursor tests
 
     #[test]
-    fn test_cursor_left_ascii() {
+    fn test_prev_cursor_ascii() {
         let buf = Buffer::from_str("hello");
 
-        assert_eq!(buf.cursor_left(Cursor::new(0, 1)), Some(Cursor::new(0, 0)));
-        assert_eq!(buf.cursor_left(Cursor::new(0, 5)), Some(Cursor::new(0, 4)));
-        assert_eq!(buf.cursor_left(Cursor::new(0, 0)), None); // at start
+        assert_eq!(buf.prev_cursor(Cursor::new(0, 1)), Some(Cursor::new(0, 0)));
+        assert_eq!(buf.prev_cursor(Cursor::new(0, 5)), Some(Cursor::new(0, 4)));
+        assert_eq!(buf.prev_cursor(Cursor::new(0, 0)), None); // at start
     }
 
     #[test]
-    fn test_cursor_left_multibyte() {
+    fn test_prev_cursor_multibyte() {
         let buf = Buffer::from_str("aβc"); // 'β' is 2 bytes
 
-        assert_eq!(buf.cursor_left(Cursor::new(0, 3)), Some(Cursor::new(0, 1))); // jump over β
-        assert_eq!(buf.cursor_left(Cursor::new(0, 1)), Some(Cursor::new(0, 0)));
+        assert_eq!(buf.prev_cursor(Cursor::new(0, 3)), Some(Cursor::new(0, 1))); // jump over β
+        assert_eq!(buf.prev_cursor(Cursor::new(0, 1)), Some(Cursor::new(0, 0)));
     }
 
     #[test]
-    fn test_cursor_left_emoji() {
+    fn test_prev_cursor_emoji() {
         let buf = Buffer::from_str("a😀c"); // emoji is 4 bytes
 
-        assert_eq!(buf.cursor_left(Cursor::new(0, 5)), Some(Cursor::new(0, 1))); // jump over emoji
-        assert_eq!(buf.cursor_left(Cursor::new(0, 1)), Some(Cursor::new(0, 0)));
+        assert_eq!(buf.prev_cursor(Cursor::new(0, 5)), Some(Cursor::new(0, 1))); // jump over emoji
+        assert_eq!(buf.prev_cursor(Cursor::new(0, 1)), Some(Cursor::new(0, 0)));
     }
 
     #[test]
-    fn test_cursor_left_across_newline() {
+    fn test_prev_cursor_across_newline() {
         let buf = Buffer::from_str("ab\ncd");
 
-        assert_eq!(buf.cursor_left(Cursor::new(1, 0)), Some(Cursor::new(0, 2))); // cross newline
-        assert_eq!(buf.cursor_left(Cursor::new(0, 2)), Some(Cursor::new(0, 1)));
+        assert_eq!(buf.prev_cursor(Cursor::new(1, 0)), Some(Cursor::new(0, 2))); // cross newline
+        assert_eq!(buf.prev_cursor(Cursor::new(0, 2)), Some(Cursor::new(0, 1)));
     }
 
     #[test]
-    fn test_cursor_left_at_start() {
+    fn test_prev_cursor_at_start() {
         let buf = Buffer::from_str("ab");
 
-        assert_eq!(buf.cursor_left(Cursor::new(0, 0)), None);
+        assert_eq!(buf.prev_cursor(Cursor::new(0, 0)), None);
+    }
+
+    // next_cursor_line tests
+
+    #[test]
+    fn test_next_cursor_line_ascii() {
+        let buf = Buffer::from_str("hello");
+
+        // At start, next is col 1
+        assert_eq!(buf.next_cursor_line(Cursor::new(0, 0)), Some(Cursor::new(0, 1)));
+        // At middle
+        assert_eq!(buf.next_cursor_line(Cursor::new(0, 2)), Some(Cursor::new(0, 3)));
+        // At last char, next is end of line
+        assert_eq!(buf.next_cursor_line(Cursor::new(0, 4)), Some(Cursor::new(0, 5)));
+        // At end of line, None
+        assert_eq!(buf.next_cursor_line(Cursor::new(0, 5)), None);
+    }
+
+    #[test]
+    fn test_next_cursor_line_emoji() {
+        let buf = Buffer::from_str("a😀b"); // emoji is 4 bytes
+
+        // At 'a', next is start of emoji
+        assert_eq!(buf.next_cursor_line(Cursor::new(0, 0)), Some(Cursor::new(0, 1)));
+        // At emoji, next is 'b'
+        assert_eq!(buf.next_cursor_line(Cursor::new(0, 1)), Some(Cursor::new(0, 5)));
+        // At 'b', next is end of line
+        assert_eq!(buf.next_cursor_line(Cursor::new(0, 5)), Some(Cursor::new(0, 6)));
+        // At end of line, None
+        assert_eq!(buf.next_cursor_line(Cursor::new(0, 6)), None);
+    }
+
+    #[test]
+    fn test_next_cursor_line_at_end_of_line() {
+        let buf = Buffer::from_str("hello");
+
+        // At end of line, returns None (doesn't wrap to next line)
+        assert_eq!(buf.next_cursor_line(Cursor::new(0, 5)), None);
+    }
+
+    // prev_cursor_line tests
+
+    #[test]
+    fn test_prev_cursor_line_ascii() {
+        let buf = Buffer::from_str("hello");
+
+        // At col 1, prev is col 0
+        assert_eq!(buf.prev_cursor_line(Cursor::new(0, 1)), Some(Cursor::new(0, 0)));
+        // At col 3, prev is col 2
+        assert_eq!(buf.prev_cursor_line(Cursor::new(0, 3)), Some(Cursor::new(0, 2)));
+        // At start, None
+        assert_eq!(buf.prev_cursor_line(Cursor::new(0, 0)), None);
+    }
+
+    #[test]
+    fn test_prev_cursor_line_emoji() {
+        let buf = Buffer::from_str("a😀b"); // emoji is 4 bytes
+
+        // At emoji start, prev is 'a'
+        assert_eq!(buf.prev_cursor_line(Cursor::new(0, 1)), Some(Cursor::new(0, 0)));
+        // At 'b', prev is emoji start
+        assert_eq!(buf.prev_cursor_line(Cursor::new(0, 5)), Some(Cursor::new(0, 1)));
+        // At start, None
+        assert_eq!(buf.prev_cursor_line(Cursor::new(0, 0)), None);
+    }
+
+    #[test]
+    fn test_prev_cursor_line_at_start_of_line() {
+        let buf = Buffer::from_str("hello");
+
+        // At start of line, returns None (doesn't wrap to prev line)
+        assert_eq!(buf.prev_cursor_line(Cursor::new(0, 0)), None);
     }
 
     // cursor_down tests
@@ -3372,7 +3534,7 @@ mod tests {
         assert_eq!(buf.as_str(), "日本語");
         assert_eq!(buf.line_len(0), 9);
 
-        let cursor_after_first_char = buf.cursor_right(Cursor::new(0, 0));
+        let cursor_after_first_char = buf.next_cursor(Cursor::new(0, 0));
         assert_eq!(cursor_after_first_char, Some(Cursor::new(0, 3)));
 
         if let Some(cursor) = cursor_after_first_char {
@@ -3381,7 +3543,7 @@ mod tests {
 
         assert_eq!(buf.as_str(), "日X本語");
 
-        let cursor_after_insert = buf.cursor_right(cursor_after_first_char.unwrap());
+        let cursor_after_insert = buf.next_cursor(cursor_after_first_char.unwrap());
         assert_eq!(cursor_after_insert, Some(Cursor::new(0, 4)));
     }
 
@@ -3392,7 +3554,7 @@ mod tests {
         assert_eq!(buf.as_str(), "😀😀");
         assert_eq!(buf.line_len(0), 8);
 
-        let cursor_after_first_emoji = buf.cursor_right(Cursor::new(0, 0));
+        let cursor_after_first_emoji = buf.next_cursor(Cursor::new(0, 0));
         assert_eq!(cursor_after_first_emoji, Some(Cursor::new(0, 4)));
 
         if let Some(cursor) = cursor_after_first_emoji {
@@ -3401,7 +3563,7 @@ mod tests {
 
         assert_eq!(buf.as_str(), "😀X😀");
 
-        let cursor_after_insert = buf.cursor_right(cursor_after_first_emoji.unwrap());
+        let cursor_after_insert = buf.next_cursor(cursor_after_first_emoji.unwrap());
         assert_eq!(cursor_after_insert, Some(Cursor::new(0, 5)));
     }
 
@@ -3411,7 +3573,7 @@ mod tests {
 
         assert_eq!(buf.as_str(), "a😀b");
 
-        let cursor_after_emoji = buf.cursor_right(Cursor::new(0, 1));
+        let cursor_after_emoji = buf.next_cursor(Cursor::new(0, 1));
         assert_eq!(cursor_after_emoji, Some(Cursor::new(0, 5)));
 
         if let Some(cursor) = cursor_after_emoji {

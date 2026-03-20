@@ -545,14 +545,14 @@ impl Window {
 
     pub fn move_cursor_left(&mut self) {
         let cursor = self.buffer_view.cursor();
-        if let Some(new_cursor) = self.buffer_view.buffer().cursor_left(cursor) {
+        if let Some(new_cursor) = self.buffer_view.buffer().prev_cursor(cursor) {
             self.buffer_view.set_cursor(new_cursor);
         }
     }
 
     pub fn move_cursor_right(&mut self) {
         let cursor = self.buffer_view.cursor();
-        if let Some(new_cursor) = self.buffer_view.buffer().cursor_right(cursor) {
+        if let Some(new_cursor) = self.buffer_view.buffer().next_cursor(cursor) {
             self.buffer_view.set_cursor(new_cursor);
         }
     }
