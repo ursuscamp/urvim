@@ -92,6 +92,10 @@ pub enum Action {
     RepeatLastFind,
     /// Repeat the last character search in the opposite direction (',')
     RepeatLastFindReverse,
+    /// Undo the last change
+    Undo,
+    /// Redo the last undone change
+    Redo,
     /// Count prefix: repeats the inner action the specified number of times,
     /// or goes to the target absolute line number for line actions.
     Count(usize, Box<Action>),
@@ -221,6 +225,79 @@ impl Action {
             | Action::OpenLineBelow
             | Action::OpenLineAbove => true,
             Action::Count(_, inner) => inner.switches_to_insert_mode(),
+            _ => false,
+        }
+    }
+
+    /// Returns true if this action should trigger a snapshot before execution.
+    ///
+    /// Mode switches and text-modifying actions in normal mode create snapshots.
+    /// Individual insert characters do NOT create snapshots (batched at SwitchToNormal).
+    pub fn is_snapshottable(&self) -> bool {
+        match self {
+            // SwitchToNormal captures post-edit state for redo
+            Action::SwitchToNormal => true,
+
+            // Text-modifying actions in normal mode - snapshot
+            Action::DeleteBackward
+            | Action::DeleteForward
+            | Action::DeleteLine
+            | Action::ChangeLine
+            | Action::ChangeToLineEnd
+            | Action::JoinWithSpace
+            | Action::JoinWithoutSpace
+            | Action::AppendAfterCursor
+            | Action::AppendToLineEnd
+            | Action::InsertAtLineStart
+            | Action::OpenLineBelow
+            | Action::OpenLineAbove => true,
+
+            // InsertChar - NO snapshot (handled by SwitchToNormal)
+            Action::InsertChar(_) => false,
+
+            // Undo/Redo - no snapshot (they ARE the undo/redo)
+            Action::Undo | Action::Redo => false,
+
+            // Count wraps the inner action
+            Action::Count(_, inner) => inner.is_snapshottable(),
+
+            // Everything else (movement, Quit, etc.) - no snapshot
+            _ => false,
+        }
+    }
+
+    /// Returns true if this action should update the cursor in the active snapshot.
+    ///
+    /// All movement actions update the cursor for undo/redo purposes.
+    pub fn updates_snapshot_cursor(&self) -> bool {
+        match self {
+            // All movement actions update cursor in active snapshot
+            Action::MoveLeft
+            | Action::MoveDown
+            | Action::MoveUp
+            | Action::MoveRight
+            | Action::ForwardTo(_)
+            | Action::BackTo(_)
+            | Action::MoveToLineEnd
+            | Action::MoveToLineStart
+            | Action::MoveToLineContentStart
+            | Action::MoveToFirstLine
+            | Action::MoveToLastLine
+            | Action::MoveToScreenTop
+            | Action::MoveToScreenMiddle
+            | Action::MoveToScreenBottom
+            | Action::MoveToMatchingBracket
+            | Action::MoveToPreviousParagraph
+            | Action::MoveToNextParagraph
+            | Action::FindForward(_)
+            | Action::FindBackward(_)
+            | Action::TillForward(_)
+            | Action::TillBackward(_)
+            | Action::RepeatLastFind
+            | Action::RepeatLastFindReverse => true,
+
+            Action::Count(_, inner) => inner.updates_snapshot_cursor(),
+
             _ => false,
         }
     }
@@ -621,6 +698,10 @@ impl NormalMode {
 
         // Quit (Ctrl-q)
         trie_keymap.insert("<C-q>".to_string(), Action::Quit);
+
+        // Undo/Redo
+        trie_keymap.insert("u".to_string(), Action::Undo);
+        trie_keymap.insert("U".to_string(), Action::Redo);
 
         // Arrow keys for convenience
         trie_keymap.insert("<Left>".to_string(), Action::MoveLeft);
@@ -1643,5 +1724,154 @@ mod tests {
     #[test]
     fn test_percent_key_is_not_countable() {
         assert!(!Action::MoveToMatchingBracket.is_countable());
+    }
+
+    // =========================================================================
+    // Action::is_snapshottable() and Action::updates_snapshot_cursor() Tests
+    // =========================================================================
+
+    #[test]
+    fn test_is_snapshottable_mode_switches() {
+        // SwitchToNormal should be snapshottable (captures post-edit state)
+        assert!(Action::SwitchToNormal.is_snapshottable());
+        // SwitchToInsert should NOT be snapshottable
+        assert!(!Action::SwitchToInsert.is_snapshottable());
+    }
+
+    #[test]
+    fn test_is_snapshottable_text_modifying() {
+        // Text-modifying actions should be snapshottable
+        assert!(Action::DeleteBackward.is_snapshottable());
+        assert!(Action::DeleteForward.is_snapshottable());
+        assert!(Action::DeleteLine.is_snapshottable());
+        assert!(Action::ChangeLine.is_snapshottable());
+        assert!(Action::ChangeToLineEnd.is_snapshottable());
+        assert!(Action::JoinWithSpace.is_snapshottable());
+        assert!(Action::JoinWithoutSpace.is_snapshottable());
+        assert!(Action::AppendAfterCursor.is_snapshottable());
+        assert!(Action::AppendToLineEnd.is_snapshottable());
+        assert!(Action::InsertAtLineStart.is_snapshottable());
+        assert!(Action::OpenLineBelow.is_snapshottable());
+        assert!(Action::OpenLineAbove.is_snapshottable());
+    }
+
+    #[test]
+    fn test_is_snapshottable_insert_char() {
+        // InsertChar should NOT be snapshottable (batched at SwitchToNormal)
+        assert!(!Action::InsertChar('a').is_snapshottable());
+    }
+
+    #[test]
+    fn test_is_snapshottable_undo_redo() {
+        // Undo and Redo should NOT be snapshottable
+        assert!(!Action::Undo.is_snapshottable());
+        assert!(!Action::Redo.is_snapshottable());
+    }
+
+    #[test]
+    fn test_is_snapshottable_movement() {
+        // Movement actions should NOT be snapshottable
+        assert!(!Action::MoveLeft.is_snapshottable());
+        assert!(!Action::MoveRight.is_snapshottable());
+        assert!(!Action::MoveUp.is_snapshottable());
+        assert!(!Action::MoveDown.is_snapshottable());
+        assert!(!Action::MoveToLineEnd.is_snapshottable());
+        assert!(!Action::MoveToLineStart.is_snapshottable());
+        assert!(!Action::MoveToFirstLine.is_snapshottable());
+        assert!(!Action::MoveToLastLine.is_snapshottable());
+    }
+
+    #[test]
+    fn test_is_snapshottable_count() {
+        // Count action delegates to inner action
+        assert!(Action::Count(5, Box::new(Action::DeleteLine)).is_snapshottable());
+        assert!(!Action::Count(5, Box::new(Action::MoveDown)).is_snapshottable());
+    }
+
+    #[test]
+    fn test_updates_snapshot_cursor_movement() {
+        // All movement actions should update snapshot cursor
+        assert!(Action::MoveLeft.updates_snapshot_cursor());
+        assert!(Action::MoveRight.updates_snapshot_cursor());
+        assert!(Action::MoveUp.updates_snapshot_cursor());
+        assert!(Action::MoveDown.updates_snapshot_cursor());
+        assert!(Action::ForwardTo(Boundary::Word).updates_snapshot_cursor());
+        assert!(Action::BackTo(Boundary::Word).updates_snapshot_cursor());
+        assert!(Action::MoveToLineEnd.updates_snapshot_cursor());
+        assert!(Action::MoveToLineStart.updates_snapshot_cursor());
+        assert!(Action::MoveToLineContentStart.updates_snapshot_cursor());
+        assert!(Action::MoveToFirstLine.updates_snapshot_cursor());
+        assert!(Action::MoveToLastLine.updates_snapshot_cursor());
+        assert!(Action::MoveToScreenTop.updates_snapshot_cursor());
+        assert!(Action::MoveToScreenMiddle.updates_snapshot_cursor());
+        assert!(Action::MoveToScreenBottom.updates_snapshot_cursor());
+        assert!(Action::MoveToMatchingBracket.updates_snapshot_cursor());
+        assert!(Action::MoveToPreviousParagraph.updates_snapshot_cursor());
+        assert!(Action::MoveToNextParagraph.updates_snapshot_cursor());
+        assert!(Action::FindForward('a').updates_snapshot_cursor());
+        assert!(Action::FindBackward('a').updates_snapshot_cursor());
+        assert!(Action::TillForward('a').updates_snapshot_cursor());
+        assert!(Action::TillBackward('a').updates_snapshot_cursor());
+        assert!(Action::RepeatLastFind.updates_snapshot_cursor());
+        assert!(Action::RepeatLastFindReverse.updates_snapshot_cursor());
+    }
+
+    #[test]
+    fn test_updates_snapshot_cursor_non_movement() {
+        // Non-movement actions should NOT update snapshot cursor
+        assert!(!Action::InsertChar('a').updates_snapshot_cursor());
+        assert!(!Action::SwitchToInsert.updates_snapshot_cursor());
+        assert!(!Action::SwitchToNormal.updates_snapshot_cursor());
+        assert!(!Action::DeleteBackward.updates_snapshot_cursor());
+        assert!(!Action::DeleteForward.updates_snapshot_cursor());
+        assert!(!Action::DeleteLine.updates_snapshot_cursor());
+        assert!(!Action::Undo.updates_snapshot_cursor());
+        assert!(!Action::Redo.updates_snapshot_cursor());
+    }
+
+    #[test]
+    fn test_updates_snapshot_cursor_count() {
+        // Count action delegates to inner action
+        assert!(Action::Count(5, Box::new(Action::MoveDown)).updates_snapshot_cursor());
+        assert!(!Action::Count(5, Box::new(Action::DeleteLine)).updates_snapshot_cursor());
+    }
+
+    #[test]
+    fn test_is_snapshottable_all_text_modifying() {
+        // All text-modifying actions should be snapshottable
+        assert!(Action::DeleteBackward.is_snapshottable());
+        assert!(Action::DeleteForward.is_snapshottable());
+        assert!(Action::DeleteLine.is_snapshottable());
+        assert!(Action::ChangeLine.is_snapshottable());
+        assert!(Action::ChangeToLineEnd.is_snapshottable());
+        assert!(Action::JoinWithSpace.is_snapshottable());
+        assert!(Action::JoinWithoutSpace.is_snapshottable());
+        assert!(Action::AppendAfterCursor.is_snapshottable());
+        assert!(Action::AppendToLineEnd.is_snapshottable());
+        assert!(Action::InsertAtLineStart.is_snapshottable());
+        assert!(Action::OpenLineBelow.is_snapshottable());
+        assert!(Action::OpenLineAbove.is_snapshottable());
+    }
+
+    #[test]
+    fn test_is_snapshottable_others() {
+        // Quit and None should NOT be snapshottable
+        assert!(!Action::Quit.is_snapshottable());
+        assert!(!Action::None.is_snapshottable());
+    }
+
+    #[test]
+    fn test_is_snapshottable_screen_motions() {
+        // Screen-relative motions should NOT be snapshottable
+        assert!(!Action::MoveToScreenTop.is_snapshottable());
+        assert!(!Action::MoveToScreenMiddle.is_snapshottable());
+        assert!(!Action::MoveToScreenBottom.is_snapshottable());
+    }
+
+    #[test]
+    fn test_updates_snapshot_cursor_with_params() {
+        // Actions with parameters that are movements should update cursor
+        assert!(Action::ForwardTo(Boundary::WordEnd).updates_snapshot_cursor());
+        assert!(Action::BackTo(Boundary::BigWord).updates_snapshot_cursor());
     }
 }

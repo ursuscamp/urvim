@@ -75,28 +75,66 @@ fn main() -> io::Result<()> {
 
             match result {
                 HandleKeyResult::Complete(action) => {
-                    // First, try to process action through the widget (window)
-                    let action_result = window.process_action(&action);
-                    if action_result == ActionResult::NotHandled {
-                        // Fall back to app-level handling
-                        match action {
-                            Action::SwitchToNormal => {
-                                mode = Box::new(NormalMode::new());
-                                terminal.set_cursor_style(mode.cursor_style())?;
+                    // Handle Undo/Redo specially before snapshotting
+                    match action {
+                        Action::Undo => {
+                            // Before undo, take snapshot if action is snapshottable
+                            if action.is_snapshottable() {
+                                let cursor = window.buffer_view().cursor();
+                                window.buffer_view_mut().buffer_mut().push_snapshot(cursor);
                             }
-                            Action::SwitchToInsert => {
-                                mode = Box::new(InsertMode::new());
-                                terminal.set_cursor_style(mode.cursor_style())?;
+                            if let Some(cursor) = window.buffer_view_mut().buffer_mut().undo() {
+                                window.buffer_view_mut().set_cursor(cursor);
                             }
-                            Action::Quit => break,
-                            Action::None => { /* Ignore */ }
-                            _ => { /* Should have been handled by window */ }
                         }
-                    } else if action_result == ActionResult::Handled {
-                        // Check if this action switches to insert mode (handles Count actions recursively)
-                        if action.switches_to_insert_mode() {
-                            mode = Box::new(InsertMode::new());
-                            terminal.set_cursor_style(mode.cursor_style())?;
+                        Action::Redo => {
+                            // Before redo, take snapshot if action is snapshottable
+                            if action.is_snapshottable() {
+                                let cursor = window.buffer_view().cursor();
+                                window.buffer_view_mut().buffer_mut().push_snapshot(cursor);
+                            }
+                            if let Some(cursor) = window.buffer_view_mut().buffer_mut().redo() {
+                                window.buffer_view_mut().set_cursor(cursor);
+                            }
+                        }
+                        _ => {
+                            // Before processing, take snapshot if action is snapshottable
+                            if action.is_snapshottable() {
+                                let cursor = window.buffer_view().cursor();
+                                window.buffer_view_mut().buffer_mut().push_snapshot(cursor);
+                            }
+
+                            // First, try to process action through the widget (window)
+                            let action_result = window.process_action(&action);
+
+                            // After processing, update cursor in snapshot if action tracks cursor
+                            if action.updates_snapshot_cursor() {
+                                let cursor = window.buffer_view().cursor();
+                                window.buffer_view_mut().buffer_mut().update_cursor(cursor);
+                            }
+
+                            if action_result == ActionResult::NotHandled {
+                                // Fall back to app-level handling
+                                match action {
+                                    Action::SwitchToNormal => {
+                                        mode = Box::new(NormalMode::new());
+                                        terminal.set_cursor_style(mode.cursor_style())?;
+                                    }
+                                    Action::SwitchToInsert => {
+                                        mode = Box::new(InsertMode::new());
+                                        terminal.set_cursor_style(mode.cursor_style())?;
+                                    }
+                                    Action::Quit => break,
+                                    Action::None => { /* Ignore */ }
+                                    _ => { /* Should have been handled by window */ }
+                                }
+                            } else if action_result == ActionResult::Handled {
+                                // Check if this action switches to insert mode (handles Count actions recursively)
+                                if action.switches_to_insert_mode() {
+                                    mode = Box::new(InsertMode::new());
+                                    terminal.set_cursor_style(mode.cursor_style())?;
+                                }
+                            }
                         }
                     }
                 }

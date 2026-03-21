@@ -72,6 +72,127 @@ pub enum Boundary {
     BigWordEnd,
 }
 
+/// A single snapshot of buffer state (text + cursor).
+///
+/// This is used for undo/redo functionality to store the buffer state
+/// at a particular point in time.
+#[derive(Debug, Clone)]
+struct Snapshot {
+    /// The text content at this point in time.
+    lines: Vector<Arc<str>>,
+    /// The cursor position at this point in time.
+    cursor: Cursor,
+}
+
+/// Stores undo/redo history for a buffer.
+///
+/// The history is a list of snapshots, with a position pointer indicating
+/// the "active" snapshot (the one we'd restore if we undo).
+///
+/// Invariants:
+/// - `0 <= position <= history.len()`
+/// - position == 0 means no snapshots yet (or at oldest)
+/// - position > 0 means "active snapshot" is at position - 1
+/// - position == history.len() means at "current" state (no redo available)
+#[derive(Debug, Clone)]
+struct UndoState {
+    /// History of snapshots, oldest first.
+    history: Vector<Snapshot>,
+    /// Current position in history.
+    /// - position == 0: no snapshots yet (or at oldest)
+    /// - position > 0: "active snapshot" is at position - 1
+    /// - position == history.len(): at "current" state
+    position: usize,
+}
+
+impl UndoState {
+    /// Creates a new undo state with a single initial snapshot.
+    fn new(lines: Vector<Arc<str>>, cursor: Cursor) -> Self {
+        Self {
+            history: Vector::unit(Snapshot { lines, cursor }),
+            position: 0,
+        }
+    }
+
+    /// Saves the current state to the undo history.
+    ///
+    /// If the text matches the current active snapshot's text, only updates the cursor.
+    /// Otherwise, truncates redo history and pushes a new snapshot.
+    fn push_snapshot(&mut self, lines: Vector<Arc<str>>, cursor: Cursor) {
+        // Check if text matches current active snapshot (deduplication)
+        // position is the index of the active snapshot
+        if let Some(active) = self.history.get(self.position)
+            && active.lines == lines
+        {
+            // Text unchanged, just update cursor of active snapshot
+            if let Some(active_snapshot) = self.history.get_mut(self.position) {
+                *active_snapshot = Snapshot { lines, cursor };
+            }
+            return;
+        }
+
+        // Truncate redo history (anything after current position)
+        while self.history.len() > self.position + 1 {
+            self.history.pop_back();
+        }
+
+        // Push new snapshot
+        self.history.push_back(Snapshot { lines, cursor });
+        self.position = self.history.len() - 1;
+    }
+
+    /// Updates the cursor in the current active snapshot.
+    ///
+    /// Does nothing if there is no active snapshot.
+    fn update_cursor(&mut self, cursor: Cursor) {
+        if let Some(active) = self.history.get_mut(self.position) {
+            active.cursor = cursor;
+        }
+    }
+
+    /// Restores the previous state.
+    ///
+    /// Returns the lines and cursor of the previous snapshot, or None if no undo available.
+    fn undo(&mut self) -> Option<(Vector<Arc<str>>, Cursor)> {
+        if self.position == 0 {
+            return None; // Nothing to undo
+        }
+
+        self.position -= 1;
+        let snapshot = self.history.get(self.position)?;
+        Some((snapshot.lines.clone(), snapshot.cursor))
+    }
+
+    /// Restores the next state.
+    ///
+    /// Returns the lines and cursor of the next snapshot, or None if no redo available.
+    fn redo(&mut self) -> Option<(Vector<Arc<str>>, Cursor)> {
+        if self.position >= self.history.len() - 1 {
+            return None; // Nothing to redo
+        }
+
+        self.position += 1;
+        let snapshot = self.history.get(self.position)?;
+        Some((snapshot.lines.clone(), snapshot.cursor))
+    }
+
+    /// Returns true if undo is available.
+    fn can_undo(&self) -> bool {
+        self.position > 0
+    }
+
+    /// Returns true if redo is available.
+    fn can_redo(&self) -> bool {
+        self.position < self.history.len() - 1
+    }
+
+    /// Clears all undo/redo history.
+    fn clear(&mut self) {
+        self.history.clear();
+        self.position = 0;
+    }
+}
+
 /// A text buffer backed by a Vector of Arc<str> lines.
 ///
 /// Buffer provides efficient text editing with proper Unicode support.
@@ -91,6 +212,7 @@ pub enum Boundary {
 pub struct Buffer {
     lines: Vector<Arc<str>>,
     path: Option<AbsolutePath>,
+    undo_state: UndoState,
 }
 
 impl Default for Buffer {
@@ -111,9 +233,11 @@ impl Buffer {
     /// assert!(buf.is_empty());
     /// ```
     pub fn new() -> Self {
+        let lines: Vector<Arc<str>> = Vector::unit(Arc::from(""));
         Self {
-            lines: Vector::unit(Arc::from("")),
+            lines: lines.clone(),
             path: None,
+            undo_state: UndoState::new(lines, Cursor::new(0, 0)),
         }
     }
 
@@ -140,7 +264,11 @@ impl Buffer {
         } else {
             text.lines().map(Arc::from).collect::<Vector<_>>()
         };
-        Self { lines, path: None }
+        Self {
+            lines: lines.clone(),
+            path: None,
+            undo_state: UndoState::new(lines, Cursor::new(0, 0)),
+        }
     }
 
     #[doc(hidden)]
@@ -151,9 +279,11 @@ impl Buffer {
     }
 
     pub fn with_path(path: AbsolutePath) -> Self {
+        let lines: Vector<Arc<str>> = Vector::unit(Arc::from(""));
         Self {
-            lines: Vector::unit(Arc::from("")),
+            lines: lines.clone(),
             path: Some(path),
+            undo_state: UndoState::new(lines, Cursor::new(0, 0)),
         }
     }
 
@@ -260,6 +390,69 @@ impl Buffer {
 
     pub fn file_name(&self) -> Option<&std::ffi::OsStr> {
         self.path.as_ref().and_then(|p| p.file_name())
+    }
+
+    // =========================================================================
+    // Undo/Redo Methods
+    // =========================================================================
+
+    /// Takes a snapshot of the current buffer state for undo/redo.
+    ///
+    /// If the current text matches the active snapshot's text, only updates the cursor.
+    /// Otherwise, truncates redo history and pushes a new snapshot.
+    ///
+    /// # Arguments
+    ///
+    /// * `cursor` - The current cursor position
+    pub fn push_snapshot(&mut self, cursor: Cursor) {
+        self.undo_state.push_snapshot(self.lines.clone(), cursor);
+    }
+
+    /// Updates the cursor position in the active snapshot for undo/redo.
+    ///
+    /// This is called by cursor movement actions to track cursor position.
+    ///
+    /// # Arguments
+    ///
+    /// * `cursor` - The new cursor position
+    pub fn update_cursor(&mut self, cursor: Cursor) {
+        self.undo_state.update_cursor(cursor);
+    }
+
+    /// Undoes the last change.
+    ///
+    /// Returns the cursor if undo was successful, None if nothing to undo.
+    pub fn undo(&mut self) -> Option<Cursor> {
+        match self.undo_state.undo() {
+            Some((lines, cursor)) => {
+                self.lines = lines;
+                Some(cursor)
+            }
+            None => None,
+        }
+    }
+
+    /// Redoes the last undone change.
+    ///
+    /// Returns the cursor if redo was successful, None if nothing to redo.
+    pub fn redo(&mut self) -> Option<Cursor> {
+        match self.undo_state.redo() {
+            Some((lines, cursor)) => {
+                self.lines = lines;
+                Some(cursor)
+            }
+            None => None,
+        }
+    }
+
+    /// Returns true if there is an undo available.
+    pub fn can_undo(&self) -> bool {
+        self.undo_state.can_undo()
+    }
+
+    /// Returns true if there is a redo available.
+    pub fn can_redo(&self) -> bool {
+        self.undo_state.can_redo()
     }
 
     /// Gets the line at the specified index.
