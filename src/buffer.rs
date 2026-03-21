@@ -72,6 +72,16 @@ pub enum Boundary {
     BigWordEnd,
 }
 
+/// Represents a selected text region for a text object.
+/// The range is inclusive at start and exclusive at end.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TextObjectRange {
+    /// Start cursor position (inclusive)
+    pub start: Cursor,
+    /// End cursor position (exclusive - cursor would be here after selection)
+    pub end: Cursor,
+}
+
 /// A single snapshot of buffer state (text + cursor).
 ///
 /// This is used for undo/redo functionality to store the buffer state
@@ -966,26 +976,26 @@ impl Buffer {
     /// ```
     pub fn delete_lines(&mut self, start_line: usize, count: usize) -> Option<Cursor> {
         let total_lines = self.lines.len();
-        
+
         // Handle empty buffer
         if total_lines == 0 {
             return Some(Cursor::new(0, 0));
         }
-        
+
         // Validate start_line
         if start_line >= total_lines {
             return None;
         }
-        
+
         // Clamp count to available lines
         let actual_count = (total_lines - start_line).min(count);
         if actual_count == 0 {
             return Some(Cursor::new(start_line, 0));
         }
-        
+
         // Calculate end position (line after the last deleted line)
         let end_line = start_line + actual_count;
-        
+
         if end_line >= total_lines {
             // Deleting to end of file
             // Keep lines before start_line
@@ -1003,7 +1013,7 @@ impl Buffer {
             left.append(right);
             self.lines = left;
         }
-        
+
         // Return new cursor position
         let new_line_count = self.lines.len();
         if new_line_count == 0 {
@@ -1150,7 +1160,7 @@ impl Buffer {
     /// ```
     pub fn insert_lines_after(&mut self, line: usize, count: usize) -> Option<Cursor> {
         let total_lines = self.lines.len();
-        
+
         // Handle empty buffer - create first line if inserting into empty
         if total_lines == 0 {
             if count > 0 {
@@ -1158,15 +1168,15 @@ impl Buffer {
             }
             return Some(Cursor::new(0, 0));
         }
-        
+
         // Clamp line to valid range (insert after last line means append)
         let insert_after = line.min(total_lines);
-        
+
         // If count is 0, just return cursor at the given line (no insertion)
         if count == 0 {
             return Some(Cursor::new(line, 0));
         }
-        
+
         // Insert the empty lines
         if insert_after >= total_lines {
             // Appending to end of file
@@ -2726,17 +2736,320 @@ impl Buffer {
         }
     }
 
+    /// Get the inner word range from cursor position.
+    ///
+    /// - If cursor is inside a word: returns that word (from word start to word end)
+    /// - If cursor is inside whitespace: returns the whitespace region
+    ///
+    /// Returns None if cursor is on an empty buffer or at invalid position.
+    pub fn get_inner_word_range(&self, cursor: Cursor) -> Option<TextObjectRange> {
+        let line = self.line_at(cursor.line)?;
+        let line_str = line.as_ref();
+        let line_len = line_str.len();
+
+        // Find what we're at: word char, whitespace, or empty
+        let cursor_grapheme = self.grapheme_at_byte(cursor.line, cursor.col);
+
+        if cursor_grapheme.map_or(true, |g| Self::is_word_char(g)) {
+            // Cursor is inside a word (or at start of word-like char)
+            // Find word boundaries
+            let mut word_start = cursor.col;
+            let mut word_end = cursor.col;
+
+            // Scan backward to find word start
+            let mut col = cursor.col;
+            while col > 0 {
+                let prev_col = self.prev_grapheme_start(line_str, col);
+                if prev_col == col {
+                    break;
+                }
+                col = prev_col;
+                if let Some(g) = line_str.get(col..).and_then(|s| s.graphemes(true).next()) {
+                    if Self::is_word_char(g) {
+                        word_start = col;
+                    } else {
+                        break;
+                    }
+                } else {
+                    break;
+                }
+            }
+
+            // Scan forward to find word end
+            col = cursor.col;
+            while col < line_len {
+                let next_grapheme = line_str.get(col..).and_then(|s| s.graphemes(true).next());
+                if let Some(g) = next_grapheme {
+                    if Self::is_word_char(g) {
+                        word_end = col + g.len();
+                        col = word_end;
+                    } else {
+                        break;
+                    }
+                } else {
+                    break;
+                }
+            }
+
+            Some(TextObjectRange {
+                start: Cursor::new(cursor.line, word_start),
+                end: Cursor::new(cursor.line, word_end),
+            })
+        } else {
+            // Cursor is in whitespace or at non-word char
+            // Find the whitespace region
+            let mut ws_start = cursor.col;
+            let mut ws_end = cursor.col;
+
+            // Scan backward to find whitespace start
+            let mut col = cursor.col;
+            while col > 0 {
+                let prev_col = self.prev_grapheme_start(line_str, col);
+                if prev_col == col {
+                    break;
+                }
+                col = prev_col;
+                if let Some(g) = line_str.get(col..).and_then(|s| s.graphemes(true).next()) {
+                    if Self::is_whitespace_char(g) {
+                        ws_start = col;
+                    } else {
+                        break;
+                    }
+                } else {
+                    break;
+                }
+            }
+
+            // Scan forward to find whitespace end
+            col = cursor.col;
+            while col < line_len {
+                let next_grapheme = line_str.get(col..).and_then(|s| s.graphemes(true).next());
+                if let Some(g) = next_grapheme {
+                    if Self::is_whitespace_char(g) {
+                        ws_end = col + g.len();
+                        col = ws_end;
+                    } else {
+                        break;
+                    }
+                } else {
+                    break;
+                }
+            }
+
+            Some(TextObjectRange {
+                start: Cursor::new(cursor.line, ws_start),
+                end: Cursor::new(cursor.line, ws_end),
+            })
+        }
+    }
+
+    /// Get an inner word range extended by count consecutive words.
+    pub fn get_inner_word_range_with_count(
+        &self,
+        cursor: Cursor,
+        count: usize,
+    ) -> Option<TextObjectRange> {
+        let mut range = self.get_inner_word_range(cursor)?;
+
+        for _ in 1..count {
+            let next_cursor = self.next_non_whitespace_cursor(range.end)?;
+            let next_range = self.get_inner_word_range(next_cursor)?;
+            range.end = next_range.end;
+        }
+
+        Some(range)
+    }
+
+    /// Get the around word range from cursor position.
+    ///
+    /// - If cursor is inside a word: returns word + ALL trailing whitespace
+    /// - If cursor is inside whitespace: returns whitespace + trailing word after it
+    ///
+    /// Returns None if cursor is on an empty buffer or at invalid position.
+    pub fn get_around_word_range(&self, cursor: Cursor) -> Option<TextObjectRange> {
+        let line = self.line_at(cursor.line)?;
+        let line_str = line.as_ref();
+        let line_len = line_str.len();
+
+        // Find what we're at: word char, whitespace, or empty
+        let cursor_grapheme = self.grapheme_at_byte(cursor.line, cursor.col);
+
+        if cursor_grapheme.map_or(true, |g| Self::is_word_char(g)) {
+            // Cursor is inside a word - get inner word + all trailing whitespace
+            let inner = self.get_inner_word_range(cursor)?;
+            let mut end_col = inner.end.col;
+
+            // Scan forward to find end of all trailing whitespace
+            let mut col = inner.end.col;
+            while col < line_len {
+                let next_grapheme = line_str.get(col..).and_then(|s| s.graphemes(true).next());
+                if let Some(g) = next_grapheme {
+                    if Self::is_whitespace_char(g) {
+                        end_col = col + g.len();
+                        col = end_col;
+                    } else {
+                        break;
+                    }
+                } else {
+                    break;
+                }
+            }
+
+            Some(TextObjectRange {
+                start: inner.start,
+                end: Cursor::new(cursor.line, end_col),
+            })
+        } else {
+            // Cursor is in whitespace - get whitespace + trailing word
+            let mut ws_start = cursor.col;
+            let mut ws_end = cursor.col;
+            let mut word_end_col = cursor.col;
+
+            // Find whitespace start (scan backward)
+            let mut col = cursor.col;
+            while col > 0 {
+                let prev_col = self.prev_grapheme_start(line_str, col);
+                if prev_col == col {
+                    break;
+                }
+                col = prev_col;
+                if let Some(g) = line_str.get(col..).and_then(|s| s.graphemes(true).next()) {
+                    if Self::is_whitespace_char(g) {
+                        ws_start = col;
+                    } else {
+                        break;
+                    }
+                } else {
+                    break;
+                }
+            }
+
+            // Find whitespace end and trailing word (scan forward)
+            col = cursor.col;
+            while col < line_len {
+                let next_grapheme = line_str.get(col..).and_then(|s| s.graphemes(true).next());
+                if let Some(g) = next_grapheme {
+                    if Self::is_whitespace_char(g) {
+                        ws_end = col + g.len();
+                        col = ws_end;
+                    } else if Self::is_word_char(g) {
+                        // Found start of trailing word
+                        word_end_col = col;
+                        // Find end of this word
+                        while word_end_col < line_len {
+                            let word_grapheme = line_str
+                                .get(word_end_col..)
+                                .and_then(|s| s.graphemes(true).next());
+                            if let Some(wg) = word_grapheme {
+                                if Self::is_word_char(wg) {
+                                    word_end_col = word_end_col + wg.len();
+                                } else {
+                                    break;
+                                }
+                            } else {
+                                break;
+                            }
+                        }
+                        break;
+                    } else {
+                        // Non-word, non-whitespace char - treat as separate word
+                        word_end_col = col + g.len();
+                        break;
+                    }
+                } else {
+                    break;
+                }
+            }
+
+            // Determine end: either at end of whitespace or end of trailing word
+            let end_col = if word_end_col > ws_end {
+                word_end_col
+            } else {
+                ws_end
+            };
+
+            Some(TextObjectRange {
+                start: Cursor::new(cursor.line, ws_start),
+                end: Cursor::new(cursor.line, end_col),
+            })
+        }
+    }
+
+    /// Get an around word range extended by count consecutive words.
+    pub fn get_around_word_range_with_count(
+        &self,
+        cursor: Cursor,
+        count: usize,
+    ) -> Option<TextObjectRange> {
+        let mut range = self.get_around_word_range(cursor)?;
+
+        for _ in 1..count {
+            let next_cursor = self.next_non_whitespace_cursor(range.end)?;
+            let next_range = self.get_around_word_range(next_cursor)?;
+            range.end = next_range.end;
+        }
+
+        Some(range)
+    }
+
+    /// Delete text in the given range.
+    /// Returns the new cursor position after deletion (at the start of the deleted region).
+    pub fn delete_range(&mut self, range: TextObjectRange) -> Option<Cursor> {
+        let start = range.start;
+        let end = range.end;
+
+        // Validate range
+        if start.line > end.line || (start.line == end.line && start.col >= end.col) {
+            return Some(start);
+        }
+
+        // Save the start position for return
+        let new_cursor = start;
+
+        // Use the remove method to delete
+        self.remove(start, end);
+
+        Some(new_cursor)
+    }
+
+    /// Get the byte offset of the previous grapheme start before the given byte offset.
+    /// Returns the same offset if already at start.
+    fn prev_grapheme_start(&self, line: &str, byte_offset: usize) -> usize {
+        if byte_offset == 0 {
+            return 0;
+        }
+        let mut prev_offset = 0;
+        for (byte_pos, _grapheme) in line.grapheme_indices(true) {
+            if byte_pos >= byte_offset {
+                break;
+            }
+            prev_offset = byte_pos;
+        }
+        prev_offset
+    }
+
+    fn next_non_whitespace_cursor(&self, cursor: Cursor) -> Option<Cursor> {
+        let line = self.line_at(cursor.line)?;
+        let line_str = line.as_ref();
+        let mut col = cursor.col;
+
+        while col < line_str.len() {
+            let grapheme = line_str.get(col..).and_then(|s| s.graphemes(true).next())?;
+            if !Self::is_whitespace_char(grapheme) {
+                return Some(Cursor::new(cursor.line, col));
+            }
+            col += grapheme.len();
+        }
+
+        None
+    }
+
     /// Find the next occurrence of a character forward from cursor position.
     /// Searches from cursor.col + 1 onwards within the same line.
     /// Returns the cursor position ON the found character.
     /// If count > 1, finds the count-th occurrence.
     /// Returns None if character not found.
-    pub fn find_char_forward(
-        &self,
-        cursor: Cursor,
-        target: char,
-        count: usize,
-    ) -> Option<Cursor> {
+    pub fn find_char_forward(&self, cursor: Cursor, target: char, count: usize) -> Option<Cursor> {
         let line_idx = cursor.line;
         let line = self.line_at(line_idx)?;
         let line_str = line.as_ref();
@@ -2767,12 +3080,7 @@ impl Buffer {
     /// Returns the cursor position ON the found character.
     /// If count > 1, finds the count-th previous occurrence.
     /// Returns None if character not found.
-    pub fn find_char_backward(
-        &self,
-        cursor: Cursor,
-        target: char,
-        count: usize,
-    ) -> Option<Cursor> {
+    pub fn find_char_backward(&self, cursor: Cursor, target: char, count: usize) -> Option<Cursor> {
         let line_idx = cursor.line;
         let line = self.line_at(line_idx)?;
         let line_str = line.as_ref();
@@ -3225,11 +3533,20 @@ mod tests {
         let buf = Buffer::from_str("hello");
 
         // At start, next is col 1
-        assert_eq!(buf.next_cursor_line(Cursor::new(0, 0)), Some(Cursor::new(0, 1)));
+        assert_eq!(
+            buf.next_cursor_line(Cursor::new(0, 0)),
+            Some(Cursor::new(0, 1))
+        );
         // At middle
-        assert_eq!(buf.next_cursor_line(Cursor::new(0, 2)), Some(Cursor::new(0, 3)));
+        assert_eq!(
+            buf.next_cursor_line(Cursor::new(0, 2)),
+            Some(Cursor::new(0, 3))
+        );
         // At last char, next is end of line
-        assert_eq!(buf.next_cursor_line(Cursor::new(0, 4)), Some(Cursor::new(0, 5)));
+        assert_eq!(
+            buf.next_cursor_line(Cursor::new(0, 4)),
+            Some(Cursor::new(0, 5))
+        );
         // At end of line, None
         assert_eq!(buf.next_cursor_line(Cursor::new(0, 5)), None);
     }
@@ -3239,11 +3556,20 @@ mod tests {
         let buf = Buffer::from_str("a😀b"); // emoji is 4 bytes
 
         // At 'a', next is start of emoji
-        assert_eq!(buf.next_cursor_line(Cursor::new(0, 0)), Some(Cursor::new(0, 1)));
+        assert_eq!(
+            buf.next_cursor_line(Cursor::new(0, 0)),
+            Some(Cursor::new(0, 1))
+        );
         // At emoji, next is 'b'
-        assert_eq!(buf.next_cursor_line(Cursor::new(0, 1)), Some(Cursor::new(0, 5)));
+        assert_eq!(
+            buf.next_cursor_line(Cursor::new(0, 1)),
+            Some(Cursor::new(0, 5))
+        );
         // At 'b', next is end of line
-        assert_eq!(buf.next_cursor_line(Cursor::new(0, 5)), Some(Cursor::new(0, 6)));
+        assert_eq!(
+            buf.next_cursor_line(Cursor::new(0, 5)),
+            Some(Cursor::new(0, 6))
+        );
         // At end of line, None
         assert_eq!(buf.next_cursor_line(Cursor::new(0, 6)), None);
     }
@@ -3263,9 +3589,15 @@ mod tests {
         let buf = Buffer::from_str("hello");
 
         // At col 1, prev is col 0
-        assert_eq!(buf.prev_cursor_line(Cursor::new(0, 1)), Some(Cursor::new(0, 0)));
+        assert_eq!(
+            buf.prev_cursor_line(Cursor::new(0, 1)),
+            Some(Cursor::new(0, 0))
+        );
         // At col 3, prev is col 2
-        assert_eq!(buf.prev_cursor_line(Cursor::new(0, 3)), Some(Cursor::new(0, 2)));
+        assert_eq!(
+            buf.prev_cursor_line(Cursor::new(0, 3)),
+            Some(Cursor::new(0, 2))
+        );
         // At start, None
         assert_eq!(buf.prev_cursor_line(Cursor::new(0, 0)), None);
     }
@@ -3275,9 +3607,15 @@ mod tests {
         let buf = Buffer::from_str("a😀b"); // emoji is 4 bytes
 
         // At emoji start, prev is 'a'
-        assert_eq!(buf.prev_cursor_line(Cursor::new(0, 1)), Some(Cursor::new(0, 0)));
+        assert_eq!(
+            buf.prev_cursor_line(Cursor::new(0, 1)),
+            Some(Cursor::new(0, 0))
+        );
         // At 'b', prev is emoji start
-        assert_eq!(buf.prev_cursor_line(Cursor::new(0, 5)), Some(Cursor::new(0, 1)));
+        assert_eq!(
+            buf.prev_cursor_line(Cursor::new(0, 5)),
+            Some(Cursor::new(0, 1))
+        );
         // At start, None
         assert_eq!(buf.prev_cursor_line(Cursor::new(0, 0)), None);
     }
@@ -4296,34 +4634,34 @@ mod tests {
         let cursor = buf.change_lines(0, 1);
         assert_eq!(cursor, Some(Cursor::new(0, 0)));
         assert_eq!(buf.line_count(), 3);
-        assert_eq!(buf.as_str(), "\nworld\ntest");  // First line replaced with blank
+        assert_eq!(buf.as_str(), "\nworld\ntest"); // First line replaced with blank
     }
 
     #[test]
     fn test_change_lines_multiple_lines() {
         let mut buf = Buffer::from_str("line1\nline2\nline3\nline4");
-        let cursor = buf.change_lines(0, 2);  // Change 2 lines, leave 1 blank
+        let cursor = buf.change_lines(0, 2); // Change 2 lines, leave 1 blank
         assert_eq!(cursor, Some(Cursor::new(0, 0)));
         assert_eq!(buf.line_count(), 3);
-        assert_eq!(buf.as_str(), "\nline3\nline4");  // 2 lines replaced with 1 blank
+        assert_eq!(buf.as_str(), "\nline3\nline4"); // 2 lines replaced with 1 blank
     }
 
     #[test]
     fn test_change_lines_from_middle() {
         let mut buf = Buffer::from_str("line1\nline2\nline3\nline4");
-        let cursor = buf.change_lines(1, 1);  // Change line 2
+        let cursor = buf.change_lines(1, 1); // Change line 2
         assert_eq!(cursor, Some(Cursor::new(1, 0)));
         assert_eq!(buf.line_count(), 4);
-        assert_eq!(buf.as_str(), "line1\n\nline3\nline4");  // line2 replaced with blank
+        assert_eq!(buf.as_str(), "line1\n\nline3\nline4"); // line2 replaced with blank
     }
 
     #[test]
     fn test_change_lines_from_last_line() {
         let mut buf = Buffer::from_str("line1\nline2");
-        let cursor = buf.change_lines(1, 1);  // Change last line
+        let cursor = buf.change_lines(1, 1); // Change last line
         assert_eq!(cursor, Some(Cursor::new(1, 0)));
         assert_eq!(buf.line_count(), 2);
-        assert_eq!(buf.as_str(), "line1\n");  // last line replaced with blank
+        assert_eq!(buf.as_str(), "line1\n"); // last line replaced with blank
     }
 
     #[test]
@@ -4332,24 +4670,24 @@ mod tests {
         let cursor = buf.change_lines(0, 1);
         assert_eq!(cursor, Some(Cursor::new(0, 0)));
         assert_eq!(buf.line_count(), 1);
-        assert_eq!(buf.as_str(), "");  // Line replaced with blank
+        assert_eq!(buf.as_str(), ""); // Line replaced with blank
     }
 
     #[test]
     fn test_change_lines_count_exceeds_available() {
         let mut buf = Buffer::from_str("line1\nline2\nline3");
-        let cursor = buf.change_lines(0, 5);  // Try to change 5 lines, only 3 exist
+        let cursor = buf.change_lines(0, 5); // Try to change 5 lines, only 3 exist
         assert_eq!(cursor, Some(Cursor::new(0, 0)));
-        assert_eq!(buf.line_count(), 1);  // Should leave 1 blank line
-        assert_eq!(buf.as_str(), "");  // All 3 lines replaced with 1 blank
+        assert_eq!(buf.line_count(), 1); // Should leave 1 blank line
+        assert_eq!(buf.as_str(), ""); // All 3 lines replaced with 1 blank
     }
 
     #[test]
     fn test_change_lines_invalid_start_line() {
         let mut buf = Buffer::from_str("line1\nline2");
-        let cursor = buf.change_lines(5, 1);  // Start beyond available lines
+        let cursor = buf.change_lines(5, 1); // Start beyond available lines
         assert_eq!(cursor, None);
-        assert_eq!(buf.as_str(), "line1\nline2");  // No change
+        assert_eq!(buf.as_str(), "line1\nline2"); // No change
     }
 
     #[test]
@@ -4387,7 +4725,7 @@ mod tests {
         // Cursor at end of line (position 5)
         let cursor = buf.change_to_line_end(Cursor::new(0, 5), 1);
         assert_eq!(cursor, Some(Cursor::new(0, 5)));
-        assert_eq!(buf.as_str(), "hello");  // No change
+        assert_eq!(buf.as_str(), "hello"); // No change
     }
 
     #[test]
@@ -4415,7 +4753,7 @@ mod tests {
         let mut buf = Buffer::from_str("line1\nline2");
         let cursor = buf.change_to_line_end(Cursor::new(5, 0), 1);
         assert_eq!(cursor, None);
-        assert_eq!(buf.as_str(), "line1\nline2");  // No change
+        assert_eq!(buf.as_str(), "line1\nline2"); // No change
     }
 
     #[test]
@@ -4431,13 +4769,13 @@ mod tests {
         let mut buf = Buffer::from_str("hello world");
         let cursor = buf.change_to_line_end(Cursor::new(0, 5), 0);
         assert_eq!(cursor, Some(Cursor::new(0, 5)));
-        assert_eq!(buf.as_str(), "hello world");  // No change
+        assert_eq!(buf.as_str(), "hello world"); // No change
     }
 
     #[test]
     fn test_insert_lines_after_first_line() {
         let mut buf = Buffer::from_str("line1\nline2\nline3");
-        let cursor = buf.insert_lines_after(0, 1);  // Insert after line 1
+        let cursor = buf.insert_lines_after(0, 1); // Insert after line 1
         assert_eq!(cursor, Some(Cursor::new(1, 0))); // At new line 2
         assert_eq!(buf.line_count(), 4);
         assert_eq!(buf.as_str(), "line1\n\nline2\nline3");
@@ -4446,7 +4784,7 @@ mod tests {
     #[test]
     fn test_insert_lines_after_middle_line() {
         let mut buf = Buffer::from_str("line1\nline2\nline3");
-        let cursor = buf.insert_lines_after(1, 1);  // Insert after line 2
+        let cursor = buf.insert_lines_after(1, 1); // Insert after line 2
         assert_eq!(cursor, Some(Cursor::new(2, 0))); // At new line 3
         assert_eq!(buf.line_count(), 4);
         assert_eq!(buf.as_str(), "line1\nline2\n\nline3");
@@ -4455,7 +4793,7 @@ mod tests {
     #[test]
     fn test_insert_lines_after_last_line() {
         let mut buf = Buffer::from_str("line1\nline2");
-        let cursor = buf.insert_lines_after(1, 1);  // Insert after last line
+        let cursor = buf.insert_lines_after(1, 1); // Insert after last line
         assert_eq!(cursor, Some(Cursor::new(2, 0))); // At new line 3 (index 2)
         assert_eq!(buf.line_count(), 3);
         assert_eq!(buf.as_str(), "line1\nline2\n");
@@ -4463,17 +4801,17 @@ mod tests {
 
     #[test]
     fn test_insert_lines_after_empty_buffer() {
-        let mut buf = Buffer::new();  // Creates buffer with 1 empty line
+        let mut buf = Buffer::new(); // Creates buffer with 1 empty line
         let cursor = buf.insert_lines_after(0, 1);
-        assert_eq!(cursor, Some(Cursor::new(1, 0)));  // Cursor at new line (index 1)
+        assert_eq!(cursor, Some(Cursor::new(1, 0))); // Cursor at new line (index 1)
         assert_eq!(buf.line_count(), 2);
-        assert_eq!(buf.as_str(), "\n");  // Two empty lines
+        assert_eq!(buf.as_str(), "\n"); // Two empty lines
     }
 
     #[test]
     fn test_insert_lines_after_multiple_lines() {
         let mut buf = Buffer::from_str("line1\nline2");
-        let cursor = buf.insert_lines_after(0, 3);  // Insert 3 lines after line 1
+        let cursor = buf.insert_lines_after(0, 3); // Insert 3 lines after line 1
         assert_eq!(cursor, Some(Cursor::new(1, 0))); // At first inserted line
         assert_eq!(buf.line_count(), 5);
         assert_eq!(buf.as_str(), "line1\n\n\n\nline2");
@@ -4482,9 +4820,9 @@ mod tests {
     #[test]
     fn test_insert_lines_after_zero_count() {
         let mut buf = Buffer::from_str("line1\nline2");
-        let cursor = buf.insert_lines_after(0, 0);  // No lines to insert
+        let cursor = buf.insert_lines_after(0, 0); // No lines to insert
         assert_eq!(cursor, Some(Cursor::new(0, 0))); // Cursor at line 0
-        assert_eq!(buf.line_count(), 2);  // No change
+        assert_eq!(buf.line_count(), 2); // No change
         assert_eq!(buf.as_str(), "line1\nline2");
     }
 
@@ -4501,7 +4839,7 @@ mod tests {
     #[test]
     fn test_insert_lines_before_first_line() {
         let mut buf = Buffer::from_str("line1\nline2\nline3");
-        let cursor = buf.insert_lines_before(0, 1);  // Insert before line 1
+        let cursor = buf.insert_lines_before(0, 1); // Insert before line 1
         assert_eq!(cursor, Some(Cursor::new(0, 0))); // At new line 1
         assert_eq!(buf.line_count(), 4);
         assert_eq!(buf.as_str(), "\nline1\nline2\nline3");
@@ -4510,7 +4848,7 @@ mod tests {
     #[test]
     fn test_insert_lines_before_middle_line() {
         let mut buf = Buffer::from_str("line1\nline2\nline3");
-        let cursor = buf.insert_lines_before(1, 1);  // Insert before line 2
+        let cursor = buf.insert_lines_before(1, 1); // Insert before line 2
         assert_eq!(cursor, Some(Cursor::new(1, 0))); // At new line 2
         assert_eq!(buf.line_count(), 4);
         assert_eq!(buf.as_str(), "line1\n\nline2\nline3");
@@ -4519,7 +4857,7 @@ mod tests {
     #[test]
     fn test_insert_lines_before_last_line() {
         let mut buf = Buffer::from_str("line1\nline2");
-        let cursor = buf.insert_lines_before(1, 1);  // Insert before line 2
+        let cursor = buf.insert_lines_before(1, 1); // Insert before line 2
         assert_eq!(cursor, Some(Cursor::new(1, 0))); // At new line 2
         assert_eq!(buf.line_count(), 3);
         assert_eq!(buf.as_str(), "line1\n\nline2");
@@ -4537,7 +4875,7 @@ mod tests {
     #[test]
     fn test_insert_lines_before_multiple_lines() {
         let mut buf = Buffer::from_str("line1\nline2");
-        let cursor = buf.insert_lines_before(0, 3);  // Insert 3 lines before line 1
+        let cursor = buf.insert_lines_before(0, 3); // Insert 3 lines before line 1
         assert_eq!(cursor, Some(Cursor::new(0, 0))); // At first inserted line
         assert_eq!(buf.line_count(), 5);
         assert_eq!(buf.as_str(), "\n\n\nline1\nline2");
@@ -4546,7 +4884,7 @@ mod tests {
     #[test]
     fn test_insert_lines_before_zero_count() {
         let mut buf = Buffer::from_str("line1\nline2");
-        let cursor = buf.insert_lines_before(0, 0);  // No lines to insert
+        let cursor = buf.insert_lines_before(0, 0); // No lines to insert
         assert_eq!(cursor, Some(Cursor::new(0, 0))); // Cursor at line 0
         assert_eq!(buf.line_count(), 2);
         assert_eq!(buf.as_str(), "line1\nline2");
@@ -4595,7 +4933,8 @@ mod tests {
         // 3: "Para 2 line 2"
         // 4: "" (blank)
         // 5: "Para 3 line 1"
-        let buf = Buffer::from_str("Para 1 line 1\n\nPara 2 line 1\nPara 2 line 2\n\nPara 3 line 1");
+        let buf =
+            Buffer::from_str("Para 1 line 1\n\nPara 2 line 1\nPara 2 line 2\n\nPara 3 line 1");
 
         // From middle of Para 2 (line 2), should find blank line before it (line 1)
         let cursor = Cursor::new(2, 5);
@@ -4622,7 +4961,8 @@ mod tests {
         // 3: "Para 2 line 2"
         // 4: "" (blank)
         // 5: "Para 3 line 1"
-        let buf = Buffer::from_str("Para 1 line 1\n\nPara 2 line 1\nPara 2 line 2\n\nPara 3 line 1");
+        let buf =
+            Buffer::from_str("Para 1 line 1\n\nPara 2 line 1\nPara 2 line 2\n\nPara 3 line 1");
 
         // From blank line 1, should find blank line before Para 1 (none, returns None)
         let cursor = Cursor::new(1, 0);
@@ -4670,7 +5010,8 @@ mod tests {
         // 3: "Para 2 line 2"
         // 4: "" (blank)
         // 5: "Para 3 line 1"
-        let buf = Buffer::from_str("Para 1 line 1\n\nPara 2 line 1\nPara 2 line 2\n\nPara 3 line 1");
+        let buf =
+            Buffer::from_str("Para 1 line 1\n\nPara 2 line 1\nPara 2 line 2\n\nPara 3 line 1");
 
         // From Para 1 (line 0), should find blank line after Para 1 (line 1)
         let cursor = Cursor::new(0, 5);
@@ -4692,7 +5033,8 @@ mod tests {
         // 3: "Para 2 line 2"
         // 4: "" (blank)
         // 5: "Para 3 line 1"
-        let buf = Buffer::from_str("Para 1 line 1\n\nPara 2 line 1\nPara 2 line 2\n\nPara 3 line 1");
+        let buf =
+            Buffer::from_str("Para 1 line 1\n\nPara 2 line 1\nPara 2 line 2\n\nPara 3 line 1");
 
         // From blank line 1, should find blank line after Para 2 (line 4)
         let cursor = Cursor::new(1, 0);

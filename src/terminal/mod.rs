@@ -569,11 +569,12 @@ impl<I: Read + AsFd, O: Write + AsFd> Terminal<I, O> {
             // On each iteration, check if the terminal size has changed.
             // This works for both TTY and non-TTY modes.
             if let Some((rows, cols)) = get_terminal_size()
-                && (rows != self.last_rows || cols != self.last_cols) {
-                    self.last_rows = rows;
-                    self.last_cols = cols;
-                    return Ok(Event::Resize(rows, cols));
-                }
+                && (rows != self.last_rows || cols != self.last_cols)
+            {
+                self.last_rows = rows;
+                self.last_cols = cols;
+                return Ok(Event::Resize(rows, cols));
+            }
 
             // ============================================================
             // Step 4: Read input (TTY vs non-TTY handling)

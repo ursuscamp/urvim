@@ -1,7 +1,7 @@
 use std::io;
 use tracing_appender::non_blocking::WorkerGuard;
-use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
-use urvim::terminal::{CursorStyle, Event, KeyCode, CURSOR_STYLES};
+use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
+use urvim::terminal::{CURSOR_STYLES, CursorStyle, Event, KeyCode};
 
 fn init_logger() -> WorkerGuard {
     let file = std::fs::OpenOptions::new()

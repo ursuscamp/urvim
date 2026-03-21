@@ -145,6 +145,30 @@ The position in the buffer that corresponds to the top-left of the viewport.
 ### Count Actions
 - `Count(usize, Box<Action>)` - Repeat an action N times (e.g., `5j` moves down 5 lines)
 
+### Operator
+An action that waits for a motion or text object to define its target region. Examples: `Delete`, `Change`, `Yank`.
+
+### Text Object
+A selection of text defined by boundaries (start and end positions). Text objects are used with operators in operator-pending mode. Examples: `InnerWord`, `AroundWord`.
+
+### Operator-Pending Mode
+A state where the editor waits for a motion or text object after an operator key is pressed. For example, after pressing `d`, the editor waits for `w` (motion) or `iw` (text object) to define what to delete.
+
+### Operation Action
+`Action::Operation(Operator, TextObject)` - A compositional action combining an operator with a text object. Instead of many individual action variants, operations use this structure for extensibility.
+
+### Count Prefix
+A numeric prefix that multiplies with the action. urvim supports two count placements:
+- **Leading count**: Before the operator (e.g., `3diw` = delete 3 inner words)
+- **Sub-count**: After the operator (e.g., `d3iw` = delete 3 inner words)
+- **Combined**: Multiplicative (e.g., `3d3iw` = 3 × 3 = 9 inner words)
+
+### Inner Word (Text Object)
+A word selected without surrounding whitespace boundaries. If cursor is inside whitespace, selects the whitespace region. If cursor is inside a word, selects that word.
+
+### Around Word (Text Object)
+A word selected with trailing whitespace included. If cursor is inside whitespace, selects whitespace plus the trailing word. If cursor is inside a word, selects that word plus all trailing whitespace.
+
 ## Spec-Related Terms
 
 ### Requirements Document

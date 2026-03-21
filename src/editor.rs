@@ -9,6 +9,19 @@ use crate::motion::char_scan_keymap::CharScanKeymap;
 use crate::terminal::{CursorStyle, Key, KeyCode};
 use std::collections::BTreeMap;
 
+/// Operators that wait for a motion or text object to define the target region.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Operator {
+    Delete,
+}
+
+/// Text objects that define a selection region for use with operators.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TextObject {
+    InnerWord,
+    AroundWord,
+}
+
 /// Actions that the main event loop processes.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Action {
@@ -99,6 +112,9 @@ pub enum Action {
     /// Count prefix: repeats the inner action the specified number of times,
     /// or goes to the target absolute line number for line actions.
     Count(usize, Box<Action>),
+    /// Compositional operation: apply an operator to a text object.
+    /// Examples: Operation(Delete, InnerWord) = "diw", Operation(Delete, AroundWord) = "daw"
+    Operation(Operator, TextObject),
 }
 
 impl Action {
@@ -181,6 +197,7 @@ impl Action {
                 | Action::TillForward(_)
                 | Action::TillBackward(_)
                 | Action::RepeatLastFind
+                | Action::Operation(_, _)
                 | Action::RepeatLastFindReverse
                 | Action::MoveToPreviousParagraph
                 | Action::MoveToNextParagraph
@@ -225,6 +242,8 @@ impl Action {
             | Action::OpenLineBelow
             | Action::OpenLineAbove => true,
             Action::Count(_, inner) => inner.switches_to_insert_mode(),
+            // Operation doesn't switch to insert mode (only change would)
+            Action::Operation(_, _) => false,
             _ => false,
         }
     }
@@ -260,6 +279,9 @@ impl Action {
 
             // Count wraps the inner action
             Action::Count(_, inner) => inner.is_snapshottable(),
+
+            // Operation(Delete, _) modifies text - snapshot needed
+            Action::Operation(Operator::Delete, _) => true,
 
             // Everything else (movement, Quit, etc.) - no snapshot
             _ => false,
@@ -297,6 +319,9 @@ impl Action {
             | Action::RepeatLastFindReverse => true,
 
             Action::Count(_, inner) => inner.updates_snapshot_cursor(),
+
+            // Operation doesn't update cursor during snapshot cursor update phase
+            Action::Operation(_, _) => false,
 
             _ => false,
         }
@@ -678,14 +703,17 @@ impl NormalMode {
         // Delete operations
         trie_keymap.insert("x".to_string(), Action::DeleteForward);
         trie_keymap.insert("X".to_string(), Action::DeleteBackward);
+        trie_keymap.insert_sequence(vec!["d".to_string(), "d".to_string()], Action::DeleteLine);
+        // Delete with text objects (diw, daw)
         trie_keymap.insert_sequence(
-            vec!["d".to_string(), "d".to_string()],
-            Action::DeleteLine,
+            vec!["d".to_string(), "i".to_string(), "w".to_string()],
+            Action::Operation(Operator::Delete, TextObject::InnerWord),
         );
         trie_keymap.insert_sequence(
-            vec!["c".to_string(), "c".to_string()],
-            Action::ChangeLine,
+            vec!["d".to_string(), "a".to_string(), "w".to_string()],
+            Action::Operation(Operator::Delete, TextObject::AroundWord),
         );
+        trie_keymap.insert_sequence(vec!["c".to_string(), "c".to_string()], Action::ChangeLine);
         // Change to end of line
         trie_keymap.insert("C".to_string(), Action::ChangeToLineEnd);
 
@@ -780,9 +808,10 @@ impl Mode for NormalMode {
 
                 // Only wrap with Count if count > 1 and action supports counting
                 if total_count > 1
-                    && let Some(counted_action) = action.clone().with_count(total_count) {
-                        return HandleKeyResult::Complete(counted_action);
-                    }
+                    && let Some(counted_action) = action.clone().with_count(total_count)
+                {
+                    return HandleKeyResult::Complete(counted_action);
+                }
                 return HandleKeyResult::Complete(action);
             }
 
@@ -811,9 +840,10 @@ impl Mode for NormalMode {
 
             // Only wrap with Count if count > 1 and action supports counting
             if count > 1
-                && let Some(counted_action) = action.clone().with_count(count) {
-                    return HandleKeyResult::Complete(counted_action);
-                }
+                && let Some(counted_action) = action.clone().with_count(count)
+            {
+                return HandleKeyResult::Complete(counted_action);
+            }
             // Return action without wrapping (count is 1 or action doesn't support counting)
             return HandleKeyResult::Complete(action);
         }
@@ -917,11 +947,12 @@ impl Mode for InsertMode {
 
         // For printable characters without Ctrl, insert them
         if let KeyCode::Char(c) = key.code
-            && !key.modifiers.has_ctrl() {
-                self.buffer.clear();
-                self.waiting = false;
-                return HandleKeyResult::Complete(Action::InsertChar(c));
-            }
+            && !key.modifiers.has_ctrl()
+        {
+            self.buffer.clear();
+            self.waiting = false;
+            return HandleKeyResult::Complete(Action::InsertChar(c));
+        }
 
         // No match - clear buffer
         self.buffer.clear();
@@ -1873,5 +1904,151 @@ mod tests {
         // Actions with parameters that are movements should update cursor
         assert!(Action::ForwardTo(Boundary::WordEnd).updates_snapshot_cursor());
         assert!(Action::BackTo(Boundary::BigWord).updates_snapshot_cursor());
+    }
+
+    // Text object tests
+
+    #[test]
+    fn test_diw_sequence() {
+        let mut mode = NormalMode::new();
+        // Press 'd' - should wait for more
+        let result = mode.handle_key(&key('d'));
+        assert!(matches!(result, HandleKeyResult::WaitForMore));
+
+        // Press 'i' - should still wait
+        let result = mode.handle_key(&key('i'));
+        assert!(matches!(result, HandleKeyResult::WaitForMore));
+
+        // Press 'w' - should complete
+        let result = mode.handle_key(&key('w'));
+        assert!(matches!(
+            result,
+            HandleKeyResult::Complete(Action::Operation(Operator::Delete, TextObject::InnerWord))
+        ));
+    }
+
+    #[test]
+    fn test_daw_sequence() {
+        let mut mode = NormalMode::new();
+        // Press 'd'
+        let result = mode.handle_key(&key('d'));
+        assert!(matches!(result, HandleKeyResult::WaitForMore));
+
+        // Press 'a'
+        let result = mode.handle_key(&key('a'));
+        assert!(matches!(result, HandleKeyResult::WaitForMore));
+
+        // Press 'w' - should complete
+        let result = mode.handle_key(&key('w'));
+        assert!(matches!(
+            result,
+            HandleKeyResult::Complete(Action::Operation(Operator::Delete, TextObject::AroundWord))
+        ));
+    }
+
+    #[test]
+    fn test_d_alone_waits_for_more() {
+        let mut mode = NormalMode::new();
+        let result = mode.handle_key(&key('d'));
+        assert!(matches!(result, HandleKeyResult::WaitForMore));
+    }
+
+    #[test]
+    fn test_di_alone_waits_for_more() {
+        let mut mode = NormalMode::new();
+        // Press 'd'
+        let _ = mode.handle_key(&key('d'));
+        // Press 'i'
+        let result = mode.handle_key(&key('i'));
+        assert!(matches!(result, HandleKeyResult::WaitForMore));
+    }
+
+    #[test]
+    fn test_escape_cancels_sequence() {
+        let mut mode = NormalMode::new();
+        // Press 'd' - wait
+        let _ = mode.handle_key(&key('d'));
+        // Press Escape - should cancel
+        let result = mode.handle_key(&Key::new(KeyCode::Esc));
+        assert!(matches!(result, HandleKeyResult::InvalidSequence));
+
+        // Now pressing 'd' should work fresh
+        let result = mode.handle_key(&key('d'));
+        assert!(matches!(result, HandleKeyResult::WaitForMore));
+    }
+
+    #[test]
+    fn test_count_diw() {
+        let mut mode = NormalMode::new();
+
+        // Press '3'
+        let result = mode.handle_key(&key('3'));
+        assert!(matches!(result, HandleKeyResult::WaitForMore));
+
+        // Press 'd'
+        let result = mode.handle_key(&key('d'));
+        assert!(matches!(result, HandleKeyResult::WaitForMore));
+
+        // Press 'i'
+        let result = mode.handle_key(&key('i'));
+        assert!(matches!(result, HandleKeyResult::WaitForMore));
+
+        // Press 'w'
+        let result = mode.handle_key(&key('w'));
+        assert!(matches!(
+            result,
+            HandleKeyResult::Complete(Action::Count(3, _))
+        ));
+
+        // Check it's the right action
+        if let HandleKeyResult::Complete(Action::Count(count, inner)) = result {
+            assert_eq!(count, 3);
+            assert!(matches!(
+                *inner,
+                Action::Operation(Operator::Delete, TextObject::InnerWord)
+            ));
+        }
+    }
+
+    #[test]
+    fn test_d_count_iw() {
+        let mut mode = NormalMode::new();
+
+        // Press 'd'
+        let result = mode.handle_key(&key('d'));
+        assert!(matches!(result, HandleKeyResult::WaitForMore));
+
+        // Press '3'
+        let result = mode.handle_key(&key('3'));
+        assert!(matches!(result, HandleKeyResult::WaitForMore));
+
+        // Press 'i'
+        let result = mode.handle_key(&key('i'));
+        assert!(matches!(result, HandleKeyResult::WaitForMore));
+
+        // Press 'w'
+        let result = mode.handle_key(&key('w'));
+        assert!(matches!(
+            result,
+            HandleKeyResult::Complete(Action::Count(3, _))
+        ));
+    }
+
+    #[test]
+    fn test_d_operation_switches_to_insert_mode() {
+        // Operation should NOT switch to insert mode (only Change would)
+        assert!(
+            !Action::Operation(Operator::Delete, TextObject::InnerWord).switches_to_insert_mode()
+        );
+        assert!(
+            !Action::Operation(Operator::Delete, TextObject::AroundWord).switches_to_insert_mode()
+        );
+    }
+
+    #[test]
+    fn test_d_operation_is_snapshottable() {
+        // Delete operation should be snapshottable
+        assert!(Action::Operation(Operator::Delete, TextObject::InnerWord).is_snapshottable());
+        assert!(Action::Operation(Operator::Delete, TextObject::AroundWord).is_snapshottable());
     }
 }

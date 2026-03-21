@@ -5,7 +5,7 @@
 //! - Querying the cursor position from the terminal
 //! - Low-level input polling
 
-use rustix::event::{poll, PollFd, PollFlags};
+use rustix::event::{PollFd, PollFlags, poll};
 use rustix::fd::AsFd;
 use std::io::{Read, Write};
 use tracing::trace;

@@ -5,7 +5,7 @@ use urvim::action::ActionResult;
 use urvim::buffer::Buffer;
 use urvim::editor::{Action, HandleKeyResult, InsertMode, Mode, NormalMode};
 use urvim::screen::Screen;
-use urvim::terminal::{size::get_terminal_size, Event, Terminal};
+use urvim::terminal::{Event, Terminal, size::get_terminal_size};
 use urvim::widget::Widget;
 use urvim::window::{Position, Size, Window};
 

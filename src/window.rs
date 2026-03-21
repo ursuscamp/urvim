@@ -6,7 +6,7 @@
 
 use crate::action::{ActionResult, ActionResult::NotHandled};
 use crate::buffer::{Boundary, Buffer, Cursor};
-use crate::editor::Action;
+use crate::editor::{Action, Operator, TextObject};
 use crate::globals;
 use crate::screen::Screen;
 use crate::terminal::Color;
@@ -847,12 +847,45 @@ impl Window {
             // O with count: create N lines above
             Action::OpenLineAbove => self.handle_count_open_line_above(count),
 
+            // Operation with count: execute operation count times
+            Action::Operation(_, _) => self.handle_count_operation(count, inner),
+
             // Line actions: go to target absolute line, then perform action
             // (must check after specific action types above)
             _ if inner.is_line_action() => self.handle_count_line_action(count, inner),
 
             // Default: repeatable action - execute count times
             _ => self.handle_count_repeatable(count, inner),
+        }
+    }
+
+    /// Handles operation actions with count - execute operation count times.
+    fn handle_count_operation(&mut self, count: usize, action: &Action) -> ActionResult {
+        if let Action::Operation(op, obj) = action {
+            let cursor = self.buffer_view.cursor();
+            let buffer = self.buffer_view.buffer_mut();
+
+            let range = match obj {
+                TextObject::InnerWord => buffer.get_inner_word_range_with_count(cursor, count),
+                TextObject::AroundWord => buffer.get_around_word_range_with_count(cursor, count),
+            };
+
+            let Some(range) = range else {
+                return ActionResult::Handled;
+            };
+
+            match op {
+                Operator::Delete => {
+                    buffer.push_snapshot(cursor);
+                    if let Some(new_cursor) = buffer.delete_range(range) {
+                        self.buffer_view.set_cursor(new_cursor);
+                    }
+                }
+            }
+
+            ActionResult::Handled
+        } else {
+            ActionResult::Handled
         }
     }
 
@@ -990,6 +1023,39 @@ impl Window {
         for _ in 0..count {
             self.process_action(action);
         }
+        ActionResult::Handled
+    }
+
+    /// Handle Operation(Operator, TextObject) actions.
+    fn handle_operation(&mut self, operator: &Operator, text_object: &TextObject) -> ActionResult {
+        use crate::editor::{Operator::*, TextObject::*};
+
+        let cursor = self.buffer_view.cursor();
+        let buffer = self.buffer_view.buffer_mut();
+
+        // Get the range based on text object
+        let range = match text_object {
+            InnerWord => buffer.get_inner_word_range(cursor),
+            AroundWord => buffer.get_around_word_range(cursor),
+        };
+
+        let Some(range) = range else {
+            // No word at cursor position
+            return ActionResult::Handled;
+        };
+
+        // Execute the operator
+        match operator {
+            Delete => {
+                // Save undo snapshot before modification
+                buffer.push_snapshot(cursor);
+                // Delete the range
+                if let Some(new_cursor) = buffer.delete_range(range) {
+                    self.buffer_view.set_cursor(new_cursor);
+                }
+            }
+        }
+
         ActionResult::Handled
     }
 }
@@ -1273,6 +1339,9 @@ impl Widget for Window {
             }
             Action::Count(count, inner) => {
                 return self.handle_count(*count, inner);
+            }
+            Action::Operation(op, obj) => {
+                return self.handle_operation(&op, &obj);
             }
             // All other actions are not handled by window
             _ => NotHandled,
@@ -1951,6 +2020,28 @@ mod tests {
         window.process_action(&Action::FindBackward('l'));
         // Should find 2nd 'l' at column 2, not 3rd 'l' at column 3
         assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 2));
+    }
+
+    #[test]
+    fn test_count_diw_deletes_multiple_words() {
+        let buffer = Buffer::from_str("one two three four");
+        let mut window = Window::new(buffer);
+
+        window.buffer_view.set_cursor(Cursor::new(0, 0));
+        window.process_action(&Action::Count(
+            3,
+            Box::new(Action::Operation(Operator::Delete, TextObject::InnerWord)),
+        ));
+
+        assert_eq!(
+            window
+                .buffer_view
+                .buffer
+                .line_at(0)
+                .map(|line| line.as_ref()),
+            Some(" four")
+        );
+        assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
     }
 
     #[test]

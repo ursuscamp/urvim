@@ -41,6 +41,8 @@ This document describes the motions implemented in urvim and how they differ fro
 | `F` | Find backward: move to previous occurrence of character |
 | `t` | Till forward: move to position before next occurrence of character |
 | `T` | Till backward: move to position after previous occurrence of character |
+| `diw` | Delete inner word (word under cursor) |
+| `daw` | Delete around word (word plus trailing whitespace) |
 
 ## Count Support
 
@@ -49,6 +51,11 @@ urvim supports count prefixes for most motions. There are two types of count beh
 1. **Repeatable motions** (h, j, k, l, w, b, e, W, B, E, dd, cc, o, O): The motion is executed `count` times from the current position.
 
 2. **Line actions** (0, $, ^): The count specifies an absolute 1-indexed line number to jump to, then performs the action on that line.
+
+3. **Operations with text objects**: Counts multiply with the text object count:
+   - Leading count: `3diw` = delete 3 inner words
+   - Sub-count: `d3iw` = delete 3 inner words
+   - Combined: `3d3iw` = 3 × 3 = 9 inner words
 
 > Note: urvim limits counts to values 1-9999 to prevent excessive operations.
 
@@ -629,3 +636,77 @@ Paragraph motions behave like vertical motions (`j`/`k`) for column preservation
 - **Multiple consecutive blank lines**: Treated as a single blank line boundary
 - **Whitespace-only lines**: Treated as blank lines
 - **Empty buffer**: No movement (cursor stays in place)
+
+## Text Objects
+
+Text objects allow targeted text selection combined with operators. They are triggered by pressing an operator (like `d` for delete) followed by the text object keys.
+
+### Supported Text Objects
+
+| Text Object | Description |
+|------------|-------------|
+| `iw` | Inner word: word under cursor (excludes whitespace boundaries) |
+| `aw` | Around word: word under cursor plus trailing whitespace |
+
+### Supported Operators
+
+| Operator | Action |
+|----------|--------|
+| `d` | Delete |
+
+### How Text Objects Work
+
+When you press an operator key (like `d`), urvim enters **operator-pending mode** - it waits for a motion or text object to define the target region. Pressing Escape cancels the operation.
+
+### Count Support with Text Objects
+
+Counts multiply when used with text objects:
+- `3diw` - delete 3 inner words (leading count: 3)
+- `d3iw` - delete 3 inner words (sub-count after operator: 3)
+- `3d3iw` - delete 9 inner words (combined: 3 × 3 = 9)
+
+### Inner Word (iw)
+
+Selects the word under the cursor without surrounding whitespace:
+
+- **Cursor inside a word**: Selects that word
+- **Cursor inside whitespace**: Selects the entire whitespace region
+
+Examples on "  hello world  " with cursor positions:
+
+| Cursor Position | `diw` deletes | Result |
+|----------------|---------------|--------|
+| on 'h' in "hello" | "hello" | "  world  " |
+| inside "  " (before "hello") | "  " | "hello world  " |
+| inside "  " (between words) | "  " | "helloworld  " |
+
+### Around Word (aw)
+
+Selects the word under the cursor plus trailing whitespace:
+
+- **Cursor inside a word**: Selects word plus all trailing whitespace
+- **Cursor inside whitespace**: Selects whitespace plus the trailing word after it
+
+Examples on "  hello world  " with cursor positions:
+
+| Cursor Position | `daw` deletes | Result |
+|----------------|---------------|--------|
+| on 'h' in "hello" | "hello " | "  world  " |
+| on 'w' in "world" | "world  " | "  hello " |
+| inside "  " (between words) | "  world" | "  hello  " |
+
+### Key Sequence Flow
+
+```
+d → operator-pending (waiting for motion/text-object)
+  i → still pending (waiting for text-object completion)
+    w → Operation(Delete, InnerWord) - execute
+```
+
+Pressing Escape at any point cancels the operation and returns to normal mode.
+
+### Edge Cases
+
+- **Cursor on empty line**: `diw`/`daw` does nothing (no word to select)
+- **Cursor at end of line with no word after**: `aw` selects word before cursor plus trailing whitespace
+- **No trailing whitespace**: `aw` still selects the word (behaves like `iw` without trailing space)

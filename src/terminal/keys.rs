@@ -305,10 +305,13 @@ impl Key {
                 }
 
                 // If only Shift is pressed on a character with shifted representation
-                if has_shift && !has_ctrl && !has_other_modifier
-                    && let Some(shifted) = get_shifted_char(c) {
-                        return shifted.to_string();
-                    }
+                if has_shift
+                    && !has_ctrl
+                    && !has_other_modifier
+                    && let Some(shifted) = get_shifted_char(c)
+                {
+                    return shifted.to_string();
+                }
 
                 // Otherwise use modifier notation
                 let prefixes = self.modifiers.to_prefixes();
