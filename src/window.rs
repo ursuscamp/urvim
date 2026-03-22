@@ -543,6 +543,16 @@ impl Window {
         self.buffer_view.set_cursor(cursor);
     }
 
+    fn set_cursor_to_visual_col_on_line(&mut self, target_line: usize, visual_col: usize) {
+        let target_col = self
+            .buffer_view
+            .buffer()
+            .byte_pos_at_visual_col(target_line, visual_col);
+        self.buffer_view
+            .set_cursor(Cursor::new(target_line, target_col));
+        self.buffer_view.set_remembered_visual_col(visual_col);
+    }
+
     pub fn move_cursor_left(&mut self) {
         let cursor = self.buffer_view.cursor();
         if let Some(new_cursor) = self.buffer_view.buffer().prev_cursor(cursor) {
@@ -648,9 +658,11 @@ impl Window {
         let search_cursor = Cursor::new(cursor.line, search_start_col);
         if let Some(new_cursor) = buffer.find_char_forward(search_cursor, target, count) {
             // Land one position before the found character
-            let new_col = new_cursor.col.saturating_sub(1);
-            self.buffer_view
-                .set_cursor(Cursor::new(new_cursor.line, new_col));
+            if let Some(prev_cursor) = buffer.prev_cursor_line(new_cursor) {
+                self.buffer_view.set_cursor(prev_cursor);
+            } else {
+                self.buffer_view.set_cursor(new_cursor);
+            }
         }
         // If not found, cursor stays in place (do nothing)
     }
@@ -676,10 +688,13 @@ impl Window {
 
         if let Some(new_cursor) = buffer.find_char_backward(search_cursor, target, count) {
             // Land one position after the found character
-            let line_len = buffer.line_len(new_cursor.line);
-            let new_col = (new_cursor.col + 1).min(line_len);
-            self.buffer_view
-                .set_cursor(crate::buffer::Cursor::new(new_cursor.line, new_col));
+            if let Some(next_cursor) = buffer.next_cursor_line(new_cursor) {
+                self.buffer_view.set_cursor(next_cursor);
+            } else {
+                let line_len = buffer.line_len(new_cursor.line);
+                self.buffer_view
+                    .set_cursor(Cursor::new(new_cursor.line, line_len));
+            }
         }
         // If not found, cursor stays in place (do nothing)
     }
@@ -725,9 +740,7 @@ impl Window {
         let cursor = self.buffer_view.cursor();
         let target_col = self.buffer_view.get_or_compute_target_col();
         if let Some(new_cursor) = self.buffer_view.buffer().cursor_paragraph_backward(cursor) {
-            self.buffer_view
-                .set_cursor(Cursor::new(new_cursor.line, target_col));
-            self.buffer_view.set_remembered_visual_col(target_col);
+            self.set_cursor_to_visual_col_on_line(new_cursor.line, target_col);
         }
     }
 
@@ -738,9 +751,7 @@ impl Window {
         let cursor = self.buffer_view.cursor();
         let target_col = self.buffer_view.get_or_compute_target_col();
         if let Some(new_cursor) = self.buffer_view.buffer().cursor_paragraph_forward(cursor) {
-            self.buffer_view
-                .set_cursor(Cursor::new(new_cursor.line, target_col));
-            self.buffer_view.set_remembered_visual_col(target_col);
+            self.set_cursor_to_visual_col_on_line(new_cursor.line, target_col);
         }
     }
 
@@ -897,10 +908,7 @@ impl Window {
         }
         let target_line = (count - 1).min(line_count - 1);
         let target_col = self.buffer_view.get_or_compute_target_col();
-        self.buffer_view
-            .set_cursor(Cursor::new(target_line, target_col));
-        // Update remembered column like vertical motions do
-        self.buffer_view.set_remembered_visual_col(target_col);
+        self.set_cursor_to_visual_col_on_line(target_line, target_col);
         ActionResult::Handled
     }
 
@@ -930,9 +938,7 @@ impl Window {
         };
 
         let target_col = self.buffer_view.get_or_compute_target_col();
-        self.buffer_view
-            .set_cursor(Cursor::new(target_line, target_col));
-        self.buffer_view.set_remembered_visual_col(target_col);
+        self.set_cursor_to_visual_col_on_line(target_line, target_col);
         ActionResult::Handled
     }
 
@@ -1110,19 +1116,14 @@ impl Widget for Window {
             Action::MoveToFirstLine => {
                 // Go to first line (or specified line with count - handled in Count branch)
                 let target_col = self.buffer_view.get_or_compute_target_col();
-                self.buffer_view.set_cursor(Cursor::new(0, target_col));
-                // Update remembered column like vertical motions do
-                self.buffer_view.set_remembered_visual_col(target_col);
+                self.set_cursor_to_visual_col_on_line(0, target_col);
                 ActionResult::Handled
             }
             Action::MoveToLastLine => {
                 // Go to last line (or specified line with count - handled in Count branch)
                 let target_line = self.buffer_view.buffer.line_count().saturating_sub(1);
                 let target_col = self.buffer_view.get_or_compute_target_col();
-                self.buffer_view
-                    .set_cursor(Cursor::new(target_line, target_col));
-                // Update remembered column like vertical motions do
-                self.buffer_view.set_remembered_visual_col(target_col);
+                self.set_cursor_to_visual_col_on_line(target_line, target_col);
                 ActionResult::Handled
             }
             Action::MoveToScreenTop => {
@@ -1136,9 +1137,7 @@ impl Widget for Window {
                 let target_line =
                     start_line.min(self.buffer_view.buffer().line_count().saturating_sub(1));
                 let target_col = self.buffer_view.get_or_compute_target_col();
-                self.buffer_view
-                    .set_cursor(Cursor::new(target_line, target_col));
-                self.buffer_view.set_remembered_visual_col(target_col);
+                self.set_cursor_to_visual_col_on_line(target_line, target_col);
                 ActionResult::Handled
             }
             Action::MoveToScreenMiddle => {
@@ -1154,9 +1153,7 @@ impl Widget for Window {
                 }
                 let target_line = (start_line + viewport_rows / 2).min(line_count - 1);
                 let target_col = self.buffer_view.get_or_compute_target_col();
-                self.buffer_view
-                    .set_cursor(Cursor::new(target_line, target_col));
-                self.buffer_view.set_remembered_visual_col(target_col);
+                self.set_cursor_to_visual_col_on_line(target_line, target_col);
                 ActionResult::Handled
             }
             Action::MoveToScreenBottom => {
@@ -1173,9 +1170,7 @@ impl Widget for Window {
                 let end_line = (start_line + viewport_rows - 1).min(line_count - 1);
                 let target_line = end_line;
                 let target_col = self.buffer_view.get_or_compute_target_col();
-                self.buffer_view
-                    .set_cursor(Cursor::new(target_line, target_col));
-                self.buffer_view.set_remembered_visual_col(target_col);
+                self.set_cursor_to_visual_col_on_line(target_line, target_col);
                 ActionResult::Handled
             }
             Action::DeleteBackward => {
@@ -2078,5 +2073,62 @@ mod tests {
         window.process_action(&Action::TillBackward('h'));
         // No more 'h' before column 0, cursor stays at column 1
         assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 1));
+    }
+
+    #[test]
+    fn test_till_forward_preserves_grapheme_boundaries() {
+        let buffer = Buffer::from_str("a😀b");
+        let mut window = Window::new(buffer);
+
+        window.buffer_view.set_cursor(Cursor::new(0, 0));
+        window.process_action(&Action::TillForward('b'));
+
+        assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 1));
+    }
+
+    #[test]
+    fn test_till_backward_preserves_grapheme_boundaries() {
+        let buffer = Buffer::from_str("a😀b");
+        let mut window = Window::new(buffer);
+
+        window.buffer_view.set_cursor(Cursor::new(0, 5));
+        window.process_action(&Action::TillBackward('a'));
+
+        assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 1));
+    }
+
+    #[test]
+    fn test_move_to_last_line_preserves_visual_column() {
+        let buffer = Buffer::from_str("ab\na😀b");
+        let mut window = Window::new(buffer);
+
+        window.buffer_view.set_cursor(Cursor::new(0, 2));
+        window.process_action(&Action::MoveToLastLine);
+
+        assert_eq!(window.buffer_view.cursor(), Cursor::new(1, 1));
+    }
+
+    #[test]
+    fn test_count_screen_top_preserves_visual_column() {
+        let buffer = Buffer::from_str("ab\na😀b\ncd");
+        let mut window = Window::new(buffer);
+
+        window.size = Size::new(2, 10);
+        window.buffer_view.set_scroll_offset(Position::new(1, 0));
+        window.buffer_view.set_cursor(Cursor::new(0, 2));
+        window.process_action(&Action::Count(1, Box::new(Action::MoveToScreenTop)));
+
+        assert_eq!(window.buffer_view.cursor(), Cursor::new(1, 1));
+    }
+
+    #[test]
+    fn test_next_paragraph_clamps_visual_column_on_blank_line() {
+        let buffer = Buffer::from_str("ab\n\ncd");
+        let mut window = Window::new(buffer);
+
+        window.buffer_view.set_cursor(Cursor::new(0, 2));
+        window.process_action(&Action::MoveToNextParagraph);
+
+        assert_eq!(window.buffer_view.cursor(), Cursor::new(1, 0));
     }
 }

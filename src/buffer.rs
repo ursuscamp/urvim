@@ -1523,6 +1523,21 @@ impl Buffer {
         Some(Cursor::new(prev_line, target_col))
     }
 
+    fn first_non_whitespace_col(&self, line_idx: usize) -> Option<usize> {
+        let line = self.line_at(line_idx)?;
+        line.grapheme_indices(true)
+            .find(|(_, grapheme)| !Self::is_whitespace_char(grapheme))
+            .map(|(idx, _)| idx)
+    }
+
+    fn last_non_whitespace_col(&self, line_idx: usize) -> Option<usize> {
+        let line = self.line_at(line_idx)?;
+        line.grapheme_indices(true)
+            .filter(|(_, grapheme)| !Self::is_whitespace_char(grapheme))
+            .map(|(idx, _)| idx)
+            .next_back()
+    }
+
     /// Move cursor to the end of the current line (last non-whitespace character).
     ///
     /// If the cursor is already at or beyond the end of the current line, moves to
@@ -1551,18 +1566,7 @@ impl Buffer {
             return None;
         }
 
-        let line = self.line_at(cursor.line)?;
-        let line_str = line.as_ref();
-
-        // Find last non-whitespace character position on current line
-        let mut last_non_ws = None;
-        for (idx, grapheme) in line_str.grapheme_indices(true) {
-            if !Self::is_whitespace_char(grapheme) {
-                last_non_ws = Some(idx);
-            }
-        }
-
-        let end_pos = last_non_ws.unwrap_or(0);
+        let end_pos = self.last_non_whitespace_col(cursor.line).unwrap_or(0);
 
         // If cursor is before the end position, move to end
         if cursor.col < end_pos {
@@ -1576,18 +1580,10 @@ impl Buffer {
             let next_line_len = self.line_len(next_line_idx);
 
             if next_line_len > 0 {
-                // Find last non-whitespace on next line
-                let next_line = self.line_at(next_line_idx)?;
-                let next_line_str = next_line.as_ref();
-
-                let mut next_last_non_ws = None;
-                for (idx, grapheme) in next_line_str.grapheme_indices(true) {
-                    if !Self::is_whitespace_char(grapheme) {
-                        next_last_non_ws = Some(idx);
-                    }
-                }
-
-                return Some(Cursor::new(next_line_idx, next_last_non_ws.unwrap_or(0)));
+                return Some(Cursor::new(
+                    next_line_idx,
+                    self.last_non_whitespace_col(next_line_idx).unwrap_or(0),
+                ));
             } else {
                 // Next line is empty, return at position 0
                 return Some(Cursor::new(next_line_idx, 0));
@@ -1668,19 +1664,7 @@ impl Buffer {
             return None;
         }
 
-        let line = self.line_at(cursor.line)?;
-        let line_str = line.as_ref();
-
-        // Find first non-whitespace character position on current line
-        let mut first_non_ws = None;
-        for (idx, grapheme) in line_str.grapheme_indices(true) {
-            if !Self::is_whitespace_char(grapheme) {
-                first_non_ws = Some(idx);
-                break;
-            }
-        }
-
-        let content_start = match first_non_ws {
+        let content_start = match self.first_non_whitespace_col(cursor.line) {
             Some(pos) => pos,
             None => {
                 // Line has no non-whitespace - return at column 0
@@ -1702,19 +1686,7 @@ impl Buffer {
         // Cursor is at content start - wrap to previous line if available
         if cursor.line > 0 {
             let prev_line_idx = cursor.line - 1;
-            let prev_line = self.line_at(prev_line_idx)?;
-            let prev_line_str = prev_line.as_ref();
-
-            // Find first non-whitespace on previous line
-            let mut prev_first_non_ws = None;
-            for (idx, grapheme) in prev_line_str.grapheme_indices(true) {
-                if !Self::is_whitespace_char(grapheme) {
-                    prev_first_non_ws = Some(idx);
-                    break;
-                }
-            }
-
-            if let Some(prev_pos) = prev_first_non_ws {
+            if let Some(prev_pos) = self.first_non_whitespace_col(prev_line_idx) {
                 return Some(Cursor::new(prev_line_idx, prev_pos));
             } else {
                 // Previous line has no non-whitespace - return at column 0
