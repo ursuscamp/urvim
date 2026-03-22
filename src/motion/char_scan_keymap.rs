@@ -123,7 +123,7 @@ mod tests {
     }
 
     #[test]
-    fn test_is_prefix_F_trigger() {
+    fn test_is_prefix_uppercase_f_trigger() {
         let keymap = CharScanKeymap::new();
         assert!(keymap.is_prefix(&["F".to_string()]));
     }
@@ -135,7 +135,7 @@ mod tests {
     }
 
     #[test]
-    fn test_is_prefix_T_trigger() {
+    fn test_is_prefix_uppercase_t_trigger() {
         let keymap = CharScanKeymap::new();
         assert!(keymap.is_prefix(&["T".to_string()]));
     }

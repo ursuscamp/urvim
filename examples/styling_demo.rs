@@ -2,7 +2,7 @@ use std::io;
 use urvim::terminal::{Color, Style, UnderlineStyle};
 
 fn main() -> io::Result<()> {
-    if !is_terminal::is_terminal(&std::io::stdin()) {
+    if !is_terminal::is_terminal(std::io::stdin()) {
         eprintln!("Error: Must be run from a terminal");
         return Err(io::Error::new(
             io::ErrorKind::NotConnected,
@@ -22,10 +22,10 @@ fn main() -> io::Result<()> {
     loop {
         let event = terminal.read_event()?;
 
-        if let urvim::terminal::Event::Key(key) = event {
-            if key.code == urvim::terminal::KeyCode::Char('q') {
-                break;
-            }
+        if let urvim::terminal::Event::Key(key) = event
+            && key.code == urvim::terminal::KeyCode::Char('q')
+        {
+            break;
         }
     }
 

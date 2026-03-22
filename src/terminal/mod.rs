@@ -86,7 +86,7 @@ const MAX_PASTE_SIZE: usize = 1024 * 1024;
 /// This balances responsiveness with CPU usage:
 /// - Shorter timeout = more responsive to input, but more CPU overhead from frequent polls
 /// - Longer timeout = less CPU overhead, but higher input latency
-/// 50ms is a good balance: responsive (< 1 frame at 60fps) while not hammering the CPU
+/// - 50ms is a good balance: responsive (< 1 frame at 60fps) while not hammering the CPU
 const POLL_TIMEOUT_MS: i32 = 50;
 
 /// Terminal cursor style.
@@ -819,7 +819,7 @@ mod test_helpers {
     }
 
     impl AsFd for TestBackend {
-        fn as_fd(&self) -> rustix::fd::BorrowedFd {
+        fn as_fd(&self) -> rustix::fd::BorrowedFd<'_> {
             panic!("TestBackend does not have a valid file descriptor")
         }
     }

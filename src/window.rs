@@ -1341,7 +1341,7 @@ impl Widget for Window {
                 return self.handle_count(*count, inner);
             }
             Action::Operation(op, obj) => {
-                return self.handle_operation(&op, &obj);
+                return self.handle_operation(op, obj);
             }
             // All other actions are not handled by window
             _ => NotHandled,

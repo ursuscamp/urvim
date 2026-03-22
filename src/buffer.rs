@@ -196,11 +196,6 @@ impl UndoState {
         self.position < self.history.len() - 1
     }
 
-    /// Clears all undo/redo history.
-    fn clear(&mut self) {
-        self.history.clear();
-        self.position = 0;
-    }
 }
 
 /// A text buffer backed by a Vector of Arc<str> lines.
@@ -282,7 +277,6 @@ impl Buffer {
     }
 
     #[doc(hidden)]
-    #[deprecated(since = "0.1.0", note = "use new_from_str instead")]
     #[allow(clippy::should_implement_trait)]
     pub fn from_str(text: &str) -> Self {
         Self::new_from_str(text)
@@ -1368,8 +1362,7 @@ impl Buffer {
 
             let last_grapheme_offset = prefix
                 .grapheme_indices(true)
-                .rev()
-                .next()
+                .next_back()
                 .map(|(offset, _)| offset)?;
 
             Some(Cursor::new(cursor.line, last_grapheme_offset))
@@ -1464,8 +1457,7 @@ impl Buffer {
         // .next() gets the last element (now first in reversed order)
         let last_grapheme_offset = prefix
             .grapheme_indices(true)
-            .rev()
-            .next()
+            .next_back()
             .map(|(offset, _)| offset)?;
 
         Some(Cursor::new(cursor.line, last_grapheme_offset))
@@ -2750,7 +2742,7 @@ impl Buffer {
         // Find what we're at: word char, whitespace, or empty
         let cursor_grapheme = self.grapheme_at_byte(cursor.line, cursor.col);
 
-        if cursor_grapheme.map_or(true, |g| Self::is_word_char(g)) {
+        if cursor_grapheme.is_none_or(Self::is_word_char) {
             // Cursor is inside a word (or at start of word-like char)
             // Find word boundaries
             let mut word_start = cursor.col;
@@ -2874,7 +2866,7 @@ impl Buffer {
         // Find what we're at: word char, whitespace, or empty
         let cursor_grapheme = self.grapheme_at_byte(cursor.line, cursor.col);
 
-        if cursor_grapheme.map_or(true, |g| Self::is_word_char(g)) {
+        if cursor_grapheme.is_none_or(Self::is_word_char) {
             // Cursor is inside a word - get inner word + all trailing whitespace
             let inner = self.get_inner_word_range(cursor)?;
             let mut end_col = inner.end.col;
@@ -2942,7 +2934,7 @@ impl Buffer {
                                 .and_then(|s| s.graphemes(true).next());
                             if let Some(wg) = word_grapheme {
                                 if Self::is_word_char(wg) {
-                                    word_end_col = word_end_col + wg.len();
+                                    word_end_col += wg.len();
                                 } else {
                                     break;
                                 }
@@ -4120,8 +4112,6 @@ mod tests {
 
     #[test]
     fn test_word_forward_at_last_word() {
-        // "hello world" - cursor at 'd' (last char), w should go to start of next word
-        let buf = Buffer::from_str("hello world");
         // At position 10 ('d'), w should go to... wait, there's no next line, so should wrap or stay
         // Actually "hello world\nmore" - at 'd' in "world", w should go to 'm' in "more"
         let buf2 = Buffer::from_str("hello world\nmore");

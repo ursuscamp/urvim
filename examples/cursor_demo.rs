@@ -1,7 +1,7 @@
 use std::io;
 use tracing_appender::non_blocking::WorkerGuard;
-use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
-use urvim::terminal::{CURSOR_STYLES, CursorStyle, Event, KeyCode};
+use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
+use urvim::terminal::{Event, KeyCode, CURSOR_STYLES};
 
 fn init_logger() -> WorkerGuard {
     let file = std::fs::OpenOptions::new()
@@ -23,7 +23,7 @@ fn init_logger() -> WorkerGuard {
 
 fn main() -> io::Result<()> {
     let _guard = init_logger();
-    if !is_terminal::is_terminal(&std::io::stdin()) {
+    if !is_terminal::is_terminal(std::io::stdin()) {
         eprintln!("Error: Must be run from a terminal");
         return Err(io::Error::new(
             io::ErrorKind::NotConnected,

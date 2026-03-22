@@ -367,8 +367,8 @@ mod tests {
         screen.write_string(0, 0, Style::default(), "a");
         screen.write_string(0, 1, Style::default(), "c");
 
-        let idx00 = (0 * 2 + 0) as usize;
-        let idx01 = (0 * 2 + 1) as usize;
+        let idx00 = 0usize;
+        let idx01 = 1usize;
 
         assert_eq!(screen.buffer[idx00].text, "a");
         assert_eq!(screen.old_buffer[idx00].text, "a");

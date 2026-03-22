@@ -5,7 +5,7 @@
 //! - Querying the cursor position from the terminal
 //! - Low-level input polling
 
-use rustix::event::{PollFd, PollFlags, poll};
+use rustix::event::{poll, PollFd, PollFlags};
 use rustix::fd::AsFd;
 use std::io::{Read, Write};
 use tracing::trace;
@@ -114,8 +114,6 @@ pub fn poll_input<T: AsFd>(fd: &T, timeout_ms: i32) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
     fn test_parse_cursor_position_simple() {
         let response = b"\x1b[5;10R";

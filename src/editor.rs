@@ -529,24 +529,6 @@ impl CountParser {
         s.chars().all(|c| c.is_ascii_digit())
     }
 
-    /// Check if a string is a valid count digit that should be treated as part of a count.
-    /// This is different from is_count_digit because it includes "0" when it follows other digits.
-    /// This should only be called when we know we're building a count (i.e., after seeing a 1-9).
-    fn is_count_continuation(s: &str, is_accumulating_count: bool) -> bool {
-        // If we're already accumulating a count, allow 0-9
-        // If we're starting fresh, only allow 1-9
-        if is_accumulating_count {
-            Self::is_count_digit(s)
-        } else {
-            // Only 1-9 when starting fresh (can't have "0" as first digit)
-            s.len() == 1
-                && s.chars()
-                    .next()
-                    .map(|c| ('1'..='9').contains(&c))
-                    .unwrap_or(false)
-        }
-    }
-
     /// Parse a key sequence to extract action keys and total count.
     ///
     /// Returns (action_keys, total_count) where:
@@ -1707,7 +1689,7 @@ mod tests {
     }
 
     #[test]
-    fn test_O_key_opens_line_above() {
+    fn test_o_key_opens_line_above_uppercase() {
         let mut mode = NormalMode::new();
         let result = mode.handle_key(&key('O'));
         assert!(matches!(
@@ -1717,7 +1699,7 @@ mod tests {
     }
 
     #[test]
-    fn test_O_key_is_countable() {
+    fn test_o_key_uppercase_is_countable() {
         // O supports count prefix (e.g., 3O creates 3 lines above)
         assert!(Action::OpenLineAbove.is_countable());
     }

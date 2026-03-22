@@ -1,7 +1,7 @@
 use std::io;
 
 fn main() -> io::Result<()> {
-    if !is_terminal::is_terminal(&std::io::stdin()) {
+    if !is_terminal::is_terminal(std::io::stdin()) {
         eprintln!("Error: Must be run from a terminal");
         return Err(io::Error::new(
             io::ErrorKind::NotConnected,
