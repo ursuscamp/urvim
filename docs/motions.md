@@ -46,6 +46,11 @@ This document describes the motions implemented in urvim and how they differ fro
 | `dw` | Delete through next `w` boundary |
 | `de` | Delete through next `e` boundary |
 | `db` | Delete back to previous `b` boundary |
+| `d$` | Delete from the cursor through the end of the line |
+| `d0` | Delete from the start of the line through the cursor |
+| `d^` | Delete from the first non-whitespace character through the cursor |
+| `dgg` | Delete linewise from the current line to line 1 (or to line N with a count) |
+| `dG` | Delete linewise from the current line to the last line (or to line N with a count) |
 | `dW` | Delete through next `W` boundary |
 | `dE` | Delete through next `E` boundary |
 | `dB` | Delete back to previous `B` boundary |
@@ -67,6 +72,11 @@ urvim supports count prefixes for most motions. There are two types of count beh
    - `2dw` = delete through the second `w` boundary
    - `d3e` = delete through the third `e` boundary
    - `3d2B` = 6 backward BigWord boundary steps
+
+5. **Operations with linewise delete motions**:
+   - `dgg` and `dG` delete linewise and treat counts as destination line numbers
+   - `d5gg` deletes linewise to line 5
+   - `d5G` deletes linewise to line 5
 
 > Note: urvim limits counts to values 1-9999 to prevent excessive operations.
 

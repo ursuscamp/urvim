@@ -1,5 +1,6 @@
 use super::*;
-use crate::editor::{BoundaryMotion, OperatorTarget, TextObject};
+use crate::editor::{BoundaryMotion, LinewiseMotion, OperatorTarget, TextObject};
+use crate::buffer::operator_target::LinewiseDeleteRange;
 
 #[test]
 fn test_new_buffer() {
@@ -1233,6 +1234,60 @@ fn test_operator_target_bigword_backward_range() {
 }
 
 #[test]
+fn test_operator_target_line_end_range() {
+    let buf = Buffer::from_str("hello world");
+    let range = buf
+        .get_operator_target_range(
+            Cursor::new(0, 6),
+            OperatorTarget::BoundaryMotion(BoundaryMotion::LineEnd),
+        )
+        .unwrap();
+    assert_eq!(
+        range,
+        TextObjectRange {
+            start: Cursor::new(0, 6),
+            end: Cursor::new(0, 11),
+        }
+    );
+}
+
+#[test]
+fn test_operator_target_line_start_range() {
+    let buf = Buffer::from_str("hello world");
+    let range = buf
+        .get_operator_target_range(
+            Cursor::new(0, 6),
+            OperatorTarget::BoundaryMotion(BoundaryMotion::LineStart),
+        )
+        .unwrap();
+    assert_eq!(
+        range,
+        TextObjectRange {
+            start: Cursor::new(0, 0),
+            end: Cursor::new(0, 6),
+        }
+    );
+}
+
+#[test]
+fn test_operator_target_line_content_start_range() {
+    let buf = Buffer::from_str("    hello world");
+    let range = buf
+        .get_operator_target_range(
+            Cursor::new(0, 10),
+            OperatorTarget::BoundaryMotion(BoundaryMotion::LineContentStart),
+        )
+        .unwrap();
+    assert_eq!(
+        range,
+        TextObjectRange {
+            start: Cursor::new(0, 4),
+            end: Cursor::new(0, 10),
+        }
+    );
+}
+
+#[test]
 fn test_operator_target_counted_word_forward_range() {
     let buf = Buffer::from_str("one two three four");
     let range = buf
@@ -1287,6 +1342,50 @@ fn test_operator_target_counted_word_backward_range() {
             end: Cursor::new(0, 8),
         }
     );
+}
+
+#[test]
+fn test_linewise_operator_target_first_line_range() {
+    let buf = Buffer::from_str("a\nb\nc\nd\ne");
+    let range = buf
+        .get_linewise_operator_target_range(Cursor::new(3, 0), LinewiseMotion::FirstLine)
+        .unwrap();
+    assert_eq!(range, LinewiseDeleteRange::new(0, 4));
+}
+
+#[test]
+fn test_linewise_operator_target_last_line_range() {
+    let buf = Buffer::from_str("a\nb\nc\nd\ne");
+    let range = buf
+        .get_linewise_operator_target_range(Cursor::new(1, 0), LinewiseMotion::LastLine)
+        .unwrap();
+    assert_eq!(range, LinewiseDeleteRange::new(1, 4));
+}
+
+#[test]
+fn test_linewise_operator_target_counted_first_line_range() {
+    let buf = Buffer::from_str("a\nb\nc\nd\ne\nf\ng\nh\ni\nj");
+    let range = buf
+        .get_linewise_operator_target_range_with_count(
+            Cursor::new(7, 0),
+            LinewiseMotion::FirstLine,
+            5,
+        )
+        .unwrap();
+    assert_eq!(range, LinewiseDeleteRange::new(4, 4));
+}
+
+#[test]
+fn test_linewise_operator_target_counted_last_line_range() {
+    let buf = Buffer::from_str("a\nb\nc\nd\ne\nf\ng\nh\ni\nj");
+    let range = buf
+        .get_linewise_operator_target_range_with_count(
+            Cursor::new(2, 0),
+            LinewiseMotion::LastLine,
+            5,
+        )
+        .unwrap();
+    assert_eq!(range, LinewiseDeleteRange::new(2, 3));
 }
 
 #[test]

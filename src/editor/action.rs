@@ -9,11 +9,23 @@ pub enum Operator {
 /// Boundary-based delete targets that mirror motion families.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BoundaryMotion {
+    /// Move to the last non-whitespace character of the current line or target line.
+    LineEnd,
+    /// Move to the start of the current line or target line.
+    LineStart,
+    /// Move to the first non-whitespace character of the current line or target line.
+    LineContentStart,
+    /// Move to the next word start.
     WordForward,
+    /// Move to the end of the current or next word.
     WordEnd,
+    /// Move to the previous word start.
     WordBackward,
+    /// Move to the next BigWord start.
     BigWordForward,
+    /// Move to the end of the current or next BigWord.
     BigWordEnd,
+    /// Move to the previous BigWord start.
     BigWordBackward,
 }
 
@@ -29,6 +41,16 @@ pub enum TextObject {
 pub enum OperatorTarget {
     TextObject(TextObject),
     BoundaryMotion(BoundaryMotion),
+    LinewiseMotion(LinewiseMotion),
+}
+
+/// Linewise operator targets for whole-line deletion.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LinewiseMotion {
+    /// Move to the first line of the file.
+    FirstLine,
+    /// Move to the last line of the file.
+    LastLine,
 }
 
 /// Actions that the main event loop processes.

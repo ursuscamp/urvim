@@ -1,6 +1,6 @@
 use super::{
-    Action, BoundaryMotion, CountParser, HandleKeyResult, Keymap, Mode, Operator, OperatorTarget,
-    TextObject, TrieKeymap,
+    Action, BoundaryMotion, CountParser, HandleKeyResult, Keymap, LinewiseMotion, Mode, Operator,
+    OperatorTarget, TextObject, TrieKeymap,
 };
 use super::keymap::{MAX_COUNT, extract_leading_count};
 use crate::buffer::Boundary;
@@ -96,6 +96,27 @@ impl NormalMode {
             ),
         );
         trie_keymap.insert_sequence(
+            vec!["d".to_string(), "$".to_string()],
+            Action::Operation(
+                Operator::Delete,
+                OperatorTarget::BoundaryMotion(BoundaryMotion::LineEnd),
+            ),
+        );
+        trie_keymap.insert_sequence(
+            vec!["d".to_string(), "0".to_string()],
+            Action::Operation(
+                Operator::Delete,
+                OperatorTarget::BoundaryMotion(BoundaryMotion::LineStart),
+            ),
+        );
+        trie_keymap.insert_sequence(
+            vec!["d".to_string(), "^".to_string()],
+            Action::Operation(
+                Operator::Delete,
+                OperatorTarget::BoundaryMotion(BoundaryMotion::LineContentStart),
+            ),
+        );
+        trie_keymap.insert_sequence(
             vec!["d".to_string(), "W".to_string()],
             Action::Operation(
                 Operator::Delete,
@@ -114,6 +135,20 @@ impl NormalMode {
             Action::Operation(
                 Operator::Delete,
                 OperatorTarget::BoundaryMotion(BoundaryMotion::BigWordBackward),
+            ),
+        );
+        trie_keymap.insert_sequence(
+            vec!["d".to_string(), "g".to_string(), "g".to_string()],
+            Action::Operation(
+                Operator::Delete,
+                OperatorTarget::LinewiseMotion(LinewiseMotion::FirstLine),
+            ),
+        );
+        trie_keymap.insert_sequence(
+            vec!["d".to_string(), "G".to_string()],
+            Action::Operation(
+                Operator::Delete,
+                OperatorTarget::LinewiseMotion(LinewiseMotion::LastLine),
             ),
         );
         trie_keymap.insert_sequence(vec!["c".to_string(), "c".to_string()], Action::ChangeLine);

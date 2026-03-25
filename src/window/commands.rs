@@ -192,6 +192,20 @@ impl Window {
         target: OperatorTarget,
         count: usize,
     ) -> ActionResult {
+        match target {
+            OperatorTarget::LinewiseMotion(motion) => {
+                self.handle_linewise_operation_with_count(operator, motion, count)
+            }
+            _ => self.handle_characterwise_operation_with_count(operator, target, count),
+        }
+    }
+
+    fn handle_characterwise_operation_with_count(
+        &mut self,
+        operator: Operator,
+        target: OperatorTarget,
+        count: usize,
+    ) -> ActionResult {
         let cursor = self.buffer_view.cursor();
         let buffer = self.buffer_view.buffer_mut();
         let range = buffer.get_operator_target_range_with_count(cursor, target, count);
@@ -212,11 +226,63 @@ impl Window {
         ActionResult::Handled
     }
 
+    fn handle_linewise_operation_with_count(
+        &mut self,
+        operator: Operator,
+        motion: LinewiseMotion,
+        count: usize,
+    ) -> ActionResult {
+        let cursor = self.buffer_view.cursor();
+        let buffer = self.buffer_view.buffer_mut();
+        let range = buffer.get_linewise_operator_target_range_with_count(cursor, motion, count);
+        let Some(range) = range else {
+            return ActionResult::Handled;
+        };
+        if range.count == 0 {
+            return ActionResult::Handled;
+        }
+        match operator {
+            Operator::Delete => {
+                buffer.push_snapshot(cursor);
+                if let Some(new_cursor) = buffer.delete_lines(range.start_line, range.count) {
+                    self.buffer_view.set_cursor(new_cursor);
+                }
+            }
+        }
+        ActionResult::Handled
+    }
+
     pub(super) fn handle_operation(
         &mut self,
         operator: &Operator,
         target: &OperatorTarget,
     ) -> ActionResult {
-        self.handle_operation_with_count(*operator, *target, 1)
+        match target {
+            OperatorTarget::LinewiseMotion(motion) => {
+                self.handle_linewise_operation(*operator, *motion)
+            }
+            _ => self.handle_characterwise_operation_with_count(*operator, *target, 1),
+        }
+    }
+
+    fn handle_linewise_operation(&mut self, operator: Operator, motion: LinewiseMotion) -> ActionResult {
+        let cursor = self.buffer_view.cursor();
+        let buffer = self.buffer_view.buffer_mut();
+        let range = buffer.get_linewise_operator_target_range(cursor, motion);
+        let Some(range) = range else {
+            return ActionResult::Handled;
+        };
+        if range.count == 0 {
+            return ActionResult::Handled;
+        }
+        match operator {
+            Operator::Delete => {
+                buffer.push_snapshot(cursor);
+                if let Some(new_cursor) = buffer.delete_lines(range.start_line, range.count) {
+                    self.buffer_view.set_cursor(new_cursor);
+                }
+            }
+        }
+        ActionResult::Handled
     }
 }

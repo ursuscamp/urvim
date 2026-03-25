@@ -80,6 +80,57 @@ fn test_dw_sequence() {
 }
 
 #[test]
+fn test_dollar_sequence() {
+    let mut mode = NormalMode::new();
+    assert!(matches!(
+        mode.handle_key(&key('d')),
+        HandleKeyResult::WaitForMore
+    ));
+    let result = mode.handle_key(&key('$'));
+    assert!(matches!(
+        result,
+        HandleKeyResult::Complete(Action::Operation(
+            Operator::Delete,
+            OperatorTarget::BoundaryMotion(BoundaryMotion::LineEnd),
+        ))
+    ));
+}
+
+#[test]
+fn test_d0_sequence() {
+    let mut mode = NormalMode::new();
+    assert!(matches!(
+        mode.handle_key(&key('d')),
+        HandleKeyResult::WaitForMore
+    ));
+    let result = mode.handle_key(&key('0'));
+    assert!(matches!(
+        result,
+        HandleKeyResult::Complete(Action::Operation(
+            Operator::Delete,
+            OperatorTarget::BoundaryMotion(BoundaryMotion::LineStart),
+        ))
+    ));
+}
+
+#[test]
+fn test_dcaret_sequence() {
+    let mut mode = NormalMode::new();
+    assert!(matches!(
+        mode.handle_key(&key('d')),
+        HandleKeyResult::WaitForMore
+    ));
+    let result = mode.handle_key(&key('^'));
+    assert!(matches!(
+        result,
+        HandleKeyResult::Complete(Action::Operation(
+            Operator::Delete,
+            OperatorTarget::BoundaryMotion(BoundaryMotion::LineContentStart),
+        ))
+    ));
+}
+
+#[test]
 fn test_dbigword_sequence() {
     let mut mode = NormalMode::new();
     assert!(matches!(
@@ -94,6 +145,105 @@ fn test_dbigword_sequence() {
             OperatorTarget::BoundaryMotion(BoundaryMotion::BigWordForward),
         ))
     ));
+}
+
+#[test]
+fn test_dgg_sequence() {
+    let mut mode = NormalMode::new();
+    assert!(matches!(
+        mode.handle_key(&key('d')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert!(matches!(
+        mode.handle_key(&key('g')),
+        HandleKeyResult::WaitForMore
+    ));
+    let result = mode.handle_key(&key('g'));
+    assert!(matches!(
+        result,
+        HandleKeyResult::Complete(Action::Operation(
+            Operator::Delete,
+            OperatorTarget::LinewiseMotion(LinewiseMotion::FirstLine),
+        ))
+    ));
+}
+
+#[test]
+fn test_dg_prefix_waits() {
+    let mut mode = NormalMode::new();
+    assert!(matches!(
+        mode.handle_key(&key('d')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert!(matches!(
+        mode.handle_key(&key('g')),
+        HandleKeyResult::WaitForMore
+    ));
+}
+
+#[test]
+fn test_d_g_sequence() {
+    let mut mode = NormalMode::new();
+    assert!(matches!(
+        mode.handle_key(&key('d')),
+        HandleKeyResult::WaitForMore
+    ));
+    let result = mode.handle_key(&key('G'));
+    assert!(matches!(
+        result,
+        HandleKeyResult::Complete(Action::Operation(
+            Operator::Delete,
+            OperatorTarget::LinewiseMotion(LinewiseMotion::LastLine),
+        ))
+    ));
+}
+
+#[test]
+fn test_d5_g_sequence() {
+    let mut mode = NormalMode::new();
+    assert!(matches!(
+        mode.handle_key(&key('d')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert!(matches!(
+        mode.handle_key(&key('5')),
+        HandleKeyResult::WaitForMore
+    ));
+    let result = mode.handle_key(&key('G'));
+    if let HandleKeyResult::Complete(Action::Count(5, inner)) = result {
+        assert!(matches!(
+            *inner,
+            Action::Operation(Operator::Delete, OperatorTarget::LinewiseMotion(LinewiseMotion::LastLine))
+        ));
+    } else {
+        panic!("expected counted delete motion");
+    }
+}
+
+#[test]
+fn test_d5gg_sequence() {
+    let mut mode = NormalMode::new();
+    assert!(matches!(
+        mode.handle_key(&key('d')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert!(matches!(
+        mode.handle_key(&key('5')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert!(matches!(
+        mode.handle_key(&key('g')),
+        HandleKeyResult::WaitForMore
+    ));
+    let result = mode.handle_key(&key('g'));
+    if let HandleKeyResult::Complete(Action::Count(5, inner)) = result {
+        assert!(matches!(
+            *inner,
+            Action::Operation(Operator::Delete, OperatorTarget::LinewiseMotion(LinewiseMotion::FirstLine))
+        ));
+    } else {
+        panic!("expected counted delete motion");
+    }
 }
 
 #[test]

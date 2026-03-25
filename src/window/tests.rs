@@ -1,5 +1,6 @@
 use super::*;
 use crate::editor::BoundaryMotion;
+use crate::editor::LinewiseMotion;
 use crate::editor::TextObject;
 
 #[test]
@@ -705,6 +706,51 @@ fn test_dw_deletes_through_next_word_start() {
 }
 
 #[test]
+fn test_dollar_deletes_to_line_end() {
+    let buffer = Buffer::from_str("hello world");
+    let mut window = Window::new(buffer);
+
+    window.buffer_view.set_cursor(Cursor::new(0, 6));
+    window.process_action(&Action::Operation(
+        Operator::Delete,
+        OperatorTarget::BoundaryMotion(BoundaryMotion::LineEnd),
+    ));
+
+    assert_eq!(window.buffer_view.buffer.as_str(), "hello ");
+    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 6));
+}
+
+#[test]
+fn test_d0_deletes_to_line_start() {
+    let buffer = Buffer::from_str("hello world");
+    let mut window = Window::new(buffer);
+
+    window.buffer_view.set_cursor(Cursor::new(0, 6));
+    window.process_action(&Action::Operation(
+        Operator::Delete,
+        OperatorTarget::BoundaryMotion(BoundaryMotion::LineStart),
+    ));
+
+    assert_eq!(window.buffer_view.buffer.as_str(), "world");
+    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
+}
+
+#[test]
+fn test_dcaret_deletes_to_line_content_start() {
+    let buffer = Buffer::from_str("    hello world");
+    let mut window = Window::new(buffer);
+
+    window.buffer_view.set_cursor(Cursor::new(0, 10));
+    window.process_action(&Action::Operation(
+        Operator::Delete,
+        OperatorTarget::BoundaryMotion(BoundaryMotion::LineContentStart),
+    ));
+
+    assert_eq!(window.buffer_view.buffer.as_str(), "    world");
+    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 4));
+}
+
+#[test]
 fn test_db_deletes_back_to_previous_word_start() {
     let buffer = Buffer::from_str("hello world");
     let mut window = Window::new(buffer);
@@ -717,6 +763,54 @@ fn test_db_deletes_back_to_previous_word_start() {
 
     assert_eq!(window.buffer_view.buffer.as_str(), "world");
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
+}
+
+#[test]
+fn test_dgg_deletes_to_first_line_linewise() {
+    let buffer = Buffer::from_str("one\ntwo\nthree\nfour\nfive");
+    let mut window = Window::new(buffer);
+
+    window.buffer_view.set_cursor(Cursor::new(3, 1));
+    window.process_action(&Action::Operation(
+        Operator::Delete,
+        OperatorTarget::LinewiseMotion(LinewiseMotion::FirstLine),
+    ));
+
+    assert_eq!(window.buffer_view.buffer.as_str(), "five");
+    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
+}
+
+#[test]
+fn test_d_g_deletes_to_last_line_linewise() {
+    let buffer = Buffer::from_str("one\ntwo\nthree\nfour\nfive");
+    let mut window = Window::new(buffer);
+
+    window.buffer_view.set_cursor(Cursor::new(2, 0));
+    window.process_action(&Action::Operation(
+        Operator::Delete,
+        OperatorTarget::LinewiseMotion(LinewiseMotion::LastLine),
+    ));
+
+    assert_eq!(window.buffer_view.buffer.as_str(), "one\ntwo");
+    assert_eq!(window.buffer_view.cursor(), Cursor::new(1, 0));
+}
+
+#[test]
+fn test_counted_d_g_deletes_to_destination_line() {
+    let buffer = Buffer::from_str("one\ntwo\nthree\nfour\nfive\nsix");
+    let mut window = Window::new(buffer);
+
+    window.buffer_view.set_cursor(Cursor::new(2, 0));
+    window.process_action(&Action::Count(
+        5,
+        Box::new(Action::Operation(
+            Operator::Delete,
+            OperatorTarget::LinewiseMotion(LinewiseMotion::LastLine),
+        )),
+    ));
+
+    assert_eq!(window.buffer_view.buffer.as_str(), "one\ntwo\nsix");
+    assert_eq!(window.buffer_view.cursor(), Cursor::new(2, 0));
 }
 
 #[test]
