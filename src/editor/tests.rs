@@ -80,6 +80,65 @@ fn test_dw_sequence() {
 }
 
 #[test]
+fn test_cw_sequence() {
+    let mut mode = NormalMode::new();
+    assert!(matches!(
+        mode.handle_key(&key('c')),
+        HandleKeyResult::WaitForMore
+    ));
+    let result = mode.handle_key(&key('w'));
+    assert!(matches!(
+        result,
+        HandleKeyResult::Complete(Action::Operation(
+            Operator::Change,
+            OperatorTarget::BoundaryMotion(BoundaryMotion::WordForward),
+        ))
+    ));
+}
+
+#[test]
+fn test_ciw_sequence() {
+    let mut mode = NormalMode::new();
+    assert!(matches!(
+        mode.handle_key(&key('c')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert!(matches!(
+        mode.handle_key(&key('i')),
+        HandleKeyResult::WaitForMore
+    ));
+    let result = mode.handle_key(&key('w'));
+    assert!(matches!(
+        result,
+        HandleKeyResult::Complete(Action::Operation(
+            Operator::Change,
+            OperatorTarget::TextObject(TextObject::InnerWord),
+        ))
+    ));
+}
+
+#[test]
+fn test_cgg_sequence() {
+    let mut mode = NormalMode::new();
+    assert!(matches!(
+        mode.handle_key(&key('c')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert!(matches!(
+        mode.handle_key(&key('g')),
+        HandleKeyResult::WaitForMore
+    ));
+    let result = mode.handle_key(&key('g'));
+    assert!(matches!(
+        result,
+        HandleKeyResult::Complete(Action::Operation(
+            Operator::Change,
+            OperatorTarget::LinewiseMotion(LinewiseMotion::FirstLine),
+        ))
+    ));
+}
+
+#[test]
 fn test_dollar_sequence() {
     let mut mode = NormalMode::new();
     assert!(matches!(
@@ -182,6 +241,19 @@ fn test_dg_prefix_waits() {
 }
 
 #[test]
+fn test_c_prefix_waits() {
+    let mut mode = NormalMode::new();
+    assert!(matches!(
+        mode.handle_key(&key('c')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert!(matches!(
+        mode.handle_key(&key('i')),
+        HandleKeyResult::WaitForMore
+    ));
+}
+
+#[test]
 fn test_d_g_sequence() {
     let mut mode = NormalMode::new();
     assert!(matches!(
@@ -213,7 +285,10 @@ fn test_d5_g_sequence() {
     if let HandleKeyResult::Complete(Action::Count(5, inner)) = result {
         assert!(matches!(
             *inner,
-            Action::Operation(Operator::Delete, OperatorTarget::LinewiseMotion(LinewiseMotion::LastLine))
+            Action::Operation(
+                Operator::Delete,
+                OperatorTarget::LinewiseMotion(LinewiseMotion::LastLine)
+            )
         ));
     } else {
         panic!("expected counted delete motion");
@@ -239,7 +314,10 @@ fn test_d5gg_sequence() {
     if let HandleKeyResult::Complete(Action::Count(5, inner)) = result {
         assert!(matches!(
             *inner,
-            Action::Operation(Operator::Delete, OperatorTarget::LinewiseMotion(LinewiseMotion::FirstLine))
+            Action::Operation(
+                Operator::Delete,
+                OperatorTarget::LinewiseMotion(LinewiseMotion::FirstLine)
+            )
         ));
     } else {
         panic!("expected counted delete motion");
@@ -268,4 +346,16 @@ fn test_d_counted_word_sequence() {
 fn test_action_with_count() {
     let action = Action::MoveDown.clone().with_count(5);
     assert!(matches!(action, Some(Action::Count(5, _))));
+}
+
+#[test]
+fn test_change_operation_traits() {
+    let action = Action::Operation(
+        Operator::Change,
+        OperatorTarget::BoundaryMotion(BoundaryMotion::WordForward),
+    );
+
+    assert!(action.is_snapshottable());
+    assert!(action.switches_to_insert_mode());
+    assert!(action.is_countable());
 }

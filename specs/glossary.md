@@ -16,6 +16,11 @@ In normal mode, the block cursor visually covers a character, indicating the cur
 ### Action
 An enum representing operations that the editor can perform in response to keypresses. Examples include `MoveLeft`, `MoveDown`, `InsertChar`, `SwitchToNormal`, etc.
 
+### Change Operator
+The `c` operator in operator-pending mode. It removes the resolved text range and then places the editor in insert mode when the operation succeeds. Examples include `cw`, `ciw`, `c$`, and `cG`.
+
+**Related Terms:** Operator, Operator-Pending Mode, Operation Action, Delete Line, Change Line
+
 ### Mode
 A trait that defines how the editor responds to key input in different states. Urvim implements two modes:
 - **Normal Mode**: For navigation and command execution. Uses a steady block cursor.

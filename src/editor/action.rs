@@ -4,6 +4,8 @@ use crate::buffer::Boundary;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Operator {
     Delete,
+    /// Delete text and enter insert mode after a successful operation.
+    Change,
 }
 
 /// Boundary-based delete targets that mirror motion families.
@@ -214,7 +216,8 @@ impl Action {
             | Action::OpenLineBelow
             | Action::OpenLineAbove => true,
             Action::Count(_, inner) => inner.switches_to_insert_mode(),
-            Action::Operation(_, _) => false,
+            Action::Operation(Operator::Change, _) => true,
+            Action::Operation(Operator::Delete, _) => false,
             _ => false,
         }
     }
@@ -237,7 +240,7 @@ impl Action {
             Action::InsertChar(_) => false,
             Action::Undo | Action::Redo => false,
             Action::Count(_, inner) => inner.is_snapshottable(),
-            Action::Operation(Operator::Delete, _) => true,
+            Action::Operation(Operator::Delete, _) | Action::Operation(Operator::Change, _) => true,
             _ => false,
         }
     }

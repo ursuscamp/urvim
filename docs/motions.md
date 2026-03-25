@@ -54,6 +54,19 @@ This document describes the motions implemented in urvim and how they differ fro
 | `dW` | Delete through next `W` boundary |
 | `dE` | Delete through next `E` boundary |
 | `dB` | Delete back to previous `B` boundary |
+| `ciw` | Change inner word (delete inner word and enter insert mode) |
+| `caw` | Change around word (delete around word and enter insert mode) |
+| `cw` | Change through next `w` boundary and enter insert mode |
+| `ce` | Change through next `e` boundary and enter insert mode |
+| `cb` | Change back to previous `b` boundary and enter insert mode |
+| `cW` | Change through next `W` boundary and enter insert mode |
+| `cE` | Change through next `E` boundary and enter insert mode |
+| `cB` | Change back to previous `B` boundary and enter insert mode |
+| `c$` | Change from the cursor through the end of the line |
+| `c0` | Change from the start of the line through the cursor |
+| `c^` | Change from the first non-whitespace character through the cursor |
+| `cgg` | Change linewise from the current line to line 1 (or to line N with a count) |
+| `cG` | Change linewise from the current line to the last line (or to line N with a count) |
 
 ## Count Support
 
@@ -73,7 +86,9 @@ urvim supports count prefixes for most motions. There are two types of count beh
    - `d3e` = delete through the third `e` boundary
    - `3d2B` = 6 backward BigWord boundary steps
 
-5. **Operations with linewise delete motions**:
+5. **Operations with change motions**: Counts use the same target resolution as the matching delete motions, but successful operations enter insert mode afterward.
+
+6. **Operations with linewise delete motions**:
    - `dgg` and `dG` delete linewise and treat counts as destination line numbers
    - `d5gg` deletes linewise to line 5
    - `d5G` deletes linewise to line 5

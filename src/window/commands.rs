@@ -210,17 +210,13 @@ impl Window {
         let buffer = self.buffer_view.buffer_mut();
         let range = buffer.get_operator_target_range_with_count(cursor, target, count);
         let Some(range) = range else {
-            return ActionResult::Handled;
+            return self.operation_noop_result(operator);
         };
         if range.start == range.end {
-            return ActionResult::Handled;
+            return self.operation_noop_result(operator);
         }
-        match operator {
-            Operator::Delete => {
-                if let Some(new_cursor) = buffer.delete_range(range) {
-                    self.buffer_view.set_cursor(new_cursor);
-                }
-            }
+        if let Some(new_cursor) = buffer.delete_range(range) {
+            self.buffer_view.set_cursor(new_cursor);
         }
         ActionResult::Handled
     }
@@ -235,17 +231,13 @@ impl Window {
         let buffer = self.buffer_view.buffer_mut();
         let range = buffer.get_linewise_operator_target_range_with_count(cursor, motion, count);
         let Some(range) = range else {
-            return ActionResult::Handled;
+            return self.operation_noop_result(operator);
         };
         if range.count == 0 {
-            return ActionResult::Handled;
+            return self.operation_noop_result(operator);
         }
-        match operator {
-            Operator::Delete => {
-                if let Some(new_cursor) = buffer.delete_lines(range.start_line, range.count) {
-                    self.buffer_view.set_cursor(new_cursor);
-                }
-            }
+        if let Some(new_cursor) = buffer.delete_lines(range.start_line, range.count) {
+            self.buffer_view.set_cursor(new_cursor);
         }
         ActionResult::Handled
     }
@@ -263,23 +255,30 @@ impl Window {
         }
     }
 
-    fn handle_linewise_operation(&mut self, operator: Operator, motion: LinewiseMotion) -> ActionResult {
+    fn handle_linewise_operation(
+        &mut self,
+        operator: Operator,
+        motion: LinewiseMotion,
+    ) -> ActionResult {
         let cursor = self.buffer_view.cursor();
         let buffer = self.buffer_view.buffer_mut();
         let range = buffer.get_linewise_operator_target_range(cursor, motion);
         let Some(range) = range else {
-            return ActionResult::Handled;
+            return self.operation_noop_result(operator);
         };
         if range.count == 0 {
-            return ActionResult::Handled;
+            return self.operation_noop_result(operator);
         }
-        match operator {
-            Operator::Delete => {
-                if let Some(new_cursor) = buffer.delete_lines(range.start_line, range.count) {
-                    self.buffer_view.set_cursor(new_cursor);
-                }
-            }
+        if let Some(new_cursor) = buffer.delete_lines(range.start_line, range.count) {
+            self.buffer_view.set_cursor(new_cursor);
         }
         ActionResult::Handled
+    }
+
+    fn operation_noop_result(&self, operator: Operator) -> ActionResult {
+        match operator {
+            Operator::Delete => ActionResult::Handled,
+            Operator::Change => ActionResult::NotHandled,
+        }
     }
 }

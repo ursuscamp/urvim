@@ -1,7 +1,7 @@
 use super::*;
 use crate::action::ActionResult;
-use crate::editor::BoundaryMotion;
 use crate::editor::Action;
+use crate::editor::BoundaryMotion;
 use crate::editor::LinewiseMotion;
 use crate::editor::Operator;
 use crate::editor::OperatorTarget;
@@ -719,6 +719,43 @@ fn test_dw_deletes_through_next_word_start() {
 }
 
 #[test]
+fn test_cw_changes_through_next_word_start() {
+    let buffer = Buffer::from_str("hello world");
+    let mut window = Window::new(buffer);
+
+    window.buffer_view.set_cursor(Cursor::new(0, 0));
+    let result = window.process_action(&Action::Operation(
+        Operator::Change,
+        OperatorTarget::BoundaryMotion(BoundaryMotion::WordForward),
+    ));
+
+    assert_eq!(result, ActionResult::Handled);
+    assert_eq!(window.buffer_view.buffer.as_str(), "world");
+    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
+    assert!(Action::Operation(
+        Operator::Change,
+        OperatorTarget::BoundaryMotion(BoundaryMotion::WordForward)
+    )
+    .switches_to_insert_mode());
+}
+
+#[test]
+fn test_cw_at_end_of_line_is_noop() {
+    let buffer = Buffer::from_str("hello");
+    let mut window = Window::new(buffer);
+
+    window.buffer_view.set_cursor(Cursor::new(0, 5));
+    let result = window.process_action(&Action::Operation(
+        Operator::Change,
+        OperatorTarget::BoundaryMotion(BoundaryMotion::WordForward),
+    ));
+
+    assert_eq!(result, ActionResult::NotHandled);
+    assert_eq!(window.buffer_view.buffer.as_str(), "hello");
+    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 5));
+}
+
+#[test]
 fn test_delete_forward_undo_and_redo() {
     let buffer = Buffer::from_str("hello");
     let mut window = Window::new(buffer);
@@ -769,6 +806,22 @@ fn test_dw_undo_and_redo() {
         window.buffer_view.set_cursor(cursor);
     }
     assert_eq!(window.buffer_view.buffer.as_str(), "world");
+    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
+}
+
+#[test]
+fn test_cg_changes_to_first_line() {
+    let buffer = Buffer::from_str("one\ntwo\nthree");
+    let mut window = Window::new(buffer);
+
+    window.buffer_view.set_cursor(Cursor::new(1, 0));
+    let result = window.process_action(&Action::Operation(
+        Operator::Change,
+        OperatorTarget::LinewiseMotion(LinewiseMotion::LastLine),
+    ));
+
+    assert_eq!(result, ActionResult::Handled);
+    assert_eq!(window.buffer_view.buffer.as_str(), "one");
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
 }
 
