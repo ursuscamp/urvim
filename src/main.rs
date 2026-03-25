@@ -75,43 +75,20 @@ fn main() -> io::Result<()> {
 
             match result {
                 HandleKeyResult::Complete(action) => {
-                    // Handle Undo/Redo specially before snapshotting
                     match action {
                         Action::Undo => {
-                            // Before undo, take snapshot if action is snapshottable
-                            if action.is_snapshottable() {
-                                let cursor = window.buffer_view().cursor();
-                                window.buffer_view_mut().buffer_mut().push_snapshot(cursor);
-                            }
                             if let Some(cursor) = window.buffer_view_mut().buffer_mut().undo() {
                                 window.buffer_view_mut().set_cursor(cursor);
                             }
                         }
                         Action::Redo => {
-                            // Before redo, take snapshot if action is snapshottable
-                            if action.is_snapshottable() {
-                                let cursor = window.buffer_view().cursor();
-                                window.buffer_view_mut().buffer_mut().push_snapshot(cursor);
-                            }
                             if let Some(cursor) = window.buffer_view_mut().buffer_mut().redo() {
                                 window.buffer_view_mut().set_cursor(cursor);
                             }
                         }
                         _ => {
-                            // Before processing, take snapshot if action is snapshottable
-                            if action.is_snapshottable() {
-                                let cursor = window.buffer_view().cursor();
-                                window.buffer_view_mut().buffer_mut().push_snapshot(cursor);
-                            }
-
-                            // First, try to process action through the widget (window)
+                            let mut handled = false;
                             let action_result = window.process_action(&action);
-
-                            // After processing, update cursor in snapshot if action tracks cursor
-                            if action.updates_snapshot_cursor() {
-                                let cursor = window.buffer_view().cursor();
-                                window.buffer_view_mut().buffer_mut().update_cursor(cursor);
-                            }
 
                             if action_result == ActionResult::NotHandled {
                                 // Fall back to app-level handling
@@ -119,13 +96,17 @@ fn main() -> io::Result<()> {
                                     Action::SwitchToNormal => {
                                         mode = Box::new(NormalMode::new());
                                         terminal.set_cursor_style(mode.cursor_style())?;
+                                        handled = true;
                                     }
                                     Action::SwitchToInsert => {
                                         mode = Box::new(InsertMode::new());
                                         terminal.set_cursor_style(mode.cursor_style())?;
+                                        handled = true;
                                     }
                                     Action::Quit => break,
-                                    Action::None => { /* Ignore */ }
+                                    Action::None => {
+                                        handled = true;
+                                    }
                                     _ => { /* Should have been handled by window */ }
                                 }
                             } else if action_result == ActionResult::Handled {
@@ -133,6 +114,20 @@ fn main() -> io::Result<()> {
                                 if action.switches_to_insert_mode() {
                                     mode = Box::new(InsertMode::new());
                                     terminal.set_cursor_style(mode.cursor_style())?;
+                                }
+                                handled = true;
+                            }
+
+                            if handled {
+                                // Snapshot after the edit so undo can restore the pre-change state.
+                                if action.is_snapshottable() {
+                                    let cursor = window.buffer_view().cursor();
+                                    window.buffer_view_mut().buffer_mut().push_snapshot(cursor);
+                                }
+
+                                if action.updates_snapshot_cursor() {
+                                    let cursor = window.buffer_view().cursor();
+                                    window.buffer_view_mut().buffer_mut().update_cursor(cursor);
                                 }
                             }
                         }

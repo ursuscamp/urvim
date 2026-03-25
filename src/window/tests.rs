@@ -1,7 +1,20 @@
 use super::*;
+use crate::action::ActionResult;
 use crate::editor::BoundaryMotion;
+use crate::editor::Action;
 use crate::editor::LinewiseMotion;
+use crate::editor::Operator;
+use crate::editor::OperatorTarget;
 use crate::editor::TextObject;
+
+fn process_action_and_snapshot(window: &mut Window, action: &Action) {
+    assert_eq!(window.process_action(action), ActionResult::Handled);
+
+    if action.is_snapshottable() {
+        let cursor = window.buffer_view.cursor();
+        window.buffer_view.buffer_mut().push_snapshot(cursor);
+    }
+}
 
 #[test]
 fn test_position_default() {
@@ -702,6 +715,86 @@ fn test_dw_deletes_through_next_word_start() {
     ));
 
     assert_eq!(window.buffer_view.buffer.as_str(), "world");
+    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
+}
+
+#[test]
+fn test_delete_forward_undo_and_redo() {
+    let buffer = Buffer::from_str("hello");
+    let mut window = Window::new(buffer);
+
+    window.buffer_view.set_cursor(Cursor::new(0, 0));
+    process_action_and_snapshot(&mut window, &Action::DeleteForward);
+
+    assert_eq!(window.buffer_view.buffer.as_str(), "ello");
+    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
+
+    if let Some(cursor) = window.buffer_view.buffer_mut().undo() {
+        window.buffer_view.set_cursor(cursor);
+    }
+    assert_eq!(window.buffer_view.buffer.as_str(), "hello");
+    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
+
+    if let Some(cursor) = window.buffer_view.buffer_mut().redo() {
+        window.buffer_view.set_cursor(cursor);
+    }
+    assert_eq!(window.buffer_view.buffer.as_str(), "ello");
+    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
+}
+
+#[test]
+fn test_dw_undo_and_redo() {
+    let buffer = Buffer::from_str("hello world");
+    let mut window = Window::new(buffer);
+
+    window.buffer_view.set_cursor(Cursor::new(0, 0));
+    process_action_and_snapshot(
+        &mut window,
+        &Action::Operation(
+            Operator::Delete,
+            OperatorTarget::BoundaryMotion(BoundaryMotion::WordForward),
+        ),
+    );
+
+    assert_eq!(window.buffer_view.buffer.as_str(), "world");
+    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
+
+    if let Some(cursor) = window.buffer_view.buffer_mut().undo() {
+        window.buffer_view.set_cursor(cursor);
+    }
+    assert_eq!(window.buffer_view.buffer.as_str(), "hello world");
+    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
+
+    if let Some(cursor) = window.buffer_view.buffer_mut().redo() {
+        window.buffer_view.set_cursor(cursor);
+    }
+    assert_eq!(window.buffer_view.buffer.as_str(), "world");
+    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
+}
+
+#[test]
+fn test_counted_dw_undo_restores_original_text() {
+    let buffer = Buffer::from_str("one two three four");
+    let mut window = Window::new(buffer);
+
+    window.buffer_view.set_cursor(Cursor::new(0, 0));
+    process_action_and_snapshot(
+        &mut window,
+        &Action::Count(
+            2,
+            Box::new(Action::Operation(
+                Operator::Delete,
+                OperatorTarget::BoundaryMotion(BoundaryMotion::WordForward),
+            )),
+        ),
+    );
+
+    assert_eq!(window.buffer_view.buffer.as_str(), "three four");
+
+    if let Some(cursor) = window.buffer_view.buffer_mut().undo() {
+        window.buffer_view.set_cursor(cursor);
+    }
+    assert_eq!(window.buffer_view.buffer.as_str(), "one two three four");
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
 }
 

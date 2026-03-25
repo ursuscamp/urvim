@@ -217,7 +217,6 @@ impl Window {
         }
         match operator {
             Operator::Delete => {
-                buffer.push_snapshot(cursor);
                 if let Some(new_cursor) = buffer.delete_range(range) {
                     self.buffer_view.set_cursor(new_cursor);
                 }
@@ -243,7 +242,6 @@ impl Window {
         }
         match operator {
             Operator::Delete => {
-                buffer.push_snapshot(cursor);
                 if let Some(new_cursor) = buffer.delete_lines(range.start_line, range.count) {
                     self.buffer_view.set_cursor(new_cursor);
                 }
@@ -277,7 +275,6 @@ impl Window {
         }
         match operator {
             Operator::Delete => {
-                buffer.push_snapshot(cursor);
                 if let Some(new_cursor) = buffer.delete_lines(range.start_line, range.count) {
                     self.buffer_view.set_cursor(new_cursor);
                 }
