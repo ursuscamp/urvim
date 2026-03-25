@@ -40,7 +40,7 @@ The left margin area that displays line numbers. Shows a distinct background col
 ### Tab Group
 A container that owns multiple windows, displays a horizontal tab bar, and routes editing actions to the active window. The tab bar can scroll horizontally when more tabs exist than fit in the visible terminal width.
 
-**Related Terms:** Window, Screen, Buffer
+**Related Terms:** Layout, Window, Screen, Buffer
 
 ### Keymap
 A data structure that maps key sequences to actions. Supports multi-key bindings like `dd` (delete line) or `gg` (go to first line). Implementations include Trie-based keymaps for fixed sequences, character scan keymaps for parameter-based motions, and chained keymaps that combine multiple keymaps.
@@ -50,6 +50,11 @@ A stateless keymap that matches two-key sequences for character scan motions (f,
 
 ### Chained Keymap
 A keymap wrapper that delegates `get_action` and `is_prefix` calls to multiple sub-keymaps in sequence, trying each until one returns a non-None result. Used to combine trie-based keymaps with character scan keymaps.
+
+### Layout
+A container widget that owns one or more higher-level UI regions, positions them on screen, and sizes them relative to the available terminal space. The first layout implementation owns a single tab group and serves as the root container above `Tab Group`.
+
+**Related Terms:** Tab Group, Window, Screen
 
 ## Text Navigation
 
