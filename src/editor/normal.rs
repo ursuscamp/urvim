@@ -63,6 +63,14 @@ impl NormalMode {
         trie_keymap.insert("I".to_string(), Action::InsertAtLineStart);
         trie_keymap.insert("o".to_string(), Action::OpenLineBelow);
         trie_keymap.insert("O".to_string(), Action::OpenLineAbove);
+        trie_keymap.insert_sequence(
+            vec!["[".to_string(), "b".to_string()],
+            Action::PreviousTab,
+        );
+        trie_keymap.insert_sequence(
+            vec!["]".to_string(), "b".to_string()],
+            Action::NextTab,
+        );
         trie_keymap.insert("x".to_string(), Action::DeleteForward);
         trie_keymap.insert("X".to_string(), Action::DeleteBackward);
         trie_keymap.insert_sequence(vec!["d".to_string(), "d".to_string()], Action::DeleteLine);

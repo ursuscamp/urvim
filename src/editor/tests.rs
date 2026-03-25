@@ -359,3 +359,41 @@ fn test_change_operation_traits() {
     assert!(action.switches_to_insert_mode());
     assert!(action.is_countable());
 }
+
+#[test]
+fn test_tab_navigation_key_sequences() {
+    let mut mode = NormalMode::new();
+
+    assert!(matches!(
+        mode.handle_key(&key('[')),
+        HandleKeyResult::WaitForMore
+    ));
+    let result = mode.handle_key(&key('b'));
+    assert!(matches!(result, HandleKeyResult::Complete(Action::PreviousTab)));
+
+    let mut mode = NormalMode::new();
+    assert!(matches!(
+        mode.handle_key(&key(']')),
+        HandleKeyResult::WaitForMore
+    ));
+    let result = mode.handle_key(&key('b'));
+    assert!(matches!(result, HandleKeyResult::Complete(Action::NextTab)));
+}
+
+#[test]
+fn test_tab_navigation_action_traits() {
+    let previous = Action::PreviousTab;
+    let next = Action::NextTab;
+
+    assert!(previous.is_countable());
+    assert!(next.is_countable());
+    assert!(!previous.is_snapshottable());
+    assert!(!next.is_snapshottable());
+    assert!(!previous.switches_to_insert_mode());
+    assert!(!next.switches_to_insert_mode());
+    assert!(!previous.updates_snapshot_cursor());
+    assert!(!next.updates_snapshot_cursor());
+
+    assert!(matches!(previous.clone().with_count(3), Some(Action::Count(3, _))));
+    assert!(matches!(next.clone().with_count(4), Some(Action::Count(4, _))));
+}

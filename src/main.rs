@@ -2,12 +2,12 @@ use clap::Parser;
 use std::io;
 
 use urvim::action::ActionResult;
-use urvim::buffer::Buffer;
 use urvim::editor::{Action, HandleKeyResult, InsertMode, Mode, NormalMode};
 use urvim::screen::Screen;
 use urvim::terminal::{Event, Terminal, size::get_terminal_size};
 use urvim::widget::Widget;
-use urvim::window::{Position, Size, Window};
+use urvim::window::{Position, Size};
+use urvim::TabGroup;
 
 #[derive(Parser)]
 #[command(name = "urvim")]
@@ -30,21 +30,6 @@ fn main() -> io::Result<()> {
         ));
     }
 
-    let buffer = if let Some(first_file) = cli.files.first() {
-        match Buffer::load_from_file(first_file) {
-            Ok(buf) => {
-                tracing::info!("Opened file: {:?}", first_file);
-                buf
-            }
-            Err(e) => {
-                tracing::warn!("Failed to open file {:?}: {}", first_file, e);
-                Buffer::new()
-            }
-        }
-    } else {
-        Buffer::new()
-    };
-
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();
 
@@ -53,7 +38,7 @@ fn main() -> io::Result<()> {
     let (mut rows, mut cols) = get_terminal_size().unwrap_or((24, 80));
     let mut screen = Screen::new(rows, cols);
 
-    let mut window = Window::new(buffer);
+    let mut tab_group = TabGroup::from_paths(&cli.files);
 
     // Initialize with Normal mode and set cursor style
     let mut mode: Box<dyn Mode> = Box::new(NormalMode::new());
@@ -61,10 +46,10 @@ fn main() -> io::Result<()> {
 
     loop {
         screen.clear();
-        window.render(&mut screen, Position::new(0, 0), Size::new(rows, cols));
+        tab_group.render(&mut screen, Position::new(0, 0), Size::new(rows, cols));
         screen.render(&mut terminal)?;
 
-        if let Some(cursor_pos) = window.visual_cursor() {
+        if let Some(cursor_pos) = tab_group.visual_cursor() {
             terminal.set_cursor_position(cursor_pos.row + 1, cursor_pos.col + 1)?;
         }
 
@@ -77,18 +62,20 @@ fn main() -> io::Result<()> {
                 HandleKeyResult::Complete(action) => {
                     match action {
                         Action::Undo => {
-                            if let Some(cursor) = window.buffer_view_mut().buffer_mut().undo() {
-                                window.buffer_view_mut().set_cursor(cursor);
+                            if let Some(cursor) = tab_group.active_buffer_view_mut().buffer_mut().undo()
+                            {
+                                tab_group.active_buffer_view_mut().set_cursor(cursor);
                             }
                         }
                         Action::Redo => {
-                            if let Some(cursor) = window.buffer_view_mut().buffer_mut().redo() {
-                                window.buffer_view_mut().set_cursor(cursor);
+                            if let Some(cursor) = tab_group.active_buffer_view_mut().buffer_mut().redo()
+                            {
+                                tab_group.active_buffer_view_mut().set_cursor(cursor);
                             }
                         }
                         _ => {
                             let mut handled = false;
-                            let action_result = window.process_action(&action);
+                            let action_result = tab_group.process_action(&action);
 
                             if action_result == ActionResult::NotHandled {
                                 // Fall back to app-level handling
@@ -121,13 +108,19 @@ fn main() -> io::Result<()> {
                             if handled {
                                 // Snapshot after the edit so undo can restore the pre-change state.
                                 if action.is_snapshottable() {
-                                    let cursor = window.buffer_view().cursor();
-                                    window.buffer_view_mut().buffer_mut().push_snapshot(cursor);
+                                    let cursor = tab_group.active_buffer_view().cursor();
+                                    tab_group
+                                        .active_buffer_view_mut()
+                                        .buffer_mut()
+                                        .push_snapshot(cursor);
                                 }
 
                                 if action.updates_snapshot_cursor() {
-                                    let cursor = window.buffer_view().cursor();
-                                    window.buffer_view_mut().buffer_mut().update_cursor(cursor);
+                                    let cursor = tab_group.active_buffer_view().cursor();
+                                    tab_group
+                                        .active_buffer_view_mut()
+                                        .buffer_mut()
+                                        .update_cursor(cursor);
                                 }
                             }
                         }

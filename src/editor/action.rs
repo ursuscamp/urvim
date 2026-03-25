@@ -89,6 +89,8 @@ pub enum Action {
     InsertAtLineStart,
     OpenLineBelow,
     OpenLineAbove,
+    PreviousTab,
+    NextTab,
     MoveToMatchingBracket,
     MoveToPreviousParagraph,
     MoveToNextParagraph,
@@ -172,6 +174,8 @@ impl Action {
                 | Action::ChangeToLineEnd
                 | Action::OpenLineBelow
                 | Action::OpenLineAbove
+                | Action::PreviousTab
+                | Action::NextTab
                 | Action::FindForward(_)
                 | Action::FindBackward(_)
                 | Action::TillForward(_)
@@ -194,6 +198,8 @@ impl Action {
                 | Action::MoveToLastLine
                 | Action::AppendToLineEnd
                 | Action::InsertAtLineStart
+                | Action::PreviousTab
+                | Action::NextTab
         )
     }
 

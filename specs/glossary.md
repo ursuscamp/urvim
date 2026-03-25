@@ -29,11 +29,18 @@ A trait that defines how the editor responds to key input in different states. U
 ### Window
 A rendering component that owns a Buffer and displays it on screen. It handles cursor positioning, scrolling, and text rendering with gutter.
 
+**Related Terms:** Tab Group, Buffer, Screen
+
 ### Screen
 A double-buffered terminal renderer. Maintains current and previous frame buffers for diff-based rendering - only writes changed cells to the terminal.
 
 ### Gutter
 The left margin area that displays line numbers. Shows a distinct background color to separate it from content.
+
+### Tab Group
+A container that owns multiple windows, displays a horizontal tab bar, and routes editing actions to the active window. The tab bar can scroll horizontally when more tabs exist than fit in the visible terminal width.
+
+**Related Terms:** Window, Screen, Buffer
 
 ### Keymap
 A data structure that maps key sequences to actions. Supports multi-key bindings like `dd` (delete line) or `gg` (go to first line). Implementations include Trie-based keymaps for fixed sequences, character scan keymaps for parameter-based motions, and chained keymaps that combine multiple keymaps.

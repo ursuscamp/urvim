@@ -8,6 +8,8 @@ pub mod path;
 pub mod screen;
 pub mod terminal;
 pub mod widget;
+pub mod tab_group;
 pub mod window;
 
 pub use path::AbsolutePath;
+pub use tab_group::TabGroup;
