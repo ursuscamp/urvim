@@ -14,7 +14,7 @@ mod widget_impl;
 
 use crate::action::{ActionResult, ActionResult::NotHandled};
 use crate::buffer::{Boundary, Buffer, Cursor};
-use crate::editor::{Action, Operator, TextObject};
+use crate::editor::{Action, Operator, OperatorTarget};
 use crate::globals;
 use crate::screen::Screen;
 use crate::terminal::Color;

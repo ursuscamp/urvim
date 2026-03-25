@@ -1,4 +1,6 @@
 use super::*;
+use crate::editor::BoundaryMotion;
+use crate::editor::TextObject;
 
 #[test]
 fn test_position_default() {
@@ -670,7 +672,10 @@ fn test_count_diw_deletes_multiple_words() {
     window.buffer_view.set_cursor(Cursor::new(0, 0));
     window.process_action(&Action::Count(
         3,
-        Box::new(Action::Operation(Operator::Delete, TextObject::InnerWord)),
+        Box::new(Action::Operation(
+            Operator::Delete,
+            OperatorTarget::TextObject(TextObject::InnerWord),
+        )),
     ));
 
     assert_eq!(
@@ -682,6 +687,78 @@ fn test_count_diw_deletes_multiple_words() {
         Some(" four")
     );
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
+}
+
+#[test]
+fn test_dw_deletes_through_next_word_start() {
+    let buffer = Buffer::from_str("hello world");
+    let mut window = Window::new(buffer);
+
+    window.buffer_view.set_cursor(Cursor::new(0, 0));
+    window.process_action(&Action::Operation(
+        Operator::Delete,
+        OperatorTarget::BoundaryMotion(BoundaryMotion::WordForward),
+    ));
+
+    assert_eq!(window.buffer_view.buffer.as_str(), "world");
+    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
+}
+
+#[test]
+fn test_db_deletes_back_to_previous_word_start() {
+    let buffer = Buffer::from_str("hello world");
+    let mut window = Window::new(buffer);
+
+    window.buffer_view.set_cursor(Cursor::new(0, 6));
+    window.process_action(&Action::Operation(
+        Operator::Delete,
+        OperatorTarget::BoundaryMotion(BoundaryMotion::WordBackward),
+    ));
+
+    assert_eq!(window.buffer_view.buffer.as_str(), "world");
+    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
+}
+
+#[test]
+fn test_dw_with_count_deletes_multiple_words() {
+    let buffer = Buffer::from_str("one two three four");
+    let mut window = Window::new(buffer);
+
+    window.buffer_view.set_cursor(Cursor::new(0, 0));
+    window.process_action(&Action::Count(
+        2,
+        Box::new(Action::Operation(
+            Operator::Delete,
+            OperatorTarget::BoundaryMotion(BoundaryMotion::WordForward),
+        )),
+    ));
+
+    assert_eq!(window.buffer_view.buffer.as_str(), "three four");
+    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
+}
+
+#[test]
+fn test_dbigword_forward_and_backward() {
+    let buffer = Buffer::from_str("alpha --- beta");
+    let mut window = Window::new(buffer);
+
+    window.buffer_view.set_cursor(Cursor::new(0, 0));
+    window.process_action(&Action::Operation(
+        Operator::Delete,
+        OperatorTarget::BoundaryMotion(BoundaryMotion::BigWordForward),
+    ));
+    assert_eq!(window.buffer_view.buffer.as_str(), "--- beta");
+    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
+
+    let buffer = Buffer::from_str("alpha --- beta");
+    let mut window = Window::new(buffer);
+    window.buffer_view.set_cursor(Cursor::new(0, 10));
+    window.process_action(&Action::Operation(
+        Operator::Delete,
+        OperatorTarget::BoundaryMotion(BoundaryMotion::BigWordBackward),
+    ));
+    assert_eq!(window.buffer_view.buffer.as_str(), "alpha beta");
+    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 6));
 }
 
 #[test]

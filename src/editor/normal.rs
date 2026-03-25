@@ -1,4 +1,7 @@
-use super::{Action, CountParser, HandleKeyResult, Keymap, Mode, Operator, TextObject, TrieKeymap};
+use super::{
+    Action, BoundaryMotion, CountParser, HandleKeyResult, Keymap, Mode, Operator, OperatorTarget,
+    TextObject, TrieKeymap,
+};
 use super::keymap::{MAX_COUNT, extract_leading_count};
 use crate::buffer::Boundary;
 use crate::motion::chained_keymap::ChainedKeymap;
@@ -65,11 +68,53 @@ impl NormalMode {
         trie_keymap.insert_sequence(vec!["d".to_string(), "d".to_string()], Action::DeleteLine);
         trie_keymap.insert_sequence(
             vec!["d".to_string(), "i".to_string(), "w".to_string()],
-            Action::Operation(Operator::Delete, TextObject::InnerWord),
+            Action::Operation(Operator::Delete, OperatorTarget::TextObject(TextObject::InnerWord)),
         );
         trie_keymap.insert_sequence(
             vec!["d".to_string(), "a".to_string(), "w".to_string()],
-            Action::Operation(Operator::Delete, TextObject::AroundWord),
+            Action::Operation(Operator::Delete, OperatorTarget::TextObject(TextObject::AroundWord)),
+        );
+        trie_keymap.insert_sequence(
+            vec!["d".to_string(), "w".to_string()],
+            Action::Operation(
+                Operator::Delete,
+                OperatorTarget::BoundaryMotion(BoundaryMotion::WordForward),
+            ),
+        );
+        trie_keymap.insert_sequence(
+            vec!["d".to_string(), "e".to_string()],
+            Action::Operation(
+                Operator::Delete,
+                OperatorTarget::BoundaryMotion(BoundaryMotion::WordEnd),
+            ),
+        );
+        trie_keymap.insert_sequence(
+            vec!["d".to_string(), "b".to_string()],
+            Action::Operation(
+                Operator::Delete,
+                OperatorTarget::BoundaryMotion(BoundaryMotion::WordBackward),
+            ),
+        );
+        trie_keymap.insert_sequence(
+            vec!["d".to_string(), "W".to_string()],
+            Action::Operation(
+                Operator::Delete,
+                OperatorTarget::BoundaryMotion(BoundaryMotion::BigWordForward),
+            ),
+        );
+        trie_keymap.insert_sequence(
+            vec!["d".to_string(), "E".to_string()],
+            Action::Operation(
+                Operator::Delete,
+                OperatorTarget::BoundaryMotion(BoundaryMotion::BigWordEnd),
+            ),
+        );
+        trie_keymap.insert_sequence(
+            vec!["d".to_string(), "B".to_string()],
+            Action::Operation(
+                Operator::Delete,
+                OperatorTarget::BoundaryMotion(BoundaryMotion::BigWordBackward),
+            ),
         );
         trie_keymap.insert_sequence(vec!["c".to_string(), "c".to_string()], Action::ChangeLine);
         trie_keymap.insert("C".to_string(), Action::ChangeToLineEnd);

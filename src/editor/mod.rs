@@ -9,7 +9,7 @@ mod keymap;
 mod mode;
 mod normal;
 
-pub use action::{Action, HandleKeyResult, Operator, TextObject};
+pub use action::{Action, BoundaryMotion, HandleKeyResult, Operator, OperatorTarget, TextObject};
 pub use insert::InsertMode;
 pub use keymap::{CountParser, Keymap, TrieKeymap};
 pub use mode::Mode;

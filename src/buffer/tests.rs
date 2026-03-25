@@ -1,4 +1,5 @@
 use super::*;
+use crate::editor::{BoundaryMotion, OperatorTarget, TextObject};
 
 #[test]
 fn test_new_buffer() {
@@ -1139,6 +1140,165 @@ fn test_bigword_end_at_last_char_with_next_word() {
     let buf = Buffer::from_str("hello world");
     let result = buf.next_boundary(Cursor::new(0, 4), Boundary::BigWordEnd);
     assert_eq!(result, Some(Cursor::new(0, 10))); // end of "world"
+}
+
+#[test]
+fn test_operator_target_word_forward_range() {
+    let buf = Buffer::from_str("hello world");
+    let range = buf
+        .get_operator_target_range(
+            Cursor::new(0, 0),
+            OperatorTarget::BoundaryMotion(BoundaryMotion::WordForward),
+        )
+        .unwrap();
+    assert_eq!(
+        range,
+        TextObjectRange {
+            start: Cursor::new(0, 0),
+            end: Cursor::new(0, 6),
+        }
+    );
+}
+
+#[test]
+fn test_operator_target_word_end_range() {
+    let buf = Buffer::from_str("hello world");
+    let range = buf
+        .get_operator_target_range(
+            Cursor::new(0, 0),
+            OperatorTarget::BoundaryMotion(BoundaryMotion::WordEnd),
+        )
+        .unwrap();
+    assert_eq!(
+        range,
+        TextObjectRange {
+            start: Cursor::new(0, 0),
+            end: Cursor::new(0, 5),
+        }
+    );
+}
+
+#[test]
+fn test_operator_target_word_backward_range() {
+    let buf = Buffer::from_str("hello world");
+    let range = buf
+        .get_operator_target_range(
+            Cursor::new(0, 6),
+            OperatorTarget::BoundaryMotion(BoundaryMotion::WordBackward),
+        )
+        .unwrap();
+    assert_eq!(
+        range,
+        TextObjectRange {
+            start: Cursor::new(0, 0),
+            end: Cursor::new(0, 6),
+        }
+    );
+}
+
+#[test]
+fn test_operator_target_bigword_forward_range() {
+    let buf = Buffer::from_str("alpha --- beta");
+    let range = buf
+        .get_operator_target_range(
+            Cursor::new(0, 0),
+            OperatorTarget::BoundaryMotion(BoundaryMotion::BigWordForward),
+        )
+        .unwrap();
+    assert_eq!(
+        range,
+        TextObjectRange {
+            start: Cursor::new(0, 0),
+            end: Cursor::new(0, 6),
+        }
+    );
+}
+
+#[test]
+fn test_operator_target_bigword_backward_range() {
+    let buf = Buffer::from_str("alpha --- beta");
+    let range = buf
+        .get_operator_target_range(
+            Cursor::new(0, 10),
+            OperatorTarget::BoundaryMotion(BoundaryMotion::BigWordBackward),
+        )
+        .unwrap();
+    assert_eq!(
+        range,
+        TextObjectRange {
+            start: Cursor::new(0, 6),
+            end: Cursor::new(0, 10),
+        }
+    );
+}
+
+#[test]
+fn test_operator_target_counted_word_forward_range() {
+    let buf = Buffer::from_str("one two three four");
+    let range = buf
+        .get_operator_target_range_with_count(
+            Cursor::new(0, 0),
+            OperatorTarget::BoundaryMotion(BoundaryMotion::WordForward),
+            2,
+        )
+        .unwrap();
+    assert_eq!(
+        range,
+        TextObjectRange {
+            start: Cursor::new(0, 0),
+            end: Cursor::new(0, 8),
+        }
+    );
+}
+
+#[test]
+fn test_operator_target_counted_word_end_range() {
+    let buf = Buffer::from_str("one two three four");
+    let range = buf
+        .get_operator_target_range_with_count(
+            Cursor::new(0, 0),
+            OperatorTarget::BoundaryMotion(BoundaryMotion::WordEnd),
+            2,
+        )
+        .unwrap();
+    assert_eq!(
+        range,
+        TextObjectRange {
+            start: Cursor::new(0, 0),
+            end: Cursor::new(0, 7),
+        }
+    );
+}
+
+#[test]
+fn test_operator_target_counted_word_backward_range() {
+    let buf = Buffer::from_str("one two three four");
+    let range = buf
+        .get_operator_target_range_with_count(
+            Cursor::new(0, 8),
+            OperatorTarget::BoundaryMotion(BoundaryMotion::WordBackward),
+            2,
+        )
+        .unwrap();
+    assert_eq!(
+        range,
+        TextObjectRange {
+            start: Cursor::new(0, 0),
+            end: Cursor::new(0, 8),
+        }
+    );
+}
+
+#[test]
+fn test_operator_target_invalid_count_is_none() {
+    let buf = Buffer::from_str("hello");
+    assert!(buf
+        .get_operator_target_range_with_count(
+            Cursor::new(0, 0),
+            OperatorTarget::TextObject(TextObject::InnerWord),
+            0,
+        )
+        .is_none());
 }
 
 // Delete character tests

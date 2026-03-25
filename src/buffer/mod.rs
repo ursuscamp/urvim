@@ -39,6 +39,7 @@ mod boundary;
 mod cursor;
 mod edit;
 mod search;
+mod operator_target;
 mod text_object;
 mod undo;
 mod unicode;

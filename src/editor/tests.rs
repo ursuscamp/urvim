@@ -63,6 +63,58 @@ fn test_count_diw() {
 }
 
 #[test]
+fn test_dw_sequence() {
+    let mut mode = NormalMode::new();
+    assert!(matches!(
+        mode.handle_key(&key('d')),
+        HandleKeyResult::WaitForMore
+    ));
+    let result = mode.handle_key(&key('w'));
+    assert!(matches!(
+        result,
+        HandleKeyResult::Complete(Action::Operation(
+            Operator::Delete,
+            OperatorTarget::BoundaryMotion(BoundaryMotion::WordForward),
+        ))
+    ));
+}
+
+#[test]
+fn test_dbigword_sequence() {
+    let mut mode = NormalMode::new();
+    assert!(matches!(
+        mode.handle_key(&key('d')),
+        HandleKeyResult::WaitForMore
+    ));
+    let result = mode.handle_key(&key('W'));
+    assert!(matches!(
+        result,
+        HandleKeyResult::Complete(Action::Operation(
+            Operator::Delete,
+            OperatorTarget::BoundaryMotion(BoundaryMotion::BigWordForward),
+        ))
+    ));
+}
+
+#[test]
+fn test_d_counted_word_sequence() {
+    let mut mode = NormalMode::new();
+    assert!(matches!(
+        mode.handle_key(&key('d')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert!(matches!(
+        mode.handle_key(&key('2')),
+        HandleKeyResult::WaitForMore
+    ));
+    let result = mode.handle_key(&key('w'));
+    assert!(matches!(
+        result,
+        HandleKeyResult::Complete(Action::Count(2, _))
+    ));
+}
+
+#[test]
 fn test_action_with_count() {
     let action = Action::MoveDown.clone().with_count(5);
     assert!(matches!(action, Some(Action::Count(5, _))));

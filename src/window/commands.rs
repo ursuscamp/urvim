@@ -67,24 +67,8 @@ impl Window {
     }
 
     fn handle_count_operation(&mut self, count: usize, action: &Action) -> ActionResult {
-        if let Action::Operation(op, obj) = action {
-            let cursor = self.buffer_view.cursor();
-            let buffer = self.buffer_view.buffer_mut();
-            let range = match obj {
-                TextObject::InnerWord => buffer.get_inner_word_range_with_count(cursor, count),
-                TextObject::AroundWord => buffer.get_around_word_range_with_count(cursor, count),
-            };
-            let Some(range) = range else {
-                return ActionResult::Handled;
-            };
-            match op {
-                Operator::Delete => {
-                    buffer.push_snapshot(cursor);
-                    if let Some(new_cursor) = buffer.delete_range(range) {
-                        self.buffer_view.set_cursor(new_cursor);
-                    }
-                }
-            }
+        if let Action::Operation(op, target) = action {
+            return self.handle_operation_with_count(*op, *target, count);
         }
         ActionResult::Handled
     }
@@ -202,23 +186,23 @@ impl Window {
         ActionResult::Handled
     }
 
-    pub(super) fn handle_operation(
+    fn handle_operation_with_count(
         &mut self,
-        operator: &Operator,
-        text_object: &TextObject,
+        operator: Operator,
+        target: OperatorTarget,
+        count: usize,
     ) -> ActionResult {
-        use crate::editor::{Operator::*, TextObject::*};
         let cursor = self.buffer_view.cursor();
         let buffer = self.buffer_view.buffer_mut();
-        let range = match text_object {
-            InnerWord => buffer.get_inner_word_range(cursor),
-            AroundWord => buffer.get_around_word_range(cursor),
-        };
+        let range = buffer.get_operator_target_range_with_count(cursor, target, count);
         let Some(range) = range else {
             return ActionResult::Handled;
         };
+        if range.start == range.end {
+            return ActionResult::Handled;
+        }
         match operator {
-            Delete => {
+            Operator::Delete => {
                 buffer.push_snapshot(cursor);
                 if let Some(new_cursor) = buffer.delete_range(range) {
                     self.buffer_view.set_cursor(new_cursor);
@@ -226,5 +210,13 @@ impl Window {
             }
         }
         ActionResult::Handled
+    }
+
+    pub(super) fn handle_operation(
+        &mut self,
+        operator: &Operator,
+        target: &OperatorTarget,
+    ) -> ActionResult {
+        self.handle_operation_with_count(*operator, *target, 1)
     }
 }

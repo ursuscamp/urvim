@@ -6,11 +6,29 @@ pub enum Operator {
     Delete,
 }
 
+/// Boundary-based delete targets that mirror motion families.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BoundaryMotion {
+    WordForward,
+    WordEnd,
+    WordBackward,
+    BigWordForward,
+    BigWordEnd,
+    BigWordBackward,
+}
+
 /// Text objects that define a selection region for use with operators.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TextObject {
     InnerWord,
     AroundWord,
+}
+
+/// Operator targets used after an operator key is pressed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OperatorTarget {
+    TextObject(TextObject),
+    BoundaryMotion(BoundaryMotion),
 }
 
 /// Actions that the main event loop processes.
@@ -59,7 +77,7 @@ pub enum Action {
     Undo,
     Redo,
     Count(usize, Box<Action>),
-    Operation(Operator, TextObject),
+    Operation(Operator, OperatorTarget),
 }
 
 impl Action {

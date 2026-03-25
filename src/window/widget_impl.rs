@@ -257,7 +257,7 @@ impl Widget for Window {
                 ActionResult::Handled
             }
             Action::Count(count, inner) => return self.handle_count(*count, inner),
-            Action::Operation(op, obj) => return self.handle_operation(op, obj),
+            Action::Operation(op, target) => return self.handle_operation(op, target),
             _ => NotHandled,
         };
 

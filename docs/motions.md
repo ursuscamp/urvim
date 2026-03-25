@@ -43,6 +43,12 @@ This document describes the motions implemented in urvim and how they differ fro
 | `T` | Till backward: move to position after previous occurrence of character |
 | `diw` | Delete inner word (word under cursor) |
 | `daw` | Delete around word (word plus trailing whitespace) |
+| `dw` | Delete through next `w` boundary |
+| `de` | Delete through next `e` boundary |
+| `db` | Delete back to previous `b` boundary |
+| `dW` | Delete through next `W` boundary |
+| `dE` | Delete through next `E` boundary |
+| `dB` | Delete back to previous `B` boundary |
 
 ## Count Support
 
@@ -56,6 +62,11 @@ urvim supports count prefixes for most motions. There are two types of count beh
    - Leading count: `3diw` = delete 3 inner words
    - Sub-count: `d3iw` = delete 3 inner words
    - Combined: `3d3iw` = 3 × 3 = 9 inner words
+
+4. **Operations with delete motions**: Counts multiply with the boundary traversal count:
+   - `2dw` = delete through the second `w` boundary
+   - `d3e` = delete through the third `e` boundary
+   - `3d2B` = 6 backward BigWord boundary steps
 
 > Note: urvim limits counts to values 1-9999 to prevent excessive operations.
 
@@ -694,6 +705,19 @@ Examples on "  hello world  " with cursor positions:
 | on 'h' in "hello" | "hello " | "  world  " |
 | on 'w' in "world" | "world  " | "  hello " |
 | inside "  " (between words) | "  world" | "  hello  " |
+
+### Delete Motions
+
+Delete motions use the same `w`, `e`, `b`, `W`, `E`, and `B` boundary families as cursor motions, but they delete text instead of moving the cursor.
+
+- `dw` deletes from the cursor through the next `w` boundary.
+- `de` deletes from the cursor through the next `e` boundary.
+- `db` deletes backward to the previous `b` boundary.
+- `dW` deletes from the cursor through the next `W` boundary.
+- `dE` deletes from the cursor through the next `E` boundary.
+- `dB` deletes backward to the previous `B` boundary.
+
+These commands follow urvim's existing word and BigWord semantics, including urvim's treatment of punctuation-heavy runs as separate `w` boundaries.
 
 ### Key Sequence Flow
 
