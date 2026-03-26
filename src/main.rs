@@ -1,4 +1,5 @@
 use clap::Parser;
+use rustix::fd::AsFd;
 use std::io;
 
 use urvim::Layout;
@@ -147,11 +148,95 @@ fn main() -> io::Result<()> {
         if let Event::Resize(new_rows, new_cols) = event {
             rows = new_rows;
             cols = new_cols;
-            screen.resize(rows, cols);
+            handle_resize(&mut terminal, &mut screen, rows, cols)?;
         }
     }
 
     terminal.reset_style()?;
 
     Ok(())
+}
+
+fn handle_resize<I: io::Read + AsFd, O: io::Write + AsFd>(
+    terminal: &mut Terminal<I, O>,
+    screen: &mut Screen,
+    rows: u16,
+    cols: u16,
+) -> io::Result<()> {
+    screen.resize(rows, cols);
+    terminal.clear_screen()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::VecDeque;
+    use std::io::{Read, Write};
+    use std::sync::{Arc, Mutex};
+
+    struct TestBackend {
+        input: Arc<Mutex<VecDeque<u8>>>,
+        output: Arc<Mutex<Vec<u8>>>,
+    }
+
+    impl TestBackend {
+        fn new(data: Vec<u8>) -> Self {
+            Self {
+                input: Arc::new(Mutex::new(VecDeque::from(data))),
+                output: Arc::new(Mutex::new(Vec::new())),
+            }
+        }
+    }
+
+    impl Read for TestBackend {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            let mut input = self.input.lock().unwrap();
+            if input.is_empty() {
+                return Ok(0);
+            }
+            let mut i = 0;
+            while i < buf.len() {
+                match input.pop_front() {
+                    Some(b) => {
+                        buf[i] = b;
+                        i += 1;
+                    }
+                    None => break,
+                }
+            }
+            Ok(i)
+        }
+    }
+
+    impl Write for TestBackend {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            let mut output = self.output.lock().unwrap();
+            output.extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl AsFd for TestBackend {
+        fn as_fd(&self) -> rustix::fd::BorrowedFd<'_> {
+            panic!("TestBackend does not have a valid file descriptor")
+        }
+    }
+
+    #[test]
+    fn test_handle_resize_clears_terminal() {
+        let stdin = TestBackend::new(Vec::new());
+        let stdout = TestBackend::new(Vec::new());
+        let output = stdout.output.clone();
+        let mut terminal = Terminal::new_for_testing(stdin, stdout);
+        let mut screen = Screen::new(2, 2);
+
+        handle_resize(&mut terminal, &mut screen, 3, 4).unwrap();
+
+        assert_eq!(screen.size(), (3, 4));
+        assert_eq!(output.lock().unwrap().as_slice(), b"\x1b[2J\x1b[H");
+    }
 }

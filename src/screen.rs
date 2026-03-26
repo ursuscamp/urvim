@@ -276,6 +276,13 @@ mod tests {
     }
 
     #[test]
+    fn test_screen_resize_to_zero_dimensions() {
+        let mut screen = Screen::new(2, 2);
+        screen.resize(0, 0);
+        assert_eq!(screen.size(), (0, 0));
+    }
+
+    #[test]
     fn test_get_cell_mut() {
         let mut screen = Screen::new(3, 3);
         let cell = screen.get_cell_mut(1, 2);
