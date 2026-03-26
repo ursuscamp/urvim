@@ -1,5 +1,5 @@
 use super::*;
-use crate::buffer::{BufferId, BufferMutGuard};
+use crate::buffer::BufferId;
 
 impl BufferView {
     /// Creates a new view and registers the buffer in the global pool.
@@ -28,12 +28,9 @@ impl BufferView {
         crate::globals::get_buffer(self.buffer_id).unwrap_or_default()
     }
 
-    /// Returns a mutable guard for editing the shared buffer.
-    pub fn buffer_mut(&mut self) -> BufferMutGuard {
-        crate::globals::with_buffer_pool(|pool| {
-            pool.guard(self.buffer_id)
-                .unwrap_or_else(|| BufferMutGuard::from_buffer(self.buffer_id, Buffer::new()))
-        })
+    /// Runs a closure with mutable access to the shared buffer.
+    pub fn with_buffer_mut<R>(&self, f: impl FnOnce(&mut Buffer) -> R) -> Option<R> {
+        crate::globals::with_buffer_mut(self.buffer_id, f)
     }
 
     pub fn scroll_offset(&self) -> Position {

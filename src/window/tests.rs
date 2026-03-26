@@ -12,7 +12,10 @@ fn process_action_and_snapshot(window: &mut Window, action: &Action) {
 
     if action.is_snapshottable() {
         let cursor = window.buffer_view.cursor();
-        window.buffer_view.buffer_mut().push_snapshot(cursor);
+        window
+            .buffer_view
+            .with_buffer_mut(|buffer| buffer.push_snapshot(cursor))
+            .unwrap_or(());
     }
 }
 
@@ -768,13 +771,21 @@ fn test_delete_forward_undo_and_redo() {
     assert_eq!(window.buffer_view.buffer().as_str(), "ello");
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
 
-    if let Some(cursor) = window.buffer_view.buffer_mut().undo() {
+    if let Some(cursor) = window
+        .buffer_view
+        .with_buffer_mut(|buffer| buffer.undo())
+        .flatten()
+    {
         window.buffer_view.set_cursor(cursor);
     }
     assert_eq!(window.buffer_view.buffer().as_str(), "hello");
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
 
-    if let Some(cursor) = window.buffer_view.buffer_mut().redo() {
+    if let Some(cursor) = window
+        .buffer_view
+        .with_buffer_mut(|buffer| buffer.redo())
+        .flatten()
+    {
         window.buffer_view.set_cursor(cursor);
     }
     assert_eq!(window.buffer_view.buffer().as_str(), "ello");
@@ -798,13 +809,21 @@ fn test_dw_undo_and_redo() {
     assert_eq!(window.buffer_view.buffer().as_str(), "world");
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
 
-    if let Some(cursor) = window.buffer_view.buffer_mut().undo() {
+    if let Some(cursor) = window
+        .buffer_view
+        .with_buffer_mut(|buffer| buffer.undo())
+        .flatten()
+    {
         window.buffer_view.set_cursor(cursor);
     }
     assert_eq!(window.buffer_view.buffer().as_str(), "hello world");
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
 
-    if let Some(cursor) = window.buffer_view.buffer_mut().redo() {
+    if let Some(cursor) = window
+        .buffer_view
+        .with_buffer_mut(|buffer| buffer.redo())
+        .flatten()
+    {
         window.buffer_view.set_cursor(cursor);
     }
     assert_eq!(window.buffer_view.buffer().as_str(), "world");
@@ -846,7 +865,11 @@ fn test_counted_dw_undo_restores_original_text() {
 
     assert_eq!(window.buffer_view.buffer().as_str(), "three four");
 
-    if let Some(cursor) = window.buffer_view.buffer_mut().undo() {
+    if let Some(cursor) = window
+        .buffer_view
+        .with_buffer_mut(|buffer| buffer.undo())
+        .flatten()
+    {
         window.buffer_view.set_cursor(cursor);
     }
     assert_eq!(window.buffer_view.buffer().as_str(), "one two three four");

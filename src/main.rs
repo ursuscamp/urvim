@@ -63,15 +63,19 @@ fn main() -> io::Result<()> {
                 HandleKeyResult::Complete(action) => {
                     match action {
                         Action::Undo => {
-                            if let Some(cursor) =
-                                layout.active_buffer_view_mut().buffer_mut().undo()
+                            if let Some(cursor) = layout
+                                .active_buffer_view()
+                                .with_buffer_mut(|buffer| buffer.undo())
+                                .flatten()
                             {
                                 layout.active_buffer_view_mut().set_cursor(cursor);
                             }
                         }
                         Action::Redo => {
-                            if let Some(cursor) =
-                                layout.active_buffer_view_mut().buffer_mut().redo()
+                            if let Some(cursor) = layout
+                                .active_buffer_view()
+                                .with_buffer_mut(|buffer| buffer.redo())
+                                .flatten()
                             {
                                 layout.active_buffer_view_mut().set_cursor(cursor);
                             }
@@ -113,17 +117,17 @@ fn main() -> io::Result<()> {
                                 if action.is_snapshottable() {
                                     let cursor = layout.active_buffer_view().cursor();
                                     layout
-                                        .active_buffer_view_mut()
-                                        .buffer_mut()
-                                        .push_snapshot(cursor);
+                                        .active_buffer_view()
+                                        .with_buffer_mut(|buffer| buffer.push_snapshot(cursor))
+                                        .unwrap_or(());
                                 }
 
                                 if action.updates_snapshot_cursor() {
                                     let cursor = layout.active_buffer_view().cursor();
                                     layout
-                                        .active_buffer_view_mut()
-                                        .buffer_mut()
-                                        .update_cursor(cursor);
+                                        .active_buffer_view()
+                                        .with_buffer_mut(|buffer| buffer.update_cursor(cursor))
+                                        .unwrap_or(());
                                 }
                             }
                         }

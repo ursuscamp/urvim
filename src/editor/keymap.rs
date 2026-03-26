@@ -160,17 +160,11 @@ impl CountParser {
         let mut action_keys = Vec::new();
         let mut total_count: usize = 1;
         let mut current_count: usize = 0;
-        let mut has_seen_action = false;
 
         for key in keys {
             if Self::is_count_digit(key) {
                 let digit: usize = key.parse().unwrap_or(0);
-
-                if has_seen_action {
-                    current_count = current_count * 10 + digit;
-                } else {
-                    current_count = current_count * 10 + digit;
-                }
+                current_count = current_count * 10 + digit;
             } else {
                 if current_count > 0 {
                     total_count = total_count.saturating_mul(current_count);
@@ -179,7 +173,6 @@ impl CountParser {
                     }
                     current_count = 0;
                 }
-                has_seen_action = true;
                 action_keys.push(key.clone());
             }
         }

@@ -133,7 +133,10 @@ impl Widget for Window {
             }
             Action::DeleteLine => {
                 let cursor = self.buffer_view.cursor();
-                if let Some(new_cursor) = self.buffer_view.buffer_mut().delete_lines(cursor.line, 1)
+                if let Some(new_cursor) = self
+                    .buffer_view
+                    .with_buffer_mut(|buffer| buffer.delete_lines(cursor.line, 1))
+                    .flatten()
                 {
                     self.buffer_view.set_cursor(new_cursor);
                 }
@@ -141,7 +144,10 @@ impl Widget for Window {
             }
             Action::ChangeLine => {
                 let cursor = self.buffer_view.cursor();
-                if let Some(new_cursor) = self.buffer_view.buffer_mut().change_lines(cursor.line, 1)
+                if let Some(new_cursor) = self
+                    .buffer_view
+                    .with_buffer_mut(|buffer| buffer.change_lines(cursor.line, 1))
+                    .flatten()
                 {
                     self.buffer_view.set_cursor(new_cursor);
                 }
@@ -153,8 +159,10 @@ impl Widget for Window {
             }
             Action::OpenLineBelow => {
                 let cursor = self.buffer_view.cursor();
-                if let Some(new_cursor) =
-                    self.buffer_view.buffer_mut().insert_lines_after(cursor.line, 1)
+                if let Some(new_cursor) = self
+                    .buffer_view
+                    .with_buffer_mut(|buffer| buffer.insert_lines_after(cursor.line, 1))
+                    .flatten()
                 {
                     self.buffer_view.set_cursor(new_cursor);
                 }
@@ -162,8 +170,10 @@ impl Widget for Window {
             }
             Action::OpenLineAbove => {
                 let cursor = self.buffer_view.cursor();
-                if let Some(new_cursor) =
-                    self.buffer_view.buffer_mut().insert_lines_before(cursor.line, 1)
+                if let Some(new_cursor) = self
+                    .buffer_view
+                    .with_buffer_mut(|buffer| buffer.insert_lines_before(cursor.line, 1))
+                    .flatten()
                 {
                     self.buffer_view.set_cursor(new_cursor);
                 }

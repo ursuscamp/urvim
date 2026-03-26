@@ -3,6 +3,8 @@
 //! The buffer pool owns all live buffers in the editor and assigns each one a
 //! stable `BufferId`. It also deduplicates file-backed buffers by absolute
 //! path so opening the same file twice reuses the existing in-memory buffer.
+//! Mutable access runs through the pool while the pool is locked so edits stay
+//! synchronized across threads.
 
 use super::Buffer;
 use crate::path::AbsolutePath;
@@ -23,47 +25,6 @@ impl BufferId {
     /// Returns the underlying numeric identifier.
     pub fn get(self) -> usize {
         self.0
-    }
-}
-
-/// A temporary mutable buffer view that commits changes back to the pool when
-/// dropped.
-///
-/// This lets existing edit code keep using familiar `Buffer` methods while the
-/// actual storage remains in the global pool.
-#[derive(Debug)]
-pub struct BufferMutGuard {
-    buffer_id: BufferId,
-    buffer: Buffer,
-}
-
-impl BufferMutGuard {
-    /// Creates a guard from an existing buffer snapshot.
-    pub fn from_buffer(buffer_id: BufferId, buffer: Buffer) -> Self {
-        Self { buffer_id, buffer }
-    }
-}
-
-impl std::ops::Deref for BufferMutGuard {
-    type Target = Buffer;
-
-    fn deref(&self) -> &Self::Target {
-        &self.buffer
-    }
-}
-
-impl std::ops::DerefMut for BufferMutGuard {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.buffer
-    }
-}
-
-impl Drop for BufferMutGuard {
-    fn drop(&mut self) {
-        let buffer = std::mem::take(&mut self.buffer);
-        crate::globals::with_buffer_pool(|pool| {
-            pool.replace_buffer(self.buffer_id, buffer);
-        });
     }
 }
 
@@ -135,22 +96,6 @@ impl BufferPool {
         self.buffers.get_mut(&id)
     }
 
-    /// Replaces the buffer contents for an existing ID and updates path indexes
-    /// as needed.
-    pub fn replace_buffer(&mut self, id: BufferId, buffer: Buffer) {
-        if let Some(existing) = self.buffers.insert(id, buffer) {
-            if let Some(path) = existing.path() {
-                if self.paths.get(path).is_some_and(|existing_id| *existing_id == id) {
-                    self.paths.remove(path);
-                }
-            }
-        }
-
-        if let Some(path) = self.buffers.get(&id).and_then(|buffer| buffer.path().cloned()) {
-            self.paths.insert(path, id);
-        }
-    }
-
     /// Saves the buffer using its stored path.
     pub fn save_buffer(&mut self, id: BufferId) -> io::Result<()> {
         let path = self
@@ -183,20 +128,24 @@ impl BufferPool {
         result
     }
 
-    /// Creates a mutable guard that will write changes back to the pool when it
-    /// is dropped.
-    pub fn guard(&self, id: BufferId) -> Option<BufferMutGuard> {
-        self.buffers.get(&id).cloned().map(|buffer| BufferMutGuard {
-            buffer_id: id,
-            buffer,
-        })
+    /// Runs a closure with mutable access to a live buffer entry.
+    ///
+    /// The closure executes while the pool is locked, so edits are serialized
+    /// and cannot escape as detached snapshots.
+    pub fn with_buffer_mut<R>(
+        &mut self,
+        id: BufferId,
+        f: impl FnOnce(&mut Buffer) -> R,
+    ) -> Option<R> {
+        let buffer = self.buffers.get_mut(&id)?;
+        Some(f(buffer))
     }
 
     fn insert_buffer(&mut self, buffer: Buffer) -> BufferId {
-        if let Some(path) = buffer.path().cloned() {
-            if let Some(id) = self.paths.get(&path).copied() {
-                return id;
-            }
+        if let Some(path) = buffer.path().cloned()
+            && let Some(id) = self.paths.get(&path).copied()
+        {
+            return id;
         }
 
         let id = BufferId::new(self.next_id);
@@ -219,6 +168,8 @@ impl Default for BufferPool {
 mod tests {
     use super::*;
     use std::fs;
+    use std::sync::{Arc, Barrier, Mutex};
+    use std::thread;
 
     fn temp_file(name: &str) -> std::path::PathBuf {
         std::env::temp_dir().join(format!(
@@ -264,5 +215,65 @@ mod tests {
         assert!(result.is_err());
         assert!(pool.paths.is_empty());
         assert!(pool.buffers.is_empty());
+    }
+
+    #[test]
+    fn test_with_buffer_mut_applies_changes_in_place() {
+        let mut pool = BufferPool::new();
+        let id = pool.create_buffer();
+
+        let result = pool.with_buffer_mut(id, |buffer| {
+            buffer.insert_text(crate::buffer::Cursor::new(0, 0), "alpha");
+            buffer.as_str().to_string()
+        });
+
+        assert_eq!(result, Some("alpha".to_string()));
+        assert_eq!(pool.get(id).unwrap().as_str(), "alpha");
+    }
+
+    #[test]
+    fn test_with_buffer_mut_missing_buffer_returns_none() {
+        let mut pool = BufferPool::new();
+
+        let result = pool.with_buffer_mut(BufferId::new(999), |_buffer| ());
+
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_with_buffer_mut_serializes_concurrent_edits() {
+        let pool = Arc::new(Mutex::new(BufferPool::new()));
+        let id = {
+            let mut pool = pool.lock().unwrap();
+            pool.create_buffer()
+        };
+
+        let barrier = Arc::new(Barrier::new(3));
+        let mut handles = Vec::new();
+
+        for ch in ['a', 'b'] {
+            let pool = Arc::clone(&pool);
+            let barrier = Arc::clone(&barrier);
+            handles.push(thread::spawn(move || {
+                barrier.wait();
+                let mut pool = pool.lock().unwrap();
+                pool.with_buffer_mut(id, |buffer| {
+                    let cursor = crate::buffer::Cursor::new(0, buffer.as_str().len());
+                    buffer.insert_char(cursor, ch);
+                })
+                .unwrap();
+            }));
+        }
+
+        barrier.wait();
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        let pool = pool.lock().unwrap();
+        let buffer = pool.get(id).unwrap();
+        assert_eq!(buffer.as_str().len(), 2);
+        assert!(buffer.as_str().contains('a'));
+        assert!(buffer.as_str().contains('b'));
     }
 }

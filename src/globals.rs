@@ -62,15 +62,9 @@ pub fn get_buffer(id: BufferId) -> Option<Buffer> {
     with_buffer_pool(|pool| pool.get(id).cloned())
 }
 
-/// Runs a closure with mutable access to a cloned buffer and writes the result
-/// back to the pool after the closure returns.
+/// Runs a closure with mutable access to a live buffer entry.
 pub fn with_buffer_mut<R>(id: BufferId, f: impl FnOnce(&mut Buffer) -> R) -> Option<R> {
-    with_buffer_pool(|pool| {
-        let mut buffer = pool.get(id)?.clone();
-        let result = f(&mut buffer);
-        pool.replace_buffer(id, buffer);
-        Some(result)
-    })
+    with_buffer_pool(|pool| pool.with_buffer_mut(id, f))
 }
 
 #[cfg(test)]

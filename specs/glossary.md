@@ -17,6 +17,15 @@ A process-global store that owns all live buffers and resolves them by `BufferId
 
 **Related Terms:** Buffer, Buffer ID, Buffer View, Window
 
+### Mutable Buffer Access
+A pool-mediated mutation path that runs a closure while the buffer pool is still locked, so buffer edits cannot escape as detached snapshots or be committed later out of order.
+
+**Context:** Buffer Pool mutation helpers and window edit flows
+
+**Example:** `globals::with_buffer_mut(id, |buffer| buffer.insert_text(cursor, "x"))`
+
+**Related Terms:** Buffer Pool, Buffer View, Window
+
 ### Cursor
 A position in the buffer represented by `line` and `col` (byte position within line). The column can be from 0 to line byte length (inclusive, meaning cursor is at end of line).
 

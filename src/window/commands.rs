@@ -3,8 +3,9 @@ use super::*;
 impl Window {
     pub fn insert_char(&mut self, c: char) {
         let cursor = self.buffer_view.cursor();
-        let mut buffer = self.buffer_view.buffer_mut();
-        buffer.insert_char(cursor, c);
+        self.buffer_view
+            .with_buffer_mut(|buffer| buffer.insert_char(cursor, c))
+            .unwrap_or(());
         let new_cursor = match c {
             '\n' => Cursor::new(cursor.line + 1, 0),
             _ => Cursor::new(cursor.line, cursor.col + c.len_utf8()),
@@ -14,32 +15,44 @@ impl Window {
 
     pub fn delete_char_before_cursor(&mut self) {
         let cursor = self.buffer_view.cursor();
-        let mut buffer = self.buffer_view.buffer_mut();
-        if let Some(new_cursor) = buffer.delete_char_before_cursor(cursor) {
+        if let Some(new_cursor) = self
+            .buffer_view
+            .with_buffer_mut(|buffer| buffer.delete_char_before_cursor(cursor))
+            .flatten()
+        {
             self.buffer_view.set_cursor(new_cursor);
         }
     }
 
     pub fn delete_char_at_cursor(&mut self) {
         let cursor = self.buffer_view.cursor();
-        let mut buffer = self.buffer_view.buffer_mut();
-        if let Some(new_cursor) = buffer.delete_char_at_cursor(cursor) {
+        if let Some(new_cursor) = self
+            .buffer_view
+            .with_buffer_mut(|buffer| buffer.delete_char_at_cursor(cursor))
+            .flatten()
+        {
             self.buffer_view.set_cursor(new_cursor);
         }
     }
 
     pub fn join_lines_with_space(&mut self) {
         let cursor = self.buffer_view.cursor();
-        let mut buffer = self.buffer_view.buffer_mut();
-        if let Some(new_cursor) = buffer.join_lines(cursor.line, 2, true) {
+        if let Some(new_cursor) = self
+            .buffer_view
+            .with_buffer_mut(|buffer| buffer.join_lines(cursor.line, 2, true))
+            .flatten()
+        {
             self.buffer_view.set_cursor(new_cursor);
         }
     }
 
     pub fn join_lines_without_space(&mut self) {
         let cursor = self.buffer_view.cursor();
-        let mut buffer = self.buffer_view.buffer_mut();
-        if let Some(new_cursor) = buffer.join_lines(cursor.line, 2, false) {
+        if let Some(new_cursor) = self
+            .buffer_view
+            .with_buffer_mut(|buffer| buffer.join_lines(cursor.line, 2, false))
+            .flatten()
+        {
             self.buffer_view.set_cursor(new_cursor);
         }
     }
@@ -121,10 +134,10 @@ impl Window {
         let with_space = matches!(action, Action::JoinWithSpace);
         let cursor = self.buffer_view.cursor();
         let actual_count = count + 1;
-        if let Some(new_cursor) =
-            self.buffer_view
-                .buffer_mut()
-                .join_lines(cursor.line, actual_count, with_space)
+        if let Some(new_cursor) = self
+            .buffer_view
+            .with_buffer_mut(|buffer| buffer.join_lines(cursor.line, actual_count, with_space))
+            .flatten()
         {
             self.buffer_view.set_cursor(new_cursor);
         }
@@ -133,7 +146,11 @@ impl Window {
 
     fn handle_count_delete_line(&mut self, count: usize) -> ActionResult {
         let cursor = self.buffer_view.cursor();
-        if let Some(new_cursor) = self.buffer_view.buffer_mut().delete_lines(cursor.line, count) {
+        if let Some(new_cursor) = self
+            .buffer_view
+            .with_buffer_mut(|buffer| buffer.delete_lines(cursor.line, count))
+            .flatten()
+        {
             self.buffer_view.set_cursor(new_cursor);
         }
         ActionResult::Handled
@@ -141,7 +158,11 @@ impl Window {
 
     fn handle_count_change_line(&mut self, count: usize) -> ActionResult {
         let cursor = self.buffer_view.cursor();
-        if let Some(new_cursor) = self.buffer_view.buffer_mut().change_lines(cursor.line, count) {
+        if let Some(new_cursor) = self
+            .buffer_view
+            .with_buffer_mut(|buffer| buffer.change_lines(cursor.line, count))
+            .flatten()
+        {
             self.buffer_view.set_cursor(new_cursor);
         }
         ActionResult::Handled
@@ -149,8 +170,10 @@ impl Window {
 
     pub(super) fn handle_count_change_to_line_end(&mut self, count: usize) -> ActionResult {
         let cursor = self.buffer_view.cursor();
-        if let Some(new_cursor) =
-            self.buffer_view.buffer_mut().change_to_line_end(cursor, count)
+        if let Some(new_cursor) = self
+            .buffer_view
+            .with_buffer_mut(|buffer| buffer.change_to_line_end(cursor, count))
+            .flatten()
         {
             self.buffer_view.set_cursor(new_cursor);
         }
@@ -161,8 +184,8 @@ impl Window {
         let cursor = self.buffer_view.cursor();
         if let Some(new_cursor) = self
             .buffer_view
-            .buffer_mut()
-            .insert_lines_after(cursor.line, count)
+            .with_buffer_mut(|buffer| buffer.insert_lines_after(cursor.line, count))
+            .flatten()
         {
             self.buffer_view.set_cursor(new_cursor);
         }
@@ -173,8 +196,8 @@ impl Window {
         let cursor = self.buffer_view.cursor();
         if let Some(new_cursor) = self
             .buffer_view
-            .buffer_mut()
-            .insert_lines_before(cursor.line, count)
+            .with_buffer_mut(|buffer| buffer.insert_lines_before(cursor.line, count))
+            .flatten()
         {
             self.buffer_view.set_cursor(new_cursor);
         }
@@ -209,17 +232,18 @@ impl Window {
         count: usize,
     ) -> ActionResult {
         let cursor = self.buffer_view.cursor();
-        let mut buffer = self.buffer_view.buffer_mut();
-        let range = buffer.get_operator_target_range_with_count(cursor, target, count);
-        let Some(range) = range else {
+        let result = self.buffer_view.with_buffer_mut(|buffer| {
+            let range = buffer.get_operator_target_range_with_count(cursor, target, count);
+            let range = range?;
+            if range.start == range.end {
+                return None;
+            }
+            buffer.delete_range(range)
+        });
+        let Some(Some(new_cursor)) = result else {
             return self.operation_noop_result(operator);
         };
-        if range.start == range.end {
-            return self.operation_noop_result(operator);
-        }
-        if let Some(new_cursor) = buffer.delete_range(range) {
-            self.buffer_view.set_cursor(new_cursor);
-        }
+        self.buffer_view.set_cursor(new_cursor);
         ActionResult::Handled
     }
 
@@ -230,17 +254,18 @@ impl Window {
         count: usize,
     ) -> ActionResult {
         let cursor = self.buffer_view.cursor();
-        let mut buffer = self.buffer_view.buffer_mut();
-        let range = buffer.get_linewise_operator_target_range_with_count(cursor, motion, count);
-        let Some(range) = range else {
+        let result = self.buffer_view.with_buffer_mut(|buffer| {
+            let range = buffer.get_linewise_operator_target_range_with_count(cursor, motion, count);
+            let range = range?;
+            if range.count == 0 {
+                return None;
+            }
+            buffer.delete_lines(range.start_line, range.count)
+        });
+        let Some(Some(new_cursor)) = result else {
             return self.operation_noop_result(operator);
         };
-        if range.count == 0 {
-            return self.operation_noop_result(operator);
-        }
-        if let Some(new_cursor) = buffer.delete_lines(range.start_line, range.count) {
-            self.buffer_view.set_cursor(new_cursor);
-        }
+        self.buffer_view.set_cursor(new_cursor);
         ActionResult::Handled
     }
 
@@ -263,17 +288,18 @@ impl Window {
         motion: LinewiseMotion,
     ) -> ActionResult {
         let cursor = self.buffer_view.cursor();
-        let mut buffer = self.buffer_view.buffer_mut();
-        let range = buffer.get_linewise_operator_target_range(cursor, motion);
-        let Some(range) = range else {
+        let result = self.buffer_view.with_buffer_mut(|buffer| {
+            let range = buffer.get_linewise_operator_target_range(cursor, motion);
+            let range = range?;
+            if range.count == 0 {
+                return None;
+            }
+            buffer.delete_lines(range.start_line, range.count)
+        });
+        let Some(Some(new_cursor)) = result else {
             return self.operation_noop_result(operator);
         };
-        if range.count == 0 {
-            return self.operation_noop_result(operator);
-        }
-        if let Some(new_cursor) = buffer.delete_lines(range.start_line, range.count) {
-            self.buffer_view.set_cursor(new_cursor);
-        }
+        self.buffer_view.set_cursor(new_cursor);
         ActionResult::Handled
     }
 
