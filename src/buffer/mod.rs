@@ -34,12 +34,12 @@
 //! }
 //! ```
 
-mod io;
 mod boundary;
 mod cursor;
 mod edit;
-mod search;
+mod io;
 mod operator_target;
+mod search;
 mod text_object;
 mod undo;
 mod unicode;
@@ -127,7 +127,6 @@ struct UndoState {
     position: usize,
 }
 
-
 /// A text buffer backed by a Vector of Arc<str> lines.
 ///
 /// Buffer provides efficient text editing with proper Unicode support.
@@ -157,7 +156,6 @@ impl Default for Buffer {
 }
 
 impl Buffer {
-
     /// Returns the number of characters in the buffer.
     ///
     /// This counts all characters across all lines (excluding newlines between lines).
@@ -259,8 +257,7 @@ impl Buffer {
             result.push_str(line);
         }
         result
-}
-
+    }
 }
 
 #[cfg(test)]

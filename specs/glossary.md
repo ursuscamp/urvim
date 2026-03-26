@@ -26,6 +26,11 @@ A trait that defines how the editor responds to key input in different states. U
 - **Normal Mode**: For navigation and command execution. Uses a steady block cursor.
 - **Insert Mode**: For text input. Uses a steady bar cursor.
 
+### Mode Kind
+A lightweight editor-facing enum used to label the current mode in the status bar. It mirrors the live mode object managed by the main event loop and is returned by the `Mode::kind` method.
+
+**Related Terms:** Mode, Status Bar, Layout
+
 ### Window
 A rendering component that owns a Buffer and displays it on screen. It handles cursor positioning, scrolling, and text rendering with gutter.
 
@@ -33,6 +38,11 @@ A rendering component that owns a Buffer and displays it on screen. It handles c
 
 ### Screen
 A double-buffered terminal renderer. Maintains current and previous frame buffers for diff-based rendering - only writes changed cells to the terminal.
+
+### Status Bar
+A one-line footer rendered by the root layout that shows editor metadata such as the active mode, active buffer name, cursor position, and file progress.
+
+**Related Terms:** Layout, Mode, Buffer, Cursor
 
 ### Gutter
 The left margin area that displays line numbers. Shows a distinct background color to separate it from content.
@@ -52,9 +62,9 @@ A stateless keymap that matches two-key sequences for character scan motions (f,
 A keymap wrapper that delegates `get_action` and `is_prefix` calls to multiple sub-keymaps in sequence, trying each until one returns a non-None result. Used to combine trie-based keymaps with character scan keymaps.
 
 ### Layout
-A container widget that owns one or more higher-level UI regions, positions them on screen, and sizes them relative to the available terminal space. The first layout implementation owns a single tab group and serves as the root container above `Tab Group`.
+A container widget that owns one or more higher-level UI regions, positions them on screen, and sizes them relative to the available terminal space. The first layout implementation owns a single tab group plus a footer status bar and serves as the root container above `Tab Group`.
 
-**Related Terms:** Tab Group, Window, Screen
+**Related Terms:** Tab Group, Window, Screen, Status Bar
 
 ## Text Navigation
 

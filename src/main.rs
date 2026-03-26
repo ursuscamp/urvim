@@ -1,9 +1,9 @@
 use clap::Parser;
 use std::io;
 
+use urvim::Layout;
 use urvim::action::ActionResult;
 use urvim::editor::{Action, HandleKeyResult, InsertMode, Mode, NormalMode};
-use urvim::Layout;
 use urvim::screen::Screen;
 use urvim::terminal::{Event, Terminal, size::get_terminal_size};
 use urvim::widget::Widget;
@@ -43,6 +43,7 @@ fn main() -> io::Result<()> {
     // Initialize with Normal mode and set cursor style
     let mut mode: Box<dyn Mode> = Box::new(NormalMode::new());
     terminal.set_cursor_style(mode.cursor_style())?;
+    layout.set_mode_kind(mode.kind());
 
     loop {
         screen.clear();
@@ -62,13 +63,15 @@ fn main() -> io::Result<()> {
                 HandleKeyResult::Complete(action) => {
                     match action {
                         Action::Undo => {
-                            if let Some(cursor) = layout.active_buffer_view_mut().buffer_mut().undo()
+                            if let Some(cursor) =
+                                layout.active_buffer_view_mut().buffer_mut().undo()
                             {
                                 layout.active_buffer_view_mut().set_cursor(cursor);
                             }
                         }
                         Action::Redo => {
-                            if let Some(cursor) = layout.active_buffer_view_mut().buffer_mut().redo()
+                            if let Some(cursor) =
+                                layout.active_buffer_view_mut().buffer_mut().redo()
                             {
                                 layout.active_buffer_view_mut().set_cursor(cursor);
                             }
@@ -125,6 +128,8 @@ fn main() -> io::Result<()> {
                             }
                         }
                     }
+
+                    layout.set_mode_kind(mode.kind());
                 }
                 HandleKeyResult::WaitForMore => {
                     // Continue waiting for more keys, no action taken

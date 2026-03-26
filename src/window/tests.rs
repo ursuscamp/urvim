@@ -732,11 +732,13 @@ fn test_cw_changes_through_next_word_start() {
     assert_eq!(result, ActionResult::Handled);
     assert_eq!(window.buffer_view.buffer.as_str(), "world");
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
-    assert!(Action::Operation(
-        Operator::Change,
-        OperatorTarget::BoundaryMotion(BoundaryMotion::WordForward)
-    )
-    .switches_to_insert_mode());
+    assert!(
+        Action::Operation(
+            Operator::Change,
+            OperatorTarget::BoundaryMotion(BoundaryMotion::WordForward)
+        )
+        .switches_to_insert_mode()
+    );
 }
 
 #[test]

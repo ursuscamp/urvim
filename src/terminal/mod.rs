@@ -39,15 +39,15 @@
 #[allow(dead_code)]
 pub mod buffer;
 pub mod escape;
+mod input;
 pub mod keys;
+mod lifecycle;
+mod output;
 pub mod size;
 pub mod sizing;
 #[allow(dead_code)]
 pub mod style;
 pub mod utils;
-mod input;
-mod lifecycle;
-mod output;
 
 #[cfg(test)]
 mod test_backend;

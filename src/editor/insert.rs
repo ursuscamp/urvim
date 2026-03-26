@@ -1,4 +1,4 @@
-use super::{Action, HandleKeyResult, Mode, TrieKeymap};
+use super::{Action, HandleKeyResult, Mode, ModeKind, TrieKeymap};
 use crate::terminal::{CursorStyle, Key, KeyCode};
 
 /// Insert mode for text input.
@@ -81,5 +81,9 @@ impl Mode for InsertMode {
     fn clear_buffer(&mut self) {
         self.buffer.clear();
         self.waiting = false;
+    }
+
+    fn kind(&self) -> ModeKind {
+        ModeKind::Insert
     }
 }

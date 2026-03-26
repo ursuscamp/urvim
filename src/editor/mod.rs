@@ -14,7 +14,7 @@ pub use action::{
 };
 pub use insert::InsertMode;
 pub use keymap::{CountParser, Keymap, TrieKeymap};
-pub use mode::Mode;
+pub use mode::{Mode, ModeKind};
 pub use normal::NormalMode;
 
 #[cfg(test)]

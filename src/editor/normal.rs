@@ -1,8 +1,8 @@
-use super::{
-    Action, BoundaryMotion, CountParser, HandleKeyResult, Keymap, LinewiseMotion, Mode, Operator,
-    OperatorTarget, TextObject, TrieKeymap,
-};
 use super::keymap::{MAX_COUNT, extract_leading_count};
+use super::{
+    Action, BoundaryMotion, CountParser, HandleKeyResult, Keymap, LinewiseMotion, Mode, ModeKind,
+    Operator, OperatorTarget, TextObject, TrieKeymap,
+};
 use crate::buffer::Boundary;
 use crate::motion::chained_keymap::ChainedKeymap;
 use crate::motion::char_scan_keymap::CharScanKeymap;
@@ -63,24 +63,24 @@ impl NormalMode {
         trie_keymap.insert("I".to_string(), Action::InsertAtLineStart);
         trie_keymap.insert("o".to_string(), Action::OpenLineBelow);
         trie_keymap.insert("O".to_string(), Action::OpenLineAbove);
-        trie_keymap.insert_sequence(
-            vec!["[".to_string(), "b".to_string()],
-            Action::PreviousTab,
-        );
-        trie_keymap.insert_sequence(
-            vec!["]".to_string(), "b".to_string()],
-            Action::NextTab,
-        );
+        trie_keymap.insert_sequence(vec!["[".to_string(), "b".to_string()], Action::PreviousTab);
+        trie_keymap.insert_sequence(vec!["]".to_string(), "b".to_string()], Action::NextTab);
         trie_keymap.insert("x".to_string(), Action::DeleteForward);
         trie_keymap.insert("X".to_string(), Action::DeleteBackward);
         trie_keymap.insert_sequence(vec!["d".to_string(), "d".to_string()], Action::DeleteLine);
         trie_keymap.insert_sequence(
             vec!["d".to_string(), "i".to_string(), "w".to_string()],
-            Action::Operation(Operator::Delete, OperatorTarget::TextObject(TextObject::InnerWord)),
+            Action::Operation(
+                Operator::Delete,
+                OperatorTarget::TextObject(TextObject::InnerWord),
+            ),
         );
         trie_keymap.insert_sequence(
             vec!["d".to_string(), "a".to_string(), "w".to_string()],
-            Action::Operation(Operator::Delete, OperatorTarget::TextObject(TextObject::AroundWord)),
+            Action::Operation(
+                Operator::Delete,
+                OperatorTarget::TextObject(TextObject::AroundWord),
+            ),
         );
         trie_keymap.insert_sequence(
             vec!["d".to_string(), "w".to_string()],
@@ -367,5 +367,9 @@ impl Mode for NormalMode {
     fn clear_buffer(&mut self) {
         self.buffer.clear();
         self.waiting = false;
+    }
+
+    fn kind(&self) -> ModeKind {
+        ModeKind::Normal
     }
 }

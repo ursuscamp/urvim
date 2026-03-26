@@ -1,6 +1,6 @@
 use super::*;
-use crate::editor::{BoundaryMotion, LinewiseMotion, OperatorTarget, TextObject};
 use crate::buffer::operator_target::LinewiseDeleteRange;
+use crate::editor::{BoundaryMotion, LinewiseMotion, OperatorTarget, TextObject};
 
 #[test]
 fn test_new_buffer() {
@@ -489,7 +489,7 @@ fn test_cursor_down_with_emoji() {
         buf.cursor_down(Cursor::new(0, 1), 1),
         Some(Cursor::new(1, 1))
     ); // after 'a'
-       // visual col 2 would be in middle of emoji, should clamp to end of next line
+    // visual col 2 would be in middle of emoji, should clamp to end of next line
     assert_eq!(
         buf.cursor_down(Cursor::new(0, 5), 3),
         Some(Cursor::new(1, 1))
@@ -1391,13 +1391,14 @@ fn test_linewise_operator_target_counted_last_line_range() {
 #[test]
 fn test_operator_target_invalid_count_is_none() {
     let buf = Buffer::from_str("hello");
-    assert!(buf
-        .get_operator_target_range_with_count(
+    assert!(
+        buf.get_operator_target_range_with_count(
             Cursor::new(0, 0),
             OperatorTarget::TextObject(TextObject::InnerWord),
             0,
         )
-        .is_none());
+        .is_none()
+    );
 }
 
 // Delete character tests

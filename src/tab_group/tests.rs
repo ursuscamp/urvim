@@ -13,7 +13,12 @@ fn buffer_with_label(label: &str) -> Buffer {
 }
 
 fn tab_group_with_labels(labels: &[&str]) -> TabGroup {
-    TabGroup::from_buffers(labels.iter().map(|label| buffer_with_label(label)).collect())
+    TabGroup::from_buffers(
+        labels
+            .iter()
+            .map(|label| buffer_with_label(label))
+            .collect(),
+    )
 }
 
 #[test]
@@ -45,7 +50,12 @@ fn test_tab_group_from_paths_loads_success_and_skips_failures() {
 
     assert_eq!(group.tabs.len(), 2);
     assert_eq!(
-        group.active_window().buffer_view().buffer().file_name().unwrap(),
+        group
+            .active_window()
+            .buffer_view()
+            .buffer()
+            .file_name()
+            .unwrap(),
         first.file_name().unwrap()
     );
 }
@@ -54,7 +64,10 @@ fn test_tab_group_from_paths_loads_success_and_skips_failures() {
 fn test_tab_navigation_wraps_and_supports_counts() {
     let mut group = tab_group_with_labels(&["a", "b", "c", "d", "e"]);
 
-    assert_eq!(group.process_action(&Action::PreviousTab), ActionResult::Handled);
+    assert_eq!(
+        group.process_action(&Action::PreviousTab),
+        ActionResult::Handled
+    );
     assert_eq!(group.active_tab_index(), 4);
 
     assert_eq!(

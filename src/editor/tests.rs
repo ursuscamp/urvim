@@ -20,6 +20,15 @@ fn test_normal_mode_move_left() {
 }
 
 #[test]
+fn test_mode_kind_reflects_mode_type() {
+    let normal = NormalMode::new();
+    let insert = InsertMode::new();
+
+    assert_eq!(normal.kind(), ModeKind::Normal);
+    assert_eq!(insert.kind(), ModeKind::Insert);
+}
+
+#[test]
 fn test_insert_mode_escape_switches_to_normal() {
     let mut mode = InsertMode::new();
     assert_eq!(
@@ -369,7 +378,10 @@ fn test_tab_navigation_key_sequences() {
         HandleKeyResult::WaitForMore
     ));
     let result = mode.handle_key(&key('b'));
-    assert!(matches!(result, HandleKeyResult::Complete(Action::PreviousTab)));
+    assert!(matches!(
+        result,
+        HandleKeyResult::Complete(Action::PreviousTab)
+    ));
 
     let mut mode = NormalMode::new();
     assert!(matches!(
@@ -394,6 +406,12 @@ fn test_tab_navigation_action_traits() {
     assert!(!previous.updates_snapshot_cursor());
     assert!(!next.updates_snapshot_cursor());
 
-    assert!(matches!(previous.clone().with_count(3), Some(Action::Count(3, _))));
-    assert!(matches!(next.clone().with_count(4), Some(Action::Count(4, _))));
+    assert!(matches!(
+        previous.clone().with_count(3),
+        Some(Action::Count(3, _))
+    ));
+    assert!(matches!(
+        next.clone().with_count(4),
+        Some(Action::Count(4, _))
+    ));
 }

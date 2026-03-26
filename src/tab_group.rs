@@ -150,9 +150,7 @@ impl TabGroup {
         }
 
         let layout = self.compute_layout(self.tab_bar_start, cols, active_index);
-        let base_style = Style::new()
-            .bg(Color::ansi(237))
-            .fg(Color::ansi(250));
+        let base_style = Style::new().bg(Color::ansi(237)).fg(Color::ansi(250));
         let active_style = base_style.reverse().bold();
         let content_end = cols.saturating_sub(layout.right_arrow as usize);
 

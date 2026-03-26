@@ -740,4 +740,3 @@ impl Buffer {
         }
     }
 }
-

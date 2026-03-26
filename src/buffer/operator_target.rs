@@ -66,11 +66,9 @@ impl Buffer {
         target: LinewiseMotion,
     ) -> Option<LinewiseDeleteRange> {
         match target {
-            LinewiseMotion::FirstLine => self.get_linewise_operator_target_range_with_count(
-                cursor,
-                target,
-                1,
-            ),
+            LinewiseMotion::FirstLine => {
+                self.get_linewise_operator_target_range_with_count(cursor, target, 1)
+            }
             LinewiseMotion::LastLine => self.get_linewise_operator_target_range_with_count(
                 cursor,
                 target,
@@ -102,7 +100,10 @@ impl Buffer {
 
         let start_line = cursor.line.min(target_line);
         let end_line = cursor.line.max(target_line);
-        Some(LinewiseDeleteRange::new(start_line, end_line - start_line + 1))
+        Some(LinewiseDeleteRange::new(
+            start_line,
+            end_line - start_line + 1,
+        ))
     }
 
     fn get_boundary_motion_range(
@@ -178,14 +179,16 @@ impl Buffer {
         let target_line = if count == 1 {
             cursor.line
         } else {
-            count.saturating_sub(1).min(self.line_count().saturating_sub(1))
+            count
+                .saturating_sub(1)
+                .min(self.line_count().saturating_sub(1))
         };
         let target_col = match motion {
             BoundaryMotion::LineEnd => self.line_len(target_line),
             BoundaryMotion::LineStart => 0,
-            BoundaryMotion::LineContentStart => self
-                .first_non_whitespace_col(target_line)
-                .unwrap_or(0),
+            BoundaryMotion::LineContentStart => {
+                self.first_non_whitespace_col(target_line).unwrap_or(0)
+            }
             _ => return None,
         };
         let target = Cursor::new(target_line, target_col);
