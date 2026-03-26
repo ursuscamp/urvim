@@ -7,6 +7,16 @@ This document defines the key terminology used throughout the urvim codebase and
 ### Buffer
 A text storage data structure backed by `imbl::Vector<Arc<str>>`. Each line is stored as an `Arc<str>` without trailing newline characters. Newlines exist implicitly between lines. The buffer supports efficient text manipulation with proper Unicode handling including grapheme clusters, combining characters, and emoji.
 
+### Buffer ID
+A newtype wrapper around `usize` that identifies a buffer stored in the global buffer pool. Buffer IDs are assigned monotonically starting at `0`.
+
+**Related Terms:** Buffer, Buffer Pool, Window, Buffer View
+
+### Buffer Pool
+A process-global store that owns all live buffers and resolves them by `BufferId`. It deduplicates file-backed buffers by absolute path so that the same file is not loaded more than once.
+
+**Related Terms:** Buffer, Buffer ID, Buffer View, Window
+
 ### Cursor
 A position in the buffer represented by `line` and `col` (byte position within line). The column can be from 0 to line byte length (inclusive, meaning cursor is at end of line).
 
@@ -32,7 +42,7 @@ A lightweight editor-facing enum used to label the current mode in the status ba
 **Related Terms:** Mode, Status Bar, Layout
 
 ### Window
-A rendering component that owns a Buffer and displays it on screen. It handles cursor positioning, scrolling, and text rendering with gutter.
+A rendering component that owns a Buffer View and displays its buffer on screen. It handles cursor positioning, scrolling, and text rendering with gutter.
 
 **Related Terms:** Tab Group, Buffer, Screen
 

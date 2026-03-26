@@ -6,10 +6,8 @@ impl Window {
         target_line: usize,
         visual_col: usize,
     ) {
-        let target_col = self
-            .buffer_view
-            .buffer()
-            .byte_pos_at_visual_col(target_line, visual_col);
+        let buffer = self.buffer_view.buffer();
+        let target_col = buffer.byte_pos_at_visual_col(target_line, visual_col);
         self.buffer_view
             .set_cursor(Cursor::new(target_line, target_col));
         self.buffer_view.set_remembered_visual_col(visual_col);

@@ -1,8 +1,9 @@
 //! Window rendering module.
 //!
-//! This module provides the Window type, which owns a Buffer and is responsible
-//! for rendering its content to the screen. A window has a screen position (origin)
-//! and size, and renders the buffer content starting from its origin.
+//! This module provides the Window type, which owns a buffer view and is
+//! responsible for rendering its buffer content to the screen. A window has a
+//! screen position (origin) and size, and renders the shared buffer content
+//! starting from its origin.
 
 mod commands;
 mod geometry;
@@ -13,7 +14,7 @@ mod view;
 mod widget_impl;
 
 use crate::action::{ActionResult, ActionResult::NotHandled};
-use crate::buffer::{Boundary, Buffer, Cursor};
+use crate::buffer::{Boundary, Buffer, BufferId, Cursor};
 use crate::editor::{Action, LinewiseMotion, Operator, OperatorTarget};
 use crate::globals;
 use crate::screen::Screen;
@@ -80,8 +81,9 @@ pub struct RenderData {
 }
 
 #[derive(Debug, Clone)]
+/// A window-local view of a shared buffer plus scroll and cursor state.
 pub struct BufferView {
-    buffer: Buffer,
+    buffer_id: BufferId,
     scroll_offset: Position,
     cursor: Cursor,
     remembered_visual_col: Option<usize>,
@@ -95,9 +97,21 @@ pub struct Window {
 }
 
 impl Window {
+    /// Creates a new window backed by a buffer that will be registered in the
+    /// global buffer pool.
     pub fn new(buffer: Buffer) -> Self {
+        let buffer_view = BufferView::new(buffer);
         Self {
-            buffer_view: BufferView::new(buffer),
+            buffer_view,
+            render_data: RenderData::new(0),
+            size: Size::default(),
+        }
+    }
+
+    /// Creates a window from an existing buffer ID in the global buffer pool.
+    pub fn from_buffer_id(buffer_id: BufferId) -> Self {
+        Self {
+            buffer_view: BufferView::from_buffer_id(buffer_id),
             render_data: RenderData::new(0),
             size: Size::default(),
         }

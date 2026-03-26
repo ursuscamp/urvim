@@ -3,7 +3,8 @@
 //! This module stores persistent state that needs to survive across mode switches
 //! and future multi-window support.
 
-use std::sync::Mutex;
+use crate::buffer::{Buffer, BufferId, BufferPool};
+use std::sync::{Mutex, OnceLock};
 
 /// Direction of character search
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -31,6 +32,7 @@ pub struct FindState {
 
 /// Global storage for the last character search state
 static LAST_FIND: Mutex<Option<FindState>> = Mutex::new(None);
+static BUFFER_POOL: OnceLock<Mutex<BufferPool>> = OnceLock::new();
 
 /// Set the last character search state
 pub fn set_last_find(state: FindState) {
@@ -42,6 +44,33 @@ pub fn set_last_find(state: FindState) {
 pub fn get_last_find() -> Option<FindState> {
     let last = LAST_FIND.lock().unwrap();
     last.clone()
+}
+
+/// Returns the global buffer pool mutex, initializing it on first use.
+pub fn buffer_pool() -> &'static Mutex<BufferPool> {
+    BUFFER_POOL.get_or_init(|| Mutex::new(BufferPool::new()))
+}
+
+/// Runs a closure with mutable access to the global buffer pool.
+pub fn with_buffer_pool<R>(f: impl FnOnce(&mut BufferPool) -> R) -> R {
+    let mut pool = buffer_pool().lock().unwrap();
+    f(&mut pool)
+}
+
+/// Returns a cloned buffer for the given ID if it exists.
+pub fn get_buffer(id: BufferId) -> Option<Buffer> {
+    with_buffer_pool(|pool| pool.get(id).cloned())
+}
+
+/// Runs a closure with mutable access to a cloned buffer and writes the result
+/// back to the pool after the closure returns.
+pub fn with_buffer_mut<R>(id: BufferId, f: impl FnOnce(&mut Buffer) -> R) -> Option<R> {
+    with_buffer_pool(|pool| {
+        let mut buffer = pool.get(id)?.clone();
+        let result = f(&mut buffer);
+        pool.replace_buffer(id, buffer);
+        Some(result)
+    })
 }
 
 #[cfg(test)]

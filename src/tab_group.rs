@@ -37,7 +37,8 @@ impl TabGroup {
     /// Creates a new tab group from windows.
     pub fn new(mut tabs: Vec<Window>) -> Self {
         if tabs.is_empty() {
-            tabs.push(Window::new(Buffer::new()));
+            let buffer_id = crate::globals::with_buffer_pool(|pool| pool.create_buffer());
+            tabs.push(Window::from_buffer_id(buffer_id));
         }
 
         Self {
@@ -57,10 +58,10 @@ impl TabGroup {
         let mut tabs = Vec::new();
 
         for path in paths {
-            match Buffer::load_from_file(path) {
-                Ok(buffer) => {
+            match crate::globals::with_buffer_pool(|pool| pool.open_buffer(path)) {
+                Ok(buffer_id) => {
                     tracing::info!("Opened file: {:?}", path);
-                    tabs.push(Window::new(buffer));
+                    tabs.push(Window::from_buffer_id(buffer_id));
                 }
                 Err(error) => {
                     tracing::warn!("Failed to open file {:?}: {}", path, error);
@@ -125,7 +126,8 @@ impl TabGroup {
 
     fn normalize_state(&mut self) {
         if self.tabs.is_empty() {
-            self.tabs.push(Window::new(Buffer::new()));
+            let buffer_id = crate::globals::with_buffer_pool(|pool| pool.create_buffer());
+            self.tabs.push(Window::from_buffer_id(buffer_id));
         }
 
         if self.active_tab >= self.tabs.len() {

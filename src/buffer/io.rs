@@ -51,8 +51,13 @@ impl Buffer {
         let mut file = File::open(path)?;
         let mut contents = String::new();
         file.read_to_string(&mut contents)?;
-        let abs_path = AbsolutePath::from_path(path);
-        Ok(Self::from_str_with_path(&contents, abs_path.unwrap()))
+        let abs_path = AbsolutePath::from_path(path).ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "failed to resolve absolute path",
+            )
+        })?;
+        Ok(Self::from_str_with_path(&contents, abs_path))
     }
 
     /// Saves the buffer contents to a file.

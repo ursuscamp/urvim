@@ -53,7 +53,7 @@ impl Widget for Window {
                 ActionResult::Handled
             }
             Action::MoveToLastLine => {
-                let target_line = self.buffer_view.buffer.line_count().saturating_sub(1);
+                let target_line = self.buffer_view.buffer().line_count().saturating_sub(1);
                 let target_col = self.buffer_view.get_or_compute_target_col();
                 self.set_cursor_to_visual_col_on_line(target_line, target_col);
                 ActionResult::Handled
@@ -114,7 +114,7 @@ impl Widget for Window {
             }
             Action::AppendToLineEnd => {
                 let cursor = self.buffer_view.cursor();
-                let line_len = self.buffer_view.buffer.line_len(cursor.line);
+                let line_len = self.buffer_view.buffer().line_len(cursor.line);
                 self.buffer_view
                     .set_cursor(Cursor::new(cursor.line, line_len));
                 ActionResult::Handled
@@ -133,14 +133,16 @@ impl Widget for Window {
             }
             Action::DeleteLine => {
                 let cursor = self.buffer_view.cursor();
-                if let Some(new_cursor) = self.buffer_view.buffer.delete_lines(cursor.line, 1) {
+                if let Some(new_cursor) = self.buffer_view.buffer_mut().delete_lines(cursor.line, 1)
+                {
                     self.buffer_view.set_cursor(new_cursor);
                 }
                 ActionResult::Handled
             }
             Action::ChangeLine => {
                 let cursor = self.buffer_view.cursor();
-                if let Some(new_cursor) = self.buffer_view.buffer.change_lines(cursor.line, 1) {
+                if let Some(new_cursor) = self.buffer_view.buffer_mut().change_lines(cursor.line, 1)
+                {
                     self.buffer_view.set_cursor(new_cursor);
                 }
                 ActionResult::Handled
@@ -151,7 +153,8 @@ impl Widget for Window {
             }
             Action::OpenLineBelow => {
                 let cursor = self.buffer_view.cursor();
-                if let Some(new_cursor) = self.buffer_view.buffer.insert_lines_after(cursor.line, 1)
+                if let Some(new_cursor) =
+                    self.buffer_view.buffer_mut().insert_lines_after(cursor.line, 1)
                 {
                     self.buffer_view.set_cursor(new_cursor);
                 }
@@ -160,7 +163,7 @@ impl Widget for Window {
             Action::OpenLineAbove => {
                 let cursor = self.buffer_view.cursor();
                 if let Some(new_cursor) =
-                    self.buffer_view.buffer.insert_lines_before(cursor.line, 1)
+                    self.buffer_view.buffer_mut().insert_lines_before(cursor.line, 1)
                 {
                     self.buffer_view.set_cursor(new_cursor);
                 }
@@ -169,7 +172,8 @@ impl Widget for Window {
             Action::MoveToMatchingBracket => {
                 use crate::motion::bracket_matcher::find_matching_bracket;
                 let cursor = self.buffer_view.cursor();
-                if let Some(new_cursor) = find_matching_bracket(&self.buffer_view.buffer, cursor) {
+                let buffer = self.buffer_view.buffer();
+                if let Some(new_cursor) = find_matching_bracket(&buffer, cursor) {
                     self.buffer_view.set_cursor(new_cursor);
                 }
                 ActionResult::Handled

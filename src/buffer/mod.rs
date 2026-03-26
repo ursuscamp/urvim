@@ -38,6 +38,7 @@ mod boundary;
 mod cursor;
 mod edit;
 mod io;
+mod pool;
 mod operator_target;
 mod search;
 mod text_object;
@@ -45,6 +46,7 @@ mod undo;
 mod unicode;
 
 pub use unicode::{char_width, grapheme_width, str_width, to_byte_index};
+pub use pool::{BufferId, BufferMutGuard, BufferPool};
 
 use crate::path::AbsolutePath;
 use imbl::Vector;
