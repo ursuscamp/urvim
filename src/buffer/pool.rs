@@ -168,7 +168,7 @@ impl Default for BufferPool {
 mod tests {
     use super::*;
     use std::fs;
-    use std::sync::{Arc, Barrier, Mutex};
+    use std::sync::{atomic::{AtomicUsize, Ordering}, Arc, Barrier, Mutex, RwLock};
     use std::thread;
 
     fn temp_file(name: &str) -> std::path::PathBuf {
@@ -275,5 +275,43 @@ mod tests {
         assert_eq!(buffer.as_str().len(), 2);
         assert!(buffer.as_str().contains('a'));
         assert!(buffer.as_str().contains('b'));
+    }
+
+    #[test]
+    fn test_rwlock_allows_multiple_concurrent_readers() {
+        let pool = Arc::new(RwLock::new(BufferPool::new()));
+        let id = {
+            let mut pool = pool.write().unwrap();
+            pool.create_buffer()
+        };
+
+        let barrier = Arc::new(Barrier::new(3));
+        let active_readers = Arc::new(AtomicUsize::new(0));
+        let peak_readers = Arc::new(AtomicUsize::new(0));
+        let mut handles = Vec::new();
+
+        for _ in 0..2 {
+            let pool = Arc::clone(&pool);
+            let barrier = Arc::clone(&barrier);
+            let active_readers = Arc::clone(&active_readers);
+            let peak_readers = Arc::clone(&peak_readers);
+            handles.push(thread::spawn(move || {
+                barrier.wait();
+                let pool = pool.read().unwrap();
+                let current = active_readers.fetch_add(1, Ordering::SeqCst) + 1;
+                peak_readers.fetch_max(current, Ordering::SeqCst);
+                assert_eq!(pool.get(id).unwrap().line_count(), 1);
+                barrier.wait();
+                active_readers.fetch_sub(1, Ordering::SeqCst);
+            }));
+        }
+
+        barrier.wait();
+        barrier.wait();
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        assert_eq!(peak_readers.load(Ordering::SeqCst), 2);
     }
 }

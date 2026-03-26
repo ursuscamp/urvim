@@ -23,14 +23,39 @@ impl BufferView {
         self.buffer_id
     }
 
-    /// Returns a snapshot clone of the shared buffer.
-    pub fn buffer(&self) -> Buffer {
-        crate::globals::get_buffer(self.buffer_id).unwrap_or_default()
+    /// Runs a closure with shared access to the shared buffer.
+    pub fn with_buffer<R>(&self, f: impl FnOnce(&Buffer) -> R) -> Option<R> {
+        crate::globals::with_buffer(self.buffer_id, f)
     }
 
     /// Runs a closure with mutable access to the shared buffer.
     pub fn with_buffer_mut<R>(&self, f: impl FnOnce(&mut Buffer) -> R) -> Option<R> {
         crate::globals::with_buffer_mut(self.buffer_id, f)
+    }
+
+    /// Returns the number of lines in the shared buffer, or `0` if it no longer exists.
+    pub fn line_count(&self) -> usize {
+        self.with_buffer(|buffer| buffer.line_count()).unwrap_or(0)
+    }
+
+    /// Returns the length of a line in the shared buffer, or `0` if it no longer exists.
+    pub fn line_len(&self, line: usize) -> usize {
+        self.with_buffer(|buffer| buffer.line_len(line)).unwrap_or(0)
+    }
+
+    /// Returns the shared buffer's file name as display text, if available.
+    pub fn file_name(&self) -> Option<String> {
+        self.with_buffer(|buffer| {
+            buffer
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+        })
+        .flatten()
+    }
+
+    fn current_visual_col(&self) -> usize {
+        self.with_buffer(|buffer| buffer.visual_col_at(self.cursor))
+            .unwrap_or(0)
     }
 
     pub fn scroll_offset(&self) -> Position {
@@ -53,11 +78,11 @@ impl BufferView {
         if let Some(col) = self.remembered_visual_col {
             return col;
         }
-        self.buffer().visual_col_at(self.cursor)
+        self.current_visual_col()
     }
 
     pub fn update_remembered_to_current(&mut self) {
-        self.remembered_visual_col = Some(self.buffer().visual_col_at(self.cursor));
+        self.remembered_visual_col = Some(self.current_visual_col());
     }
 
     pub fn set_remembered_visual_col(&mut self, col: usize) {
@@ -66,8 +91,17 @@ impl BufferView {
 
     pub fn scroll_to_cursor(&mut self, viewport_size: Size, gutter_width: u16) {
         let cursor = self.cursor;
-        let buffer = self.buffer();
-        let buffer_line_count = buffer.line_count();
+        let Some((buffer_line_count, cursor_visual_col, line_width)) = self.with_buffer(|buffer| {
+            let line_width = buffer
+                .line_at(cursor.line)
+                .map(|line| UnicodeWidthStr::width(line.as_ref()))
+                .unwrap_or(0);
+            (buffer.line_count(), buffer.visual_col_at(cursor), line_width)
+        }) else {
+            self.scroll_offset = Position::new(0, 0);
+            return;
+        };
+
         if buffer_line_count == 0 {
             self.scroll_offset = Position::new(0, 0);
             return;
@@ -87,48 +121,45 @@ impl BufferView {
             self.scroll_offset.row = max_row as u16;
         }
 
-        let cursor_visual_col = buffer.visual_col_at(cursor);
         if cursor_visual_col < self.scroll_offset.col as usize {
             self.scroll_offset.col = cursor_visual_col as u16;
         } else if cursor_visual_col >= self.scroll_offset.col as usize + visible_cols {
             self.scroll_offset.col = (cursor_visual_col + 1 - visible_cols) as u16;
         }
 
-        if let Some(line) = buffer.line_at(cursor.line) {
-            let line_width = UnicodeWidthStr::width(line.as_ref());
-            let max_col = line_width.saturating_sub(visible_cols);
-            if self.scroll_offset.col as usize > max_col {
-                self.scroll_offset.col = max_col as u16;
-            }
+        let max_col = line_width.saturating_sub(visible_cols);
+        if self.scroll_offset.col as usize > max_col {
+            self.scroll_offset.col = max_col as u16;
         }
     }
 
     pub fn build_render_data(&self, size: Size) -> RenderData {
         let mut render_data = RenderData::new(size.rows);
-        let buffer = self.buffer();
-        let start_line = self.scroll_offset.row as usize;
-        let total_lines_needed = size.rows as usize + 10;
-        let horizontal_offset = self.scroll_offset.col as usize;
+        let _ = self.with_buffer(|buffer| {
+            let start_line = self.scroll_offset.row as usize;
+            let total_lines_needed = size.rows as usize + 10;
+            let horizontal_offset = self.scroll_offset.col as usize;
 
-        for screen_line in 0..total_lines_needed {
-            let buffer_line_idx = start_line + screen_line;
-            if let Some(line) = buffer.line_at(buffer_line_idx) {
-                let line_text = line.as_ref();
-                let (byte_offset, width_offset, visible_text) =
-                    Self::calculate_horizontal_offset(line_text, horizontal_offset);
+            for screen_line in 0..total_lines_needed {
+                let buffer_line_idx = start_line + screen_line;
+                if let Some(line) = buffer.line_at(buffer_line_idx) {
+                    let line_text = line.as_ref();
+                    let (byte_offset, width_offset, visible_text) =
+                        Self::calculate_horizontal_offset(line_text, horizontal_offset);
 
-                let chunk = RenderChunk::default_text(&visible_text);
-                let line_data = LineData {
-                    buffer_line: buffer_line_idx,
-                    byte_offset,
-                    width_offset,
-                    chunks: vec![chunk],
-                };
-                render_data.line_data.push(line_data);
-            } else {
-                break;
+                    let chunk = RenderChunk::default_text(&visible_text);
+                    let line_data = LineData {
+                        buffer_line: buffer_line_idx,
+                        byte_offset,
+                        width_offset,
+                        chunks: vec![chunk],
+                    };
+                    render_data.line_data.push(line_data);
+                } else {
+                    break;
+                }
             }
-        }
+        });
 
         render_data
     }

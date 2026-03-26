@@ -87,7 +87,7 @@ impl Window {
     }
 
     fn handle_count_line_motion(&mut self, count: usize, _action: &Action) -> ActionResult {
-        let line_count = self.buffer_view.buffer().line_count();
+        let line_count = self.buffer_view.line_count();
         if line_count == 0 {
             return ActionResult::Handled;
         }
@@ -103,7 +103,7 @@ impl Window {
             return ActionResult::Handled;
         }
         let start_line = self.buffer_view.scroll_offset().row as usize;
-        let line_count = self.buffer_view.buffer().line_count();
+        let line_count = self.buffer_view.line_count();
         if line_count == 0 {
             return ActionResult::Handled;
         }

@@ -19,6 +19,10 @@ fn process_action_and_snapshot(window: &mut Window, action: &Action) {
     }
 }
 
+fn buffer_text(view: &BufferView) -> String {
+    view.with_buffer(|buffer| buffer.as_str()).unwrap_or_default()
+}
+
 #[test]
 fn test_position_default() {
     let pos = Position::default();
@@ -698,10 +702,9 @@ fn test_count_diw_deletes_multiple_words() {
     assert_eq!(
         window
             .buffer_view
-            .buffer()
-            .line_at(0)
-            .map(|line| line.as_ref()),
-        Some(" four")
+            .with_buffer(|buffer| buffer.line_at(0).map(|line| line.to_string()))
+            .flatten(),
+        Some(" four".to_string())
     );
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
 }
@@ -717,7 +720,7 @@ fn test_dw_deletes_through_next_word_start() {
         OperatorTarget::BoundaryMotion(BoundaryMotion::WordForward),
     ));
 
-    assert_eq!(window.buffer_view.buffer().as_str(), "world");
+    assert_eq!(buffer_text(window.buffer_view()), "world");
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
 }
 
@@ -733,7 +736,7 @@ fn test_cw_changes_through_next_word_start() {
     ));
 
     assert_eq!(result, ActionResult::Handled);
-    assert_eq!(window.buffer_view.buffer().as_str(), "world");
+    assert_eq!(buffer_text(window.buffer_view()), "world");
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
     assert!(
         Action::Operation(
@@ -756,7 +759,7 @@ fn test_cw_at_end_of_line_is_noop() {
     ));
 
     assert_eq!(result, ActionResult::NotHandled);
-    assert_eq!(window.buffer_view.buffer().as_str(), "hello");
+    assert_eq!(buffer_text(window.buffer_view()), "hello");
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 5));
 }
 
@@ -768,7 +771,7 @@ fn test_delete_forward_undo_and_redo() {
     window.buffer_view.set_cursor(Cursor::new(0, 0));
     process_action_and_snapshot(&mut window, &Action::DeleteForward);
 
-    assert_eq!(window.buffer_view.buffer().as_str(), "ello");
+    assert_eq!(buffer_text(window.buffer_view()), "ello");
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
 
     if let Some(cursor) = window
@@ -778,7 +781,7 @@ fn test_delete_forward_undo_and_redo() {
     {
         window.buffer_view.set_cursor(cursor);
     }
-    assert_eq!(window.buffer_view.buffer().as_str(), "hello");
+    assert_eq!(buffer_text(window.buffer_view()), "hello");
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
 
     if let Some(cursor) = window
@@ -788,7 +791,7 @@ fn test_delete_forward_undo_and_redo() {
     {
         window.buffer_view.set_cursor(cursor);
     }
-    assert_eq!(window.buffer_view.buffer().as_str(), "ello");
+    assert_eq!(buffer_text(window.buffer_view()), "ello");
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
 }
 
@@ -806,7 +809,7 @@ fn test_dw_undo_and_redo() {
         ),
     );
 
-    assert_eq!(window.buffer_view.buffer().as_str(), "world");
+    assert_eq!(buffer_text(window.buffer_view()), "world");
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
 
     if let Some(cursor) = window
@@ -816,7 +819,7 @@ fn test_dw_undo_and_redo() {
     {
         window.buffer_view.set_cursor(cursor);
     }
-    assert_eq!(window.buffer_view.buffer().as_str(), "hello world");
+    assert_eq!(buffer_text(window.buffer_view()), "hello world");
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
 
     if let Some(cursor) = window
@@ -826,7 +829,7 @@ fn test_dw_undo_and_redo() {
     {
         window.buffer_view.set_cursor(cursor);
     }
-    assert_eq!(window.buffer_view.buffer().as_str(), "world");
+    assert_eq!(buffer_text(window.buffer_view()), "world");
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
 }
 
@@ -842,7 +845,7 @@ fn test_cg_changes_to_first_line() {
     ));
 
     assert_eq!(result, ActionResult::Handled);
-    assert_eq!(window.buffer_view.buffer().as_str(), "one");
+    assert_eq!(buffer_text(window.buffer_view()), "one");
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
 }
 
@@ -863,7 +866,7 @@ fn test_counted_dw_undo_restores_original_text() {
         ),
     );
 
-    assert_eq!(window.buffer_view.buffer().as_str(), "three four");
+    assert_eq!(buffer_text(window.buffer_view()), "three four");
 
     if let Some(cursor) = window
         .buffer_view
@@ -872,7 +875,7 @@ fn test_counted_dw_undo_restores_original_text() {
     {
         window.buffer_view.set_cursor(cursor);
     }
-    assert_eq!(window.buffer_view.buffer().as_str(), "one two three four");
+    assert_eq!(buffer_text(window.buffer_view()), "one two three four");
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
 }
 
@@ -887,7 +890,7 @@ fn test_dollar_deletes_to_line_end() {
         OperatorTarget::BoundaryMotion(BoundaryMotion::LineEnd),
     ));
 
-    assert_eq!(window.buffer_view.buffer().as_str(), "hello ");
+    assert_eq!(buffer_text(window.buffer_view()), "hello ");
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 6));
 }
 
@@ -902,7 +905,7 @@ fn test_d0_deletes_to_line_start() {
         OperatorTarget::BoundaryMotion(BoundaryMotion::LineStart),
     ));
 
-    assert_eq!(window.buffer_view.buffer().as_str(), "world");
+    assert_eq!(buffer_text(window.buffer_view()), "world");
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
 }
 
@@ -917,7 +920,7 @@ fn test_dcaret_deletes_to_line_content_start() {
         OperatorTarget::BoundaryMotion(BoundaryMotion::LineContentStart),
     ));
 
-    assert_eq!(window.buffer_view.buffer().as_str(), "    world");
+    assert_eq!(buffer_text(window.buffer_view()), "    world");
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 4));
 }
 
@@ -932,7 +935,7 @@ fn test_db_deletes_back_to_previous_word_start() {
         OperatorTarget::BoundaryMotion(BoundaryMotion::WordBackward),
     ));
 
-    assert_eq!(window.buffer_view.buffer().as_str(), "world");
+    assert_eq!(buffer_text(window.buffer_view()), "world");
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
 }
 
@@ -947,7 +950,7 @@ fn test_dgg_deletes_to_first_line_linewise() {
         OperatorTarget::LinewiseMotion(LinewiseMotion::FirstLine),
     ));
 
-    assert_eq!(window.buffer_view.buffer().as_str(), "five");
+    assert_eq!(buffer_text(window.buffer_view()), "five");
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
 }
 
@@ -962,7 +965,7 @@ fn test_d_g_deletes_to_last_line_linewise() {
         OperatorTarget::LinewiseMotion(LinewiseMotion::LastLine),
     ));
 
-    assert_eq!(window.buffer_view.buffer().as_str(), "one\ntwo");
+    assert_eq!(buffer_text(window.buffer_view()), "one\ntwo");
     assert_eq!(window.buffer_view.cursor(), Cursor::new(1, 0));
 }
 
@@ -980,7 +983,7 @@ fn test_counted_d_g_deletes_to_destination_line() {
         )),
     ));
 
-    assert_eq!(window.buffer_view.buffer().as_str(), "one\ntwo\nsix");
+    assert_eq!(buffer_text(window.buffer_view()), "one\ntwo\nsix");
     assert_eq!(window.buffer_view.cursor(), Cursor::new(2, 0));
 }
 
@@ -998,7 +1001,7 @@ fn test_dw_with_count_deletes_multiple_words() {
         )),
     ));
 
-    assert_eq!(window.buffer_view.buffer().as_str(), "three four");
+    assert_eq!(buffer_text(window.buffer_view()), "three four");
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
 }
 
@@ -1012,7 +1015,7 @@ fn test_dbigword_forward_and_backward() {
         Operator::Delete,
         OperatorTarget::BoundaryMotion(BoundaryMotion::BigWordForward),
     ));
-    assert_eq!(window.buffer_view.buffer().as_str(), "--- beta");
+    assert_eq!(buffer_text(window.buffer_view()), "--- beta");
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
 
     let buffer = Buffer::from_str("alpha --- beta");
@@ -1022,7 +1025,7 @@ fn test_dbigword_forward_and_backward() {
         Operator::Delete,
         OperatorTarget::BoundaryMotion(BoundaryMotion::BigWordBackward),
     ));
-    assert_eq!(window.buffer_view.buffer().as_str(), "alpha beta");
+    assert_eq!(buffer_text(window.buffer_view()), "alpha beta");
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 6));
 }
 

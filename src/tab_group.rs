@@ -301,10 +301,9 @@ impl TabGroup {
 
     fn tab_label(&self, index: usize) -> String {
         let window = &self.tabs[index];
-        let buffer = window.buffer_view().buffer();
-        buffer
+        window
+            .buffer_view()
             .file_name()
-            .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_else(|| "Untitled".to_string())
     }
 

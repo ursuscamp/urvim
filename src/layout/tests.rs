@@ -9,6 +9,10 @@ fn layout_with_buffers(buffers: Vec<Buffer>) -> Layout {
     Layout::new(TabGroup::from_buffers(buffers), ModeKind::Normal)
 }
 
+fn buffer_line_count(view: &crate::window::BufferView) -> usize {
+    view.with_buffer(|buffer| buffer.line_count()).unwrap_or(0)
+}
+
 #[test]
 fn test_layout_new_wraps_tab_group() {
     let layout = Layout::new(TabGroup::new(Vec::new()), ModeKind::Normal);
@@ -24,7 +28,7 @@ fn test_layout_new_wraps_tab_group() {
 fn test_layout_exposes_active_buffer_view() {
     let layout = layout_with_buffers(vec![Buffer::from_str("alpha")]);
 
-    assert_eq!(layout.active_buffer_view().buffer().line_count(), 1);
+    assert_eq!(buffer_line_count(layout.active_buffer_view()), 1);
 }
 
 #[test]

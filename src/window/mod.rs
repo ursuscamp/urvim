@@ -136,8 +136,7 @@ impl Window {
     pub fn render(&mut self, screen: &mut Screen, origin: Position, size: Size) {
         self.size = size;
         // Get buffer info for gutter
-        let buffer = self.buffer_view.buffer();
-        let total_lines = buffer.line_count();
+        let total_lines = self.buffer_view.line_count();
         let start_line = self.buffer_view.scroll_offset().row as usize;
 
         // Create gutter with needed info (no buffer reference)

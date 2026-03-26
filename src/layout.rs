@@ -111,10 +111,8 @@ impl Layout {
         self.tab_group.render(screen, origin, content_size);
 
         let buffer_view = self.active_buffer_view();
-        let buffer = buffer_view.buffer();
-        let buffer_name = buffer
+        let buffer_name = buffer_view
             .file_name()
-            .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_else(|| "Untitled".to_string());
         let cursor = buffer_view.cursor();
         let context = StatusBarContext {
@@ -122,7 +120,7 @@ impl Layout {
             buffer_name: buffer_name.as_str(),
             cursor_line: cursor.line,
             cursor_byte_col: cursor.col,
-            line_count: buffer.line_count(),
+            line_count: buffer_view.line_count(),
         };
 
         let footer_origin = Position::new(origin.row.saturating_add(content_rows), origin.col);

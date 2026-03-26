@@ -21,11 +21,20 @@ fn tab_group_with_labels(labels: &[&str]) -> TabGroup {
     )
 }
 
+fn buffer_line_count(view: &BufferView) -> usize {
+    view.with_buffer(|buffer| buffer.line_count()).unwrap_or(0)
+}
+
+fn buffer_file_name(view: &BufferView) -> Option<std::ffi::OsString> {
+    view.with_buffer(|buffer| buffer.file_name().map(|name| name.to_os_string()))
+        .flatten()
+}
+
 #[test]
 fn test_tab_group_new_creates_empty_tab() {
     let group = TabGroup::new(Vec::new());
     assert_eq!(group.active_tab_index(), 0);
-    assert_eq!(group.active_buffer_view().buffer().line_count(), 1);
+    assert_eq!(buffer_line_count(group.active_buffer_view()), 1);
 }
 
 #[test]
@@ -50,12 +59,7 @@ fn test_tab_group_from_paths_loads_success_and_skips_failures() {
 
     assert_eq!(group.tabs.len(), 2);
     assert_eq!(
-        group
-            .active_window()
-            .buffer_view()
-            .buffer()
-            .file_name()
-            .unwrap(),
+        buffer_file_name(group.active_window().buffer_view()).unwrap(),
         first.file_name().unwrap()
     );
 }
