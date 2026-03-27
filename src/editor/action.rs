@@ -36,6 +36,55 @@ pub enum BoundaryMotion {
 pub enum TextObject {
     InnerWord,
     AroundWord,
+    /// Text between matching delimiters, excluding the delimiters themselves.
+    InnerBracket(BracketKind),
+    /// Text between matching delimiters, including the delimiters.
+    AroundBracket(BracketKind),
+}
+
+/// Supported delimiter families for bracket text objects.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum BracketKind {
+    /// Parenthesis pairs `(` and `)`.
+    Paren,
+    /// Square bracket pairs `[` and `]`.
+    Square,
+    /// Curly brace pairs `{` and `}`.
+    Curly,
+    /// Angle bracket pairs `<` and `>`.
+    Angle,
+}
+
+impl BracketKind {
+    /// Returns the opening delimiter for this bracket family.
+    pub fn opening_delimiter(self) -> char {
+        match self {
+            BracketKind::Paren => '(',
+            BracketKind::Square => '[',
+            BracketKind::Curly => '{',
+            BracketKind::Angle => '<',
+        }
+    }
+
+    /// Returns the closing delimiter for this bracket family.
+    pub fn closing_delimiter(self) -> char {
+        match self {
+            BracketKind::Paren => ')',
+            BracketKind::Square => ']',
+            BracketKind::Curly => '}',
+            BracketKind::Angle => '>',
+        }
+    }
+
+    /// Returns true when the provided character is the opening delimiter.
+    pub fn matches_opening(self, ch: char) -> bool {
+        ch == self.opening_delimiter()
+    }
+
+    /// Returns true when the provided character is the closing delimiter.
+    pub fn matches_closing(self, ch: char) -> bool {
+        ch == self.closing_delimiter()
+    }
 }
 
 /// Operator targets used after an operator key is pressed.

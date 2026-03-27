@@ -28,6 +28,12 @@ impl Buffer {
             OperatorTarget::TextObject(text_object) => match text_object {
                 TextObject::InnerWord => self.get_inner_word_range_with_count(cursor, 1),
                 TextObject::AroundWord => self.get_around_word_range_with_count(cursor, 1),
+                TextObject::InnerBracket(kind) => {
+                    self.get_inner_bracket_range_with_count(cursor, kind, 1)
+                }
+                TextObject::AroundBracket(kind) => {
+                    self.get_around_bracket_range_with_count(cursor, kind, 1)
+                }
             },
             OperatorTarget::BoundaryMotion(motion) => {
                 self.get_boundary_motion_range(cursor, motion)
@@ -51,6 +57,12 @@ impl Buffer {
             OperatorTarget::TextObject(text_object) => match text_object {
                 TextObject::InnerWord => self.get_inner_word_range_with_count(cursor, count),
                 TextObject::AroundWord => self.get_around_word_range_with_count(cursor, count),
+                TextObject::InnerBracket(kind) => {
+                    self.get_inner_bracket_range_with_count(cursor, kind, count)
+                }
+                TextObject::AroundBracket(kind) => {
+                    self.get_around_bracket_range_with_count(cursor, kind, count)
+                }
             },
             OperatorTarget::BoundaryMotion(motion) => {
                 self.get_boundary_motion_range_with_count(cursor, motion, count)

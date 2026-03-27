@@ -1,7 +1,7 @@
 use super::keymap::{MAX_COUNT, extract_leading_count};
 use super::{
-    Action, BoundaryMotion, CountParser, HandleKeyResult, Keymap, LinewiseMotion, Mode, ModeKind,
-    Operator, OperatorTarget, TextObject, TrieKeymap,
+    Action, BoundaryMotion, BracketKind, CountParser, HandleKeyResult, Keymap, LinewiseMotion,
+    Mode, ModeKind, Operator, OperatorTarget, TextObject, TrieKeymap,
 };
 use crate::buffer::Boundary;
 use crate::motion::chained_keymap::ChainedKeymap;
@@ -82,6 +82,77 @@ impl NormalMode {
                 OperatorTarget::TextObject(TextObject::AroundWord),
             ),
         );
+        for (kind, open, close) in [
+            (BracketKind::Paren, '(', ')'),
+            (BracketKind::Square, '[', ']'),
+            (BracketKind::Curly, '{', '}'),
+            (BracketKind::Angle, '<', '>'),
+        ] {
+            let open_key = match open {
+                '<' => "<LessThan>".to_string(),
+                _ => open.to_string(),
+            };
+            let close_key = match close {
+                '>' => "<GreaterThan>".to_string(),
+                _ => close.to_string(),
+            };
+            trie_keymap.insert_sequence(
+                vec!["d".to_string(), "i".to_string(), open_key.clone()],
+                Action::Operation(
+                    Operator::Delete,
+                    OperatorTarget::TextObject(TextObject::InnerBracket(kind)),
+                ),
+            );
+            trie_keymap.insert_sequence(
+                vec!["d".to_string(), "i".to_string(), close_key.clone()],
+                Action::Operation(
+                    Operator::Delete,
+                    OperatorTarget::TextObject(TextObject::InnerBracket(kind)),
+                ),
+            );
+            trie_keymap.insert_sequence(
+                vec!["d".to_string(), "a".to_string(), open_key.clone()],
+                Action::Operation(
+                    Operator::Delete,
+                    OperatorTarget::TextObject(TextObject::AroundBracket(kind)),
+                ),
+            );
+            trie_keymap.insert_sequence(
+                vec!["d".to_string(), "a".to_string(), close_key.clone()],
+                Action::Operation(
+                    Operator::Delete,
+                    OperatorTarget::TextObject(TextObject::AroundBracket(kind)),
+                ),
+            );
+            trie_keymap.insert_sequence(
+                vec!["c".to_string(), "i".to_string(), open_key.clone()],
+                Action::Operation(
+                    Operator::Change,
+                    OperatorTarget::TextObject(TextObject::InnerBracket(kind)),
+                ),
+            );
+            trie_keymap.insert_sequence(
+                vec!["c".to_string(), "i".to_string(), close_key.clone()],
+                Action::Operation(
+                    Operator::Change,
+                    OperatorTarget::TextObject(TextObject::InnerBracket(kind)),
+                ),
+            );
+            trie_keymap.insert_sequence(
+                vec!["c".to_string(), "a".to_string(), open_key.clone()],
+                Action::Operation(
+                    Operator::Change,
+                    OperatorTarget::TextObject(TextObject::AroundBracket(kind)),
+                ),
+            );
+            trie_keymap.insert_sequence(
+                vec!["c".to_string(), "a".to_string(), close_key.clone()],
+                Action::Operation(
+                    Operator::Change,
+                    OperatorTarget::TextObject(TextObject::AroundBracket(kind)),
+                ),
+            );
+        }
         trie_keymap.insert_sequence(
             vec!["d".to_string(), "w".to_string()],
             Action::Operation(

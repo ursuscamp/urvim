@@ -2,6 +2,7 @@ use super::*;
 use crate::action::ActionResult;
 use crate::editor::Action;
 use crate::editor::BoundaryMotion;
+use crate::editor::BracketKind;
 use crate::editor::LinewiseMotion;
 use crate::editor::Operator;
 use crate::editor::OperatorTarget;
@@ -849,6 +850,38 @@ fn test_cw_at_end_of_line_is_noop() {
     assert_eq!(result, ActionResult::NotHandled);
     assert_eq!(buffer_text(window.buffer_view()), "hello");
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 5));
+}
+
+#[test]
+fn test_da_paren_deletes_around_bracket_pair() {
+    let buffer = Buffer::from_str("foo(bar)baz");
+    let mut window = Window::new(buffer);
+
+    window.buffer_view.set_cursor(Cursor::new(0, 4));
+    let result = window.process_action(&Action::Operation(
+        Operator::Delete,
+        OperatorTarget::TextObject(TextObject::AroundBracket(BracketKind::Paren)),
+    ));
+
+    assert_eq!(result, ActionResult::Handled);
+    assert_eq!(buffer_text(window.buffer_view()), "foobaz");
+    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 3));
+}
+
+#[test]
+fn test_di_paren_with_no_matching_pair_is_noop() {
+    let buffer = Buffer::from_str("foo bar");
+    let mut window = Window::new(buffer);
+
+    window.buffer_view.set_cursor(Cursor::new(0, 0));
+    let result = window.process_action(&Action::Operation(
+        Operator::Delete,
+        OperatorTarget::TextObject(TextObject::InnerBracket(BracketKind::Paren)),
+    ));
+
+    assert_eq!(result, ActionResult::Handled);
+    assert_eq!(buffer_text(window.buffer_view()), "foo bar");
+    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
 }
 
 #[test]

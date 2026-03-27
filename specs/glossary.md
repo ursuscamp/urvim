@@ -227,7 +227,7 @@ The position in the buffer that corresponds to the top-left of the viewport.
 An action that waits for a motion or text object to define its target region. Examples: `Delete`, `Change`, `Yank`.
 
 ### Text Object
-A selection of text defined by boundaries (start and end positions). Text objects are used with operators in operator-pending mode. Examples: `InnerWord`, `AroundWord`.
+A selection of text defined by boundaries (start and end positions). Text objects are used with operators in operator-pending mode. Examples: `InnerWord`, `AroundWord`, `InnerBracket`, `AroundBracket`.
 
 ### Operator-Pending Mode
 A state where the editor waits for a motion or text object after an operator key is pressed. For example, after pressing `d`, the editor waits for `w` (motion) or `iw` (text object) to define what to delete.
@@ -246,6 +246,15 @@ A word selected without surrounding whitespace boundaries. If cursor is inside w
 
 ### Around Word (Text Object)
 A word selected with trailing whitespace included. If cursor is inside whitespace, selects whitespace plus the trailing word. If cursor is inside a word, selects that word plus all trailing whitespace.
+
+### Bracket Text Object
+A text object that selects text inside or around a matching delimiter pair such as parentheses, square brackets, curly braces, or angle brackets. Bracket text objects are used with operators in operator-pending mode and include inner and around forms. Related terms: Inner Bracket Text Object, Around Bracket Text Object, Text Object.
+
+### Inner Bracket Text Object
+A bracket text object that selects only the text between matching delimiters and excludes the delimiters themselves. It follows Vim-compatible bracket-object matching rules for the supported delimiter families. Related terms: Bracket Text Object, Around Bracket Text Object.
+
+### Around Bracket Text Object
+A bracket text object that selects the matching delimiters together with the enclosed text. It follows Vim-compatible bracket-object matching rules for the supported delimiter families. Related terms: Bracket Text Object, Inner Bracket Text Object.
 
 ## Spec-Related Terms
 

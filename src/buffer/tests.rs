@@ -1,6 +1,6 @@
 use super::*;
 use crate::buffer::operator_target::LinewiseDeleteRange;
-use crate::editor::{BoundaryMotion, LinewiseMotion, OperatorTarget, TextObject};
+use crate::editor::{BoundaryMotion, BracketKind, LinewiseMotion, OperatorTarget, TextObject};
 
 #[test]
 fn test_new_buffer() {
@@ -1396,6 +1396,109 @@ fn test_operator_target_invalid_count_is_none() {
             Cursor::new(0, 0),
             OperatorTarget::TextObject(TextObject::InnerWord),
             0,
+        )
+        .is_none()
+    );
+}
+
+#[test]
+fn test_operator_target_inner_bracket_range() {
+    let buf = Buffer::from_str("foo(bar)baz");
+    let range = buf
+        .get_operator_target_range(
+            Cursor::new(0, 4),
+            OperatorTarget::TextObject(TextObject::InnerBracket(BracketKind::Paren)),
+        )
+        .unwrap();
+    assert_eq!(
+        range,
+        TextObjectRange {
+            start: Cursor::new(0, 4),
+            end: Cursor::new(0, 7),
+        }
+    );
+}
+
+#[test]
+fn test_operator_target_around_bracket_range() {
+    let buf = Buffer::from_str("foo(bar)baz");
+    let range = buf
+        .get_operator_target_range(
+            Cursor::new(0, 4),
+            OperatorTarget::TextObject(TextObject::AroundBracket(BracketKind::Paren)),
+        )
+        .unwrap();
+    assert_eq!(
+        range,
+        TextObjectRange {
+            start: Cursor::new(0, 3),
+            end: Cursor::new(0, 8),
+        }
+    );
+}
+
+#[test]
+fn test_operator_target_bracket_range_uses_next_pair_on_current_line() {
+    let buf = Buffer::from_str("x foo(bar) baz");
+    let range = buf
+        .get_operator_target_range(
+            Cursor::new(0, 0),
+            OperatorTarget::TextObject(TextObject::InnerBracket(BracketKind::Paren)),
+        )
+        .unwrap();
+    assert_eq!(
+        range,
+        TextObjectRange {
+            start: Cursor::new(0, 6),
+            end: Cursor::new(0, 9),
+        }
+    );
+}
+
+#[test]
+fn test_operator_target_bracket_range_nested_count_expands_outward() {
+    let buf = Buffer::from_str("((foo))");
+    let range = buf
+        .get_operator_target_range_with_count(
+            Cursor::new(0, 2),
+            OperatorTarget::TextObject(TextObject::InnerBracket(BracketKind::Paren)),
+            2,
+        )
+        .unwrap();
+    assert_eq!(
+        range,
+        TextObjectRange {
+            start: Cursor::new(0, 1),
+            end: Cursor::new(0, 6),
+        }
+    );
+}
+
+#[test]
+fn test_operator_target_bracket_range_multiline() {
+    let buf = Buffer::from_str("foo(\nbar\n)baz");
+    let range = buf
+        .get_operator_target_range(
+            Cursor::new(1, 1),
+            OperatorTarget::TextObject(TextObject::AroundBracket(BracketKind::Paren)),
+        )
+        .unwrap();
+    assert_eq!(
+        range,
+        TextObjectRange {
+            start: Cursor::new(0, 3),
+            end: Cursor::new(2, 1),
+        }
+    );
+}
+
+#[test]
+fn test_operator_target_bracket_range_missing_pair_is_none() {
+    let buf = Buffer::from_str("foo bar");
+    assert!(
+        buf.get_operator_target_range(
+            Cursor::new(0, 0),
+            OperatorTarget::TextObject(TextObject::InnerBracket(BracketKind::Paren)),
         )
         .is_none()
     );

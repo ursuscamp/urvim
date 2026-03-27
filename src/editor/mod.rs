@@ -10,7 +10,8 @@ mod mode;
 mod normal;
 
 pub use action::{
-    Action, BoundaryMotion, HandleKeyResult, LinewiseMotion, Operator, OperatorTarget, TextObject,
+    Action, BoundaryMotion, BracketKind, HandleKeyResult, LinewiseMotion, Operator, OperatorTarget,
+    TextObject,
 };
 pub use insert::InsertMode;
 pub use keymap::{CountParser, Keymap, TrieKeymap};

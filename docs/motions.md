@@ -683,6 +683,14 @@ Text objects allow targeted text selection combined with operators. They are tri
 |------------|-------------|
 | `iw` | Inner word: word under cursor (excludes whitespace boundaries) |
 | `aw` | Around word: word under cursor plus trailing whitespace |
+| `i(`/`i)` | Inner bracket text object for parentheses |
+| `a(`/`a)` | Around bracket text object for parentheses |
+| `i[`/`i]` | Inner bracket text object for square brackets |
+| `a[`/`a]` | Around bracket text object for square brackets |
+| `i{`/`i}` | Inner bracket text object for curly braces |
+| `a{`/`a}` | Around bracket text object for curly braces |
+| `i<`/`i>` | Inner bracket text object for angle brackets |
+| `a<`/`a>` | Around bracket text object for angle brackets |
 
 ### Supported Operators
 
@@ -730,6 +738,26 @@ Examples on "  hello world  " with cursor positions:
 | on 'h' in "hello" | "hello " | "  world  " |
 | on 'w' in "world" | "world  " | "  hello " |
 | inside "  " (between words) | "  world" | "  hello  " |
+
+### Bracket Text Objects
+
+Bracket text objects select text inside or around matching delimiter pairs. They support parentheses, square brackets, curly braces, and angle brackets.
+
+- **Inner**: excludes the delimiters
+- **Around**: includes the delimiters
+- **Nested pairs**: selects the innermost pair that encloses the cursor
+- **Cursor outside a pair**: if there is a later valid pair on the current line, urvim selects that pair instead
+- **Multi-line pairs**: selections can span multiple lines
+
+Examples:
+
+| Cursor Position | `di(` deletes | `da(` deletes |
+|----------------|---------------|---------------|
+| inside `(bar)` in `foo(bar)baz` | `bar` | `(bar)` |
+| on `b` in `foo(bar)baz` | `bar` | `(bar)` |
+| before the first `(` on the same line | `bar` from the next valid pair on that line, if present | `(bar)` from the next valid pair on that line, if present |
+
+If the cursor is not inside a pair and the current line has no later valid pair, the operation does nothing.
 
 ### Delete Motions
 

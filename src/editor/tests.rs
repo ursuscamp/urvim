@@ -127,6 +127,99 @@ fn test_ciw_sequence() {
 }
 
 #[test]
+fn test_bracket_text_object_sequences() {
+    let cases = [
+        (
+            '(',
+            BracketKind::Paren,
+            TextObject::InnerBracket(BracketKind::Paren),
+        ),
+        (
+            ')',
+            BracketKind::Paren,
+            TextObject::InnerBracket(BracketKind::Paren),
+        ),
+        (
+            '[',
+            BracketKind::Square,
+            TextObject::InnerBracket(BracketKind::Square),
+        ),
+        (
+            ']',
+            BracketKind::Square,
+            TextObject::InnerBracket(BracketKind::Square),
+        ),
+        (
+            '{',
+            BracketKind::Curly,
+            TextObject::InnerBracket(BracketKind::Curly),
+        ),
+        (
+            '}',
+            BracketKind::Curly,
+            TextObject::InnerBracket(BracketKind::Curly),
+        ),
+        (
+            '<',
+            BracketKind::Angle,
+            TextObject::InnerBracket(BracketKind::Angle),
+        ),
+        (
+            '>',
+            BracketKind::Angle,
+            TextObject::InnerBracket(BracketKind::Angle),
+        ),
+    ];
+
+    for (delimiter, kind, _) in cases {
+        let mut mode = NormalMode::new();
+        assert!(matches!(
+            mode.handle_key(&key('d')),
+            HandleKeyResult::WaitForMore
+        ));
+        assert!(matches!(
+            mode.handle_key(&key('i')),
+            HandleKeyResult::WaitForMore
+        ));
+        let result = mode.handle_key(&key(delimiter));
+        match result {
+            HandleKeyResult::Complete(Action::Operation(
+                Operator::Delete,
+                OperatorTarget::TextObject(TextObject::InnerBracket(actual)),
+            )) => assert_eq!(actual, kind),
+            other => panic!("unexpected result: {other:?}"),
+        }
+    }
+
+    let around_cases = [
+        ('(', BracketKind::Paren),
+        ('[', BracketKind::Square),
+        ('{', BracketKind::Curly),
+        ('<', BracketKind::Angle),
+    ];
+
+    for (delimiter, kind) in around_cases {
+        let mut mode = NormalMode::new();
+        assert!(matches!(
+            mode.handle_key(&key('c')),
+            HandleKeyResult::WaitForMore
+        ));
+        assert!(matches!(
+            mode.handle_key(&key('a')),
+            HandleKeyResult::WaitForMore
+        ));
+        let result = mode.handle_key(&key(delimiter));
+        match result {
+            HandleKeyResult::Complete(Action::Operation(
+                Operator::Change,
+                OperatorTarget::TextObject(TextObject::AroundBracket(actual)),
+            )) => assert_eq!(actual, kind),
+            other => panic!("unexpected result: {other:?}"),
+        }
+    }
+}
+
+#[test]
 fn test_cgg_sequence() {
     let mut mode = NormalMode::new();
     assert!(matches!(

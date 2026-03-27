@@ -35,6 +35,7 @@
 //! ```
 
 mod boundary;
+mod bracket_text_object;
 mod cursor;
 mod edit;
 mod io;
