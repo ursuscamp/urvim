@@ -54,10 +54,8 @@ pub struct Gutter {
     total_buffer_lines: usize,
     /// Last rendered buffer line number (for wrapping detection)
     last_buffer_line: Option<usize>,
-    /// Background color for gutter (ANSI 236 = dark gray)
-    background_color: Color,
-    /// Foreground color for line numbers (ANSI 245 = light gray)
-    foreground_color: Color,
+    /// Resolved style for the gutter.
+    style: Style,
 }
 
 #[derive(Debug, Clone)]
@@ -135,12 +133,22 @@ impl Window {
 
     pub fn render(&mut self, screen: &mut Screen, origin: Position, size: Size) {
         self.size = size;
+        let (gutter_style, default_style) = globals::with_active_theme(|theme| {
+            theme
+                .map(|theme| (theme.ui.gutter, theme.default_style()))
+                .unwrap_or_else(|| {
+                    (
+                        Style::new().bg(Color::ansi(236)).fg(Color::ansi(245)),
+                        Style::default(),
+                    )
+                })
+        });
         // Get buffer info for gutter
         let total_lines = self.buffer_view.line_count();
         let start_line = self.buffer_view.scroll_offset().row as usize;
 
         // Create gutter with needed info (no buffer reference)
-        let mut gutter = Gutter::new(start_line, size.rows, total_lines);
+        let mut gutter = Gutter::new_with_style(start_line, size.rows, total_lines, gutter_style);
         let gutter_width = gutter.calculate_width();
 
         // Scroll to make cursor visible before rendering
@@ -152,8 +160,17 @@ impl Window {
         // Render buffer content offset by gutter width
         let content_origin = Position::new(origin.row, origin.col + gutter_width);
         let content_size = Size::new(size.rows, size.cols.saturating_sub(gutter_width));
+        screen.fill_region(
+            content_origin.row,
+            content_origin.col,
+            content_size.rows,
+            content_size.cols,
+            default_style,
+        );
 
-        self.render_data = self.buffer_view.build_render_data(content_size);
+        self.render_data = self
+            .buffer_view
+            .build_render_data_with_style(content_size, default_style);
         self.render_data.render(screen, content_origin);
     }
 

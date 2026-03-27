@@ -1,6 +1,9 @@
 use super::*;
 use crate::action::ActionResult;
 use crate::editor::Action;
+use crate::globals;
+use crate::terminal::{Color, Style};
+use crate::theme::{SyntaxStyles, Theme, ThemeKind, UiStyles};
 use std::path::{Path, PathBuf};
 
 fn abs_path(path: &Path) -> crate::AbsolutePath {
@@ -18,6 +21,38 @@ fn tab_group_with_labels(labels: &[&str]) -> TabGroup {
             .iter()
             .map(|label| buffer_with_label(label))
             .collect(),
+    )
+}
+
+fn themed_group() -> Theme {
+    let default_style = Style::new().fg(Color::ansi(10)).bg(Color::ansi(20));
+    let ui_styles = UiStyles::new(
+        Style::new().fg(Color::ansi(1)).bg(Color::ansi(2)),
+        Style::new().fg(Color::ansi(3)).bg(Color::ansi(4)),
+        Style::new().fg(Color::ansi(5)).bg(Color::ansi(6)),
+        Style::new().fg(Color::ansi(7)).bg(Color::ansi(8)),
+        Style::new().fg(Color::ansi(9)).bg(Color::ansi(10)),
+        Style::new().fg(Color::ansi(11)).bg(Color::ansi(12)),
+    );
+    let syntax_styles = SyntaxStyles::new(
+        Style::new(),
+        Style::new(),
+        Style::new(),
+        Style::new(),
+        Style::new(),
+        Style::new(),
+        Style::new(),
+        Style::new(),
+        Style::new(),
+        Style::new(),
+    );
+
+    Theme::new(
+        "demo",
+        ThemeKind::Ansi256,
+        default_style,
+        ui_styles,
+        syntax_styles,
     )
 }
 
@@ -140,6 +175,19 @@ fn test_tab_bar_active_style_and_unicode_width() {
     let active_style = screen.get_cell_mut(0, 1).unwrap().style;
     let inactive_style = screen.get_cell_mut(0, 5).unwrap().style;
     assert_ne!(active_style, inactive_style);
+}
+
+#[test]
+fn test_tab_bar_uses_theme_styles() {
+    let mut group = tab_group_with_labels(&["demo"]);
+    let theme = themed_group();
+    let expected_style = theme.ui.tab_active;
+    let _theme_guard = globals::set_test_active_theme(theme);
+
+    let mut screen = crate::screen::Screen::new(2, 16);
+    group.render(&mut screen, Position::new(0, 0), Size::new(2, 16));
+
+    assert_eq!(screen.get_cell_mut(0, 0).unwrap().style, expected_style);
 }
 
 #[test]

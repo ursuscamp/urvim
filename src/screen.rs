@@ -108,8 +108,40 @@ impl Screen {
     ///
     /// This resets all cells to default style with a space character.
     pub fn clear(&mut self) {
-        for cell in &mut self.buffer {
-            cell.clear();
+        self.clear_with_style(Style::default());
+    }
+
+    /// Clears the current buffer using an explicit style.
+    ///
+    /// Every cell is reset to a space character and assigned the provided
+    /// style. This is useful when a renderer wants blank space to inherit a
+    /// theme or component-specific base style instead of the screen default.
+    pub fn clear_with_style(&mut self, style: Style) {
+        self.fill_region(0, 0, self.rows, self.cols, style);
+    }
+
+    /// Fills a rectangular region with a space character and explicit style.
+    ///
+    /// Coordinates outside the screen bounds are clipped to the visible area.
+    pub fn fill_region(
+        &mut self,
+        row: u16,
+        col: u16,
+        rows: u16,
+        cols: u16,
+        style: Style,
+    ) {
+        let row_end = row.saturating_add(rows).min(self.rows);
+        let col_end = col.saturating_add(cols).min(self.cols);
+
+        for current_row in row.min(self.rows)..row_end {
+            for current_col in col.min(self.cols)..col_end {
+                if let Some(cell) = self.get_cell_mut(current_row, current_col) {
+                    cell.text.clear();
+                    cell.text.push(' ');
+                    cell.style = style;
+                }
+            }
         }
     }
 
@@ -306,6 +338,30 @@ mod tests {
         let cell = screen.get_cell_mut(0, 0).unwrap();
         assert_eq!(cell.text, " ");
         assert_eq!(cell.style, Style::default());
+    }
+
+    #[test]
+    fn test_clear_with_style() {
+        let mut screen = Screen::new(2, 2);
+        let style = Style::new().bold().fg(crate::terminal::Color::ansi(196));
+
+        screen.clear_with_style(style);
+
+        let cell = screen.get_cell_mut(0, 0).unwrap();
+        assert_eq!(cell.text, " ");
+        assert_eq!(cell.style, style);
+    }
+
+    #[test]
+    fn test_fill_region() {
+        let mut screen = Screen::new(3, 3);
+        let style = Style::new().bg(crate::terminal::Color::ansi(30));
+
+        screen.fill_region(1, 1, 2, 2, style);
+
+        assert_eq!(screen.get_cell_mut(0, 0).unwrap().style, Style::default());
+        assert_eq!(screen.get_cell_mut(1, 1).unwrap().style, style);
+        assert_eq!(screen.get_cell_mut(2, 2).unwrap().style, style);
     }
 
     #[test]

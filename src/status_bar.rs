@@ -3,8 +3,8 @@
 //! This module provides the root layout footer that summarizes the active
 //! editor state for the user.
 
+use crate::globals;
 use crate::screen::Screen;
-use crate::terminal::{Color, Style};
 use crate::window::{Position, Size};
 
 /// Derived state used to render the footer status bar.
@@ -57,7 +57,11 @@ impl StatusBar {
             return;
         }
 
-        let style = Style::new().bg(Color::ansi(237)).fg(Color::ansi(250));
+        let style = globals::with_active_theme(|theme| {
+            theme
+                .map(|theme| theme.ui.status_bar)
+                .unwrap_or_default()
+        });
 
         let width = size.cols as usize;
         screen.write_string(origin.row, origin.col, style, &" ".repeat(width));
@@ -81,6 +85,10 @@ impl StatusBar {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::globals;
+    use crate::terminal::Color;
+    use crate::terminal::Style;
+    use crate::theme::{SyntaxStyles, Theme, ThemeKind, UiStyles};
 
     fn context<'a>(
         mode_label: &'a str,
@@ -96,6 +104,38 @@ mod tests {
             cursor_byte_col,
             line_count,
         }
+    }
+
+    fn themed_status_bar() -> Theme {
+        let default_style = Style::new().fg(Color::ansi(10)).bg(Color::ansi(20));
+        let ui_styles = UiStyles::new(
+            Style::new().fg(Color::ansi(1)).bg(Color::ansi(2)),
+            Style::new().fg(Color::ansi(3)),
+            Style::new().fg(Color::ansi(4)),
+            Style::new().fg(Color::ansi(5)),
+            Style::new().fg(Color::ansi(6)),
+            Style::new().fg(Color::ansi(7)),
+        );
+        let syntax_styles = SyntaxStyles::new(
+            Style::new(),
+            Style::new(),
+            Style::new(),
+            Style::new(),
+            Style::new(),
+            Style::new(),
+            Style::new(),
+            Style::new(),
+            Style::new(),
+            Style::new(),
+        );
+
+        Theme::new(
+            "demo",
+            ThemeKind::Ansi256,
+            default_style,
+            ui_styles,
+            syntax_styles,
+        )
     }
 
     #[test]
@@ -136,5 +176,23 @@ mod tests {
 
         let cell = screen.get_cell_mut(0, 0).unwrap();
         assert_eq!(cell.text, "N");
+    }
+
+    #[test]
+    fn test_render_uses_theme_status_bar_style() {
+        let status_bar = StatusBar::new();
+        let theme = themed_status_bar();
+        let expected_style = theme.ui.status_bar;
+        let _theme_guard = globals::set_test_active_theme(theme);
+
+        let mut screen = Screen::new(1, 12);
+        status_bar.render(
+            &mut screen,
+            Position::new(0, 0),
+            Size::new(1, 12),
+            &context("NORMAL", "notes.txt", 0, 0, 10),
+        );
+
+        assert_eq!(screen.get_cell_mut(0, 0).unwrap().style, expected_style);
     }
 }

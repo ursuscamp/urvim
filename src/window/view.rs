@@ -40,7 +40,8 @@ impl BufferView {
 
     /// Returns the length of a line in the shared buffer, or `0` if it no longer exists.
     pub fn line_len(&self, line: usize) -> usize {
-        self.with_buffer(|buffer| buffer.line_len(line)).unwrap_or(0)
+        self.with_buffer(|buffer| buffer.line_len(line))
+            .unwrap_or(0)
     }
 
     /// Returns the shared buffer's file name as display text, if available.
@@ -96,7 +97,11 @@ impl BufferView {
                 .line_at(cursor.line)
                 .map(|line| UnicodeWidthStr::width(line.as_ref()))
                 .unwrap_or(0);
-            (buffer.line_count(), buffer.visual_col_at(cursor), line_width)
+            (
+                buffer.line_count(),
+                buffer.visual_col_at(cursor),
+                line_width,
+            )
         }) else {
             self.scroll_offset = Position::new(0, 0);
             return;
@@ -134,6 +139,11 @@ impl BufferView {
     }
 
     pub fn build_render_data(&self, size: Size) -> RenderData {
+        self.build_render_data_with_style(size, Style::default())
+    }
+
+    /// Builds render data for the visible buffer region using a base style.
+    pub fn build_render_data_with_style(&self, size: Size, default_style: Style) -> RenderData {
         let mut render_data = RenderData::new(size.rows);
         let _ = self.with_buffer(|buffer| {
             let start_line = self.scroll_offset.row as usize;
@@ -147,7 +157,7 @@ impl BufferView {
                     let (byte_offset, width_offset, visible_text) =
                         Self::calculate_horizontal_offset(line_text, horizontal_offset);
 
-                    let chunk = RenderChunk::default_text(&visible_text);
+                    let chunk = RenderChunk::new(&visible_text, Style::default());
                     let line_data = LineData {
                         buffer_line: buffer_line_idx,
                         byte_offset,
@@ -160,6 +170,12 @@ impl BufferView {
                 }
             }
         });
+
+        for line_data in &mut render_data.line_data {
+            for chunk in &mut line_data.chunks {
+                chunk.style = default_style.overlay(chunk.style);
+            }
+        }
 
         render_data
     }

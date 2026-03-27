@@ -1,0 +1,40 @@
+name = "Catppuccin"
+
+[palette]
+bg = "#1e1e2e"
+fg = "#cdd6f4"
+panel = "#313244"
+accent = "#cba6f7"
+muted = "#6c7086"
+comment = "#6c7086"
+red = "#f38ba8"
+green = "#a6e3a1"
+yellow = "#f9e2af"
+blue = "#89b4fa"
+magenta = "#cba6f7"
+cyan = "#94e2d5"
+orange = "#fab387"
+
+[default]
+fg = "fg"
+bg = "bg"
+
+[ui]
+status_bar = { fg = "fg", bg = "panel", bold = true }
+tab_active = { fg = "bg", bg = "accent", bold = true }
+tab_inactive = { fg = "fg", bg = "panel" }
+tab_scroll_indicator = { fg = "muted", bg = "bg" }
+gutter = { fg = "muted", bg = "bg" }
+window = { fg = "fg", bg = "bg" }
+
+[syntax]
+comment = { fg = "comment" }
+constant = { fg = "orange" }
+function = { fg = "blue" }
+keyword = { fg = "magenta" }
+number = { fg = "yellow" }
+operator = { fg = "fg" }
+punctuation = { fg = "muted" }
+string = { fg = "green" }
+type = { fg = "cyan" }
+variable = { fg = "fg" }

@@ -163,9 +163,21 @@ impl Style {
         self
     }
 
+    /// Sets or clears the foreground color.
+    pub const fn set_foreground(mut self, color: Option<Color>) -> Self {
+        self.foreground = color;
+        self
+    }
+
     /// Sets the background color.
     pub const fn bg(mut self, color: Color) -> Self {
         self.background = Some(color);
+        self
+    }
+
+    /// Sets or clears the background color.
+    pub const fn set_background(mut self, color: Option<Color>) -> Self {
+        self.background = color;
         self
     }
 
@@ -243,6 +255,150 @@ impl Style {
     pub const fn underline_color(mut self, color: Color) -> Self {
         self.underline_color = Some(color);
         self
+    }
+
+    /// Sets or clears the underline color.
+    pub const fn set_underline_color(mut self, color: Option<Color>) -> Self {
+        self.underline_color = color;
+        self
+    }
+
+    /// Sets whether bold is enabled.
+    pub const fn set_bold(mut self, enabled: bool) -> Self {
+        if enabled {
+            self.flags |= BOLD;
+        } else {
+            self.flags &= !BOLD;
+        }
+        self
+    }
+
+    /// Sets whether faint is enabled.
+    pub const fn set_faint(mut self, enabled: bool) -> Self {
+        if enabled {
+            self.flags |= FAINT;
+        } else {
+            self.flags &= !FAINT;
+        }
+        self
+    }
+
+    /// Sets whether italic is enabled.
+    pub const fn set_italic(mut self, enabled: bool) -> Self {
+        if enabled {
+            self.flags |= ITALIC;
+        } else {
+            self.flags &= !ITALIC;
+        }
+        self
+    }
+
+    /// Sets whether underline is enabled.
+    pub const fn set_underline(mut self, enabled: bool) -> Self {
+        if enabled {
+            self.flags |= UNDERLINE;
+        } else {
+            self.flags &= !UNDERLINE;
+        }
+        self
+    }
+
+    /// Sets whether blink is enabled.
+    pub const fn set_blink(mut self, enabled: bool) -> Self {
+        if enabled {
+            self.flags |= SLOW_BLINK;
+        } else {
+            self.flags &= !SLOW_BLINK;
+        }
+        self
+    }
+
+    /// Sets whether reverse video is enabled.
+    pub const fn set_reverse(mut self, enabled: bool) -> Self {
+        if enabled {
+            self.flags |= REVERSE;
+        } else {
+            self.flags &= !REVERSE;
+        }
+        self
+    }
+
+    /// Sets whether hidden text is enabled.
+    pub const fn set_hidden(mut self, enabled: bool) -> Self {
+        if enabled {
+            self.flags |= HIDDEN;
+        } else {
+            self.flags &= !HIDDEN;
+        }
+        self
+    }
+
+    /// Sets whether strikethrough is enabled.
+    pub const fn set_strikethrough(mut self, enabled: bool) -> Self {
+        if enabled {
+            self.flags |= STRIKETHROUGH;
+        } else {
+            self.flags &= !STRIKETHROUGH;
+        }
+        self
+    }
+
+    /// Sets whether overline is enabled.
+    pub const fn set_overline(mut self, enabled: bool) -> Self {
+        if enabled {
+            self.flags |= OVERLINE;
+        } else {
+            self.flags &= !OVERLINE;
+        }
+        self
+    }
+
+    /// Sets whether double underline is enabled.
+    pub const fn set_double_underline(mut self, enabled: bool) -> Self {
+        if enabled {
+            self.flags |= DOUBLE_UNDERLINE;
+        } else {
+            self.flags &= !DOUBLE_UNDERLINE;
+        }
+        self
+    }
+
+    /// Applies a partial style on top of this style.
+    pub const fn overlay(self, other: Style) -> Self {
+        let mut style = self;
+        style.flags = (style.flags
+            & !(BOLD
+                | FAINT
+                | ITALIC
+                | UNDERLINE
+                | SLOW_BLINK
+                | REVERSE
+                | HIDDEN
+                | STRIKETHROUGH
+                | OVERLINE
+                | DOUBLE_UNDERLINE))
+            | (other.flags
+                & (BOLD
+                    | FAINT
+                    | ITALIC
+                    | UNDERLINE
+                    | SLOW_BLINK
+                    | REVERSE
+                    | HIDDEN
+                    | STRIKETHROUGH
+                    | OVERLINE
+                    | DOUBLE_UNDERLINE));
+        style.underline_style = other.underline_style;
+        if other.underline_color.is_some() {
+            style.underline_color = other.underline_color;
+        }
+        if other.foreground.is_some() {
+            style.foreground = other.foreground;
+        }
+        if other.background.is_some() {
+            style.background = other.background;
+        }
+        style
     }
 
     /// Generates the ANSI escape code for this style as a String.

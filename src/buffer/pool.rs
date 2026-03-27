@@ -60,7 +60,10 @@ impl BufferPool {
     /// identifier.
     pub fn create_buffer_with_path(&mut self, path: impl AsRef<Path>) -> io::Result<BufferId> {
         let abs_path = AbsolutePath::from_path(path.as_ref()).ok_or_else(|| {
-            io::Error::new(io::ErrorKind::InvalidInput, "failed to resolve absolute path")
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "failed to resolve absolute path",
+            )
         })?;
 
         if let Some(id) = self.paths.get(&abs_path).copied() {
@@ -74,7 +77,10 @@ impl BufferPool {
     /// same absolute path is already present in the pool.
     pub fn open_buffer(&mut self, path: impl AsRef<Path>) -> io::Result<BufferId> {
         let abs_path = AbsolutePath::from_path(path.as_ref()).ok_or_else(|| {
-            io::Error::new(io::ErrorKind::InvalidInput, "failed to resolve absolute path")
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "failed to resolve absolute path",
+            )
         })?;
 
         if let Some(id) = self.paths.get(&abs_path).copied() {
@@ -114,7 +120,10 @@ impl BufferPool {
     /// path.
     pub fn save_buffer_to_path(&mut self, id: BufferId, path: impl AsRef<Path>) -> io::Result<()> {
         let abs_path = AbsolutePath::from_path(path.as_ref()).ok_or_else(|| {
-            io::Error::new(io::ErrorKind::InvalidInput, "failed to resolve absolute path")
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "failed to resolve absolute path",
+            )
         })?;
         let buffer = self
             .buffers
@@ -168,15 +177,14 @@ impl Default for BufferPool {
 mod tests {
     use super::*;
     use std::fs;
-    use std::sync::{atomic::{AtomicUsize, Ordering}, Arc, Barrier, Mutex, RwLock};
+    use std::sync::{
+        Arc, Barrier, Mutex, RwLock,
+        atomic::{AtomicUsize, Ordering},
+    };
     use std::thread;
 
     fn temp_file(name: &str) -> std::path::PathBuf {
-        std::env::temp_dir().join(format!(
-            "urvim-buffer-pool-{}-{}",
-            std::process::id(),
-            name
-        ))
+        std::env::temp_dir().join(format!("urvim-buffer-pool-{}-{}", std::process::id(), name))
     }
 
     #[test]

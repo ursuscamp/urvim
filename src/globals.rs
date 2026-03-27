@@ -4,7 +4,11 @@
 //! and future multi-window support.
 
 use crate::buffer::{Buffer, BufferId, BufferPool};
+use crate::theme::Theme;
 use std::sync::{Mutex, OnceLock, RwLock};
+
+#[cfg(test)]
+use std::cell::RefCell;
 
 /// Direction of character search
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -33,6 +37,12 @@ pub struct FindState {
 /// Global storage for the last character search state
 static LAST_FIND: Mutex<Option<FindState>> = Mutex::new(None);
 static BUFFER_POOL: OnceLock<RwLock<BufferPool>> = OnceLock::new();
+static ACTIVE_THEME: OnceLock<RwLock<Option<Theme>>> = OnceLock::new();
+
+#[cfg(test)]
+thread_local! {
+    static TEST_ACTIVE_THEME: RefCell<Option<Theme>> = RefCell::new(None);
+}
 
 /// Set the last character search state
 pub fn set_last_find(state: FindState) {
@@ -69,9 +79,97 @@ pub fn with_buffer_mut<R>(id: BufferId, f: impl FnOnce(&mut Buffer) -> R) -> Opt
     pool.with_buffer_mut(id, f)
 }
 
+fn active_theme_slot() -> &'static RwLock<Option<Theme>> {
+    ACTIVE_THEME.get_or_init(|| RwLock::new(None))
+}
+
+/// Sets the active theme used by renderers.
+///
+/// The editor treats the active theme as startup configuration, so this should
+/// be called once after CLI theme selection succeeds.
+pub fn set_active_theme(theme: Theme) {
+    let mut active_theme = active_theme_slot().write().unwrap();
+    *active_theme = Some(theme);
+}
+
+/// Runs a closure with access to the active theme if one has been configured.
+pub fn with_active_theme<R>(f: impl FnOnce(Option<&Theme>) -> R) -> R {
+    #[cfg(test)]
+    {
+        let test_theme = TEST_ACTIVE_THEME.with(|slot| slot.borrow().clone());
+        if let Some(theme) = test_theme.as_ref() {
+            return f(Some(theme));
+        }
+        return f(None);
+    }
+
+    #[cfg(not(test))]
+    {
+        let theme = active_theme_slot().read().unwrap();
+        f(theme.as_ref())
+    }
+}
+
+#[cfg(test)]
+/// A guard that installs a test-only active theme for the current thread.
+pub struct TestActiveThemeGuard;
+
+#[cfg(test)]
+impl Drop for TestActiveThemeGuard {
+    fn drop(&mut self) {
+        TEST_ACTIVE_THEME.with(|slot| {
+            *slot.borrow_mut() = None;
+        });
+    }
+}
+
+#[cfg(test)]
+/// Installs a theme for the current test thread and clears it when the guard drops.
+pub fn set_test_active_theme(theme: Theme) -> TestActiveThemeGuard {
+    TEST_ACTIVE_THEME.with(|slot| {
+        *slot.borrow_mut() = Some(theme);
+    });
+    TestActiveThemeGuard
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::terminal::Color;
+    use crate::terminal::Style;
+    use crate::theme::{SyntaxStyles, ThemeKind, UiStyles};
+
+    fn themed_theme() -> Theme {
+        let default_style = Style::new().fg(Color::ansi(10)).bg(Color::ansi(20));
+        let ui_styles = UiStyles::new(
+            Style::new().fg(Color::ansi(1)).bg(Color::ansi(2)),
+            Style::new().fg(Color::ansi(3)).bg(Color::ansi(4)),
+            Style::new().fg(Color::ansi(5)).bg(Color::ansi(6)),
+            Style::new().fg(Color::ansi(7)).bg(Color::ansi(8)),
+            Style::new().fg(Color::ansi(9)).bg(Color::ansi(10)),
+            Style::new().fg(Color::ansi(11)).bg(Color::ansi(12)),
+        );
+        let syntax_styles = SyntaxStyles::new(
+            Style::new(),
+            Style::new(),
+            Style::new(),
+            Style::new(),
+            Style::new(),
+            Style::new(),
+            Style::new(),
+            Style::new(),
+            Style::new(),
+            Style::new(),
+        );
+
+        Theme::new(
+            "demo",
+            ThemeKind::Ansi256,
+            default_style,
+            ui_styles,
+            syntax_styles,
+        )
+    }
 
     #[test]
     fn test_set_and_get_last_find() {
@@ -112,5 +210,38 @@ mod tests {
     #[test]
     fn test_with_buffer_missing_id_returns_none() {
         assert!(with_buffer(BufferId::new(usize::MAX), |_| ()).is_none());
+    }
+
+    #[test]
+    fn test_set_active_theme_updates_global_slot() {
+        let theme = themed_theme();
+        let expected_name = theme.name().to_string();
+        set_active_theme(theme);
+
+        assert_eq!(
+            active_theme_slot()
+                .read()
+                .unwrap()
+                .as_ref()
+                .map(|theme| theme.name()),
+            Some(expected_name.as_str())
+        );
+
+        drop(active_theme_slot().write().unwrap().take());
+    }
+
+    #[test]
+    fn test_test_active_theme_guard_clears_on_drop() {
+        let theme = themed_theme();
+        {
+            let _guard = set_test_active_theme(theme);
+            with_active_theme(|active_theme| {
+                assert_eq!(active_theme.map(|theme| theme.name()), Some("demo"));
+            });
+        }
+
+        with_active_theme(|active_theme| {
+            assert!(active_theme.is_none());
+        });
     }
 }

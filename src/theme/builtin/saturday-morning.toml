@@ -1,0 +1,40 @@
+name = "Saturday Morning"
+
+[palette]
+bg = 231
+fg = 235
+panel = 254
+accent = 24
+muted = 241
+comment = 246
+red = 160
+green = 28
+yellow = 136
+blue = 25
+magenta = 90
+cyan = 31
+orange = 166
+
+[default]
+fg = "fg"
+bg = "bg"
+
+[ui]
+status_bar = { fg = "fg", bg = "panel", bold = true }
+tab_active = { fg = "bg", bg = "accent", bold = true }
+tab_inactive = { fg = "fg", bg = "panel" }
+tab_scroll_indicator = { fg = "muted", bg = "bg" }
+gutter = { fg = "muted", bg = "bg" }
+window = { fg = "fg", bg = "bg" }
+
+[syntax]
+comment = { fg = "comment" }
+constant = { fg = "orange" }
+function = { fg = "blue" }
+keyword = { fg = "magenta" }
+number = { fg = "yellow" }
+operator = { fg = "fg" }
+punctuation = { fg = "muted" }
+string = { fg = "green" }
+type = { fg = "cyan" }
+variable = { fg = "fg" }

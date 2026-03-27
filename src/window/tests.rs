@@ -6,6 +6,9 @@ use crate::editor::LinewiseMotion;
 use crate::editor::Operator;
 use crate::editor::OperatorTarget;
 use crate::editor::TextObject;
+use crate::globals;
+use crate::terminal::{Color, Style};
+use crate::theme::{SyntaxStyles, Theme, ThemeKind, UiStyles};
 
 fn process_action_and_snapshot(window: &mut Window, action: &Action) {
     assert_eq!(window.process_action(action), ActionResult::Handled);
@@ -20,7 +23,40 @@ fn process_action_and_snapshot(window: &mut Window, action: &Action) {
 }
 
 fn buffer_text(view: &BufferView) -> String {
-    view.with_buffer(|buffer| buffer.as_str()).unwrap_or_default()
+    view.with_buffer(|buffer| buffer.as_str())
+        .unwrap_or_default()
+}
+
+fn themed_window() -> Theme {
+    let default_style = Style::new().fg(Color::ansi(15)).bg(Color::ansi(30));
+    let ui_styles = UiStyles::new(
+        Style::new().fg(Color::ansi(1)).bg(Color::ansi(2)),
+        Style::new().fg(Color::ansi(3)).bg(Color::ansi(4)),
+        Style::new().fg(Color::ansi(5)).bg(Color::ansi(6)),
+        Style::new().fg(Color::ansi(7)).bg(Color::ansi(8)),
+        Style::new().fg(Color::ansi(9)).bg(Color::ansi(10)),
+        Style::new().fg(Color::ansi(11)).bg(Color::ansi(12)),
+    );
+    let syntax_styles = SyntaxStyles::new(
+        Style::new(),
+        Style::new(),
+        Style::new(),
+        Style::new(),
+        Style::new(),
+        Style::new(),
+        Style::new(),
+        Style::new(),
+        Style::new(),
+        Style::new(),
+    );
+
+    Theme::new(
+        "demo",
+        ThemeKind::Ansi256,
+        default_style,
+        ui_styles,
+        syntax_styles,
+    )
 }
 
 #[test]
@@ -100,6 +136,58 @@ fn test_window_render() {
     // Check buffer content starts after gutter
     assert_eq!(screen.get_cell_mut(0, 3).unwrap().text, "l");
     assert_eq!(screen.get_cell_mut(1, 3).unwrap().text, "l");
+}
+
+#[test]
+fn test_window_render_uses_theme_styles() {
+    let buffer = Buffer::from_str("line1");
+    let mut window = Window::new(buffer);
+    let theme = themed_window();
+    let expected_gutter_style = theme.ui.gutter;
+    let expected_default_style = theme.default_style();
+    let _theme_guard = globals::set_test_active_theme(theme);
+
+    let mut screen = crate::screen::Screen::new(1, 12);
+    window.render(&mut screen, Position::new(0, 0), Size::new(1, 12));
+
+    assert_eq!(
+        screen.get_cell_mut(0, 0).unwrap().style,
+        expected_gutter_style
+    );
+    assert_eq!(
+        screen.get_cell_mut(0, 3).unwrap().style,
+        expected_default_style
+    );
+    assert_eq!(
+        screen.get_cell_mut(0, 8).unwrap().style,
+        expected_default_style
+    );
+}
+
+#[test]
+fn test_window_render_fills_empty_content_rows_with_theme_default() {
+    let buffer = Buffer::from_str("line1");
+    let mut window = Window::new(buffer);
+    let theme = themed_window();
+    let expected_gutter_style = theme.ui.gutter;
+    let expected_default_style = theme.default_style();
+    let _theme_guard = globals::set_test_active_theme(theme);
+
+    let mut screen = crate::screen::Screen::new(3, 12);
+    window.render(&mut screen, Position::new(0, 0), Size::new(3, 12));
+
+    assert_eq!(
+        screen.get_cell_mut(1, 0).unwrap().style,
+        expected_gutter_style
+    );
+    assert_eq!(
+        screen.get_cell_mut(1, 3).unwrap().style,
+        expected_default_style
+    );
+    assert_eq!(
+        screen.get_cell_mut(2, 3).unwrap().style,
+        expected_default_style
+    );
 }
 
 #[test]

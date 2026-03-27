@@ -6,8 +6,9 @@
 use crate::action::ActionResult;
 use crate::buffer::Buffer;
 use crate::editor::Action;
+use crate::globals;
 use crate::screen::Screen;
-use crate::terminal::{Color, Style};
+use crate::terminal::Style;
 use crate::widget::Widget;
 use crate::window::{BufferView, Position, Size, Window};
 use std::path::PathBuf;
@@ -152,15 +153,30 @@ impl TabGroup {
         }
 
         let layout = self.compute_layout(self.tab_bar_start, cols, active_index);
-        let base_style = Style::new().bg(Color::ansi(237)).fg(Color::ansi(250));
-        let active_style = base_style.reverse().bold();
+        let (base_style, active_style, indicator_style) = globals::with_active_theme(|theme| {
+            theme
+                .map(|theme| {
+                    (
+                        theme.ui.tab_inactive,
+                        theme.ui.tab_active,
+                        theme.ui.tab_scroll_indicator,
+                    )
+                })
+                .unwrap_or_else(|| {
+                    let base_style = Style::new()
+                        .bg(crate::terminal::Color::ansi(237))
+                        .fg(crate::terminal::Color::ansi(250));
+                    let active_style = base_style.reverse().bold();
+                    (base_style, active_style, active_style)
+                })
+        });
         let content_end = cols.saturating_sub(layout.right_arrow as usize);
 
         screen.write_string(origin.row, origin.col, base_style, &" ".repeat(cols));
 
         let mut current_col = origin.col;
         if layout.left_arrow {
-            screen.write_string(origin.row, current_col, active_style, "<");
+            screen.write_string(origin.row, current_col, indicator_style, "<");
             current_col += 1;
         }
 
@@ -196,7 +212,12 @@ impl TabGroup {
         }
 
         if layout.right_arrow {
-            screen.write_string(origin.row, origin.col + cols as u16 - 1, active_style, ">");
+            screen.write_string(
+                origin.row,
+                origin.col + cols as u16 - 1,
+                indicator_style,
+                ">",
+            );
         }
     }
 

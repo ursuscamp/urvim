@@ -5,8 +5,10 @@ use std::io;
 use urvim::Layout;
 use urvim::action::ActionResult;
 use urvim::editor::{Action, HandleKeyResult, InsertMode, Mode, NormalMode};
+use urvim::globals;
 use urvim::screen::Screen;
 use urvim::terminal::{Event, Terminal, size::get_terminal_size};
+use urvim::theme::ThemeRegistry;
 use urvim::widget::Widget;
 use urvim::window::{Position, Size};
 
@@ -15,6 +17,8 @@ use urvim::window::{Position, Size};
 #[command(version = "0.1.0")]
 #[command(about = "A terminal-based text editor", long_about = None)]
 struct Cli {
+    #[arg(long)]
+    theme: Option<String>,
     files: Vec<std::path::PathBuf>,
 }
 
@@ -33,6 +37,17 @@ fn main() -> io::Result<()> {
 
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();
+
+    let registry = urvim::theme::ThemeRegistry::load_builtin().map_err(|error| {
+        eprintln!("Error: {}", error);
+        io::Error::new(io::ErrorKind::InvalidData, error.to_string())
+    })?;
+
+    let active_theme = select_active_theme(&registry, cli.theme.as_deref()).map_err(|error| {
+        eprintln!("Error: {}", error);
+        io::Error::new(io::ErrorKind::InvalidInput, error)
+    })?;
+    globals::set_active_theme(active_theme);
 
     let mut terminal = Terminal::new(stdin, stdout)?;
 
@@ -167,6 +182,19 @@ fn handle_resize<I: io::Read + AsFd, O: io::Write + AsFd>(
     terminal.clear_screen()
 }
 
+fn select_active_theme(
+    registry: &ThemeRegistry,
+    requested: Option<&str>,
+) -> Result<urvim::theme::Theme, String> {
+    let theme_name = requested.unwrap_or("Friday Night");
+    registry.get(theme_name).cloned().ok_or_else(|| {
+        format!(
+            "unknown theme {theme_name:?}; available themes: {}",
+            registry.names().join(", ")
+        )
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -238,5 +266,25 @@ mod tests {
 
         assert_eq!(screen.size(), (3, 4));
         assert_eq!(output.lock().unwrap().as_slice(), b"\x1b[2J\x1b[H");
+    }
+
+    #[test]
+    fn select_active_theme_defaults_to_friday_night() {
+        let registry = ThemeRegistry::load_builtin().expect("builtins should load");
+
+        let theme = select_active_theme(&registry, None).expect("default theme should exist");
+
+        assert_eq!(theme.name(), "Friday Night");
+    }
+
+    #[test]
+    fn select_active_theme_reports_unknown_theme() {
+        let registry = ThemeRegistry::load_builtin().expect("builtins should load");
+
+        let error =
+            select_active_theme(&registry, Some("missing")).expect_err("unknown theme should fail");
+
+        assert!(error.contains("missing"));
+        assert!(error.contains("Friday Night"));
     }
 }

@@ -1,0 +1,40 @@
+name = "Tokyo Night"
+
+[palette]
+bg = "#1a1b26"
+fg = "#c0caf5"
+panel = "#24283b"
+accent = "#7aa2f7"
+muted = "#565f89"
+comment = "#565f89"
+red = "#f7768e"
+green = "#9ece6a"
+yellow = "#e0af68"
+blue = "#7aa2f7"
+magenta = "#bb9af7"
+cyan = "#7dcfff"
+orange = "#ff9e64"
+
+[default]
+fg = "fg"
+bg = "bg"
+
+[ui]
+status_bar = { fg = "fg", bg = "panel", bold = true }
+tab_active = { fg = "bg", bg = "accent", bold = true }
+tab_inactive = { fg = "fg", bg = "panel" }
+tab_scroll_indicator = { fg = "muted", bg = "bg" }
+gutter = { fg = "muted", bg = "bg" }
+window = { fg = "fg", bg = "bg" }
+
+[syntax]
+comment = { fg = "comment" }
+constant = { fg = "orange" }
+function = { fg = "blue" }
+keyword = { fg = "magenta" }
+number = { fg = "yellow" }
+operator = { fg = "fg" }
+punctuation = { fg = "muted" }
+string = { fg = "green" }
+type = { fg = "cyan" }
+variable = { fg = "fg" }

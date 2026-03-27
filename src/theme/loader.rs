@@ -1,0 +1,622 @@
+//! Theme validation and resolution.
+
+use std::collections::BTreeMap;
+
+use crate::terminal::{Color, Rgb, Style};
+
+use super::error::ThemeLoadError;
+use super::model::{StyleOverride, SyntaxStyles, Theme, ThemeKind, UiStyles};
+use super::parser::parse_theme;
+use super::schema::{RawColorValue, RawStyle, RawSyntaxStyles, RawTheme, RawUiStyles};
+
+/// Parses and resolves a TOML theme document in one step.
+pub fn resolve_theme_from_str(source: &str, input: &str) -> Result<Theme, ThemeLoadError> {
+    let raw = parse_theme(source, input)?;
+    resolve_theme(raw)
+}
+
+/// Resolves a raw theme into a runtime theme.
+pub fn resolve_theme(raw: RawTheme) -> Result<Theme, ThemeLoadError> {
+    let theme_name = raw.name.trim();
+    if theme_name.is_empty() {
+        return Err(ThemeLoadError::InvalidThemeName(raw.name));
+    }
+
+    if raw.palette.is_empty() {
+        return Err(ThemeLoadError::MissingSection {
+            theme: theme_name.to_string(),
+            section: "palette",
+        });
+    }
+
+    let (palette, kind) = resolve_palette(theme_name, &raw.palette)?;
+    let default_style = resolve_style(
+        theme_name,
+        "default",
+        "default",
+        Style::new(),
+        &raw.default,
+        &palette,
+    )?;
+    let ui_styles = resolve_ui_styles(theme_name, &raw.ui, default_style, &palette)?;
+    let syntax_styles = resolve_syntax_styles(theme_name, &raw.syntax, default_style, &palette)?;
+
+    Ok(Theme::new(
+        theme_name,
+        kind,
+        default_style,
+        ui_styles,
+        syntax_styles,
+    ))
+}
+
+fn resolve_palette(
+    theme_name: &str,
+    raw_palette: &BTreeMap<String, RawColorValue>,
+) -> Result<(BTreeMap<String, Color>, ThemeKind), ThemeLoadError> {
+    let mut palette = BTreeMap::new();
+    let mut kind = ThemeKind::Ansi256;
+
+    for (name, value) in raw_palette {
+        let color = match value {
+            RawColorValue::Ansi(ansi) => Color::ansi(*ansi),
+            RawColorValue::Rgb(value) => {
+                kind = ThemeKind::TrueColor;
+                parse_rgb(theme_name, name, value)?
+            }
+        };
+
+        palette.insert(name.clone(), color);
+    }
+
+    Ok((palette, kind))
+}
+
+fn parse_rgb(theme_name: &str, key: &str, value: &str) -> Result<Color, ThemeLoadError> {
+    let Some(hex) = value.strip_prefix('#') else {
+        return Err(ThemeLoadError::InvalidPaletteValue {
+            theme: theme_name.to_string(),
+            key: key.to_string(),
+            value: value.to_string(),
+        });
+    };
+
+    if hex.len() != 6 {
+        return Err(ThemeLoadError::InvalidPaletteValue {
+            theme: theme_name.to_string(),
+            key: key.to_string(),
+            value: value.to_string(),
+        });
+    }
+
+    let red =
+        u8::from_str_radix(&hex[0..2], 16).map_err(|_| ThemeLoadError::InvalidPaletteValue {
+            theme: theme_name.to_string(),
+            key: key.to_string(),
+            value: value.to_string(),
+        })?;
+    let green =
+        u8::from_str_radix(&hex[2..4], 16).map_err(|_| ThemeLoadError::InvalidPaletteValue {
+            theme: theme_name.to_string(),
+            key: key.to_string(),
+            value: value.to_string(),
+        })?;
+    let blue =
+        u8::from_str_radix(&hex[4..6], 16).map_err(|_| ThemeLoadError::InvalidPaletteValue {
+            theme: theme_name.to_string(),
+            key: key.to_string(),
+            value: value.to_string(),
+        })?;
+
+    Ok(Color::Rgb(Rgb::new(red, green, blue)))
+}
+
+fn resolve_ui_styles(
+    theme_name: &str,
+    raw: &RawUiStyles,
+    default_style: Style,
+    palette: &BTreeMap<String, Color>,
+) -> Result<UiStyles, ThemeLoadError> {
+    Ok(UiStyles::new(
+        resolve_style(
+            theme_name,
+            "ui",
+            "status_bar",
+            default_style,
+            &raw.status_bar,
+            palette,
+        )?,
+        resolve_style(
+            theme_name,
+            "ui",
+            "tab_active",
+            default_style,
+            &raw.tab_active,
+            palette,
+        )?,
+        resolve_style(
+            theme_name,
+            "ui",
+            "tab_inactive",
+            default_style,
+            &raw.tab_inactive,
+            palette,
+        )?,
+        resolve_style(
+            theme_name,
+            "ui",
+            "tab_scroll_indicator",
+            default_style,
+            &raw.tab_scroll_indicator,
+            palette,
+        )?,
+        resolve_style(
+            theme_name,
+            "ui",
+            "gutter",
+            default_style,
+            &raw.gutter,
+            palette,
+        )?,
+        resolve_style(
+            theme_name,
+            "ui",
+            "window",
+            default_style,
+            &raw.window,
+            palette,
+        )?,
+    ))
+}
+
+fn resolve_syntax_styles(
+    theme_name: &str,
+    raw: &RawSyntaxStyles,
+    default_style: Style,
+    palette: &BTreeMap<String, Color>,
+) -> Result<SyntaxStyles, ThemeLoadError> {
+    Ok(SyntaxStyles::new(
+        resolve_style(
+            theme_name,
+            "syntax",
+            "comment",
+            default_style,
+            &raw.comment,
+            palette,
+        )?,
+        resolve_style(
+            theme_name,
+            "syntax",
+            "constant",
+            default_style,
+            &raw.constant,
+            palette,
+        )?,
+        resolve_style(
+            theme_name,
+            "syntax",
+            "function",
+            default_style,
+            &raw.function,
+            palette,
+        )?,
+        resolve_style(
+            theme_name,
+            "syntax",
+            "keyword",
+            default_style,
+            &raw.keyword,
+            palette,
+        )?,
+        resolve_style(
+            theme_name,
+            "syntax",
+            "number",
+            default_style,
+            &raw.number,
+            palette,
+        )?,
+        resolve_style(
+            theme_name,
+            "syntax",
+            "operator",
+            default_style,
+            &raw.operator,
+            palette,
+        )?,
+        resolve_style(
+            theme_name,
+            "syntax",
+            "punctuation",
+            default_style,
+            &raw.punctuation,
+            palette,
+        )?,
+        resolve_style(
+            theme_name,
+            "syntax",
+            "string",
+            default_style,
+            &raw.string,
+            palette,
+        )?,
+        resolve_style(
+            theme_name,
+            "syntax",
+            "type",
+            default_style,
+            &raw.type_,
+            palette,
+        )?,
+        resolve_style(
+            theme_name,
+            "syntax",
+            "variable",
+            default_style,
+            &raw.variable,
+            palette,
+        )?,
+    ))
+}
+
+fn resolve_style(
+    theme_name: &str,
+    section: &'static str,
+    key: &'static str,
+    base: Style,
+    raw: &RawStyle,
+    palette: &BTreeMap<String, Color>,
+) -> Result<Style, ThemeLoadError> {
+    let override_style = resolve_style_override(theme_name, section, key, raw, palette)?;
+    Ok(override_style.apply_to(base))
+}
+
+fn resolve_style_override(
+    theme_name: &str,
+    section: &'static str,
+    key: &'static str,
+    raw: &RawStyle,
+    palette: &BTreeMap<String, Color>,
+) -> Result<StyleOverride, ThemeLoadError> {
+    Ok(StyleOverride {
+        fg: resolve_palette_reference(theme_name, section, key, "fg", raw.fg.as_ref(), palette)?,
+        bg: resolve_palette_reference(theme_name, section, key, "bg", raw.bg.as_ref(), palette)?,
+        underline_color: resolve_palette_reference(
+            theme_name,
+            section,
+            key,
+            "underline_color",
+            raw.underline_color.as_ref(),
+            palette,
+        )?,
+        bold: raw.bold,
+        italic: raw.italic,
+        underline: raw.underline,
+        double_underline: raw.double_underline,
+        dim: raw.dim,
+        reverse: raw.reverse,
+        blink: raw.blink,
+        strikethrough: raw.strikethrough,
+        overline: raw.overline,
+    })
+}
+
+fn resolve_palette_reference(
+    theme_name: &str,
+    section: &'static str,
+    key: &'static str,
+    field: &'static str,
+    reference: Option<&String>,
+    palette: &BTreeMap<String, Color>,
+) -> Result<Option<Color>, ThemeLoadError> {
+    match reference {
+        Some(reference) => palette.get(reference).copied().map(Some).ok_or_else(|| {
+            ThemeLoadError::UnknownPaletteReference {
+                theme: theme_name.to_string(),
+                section,
+                key: format!("{key}.{field}"),
+                reference: reference.to_string(),
+            }
+        }),
+        None => Ok(None),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::theme::ThemeRegistry;
+
+    fn sample_theme() -> &'static str {
+        r##"
+name = "demo"
+
+[palette]
+base = 0
+accent = "#112233"
+
+[default]
+fg = "base"
+bg = "accent"
+bold = true
+
+[ui]
+status_bar = { fg = "accent" }
+tab_active = { fg = "base" }
+tab_inactive = { fg = "base" }
+tab_scroll_indicator = { fg = "base" }
+gutter = { fg = "base" }
+window = { fg = "base" }
+
+[syntax]
+comment = { fg = "base" }
+constant = { fg = "base" }
+function = { fg = "base" }
+keyword = { fg = "accent" }
+number = { fg = "base" }
+operator = { fg = "base" }
+punctuation = { fg = "base" }
+string = { fg = "accent" }
+type = { fg = "base" }
+variable = { fg = "base" }
+"##
+    }
+
+    #[test]
+    fn parse_and_resolve_sample_theme() {
+        let theme = resolve_theme_from_str("sample", sample_theme()).expect("theme should resolve");
+        assert_eq!(theme.name(), "demo");
+        assert_eq!(theme.kind(), ThemeKind::TrueColor);
+        assert_eq!(
+            theme.ui.status_bar,
+            Style::new()
+                .fg(Color::Rgb(Rgb::new(17, 34, 51)))
+                .bg(Color::Rgb(Rgb::new(17, 34, 51)))
+                .bold()
+        );
+        assert_eq!(
+            theme.syntax.keyword,
+            Style::new()
+                .fg(Color::Rgb(Rgb::new(17, 34, 51)))
+                .bg(Color::Rgb(Rgb::new(17, 34, 51)))
+                .bold()
+        );
+    }
+
+    #[test]
+    fn rejects_unknown_palette_reference() {
+        let theme = r#"
+name = "demo"
+
+[palette]
+base = 0
+
+[default]
+fg = "base"
+
+[ui]
+status_bar = { fg = "missing" }
+tab_active = { fg = "base" }
+tab_inactive = { fg = "base" }
+tab_scroll_indicator = { fg = "base" }
+gutter = { fg = "base" }
+window = { fg = "base" }
+
+[syntax]
+comment = { fg = "base" }
+constant = { fg = "base" }
+function = { fg = "base" }
+keyword = { fg = "base" }
+number = { fg = "base" }
+operator = { fg = "base" }
+punctuation = { fg = "base" }
+string = { fg = "base" }
+type = { fg = "base" }
+variable = { fg = "base" }
+"#;
+
+        let err = resolve_theme_from_str("sample", theme).expect_err("resolution should fail");
+        assert!(matches!(
+            err,
+            ThemeLoadError::UnknownPaletteReference { .. }
+        ));
+    }
+
+    #[test]
+    fn rejects_unknown_ui_key() {
+        let theme = r#"
+name = "demo"
+
+[palette]
+base = 0
+
+[default]
+fg = "base"
+
+[ui]
+status_bar = { fg = "base" }
+tab_active = { fg = "base" }
+tab_inactive = { fg = "base" }
+tab_scroll_indicator = { fg = "base" }
+gutter = { fg = "base" }
+window = { fg = "base" }
+extra = { fg = "base" }
+
+[syntax]
+comment = { fg = "base" }
+constant = { fg = "base" }
+function = { fg = "base" }
+keyword = { fg = "base" }
+number = { fg = "base" }
+operator = { fg = "base" }
+punctuation = { fg = "base" }
+string = { fg = "base" }
+type = { fg = "base" }
+variable = { fg = "base" }
+"#;
+
+        let err = resolve_theme_from_str("sample", theme).expect_err("validation should fail");
+        match err {
+            ThemeLoadError::Parse { message, .. } => {
+                assert!(message.contains("extra"));
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rejects_unknown_syntax_key() {
+        let theme = r#"
+name = "demo"
+
+[palette]
+base = 0
+
+[default]
+fg = "base"
+
+[ui]
+status_bar = { fg = "base" }
+tab_active = { fg = "base" }
+tab_inactive = { fg = "base" }
+tab_scroll_indicator = { fg = "base" }
+gutter = { fg = "base" }
+window = { fg = "base" }
+
+[syntax]
+comment = { fg = "base" }
+constant = { fg = "base" }
+function = { fg = "base" }
+keyword = { fg = "base" }
+number = { fg = "base" }
+operator = { fg = "base" }
+punctuation = { fg = "base" }
+string = { fg = "base" }
+type = { fg = "base" }
+variable = { fg = "base" }
+extra = { fg = "base" }
+"#;
+
+        let err = resolve_theme_from_str("sample", theme).expect_err("validation should fail");
+        match err {
+            ThemeLoadError::Parse { message, .. } => {
+                assert!(message.contains("extra"));
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn resolves_partial_styles_against_default_style() {
+        let theme = r#"
+name = "demo"
+
+[palette]
+base = 0
+accent = 1
+
+[default]
+fg = "base"
+bg = "accent"
+bold = true
+
+[ui]
+status_bar = { fg = "accent" }
+tab_active = { fg = "base" }
+tab_inactive = { fg = "base" }
+tab_scroll_indicator = { fg = "base" }
+gutter = { fg = "base" }
+window = { fg = "base" }
+
+[syntax]
+comment = { fg = "base" }
+constant = { fg = "base" }
+function = { fg = "base" }
+keyword = { fg = "accent" }
+number = { fg = "base" }
+operator = { fg = "base" }
+punctuation = { fg = "base" }
+string = { fg = "base" }
+type = { fg = "base" }
+variable = { fg = "base" }
+"#;
+
+        let theme = resolve_theme_from_str("sample", theme).expect("theme should resolve");
+        assert_eq!(
+            theme.ui.status_bar,
+            Style::new().fg(Color::ansi(1)).bg(Color::ansi(1)).bold()
+        );
+        assert_eq!(
+            theme.syntax.keyword,
+            Style::new().fg(Color::ansi(1)).bg(Color::ansi(1)).bold()
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_palette_values() {
+        let theme = r##"
+name = "demo"
+
+[palette]
+base = "#zzzzzz"
+
+[default]
+fg = "base"
+bg = "base"
+
+[ui]
+status_bar = { fg = "base" }
+tab_active = { fg = "base" }
+tab_inactive = { fg = "base" }
+tab_scroll_indicator = { fg = "base" }
+gutter = { fg = "base" }
+window = { fg = "base" }
+
+[syntax]
+comment = { fg = "base" }
+constant = { fg = "base" }
+function = { fg = "base" }
+keyword = { fg = "base" }
+number = { fg = "base" }
+operator = { fg = "base" }
+punctuation = { fg = "base" }
+string = { fg = "base" }
+type = { fg = "base" }
+variable = { fg = "base" }
+"##;
+
+        let err = resolve_theme_from_str("sample", theme).expect_err("invalid palette should fail");
+        assert!(matches!(err, ThemeLoadError::InvalidPaletteValue { .. }));
+    }
+
+    #[test]
+    fn builtin_themes_parse_and_classify() {
+        let registry = ThemeRegistry::load_builtin().expect("builtins should load");
+
+        assert_eq!(registry.default_theme().name(), "Friday Night");
+        assert_eq!(
+            registry.get("Friday Night").unwrap().kind(),
+            ThemeKind::Ansi256
+        );
+        assert_eq!(
+            registry.get("Saturday Morning").unwrap().kind(),
+            ThemeKind::Ansi256
+        );
+        assert_eq!(
+            registry.get("Rose Pine").unwrap().kind(),
+            ThemeKind::TrueColor
+        );
+        assert_eq!(
+            registry.get("Dracula").unwrap().kind(),
+            ThemeKind::TrueColor
+        );
+        assert_eq!(
+            registry.get("Tokyo Night").unwrap().kind(),
+            ThemeKind::TrueColor
+        );
+        assert_eq!(
+            registry.get("Catppuccin").unwrap().kind(),
+            ThemeKind::TrueColor
+        );
+    }
+}

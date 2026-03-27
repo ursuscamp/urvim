@@ -1,0 +1,40 @@
+name = "Rose Pine"
+
+[palette]
+bg = "#191724"
+fg = "#e0def4"
+panel = "#1f1d2e"
+accent = "#c4a7e7"
+muted = "#6e6a86"
+comment = "#908caa"
+red = "#eb6f92"
+green = "#31748f"
+yellow = "#f6c177"
+blue = "#9ccfd8"
+magenta = "#c4a7e7"
+cyan = "#9ccfd8"
+orange = "#ea9a97"
+
+[default]
+fg = "fg"
+bg = "bg"
+
+[ui]
+status_bar = { fg = "fg", bg = "panel", bold = true }
+tab_active = { fg = "bg", bg = "accent", bold = true }
+tab_inactive = { fg = "fg", bg = "panel" }
+tab_scroll_indicator = { fg = "muted", bg = "bg" }
+gutter = { fg = "muted", bg = "bg" }
+window = { fg = "fg", bg = "bg" }
+
+[syntax]
+comment = { fg = "comment" }
+constant = { fg = "orange" }
+function = { fg = "blue" }
+keyword = { fg = "magenta" }
+number = { fg = "yellow" }
+operator = { fg = "fg" }
+punctuation = { fg = "muted" }
+string = { fg = "green" }
+type = { fg = "cyan" }
+variable = { fg = "fg" }

@@ -50,6 +50,24 @@ A lightweight editor-facing enum used to label the current mode in the status ba
 
 **Related Terms:** Mode, Status Bar, Layout
 
+### Theme
+A resolved styling configuration that defines the editor's default style plus named UI and syntax styles. Themes determine how buffers, gutters, tab bars, and status bars inherit colors and text attributes during rendering.
+
+**Context:** Theme loading, window rendering, status bar rendering, and future syntax highlighting
+
+**Example:** `theme.default_style()` provides the base style that buffer content should inherit before any element-specific overlay is applied.
+
+**Related Terms:** Default Style, Window, Gutter, Status Bar, Layout
+
+### Default Style
+The base `Style` supplied by a theme before any UI- or syntax-specific overlay is applied. Unspecified style fields in a rendered region should inherit from this style.
+
+**Context:** Theme resolution and renderer base-style application
+
+**Example:** A buffer line that only sets foreground color should still inherit the theme default background color.
+
+**Related Terms:** Theme, Window, Screen, Cell
+
 ### Window
 A rendering component that owns a Buffer View and displays its buffer on screen. It handles cursor positioning, scrolling, and text rendering with gutter.
 

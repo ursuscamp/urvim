@@ -7,8 +7,23 @@ impl Gutter {
             visible_rows,
             total_buffer_lines,
             last_buffer_line: None,
-            background_color: Color::ansi(236),
-            foreground_color: Color::ansi(245),
+            style: Style::new().bg(Color::ansi(236)).fg(Color::ansi(245)),
+        }
+    }
+
+    /// Creates a gutter renderer with an explicit theme-derived style.
+    pub fn new_with_style(
+        start_line: usize,
+        visible_rows: u16,
+        total_buffer_lines: usize,
+        style: Style,
+    ) -> Self {
+        Self {
+            start_line,
+            visible_rows,
+            total_buffer_lines,
+            last_buffer_line: None,
+            style,
         }
     }
 
@@ -31,9 +46,7 @@ impl Gutter {
 
     pub fn render(&mut self, screen: &mut Screen, origin: Position) {
         let width = self.calculate_width();
-        let gutter_style = Style::new()
-            .bg(self.background_color)
-            .fg(self.foreground_color);
+        let gutter_style = self.style;
 
         for screen_row in 0..self.visible_rows {
             let screen_row_idx = screen_row as usize;

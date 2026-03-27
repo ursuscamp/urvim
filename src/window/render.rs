@@ -39,13 +39,19 @@ impl RenderData {
     }
 
     pub fn render(&self, screen: &mut Screen, origin: Position) {
+        self.render_with_base_style(screen, origin, Style::default());
+    }
+
+    /// Renders the buffer content using a supplied base style.
+    pub fn render_with_base_style(&self, screen: &mut Screen, origin: Position, base_style: Style) {
         for (row_offset, line_data) in self.line_data.iter().enumerate() {
             let mut col_offset = origin.col;
             for chunk in &line_data.chunks {
+                let style = base_style.overlay(chunk.style);
                 screen.write_string(
                     origin.row + row_offset as u16,
                     col_offset,
-                    chunk.style,
+                    style,
                     &chunk.text,
                 );
                 col_offset += UnicodeWidthStr::width(chunk.text.as_str()) as u16;
