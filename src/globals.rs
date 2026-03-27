@@ -4,6 +4,7 @@
 //! and future multi-window support.
 
 use crate::buffer::{Buffer, BufferId, BufferPool};
+use crate::config::Config;
 use crate::theme::Theme;
 use std::sync::{Mutex, OnceLock, RwLock};
 
@@ -37,10 +38,12 @@ pub struct FindState {
 /// Global storage for the last character search state
 static LAST_FIND: Mutex<Option<FindState>> = Mutex::new(None);
 static BUFFER_POOL: OnceLock<RwLock<BufferPool>> = OnceLock::new();
+static CONFIG: OnceLock<RwLock<Option<Config>>> = OnceLock::new();
 static ACTIVE_THEME: OnceLock<RwLock<Option<Theme>>> = OnceLock::new();
 
 #[cfg(test)]
 thread_local! {
+    static TEST_CONFIG: RefCell<Option<Config>> = RefCell::new(None);
     static TEST_ACTIVE_THEME: RefCell<Option<Theme>> = RefCell::new(None);
 }
 
@@ -79,6 +82,34 @@ pub fn with_buffer_mut<R>(id: BufferId, f: impl FnOnce(&mut Buffer) -> R) -> Opt
     pool.with_buffer_mut(id, f)
 }
 
+fn config_slot() -> &'static RwLock<Option<Config>> {
+    CONFIG.get_or_init(|| RwLock::new(None))
+}
+
+/// Sets the resolved startup configuration used by the editor.
+pub fn set_config(config: Config) {
+    let mut stored = config_slot().write().unwrap();
+    *stored = Some(config);
+}
+
+/// Runs a closure with access to the resolved startup configuration if one has been configured.
+pub fn with_config<R>(f: impl FnOnce(Option<&Config>) -> R) -> R {
+    #[cfg(test)]
+    {
+        let test_config = TEST_CONFIG.with(|slot| slot.borrow().clone());
+        if let Some(config) = test_config.as_ref() {
+            return f(Some(config));
+        }
+        return f(None);
+    }
+
+    #[cfg(not(test))]
+    {
+        let config = config_slot().read().unwrap();
+        f(config.as_ref())
+    }
+}
+
 fn active_theme_slot() -> &'static RwLock<Option<Theme>> {
     ACTIVE_THEME.get_or_init(|| RwLock::new(None))
 }
@@ -111,6 +142,28 @@ pub fn with_active_theme<R>(f: impl FnOnce(Option<&Theme>) -> R) -> R {
 }
 
 #[cfg(test)]
+/// A guard that installs a test-only resolved config for the current thread.
+pub struct TestConfigGuard;
+
+#[cfg(test)]
+impl Drop for TestConfigGuard {
+    fn drop(&mut self) {
+        TEST_CONFIG.with(|slot| {
+            *slot.borrow_mut() = None;
+        });
+    }
+}
+
+#[cfg(test)]
+/// Installs a resolved config for the current test thread and clears it when the guard drops.
+pub fn set_test_config(config: Config) -> TestConfigGuard {
+    TEST_CONFIG.with(|slot| {
+        *slot.borrow_mut() = Some(config);
+    });
+    TestConfigGuard
+}
+
+#[cfg(test)]
 /// A guard that installs a test-only active theme for the current thread.
 pub struct TestActiveThemeGuard;
 
@@ -135,6 +188,7 @@ pub fn set_test_active_theme(theme: Theme) -> TestActiveThemeGuard {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::Config;
     use crate::terminal::Color;
     use crate::terminal::Style;
     use crate::theme::{SyntaxStyles, ThemeKind, UiStyles};
@@ -169,6 +223,12 @@ mod tests {
             ui_styles,
             syntax_styles,
         )
+    }
+
+    fn themed_config(theme: &str) -> Config {
+        Config {
+            theme: theme.to_string(),
+        }
     }
 
     #[test]
@@ -228,6 +288,42 @@ mod tests {
         );
 
         drop(active_theme_slot().write().unwrap().take());
+    }
+
+    #[test]
+    fn test_set_config_updates_global_slot() {
+        let config = themed_config("demo");
+        let expected_theme = config.theme.clone();
+        set_config(config);
+
+        assert_eq!(
+            config_slot()
+                .read()
+                .unwrap()
+                .as_ref()
+                .map(|config| config.theme.as_str()),
+            Some(expected_theme.as_str())
+        );
+
+        drop(config_slot().write().unwrap().take());
+    }
+
+    #[test]
+    fn test_test_config_guard_clears_on_drop() {
+        let config = themed_config("demo");
+        {
+            let _guard = set_test_config(config);
+            with_config(|active_config| {
+                assert_eq!(
+                    active_config.map(|config| config.theme.as_str()),
+                    Some("demo")
+                );
+            });
+        }
+
+        with_config(|active_config| {
+            assert!(active_config.is_none());
+        });
     }
 
     #[test]

@@ -123,14 +123,7 @@ impl Screen {
     /// Fills a rectangular region with a space character and explicit style.
     ///
     /// Coordinates outside the screen bounds are clipped to the visible area.
-    pub fn fill_region(
-        &mut self,
-        row: u16,
-        col: u16,
-        rows: u16,
-        cols: u16,
-        style: Style,
-    ) {
+    pub fn fill_region(&mut self, row: u16, col: u16, rows: u16, cols: u16, style: Style) {
         let row_end = row.saturating_add(rows).min(self.rows);
         let col_end = col.saturating_add(cols).min(self.cols);
 

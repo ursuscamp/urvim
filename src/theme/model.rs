@@ -379,28 +379,16 @@ mod tests {
     fn theme_returns_predefined_ui_styles() {
         let theme = theme("demo");
 
-        assert_eq!(
-            theme.ui.status_bar,
-            Style::new().fg(Color::ansi(1))
-        );
-        assert_eq!(
-            theme.ui.window,
-            Style::new().fg(Color::ansi(6))
-        );
+        assert_eq!(theme.ui.status_bar, Style::new().fg(Color::ansi(1)));
+        assert_eq!(theme.ui.window, Style::new().fg(Color::ansi(6)));
     }
 
     #[test]
     fn theme_returns_predefined_syntax_styles() {
         let theme = theme("demo");
 
-        assert_eq!(
-            theme.syntax.comment,
-            Style::new().fg(Color::ansi(10))
-        );
-        assert_eq!(
-            theme.syntax.variable,
-            Style::new().fg(Color::ansi(19))
-        );
+        assert_eq!(theme.syntax.comment, Style::new().fg(Color::ansi(10)));
+        assert_eq!(theme.syntax.variable, Style::new().fg(Color::ansi(19)));
     }
 
     #[test]

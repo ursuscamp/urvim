@@ -4,6 +4,7 @@ use std::io;
 
 use urvim::Layout;
 use urvim::action::ActionResult;
+use urvim::config::Config;
 use urvim::editor::{Action, HandleKeyResult, InsertMode, Mode, NormalMode};
 use urvim::globals;
 use urvim::screen::Screen;
@@ -38,15 +39,22 @@ fn main() -> io::Result<()> {
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();
 
+    let config = Config::load(cli.theme.as_deref()).map_err(|error| {
+        eprintln!("Error: {}", error);
+        io::Error::new(io::ErrorKind::InvalidData, error.to_string())
+    })?;
+    globals::set_config(config.clone());
+
     let registry = urvim::theme::ThemeRegistry::load_builtin().map_err(|error| {
         eprintln!("Error: {}", error);
         io::Error::new(io::ErrorKind::InvalidData, error.to_string())
     })?;
 
-    let active_theme = select_active_theme(&registry, cli.theme.as_deref()).map_err(|error| {
-        eprintln!("Error: {}", error);
-        io::Error::new(io::ErrorKind::InvalidInput, error)
-    })?;
+    let active_theme =
+        select_active_theme(&registry, Some(config.theme.as_str())).map_err(|error| {
+            eprintln!("Error: {}", error);
+            io::Error::new(io::ErrorKind::InvalidInput, error)
+        })?;
     globals::set_active_theme(active_theme);
 
     let mut terminal = Terminal::new(stdin, stdout)?;

@@ -16,6 +16,7 @@ urvim is a terminal based text editor.
 - prefer calling trait methods like `value.trait_method()` rather than `TraitType::method(value)`
 - struct methods should be ordered: constructor/new, static methods, getters, setters, public methods, private methods
 - when adding/update vim motions, update docs/motions.md
+- when adding/update config options, update docs/config.md
 - don't deprecate methods, remove them
 - when describing interfaces in design.md, DO NOT include doc tests because the embedded markdown messes up design.md syntax highlighting
 - when implementing methods from design.md, DO include docs tests where appropriate

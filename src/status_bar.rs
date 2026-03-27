@@ -58,9 +58,7 @@ impl StatusBar {
         }
 
         let style = globals::with_active_theme(|theme| {
-            theme
-                .map(|theme| theme.ui.status_bar)
-                .unwrap_or_default()
+            theme.map(|theme| theme.ui.status_bar).unwrap_or_default()
         });
 
         let width = size.cols as usize;

@@ -17,6 +17,20 @@ A process-global store that owns all live buffers and resolves them by `BufferId
 
 **Related Terms:** Buffer, Buffer ID, Buffer View, Window
 
+### Configuration
+The resolved startup settings loaded from the command line and the user config file. Configuration is the single source of truth for user-facing startup options such as the active theme.
+
+**Context:** CLI parsing, config file loading, startup initialization, global state
+
+**Related Terms:** Configuration File, Theme, Globals
+
+### Configuration File
+The user-editable TOML file loaded from the XDG config directories at startup. It stores persistent configuration values that can be overridden by command-line flags.
+
+**Context:** Startup configuration loading
+
+**Related Terms:** Configuration, Theme
+
 ### Mutable Buffer Access
 A pool-mediated mutation path that runs a closure while the buffer pool is still locked, so buffer edits cannot escape as detached snapshots or be committed later out of order.
 
