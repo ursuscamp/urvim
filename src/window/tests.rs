@@ -8,6 +8,7 @@ use crate::editor::Operator;
 use crate::editor::OperatorTarget;
 use crate::editor::TextObject;
 use crate::globals;
+use crate::path::AbsolutePath;
 use crate::terminal::{Color, Style};
 use crate::theme::{SyntaxStyles, Theme, ThemeKind, UiStyles};
 
@@ -113,6 +114,15 @@ fn test_buffer_view_scroll_offset() {
 
     view.set_scroll_offset(Position::new(5, 10));
     assert_eq!(view.scroll_offset(), Position::new(5, 10));
+}
+
+#[test]
+fn test_buffer_view_filetype_label() {
+    let path = AbsolutePath::from_path(std::path::Path::new("/tmp/example.rs")).unwrap();
+    let buffer = Buffer::from_str_with_path("fn main() {}", path);
+    let view = BufferView::new(buffer);
+
+    assert_eq!(view.filetype_label(), "Rust");
 }
 
 #[test]

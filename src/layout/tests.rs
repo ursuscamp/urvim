@@ -2,6 +2,7 @@ use super::*;
 use crate::action::ActionResult;
 use crate::buffer::Buffer;
 use crate::editor::{Action, ModeKind};
+use crate::path::AbsolutePath;
 use crate::tab_group::TabGroup;
 use crate::window::{Position, Size};
 
@@ -84,4 +85,16 @@ fn test_layout_mode_kind_updates_footer() {
     layout.render(&mut screen, Position::new(0, 0), Size::new(3, 12));
 
     assert_eq!(screen.get_cell_mut(2, 0).unwrap().text, "I");
+}
+
+#[test]
+fn test_layout_render_includes_filetype_label() {
+    let path = AbsolutePath::from_path(std::path::Path::new("/tmp/example.rs")).unwrap();
+    let buffer = Buffer::from_str_with_path("fn main() {}", path);
+    let mut layout = layout_with_buffers(vec![buffer]);
+    let mut screen = crate::screen::Screen::new(3, 40);
+
+    layout.render(&mut screen, Position::new(0, 0), Size::new(3, 40));
+
+    assert_eq!(screen.get_cell_mut(2, 9).unwrap().text, "R");
 }

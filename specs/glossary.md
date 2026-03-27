@@ -82,6 +82,13 @@ The base `Style` supplied by a theme before any UI- or syntax-specific overlay i
 
 **Related Terms:** Theme, Window, Screen, Cell
 
+### Filetype
+A lightweight enum that classifies a buffer as a common editor-friendly filetype such as Rust, Python, JavaScript, Shell, Markdown, or Plain Text. Filetypes are derived from filename patterns and shebang lines when available, and are used for user-facing labels such as the status bar.
+
+**Context:** Buffer metadata, status bar rendering
+
+**Related Terms:** Buffer, Status Bar
+
 ### Window
 A rendering component that owns a Buffer View and displays its buffer on screen. It handles cursor positioning, scrolling, and text rendering with gutter.
 

@@ -4,9 +4,11 @@ impl Buffer {
     /// Creates a new empty buffer.
     pub fn new() -> Self {
         let lines: Vector<Arc<str>> = Vector::unit(Arc::from(""));
+        let filetype = Filetype::detect(None, lines.get(0).map(|line| line.as_ref()));
         Self {
             lines: lines.clone(),
             path: None,
+            filetype,
             undo_state: UndoState::new(lines, Cursor::new(0, 0)),
         }
     }
@@ -18,9 +20,11 @@ impl Buffer {
         } else {
             text.lines().map(Arc::from).collect::<Vector<_>>()
         };
+        let filetype = Filetype::detect(None, lines.get(0).map(|line| line.as_ref()));
         Self {
             lines: lines.clone(),
             path: None,
+            filetype,
             undo_state: UndoState::new(lines, Cursor::new(0, 0)),
         }
     }
@@ -33,16 +37,19 @@ impl Buffer {
 
     pub fn with_path(path: AbsolutePath) -> Self {
         let lines: Vector<Arc<str>> = Vector::unit(Arc::from(""));
+        let filetype =
+            Filetype::detect(Some(path.as_path()), lines.get(0).map(|line| line.as_ref()));
         Self {
             lines: lines.clone(),
             path: Some(path),
+            filetype,
             undo_state: UndoState::new(lines, Cursor::new(0, 0)),
         }
     }
 
     pub fn from_str_with_path(text: &str, path: AbsolutePath) -> Self {
         let mut buf = Self::new_from_str(text);
-        buf.path = Some(path);
+        buf.set_path(path);
         buf
     }
 

@@ -11,6 +11,8 @@ use crate::window::{Position, Size};
 pub struct StatusBarContext<'a> {
     /// Human-readable mode label.
     pub mode_label: &'a str,
+    /// Human-readable filetype label.
+    pub filetype_label: &'a str,
     /// Active buffer display name.
     pub buffer_name: &'a str,
     /// Zero-based cursor line in the active buffer.
@@ -40,8 +42,13 @@ impl StatusBar {
         let percent = self.progress_percent(context.cursor_line, context.line_count);
 
         format!(
-            "{} | {} | {}:{}b | {}%",
-            context.mode_label, context.buffer_name, line_number, context.cursor_byte_col, percent
+            "{} | {} | {} | {}:{} | {}%",
+            context.mode_label,
+            context.filetype_label,
+            context.buffer_name,
+            line_number,
+            context.cursor_byte_col,
+            percent
         )
     }
 
@@ -90,6 +97,7 @@ mod tests {
 
     fn context<'a>(
         mode_label: &'a str,
+        filetype_label: &'a str,
         buffer_name: &'a str,
         cursor_line: usize,
         cursor_byte_col: usize,
@@ -97,6 +105,7 @@ mod tests {
     ) -> StatusBarContext<'a> {
         StatusBarContext {
             mode_label,
+            filetype_label,
             buffer_name,
             cursor_line,
             cursor_byte_col,
@@ -139,15 +148,15 @@ mod tests {
     #[test]
     fn test_text_formats_footer_fields() {
         let status_bar = StatusBar::new();
-        let text = status_bar.text(&context("NORMAL", "notes.txt", 2, 7, 10));
+        let text = status_bar.text(&context("NORMAL", "Rust", "notes.txt", 2, 7, 10));
 
-        assert_eq!(text, "NORMAL | notes.txt | 3:7b | 22%");
+        assert_eq!(text, "NORMAL | Rust | notes.txt | 3:7 | 22%");
     }
 
     #[test]
     fn test_text_reports_hundred_percent_on_last_line() {
         let status_bar = StatusBar::new();
-        let text = status_bar.text(&context("INSERT", "notes.txt", 4, 0, 5));
+        let text = status_bar.text(&context("INSERT", "Python", "notes.txt", 4, 0, 5));
 
         assert!(text.ends_with("100%"));
     }
@@ -155,7 +164,7 @@ mod tests {
     #[test]
     fn test_text_reports_hundred_percent_for_single_line() {
         let status_bar = StatusBar::new();
-        let text = status_bar.text(&context("NORMAL", "Untitled", 0, 0, 1));
+        let text = status_bar.text(&context("NORMAL", "Plain Text", "Untitled", 0, 0, 1));
 
         assert!(text.ends_with("100%"));
     }
@@ -169,7 +178,7 @@ mod tests {
             &mut screen,
             Position::new(0, 0),
             Size::new(1, 8),
-            &context("NORMAL", "notes.txt", 0, 0, 10),
+            &context("NORMAL", "Rust", "notes.txt", 0, 0, 10),
         );
 
         let cell = screen.get_cell_mut(0, 0).unwrap();
@@ -188,7 +197,7 @@ mod tests {
             &mut screen,
             Position::new(0, 0),
             Size::new(1, 12),
-            &context("NORMAL", "notes.txt", 0, 0, 10),
+            &context("NORMAL", "Rust", "notes.txt", 0, 0, 10),
         );
 
         assert_eq!(screen.get_cell_mut(0, 0).unwrap().style, expected_style);

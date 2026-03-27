@@ -1,5 +1,5 @@
 use super::*;
-use crate::buffer::BufferId;
+use crate::buffer::{BufferId, Filetype};
 
 impl BufferView {
     /// Creates a new view and registers the buffer in the global pool.
@@ -52,6 +52,17 @@ impl BufferView {
                 .map(|name| name.to_string_lossy().into_owned())
         })
         .flatten()
+    }
+
+    /// Returns the shared buffer's resolved filetype, if it still exists.
+    pub fn filetype(&self) -> Filetype {
+        self.with_buffer(|buffer| buffer.filetype())
+            .unwrap_or(Filetype::PlainText)
+    }
+
+    /// Returns the shared buffer's filetype label for display purposes.
+    pub fn filetype_label(&self) -> &'static str {
+        self.filetype().label()
     }
 
     fn current_visual_col(&self) -> usize {

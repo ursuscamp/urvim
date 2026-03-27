@@ -1,6 +1,7 @@
 use super::*;
 use crate::buffer::operator_target::LinewiseDeleteRange;
 use crate::editor::{BoundaryMotion, BracketKind, LinewiseMotion, OperatorTarget, TextObject};
+use crate::path::AbsolutePath;
 
 #[test]
 fn test_new_buffer() {
@@ -16,6 +17,41 @@ fn test_from_str() {
     assert!(!buf.is_empty());
     assert_eq!(buf.line_count(), 1);
     assert_eq!(buf.as_str(), "hello");
+}
+
+#[test]
+fn test_filetype_from_shebang() {
+    let buf = Buffer::from_str("#!/usr/bin/env python3 -O\nprint('hello')");
+    assert_eq!(buf.filetype(), Filetype::Python);
+}
+
+#[test]
+fn test_filetype_from_filename() {
+    let path = AbsolutePath::from_path(std::path::Path::new("/tmp/example.php")).unwrap();
+    let buf = Buffer::from_str_with_path("<?php echo 'hello';", path);
+
+    assert_eq!(buf.filetype(), Filetype::Php);
+}
+
+#[test]
+fn test_filetype_filename_takes_precedence_over_shebang() {
+    let path = AbsolutePath::from_path(std::path::Path::new("/tmp/example.rs")).unwrap();
+    let buf = Buffer::from_str_with_path("#!/usr/bin/env python3\nprint('hello')", path);
+
+    assert_eq!(buf.filetype(), Filetype::Rust);
+}
+
+#[test]
+fn test_filetype_updates_after_first_line_edit() {
+    let mut buf = Buffer::from_str("#!/usr/bin/env python3\nprint('hello')");
+
+    assert_eq!(buf.filetype(), Filetype::Python);
+
+    let shebang_len = buf.line_len(0);
+    buf.remove(Cursor::new(0, 0), Cursor::new(0, shebang_len));
+    buf.insert_text(Cursor::new(0, 0), "plain text");
+
+    assert_eq!(buf.filetype(), Filetype::PlainText);
 }
 
 #[test]

@@ -38,6 +38,7 @@ mod boundary;
 mod bracket_text_object;
 mod cursor;
 mod edit;
+mod filetype;
 mod io;
 mod operator_target;
 mod pool;
@@ -46,6 +47,7 @@ mod text_object;
 mod undo;
 mod unicode;
 
+pub use filetype::Filetype;
 pub use pool::{BufferId, BufferPool};
 pub use unicode::{char_width, grapheme_width, str_width, to_byte_index};
 
@@ -149,6 +151,7 @@ struct UndoState {
 pub struct Buffer {
     lines: Vector<Arc<str>>,
     path: Option<AbsolutePath>,
+    filetype: Filetype,
     undo_state: UndoState,
 }
 
@@ -189,16 +192,25 @@ impl Buffer {
         self.lines.len() == 1 && self.lines.get(0).is_none_or(|s| s.is_empty())
     }
 
+    /// Returns the resolved path for this buffer, if it has one.
     pub fn path(&self) -> Option<&AbsolutePath> {
         self.path.as_ref()
     }
 
+    /// Sets the resolved path for this buffer and refreshes filetype detection.
     pub fn set_path(&mut self, path: AbsolutePath) {
         self.path = Some(path);
+        self.refresh_filetype();
     }
 
+    /// Returns the buffer file name, if a path has been resolved.
     pub fn file_name(&self) -> Option<&std::ffi::OsStr> {
         self.path.as_ref().and_then(|p| p.file_name())
+    }
+
+    /// Returns the resolved filetype for this buffer.
+    pub fn filetype(&self) -> Filetype {
+        self.filetype
     }
 
     /// Gets the line at the specified index.
@@ -260,6 +272,13 @@ impl Buffer {
             result.push_str(line);
         }
         result
+    }
+
+    fn refresh_filetype(&mut self) {
+        self.filetype = Filetype::detect(
+            self.path.as_ref().map(|path| path.as_path()),
+            self.lines.get(0).map(|line| line.as_ref()),
+        );
     }
 }
 
