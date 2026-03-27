@@ -100,6 +100,33 @@ fn test_tab_group_from_paths_loads_success_and_skips_failures() {
 }
 
 #[test]
+fn test_tab_group_from_paths_deduplicates_duplicate_files() {
+    let temp_dir = std::env::temp_dir().join(format!(
+        "urvim-tab-group-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&temp_dir).unwrap();
+
+    let path = temp_dir.join("duplicate.txt");
+    std::fs::write(&path, "alpha").unwrap();
+
+    let group = TabGroup::from_paths(&[path.clone(), path.clone()]);
+
+    assert_eq!(group.tabs.len(), 1);
+    assert_eq!(
+        buffer_file_name(group.active_window().buffer_view()).unwrap(),
+        path.file_name().unwrap()
+    );
+
+    std::fs::remove_file(&path).ok();
+    std::fs::remove_dir_all(&temp_dir).ok();
+}
+
+#[test]
 fn test_tab_navigation_wraps_and_supports_counts() {
     let mut group = tab_group_with_labels(&["a", "b", "c", "d", "e"]);
 

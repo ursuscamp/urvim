@@ -11,6 +11,7 @@ use crate::screen::Screen;
 use crate::terminal::Style;
 use crate::widget::Widget;
 use crate::window::{BufferView, Position, Size, Window};
+use std::collections::HashSet;
 use std::path::PathBuf;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
@@ -37,6 +38,9 @@ pub struct TabGroup {
 impl TabGroup {
     /// Creates a new tab group from windows.
     pub fn new(mut tabs: Vec<Window>) -> Self {
+        let mut seen_buffer_ids = HashSet::new();
+        tabs.retain(|window| seen_buffer_ids.insert(window.buffer_view().buffer_id()));
+
         if tabs.is_empty() {
             let buffer_id = crate::globals::with_buffer_pool(|pool| pool.create_buffer());
             tabs.push(Window::from_buffer_id(buffer_id));
