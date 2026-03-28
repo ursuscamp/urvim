@@ -89,10 +89,13 @@ impl StatusBar {
         screen.write_string(origin.row, origin.col, style, &text);
 
         if context.modified {
-            let prefix_width =
-                UnicodeWidthStr::width(context.mode_label) + 3 + UnicodeWidthStr::width(context.filetype_label) + 3;
-            let marker_col =
-                origin.col + prefix_width as u16 + UnicodeWidthStr::width(context.buffer_name) as u16;
+            let prefix_width = UnicodeWidthStr::width(context.mode_label)
+                + 3
+                + UnicodeWidthStr::width(context.filetype_label)
+                + 3;
+            let marker_col = origin.col
+                + prefix_width as u16
+                + UnicodeWidthStr::width(context.buffer_name) as u16;
             screen.write_string(origin.row, marker_col, modified_style, "*");
         }
     }

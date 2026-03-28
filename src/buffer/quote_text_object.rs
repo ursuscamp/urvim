@@ -10,7 +10,11 @@ struct QuotePair {
 
 impl Buffer {
     /// Resolves the range inside a matching quote pair.
-    pub fn get_inner_quote_range(&self, cursor: Cursor, kind: QuoteKind) -> Option<TextObjectRange> {
+    pub fn get_inner_quote_range(
+        &self,
+        cursor: Cursor,
+        kind: QuoteKind,
+    ) -> Option<TextObjectRange> {
         self.get_inner_quote_range_with_count(cursor, kind, 1)
     }
 
@@ -59,8 +63,16 @@ impl Buffer {
             pair = self.find_enclosing_quote_pair(pair, kind)?;
         }
 
-        let start = if around { pair.open } else { self.next_cursor(pair.open)? };
-        let end = if around { self.next_cursor(pair.close)? } else { pair.close };
+        let start = if around {
+            pair.open
+        } else {
+            self.next_cursor(pair.open)?
+        };
+        let end = if around {
+            self.next_cursor(pair.close)?
+        } else {
+            pair.close
+        };
 
         Some(TextObjectRange { start, end })
     }
@@ -91,8 +103,7 @@ impl Buffer {
             .copied()
             .filter(|pair| {
                 pair.open.line == cursor.line
-                    && Self::compare_cursor_positions(pair.open, cursor)
-                        != std::cmp::Ordering::Less
+                    && Self::compare_cursor_positions(pair.open, cursor) != std::cmp::Ordering::Less
             })
             .min_by_key(|pair| (pair.open.line, pair.open.col))
     }
@@ -102,8 +113,7 @@ impl Buffer {
         pairs
             .into_iter()
             .filter(|pair| {
-                Self::compare_cursor_positions(pair.open, inner.open)
-                    == std::cmp::Ordering::Less
+                Self::compare_cursor_positions(pair.open, inner.open) == std::cmp::Ordering::Less
                     && Self::compare_cursor_positions(pair.close, inner.close)
                         == std::cmp::Ordering::Greater
             })
@@ -148,8 +158,7 @@ impl Buffer {
 
     fn quote_pair_covers_cursor(&self, pair: QuotePair, cursor: Cursor) -> bool {
         Self::compare_cursor_positions(pair.open, cursor) != std::cmp::Ordering::Greater
-            && Self::compare_cursor_positions(cursor, pair.close)
-                != std::cmp::Ordering::Greater
+            && Self::compare_cursor_positions(cursor, pair.close) != std::cmp::Ordering::Greater
     }
 
     fn is_escaped_quote(line: &str, byte_idx: usize) -> bool {

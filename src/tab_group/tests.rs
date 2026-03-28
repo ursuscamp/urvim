@@ -1,10 +1,10 @@
 use super::*;
 use crate::action::ActionResult;
+use crate::buffer::Cursor;
 use crate::editor::Action;
 use crate::globals;
 use crate::terminal::{Color, Style};
 use crate::theme::{SyntaxStyles, Theme, ThemeKind, UiStyles};
-use crate::buffer::Cursor;
 use std::path::{Path, PathBuf};
 
 fn abs_path(path: &Path) -> crate::AbsolutePath {

@@ -237,7 +237,9 @@ fn test_save_buffer_without_path_is_rejected() {
     let mut pool = BufferPool::new();
     let id = pool.register_buffer(Buffer::from_str("hello"));
 
-    let err = pool.save_buffer(id).expect_err("unnamed buffers should not save");
+    let err = pool
+        .save_buffer(id)
+        .expect_err("unnamed buffers should not save");
     assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
 }
 
@@ -1607,6 +1609,24 @@ fn test_operator_target_bracket_range_missing_pair_is_none() {
 }
 
 #[test]
+fn test_operator_target_inner_bracket_empty_pair_is_zero_length() {
+    let buf = Buffer::from_str("()");
+    let range = buf
+        .get_operator_target_range(
+            Cursor::new(0, 0),
+            OperatorTarget::TextObject(TextObject::InnerBracket(BracketKind::Paren)),
+        )
+        .unwrap();
+    assert_eq!(
+        range,
+        TextObjectRange {
+            start: Cursor::new(0, 1),
+            end: Cursor::new(0, 1),
+        }
+    );
+}
+
+#[test]
 fn test_operator_target_inner_quote_range() {
     let buf = Buffer::from_str("foo \"bar\" baz");
     let range = buf
@@ -1705,6 +1725,24 @@ fn test_operator_target_quote_range_missing_pair_is_none() {
             OperatorTarget::TextObject(TextObject::InnerQuote(QuoteKind::Single)),
         )
         .is_none()
+    );
+}
+
+#[test]
+fn test_operator_target_inner_quote_empty_pair_is_zero_length() {
+    let buf = Buffer::from_str("\"\"");
+    let range = buf
+        .get_operator_target_range(
+            Cursor::new(0, 0),
+            OperatorTarget::TextObject(TextObject::InnerQuote(QuoteKind::Double)),
+        )
+        .unwrap();
+    assert_eq!(
+        range,
+        TextObjectRange {
+            start: Cursor::new(0, 1),
+            end: Cursor::new(0, 1),
+        }
     );
 }
 

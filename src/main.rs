@@ -125,13 +125,13 @@ fn main() -> io::Result<()> {
                                         let buffer_id = target.unwrap_or_else(|| {
                                             layout.active_buffer_view().buffer_id()
                                         });
-                                        let save_result =
-                                            globals::with_buffer_pool(|pool| pool.save_buffer(buffer_id));
+                                        let save_result = globals::with_buffer_pool(|pool| {
+                                            pool.save_buffer(buffer_id)
+                                        });
                                         match save_result {
                                             Ok(()) => {}
                                             Err(error)
-                                                if error.kind()
-                                                    == io::ErrorKind::InvalidInput =>
+                                                if error.kind() == io::ErrorKind::InvalidInput =>
                                             {
                                                 tracing::info!(
                                                     "Skipping save for unnamed buffer {:?}",

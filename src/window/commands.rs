@@ -236,7 +236,10 @@ impl Window {
             let range = buffer.get_operator_target_range_with_count(cursor, target, count);
             let range = range?;
             if range.start == range.end {
-                return None;
+                return match operator {
+                    Operator::Change => Some(range.start),
+                    Operator::Delete => None,
+                };
             }
             buffer.delete_range(range)
         });

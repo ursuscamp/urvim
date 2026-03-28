@@ -159,23 +159,23 @@ impl TabGroup {
         let layout = self.compute_layout(self.tab_bar_start, cols, active_index);
         let (base_style, active_style, indicator_style, modified_style) =
             globals::with_active_theme(|theme| {
-            theme
-                .map(|theme| {
-                    (
-                        theme.ui.tab_inactive,
-                        theme.ui.tab_active,
-                        theme.ui.tab_scroll_indicator,
-                        theme.ui.modified_marker,
-                    )
-                })
-                .unwrap_or_else(|| {
-                    let base_style = Style::new()
-                        .bg(crate::terminal::Color::ansi(237))
-                        .fg(crate::terminal::Color::ansi(250));
-                    let active_style = base_style.reverse().bold();
-                    (base_style, active_style, active_style, active_style)
-                })
-        });
+                theme
+                    .map(|theme| {
+                        (
+                            theme.ui.tab_inactive,
+                            theme.ui.tab_active,
+                            theme.ui.tab_scroll_indicator,
+                            theme.ui.modified_marker,
+                        )
+                    })
+                    .unwrap_or_else(|| {
+                        let base_style = Style::new()
+                            .bg(crate::terminal::Color::ansi(237))
+                            .fg(crate::terminal::Color::ansi(250));
+                        let active_style = base_style.reverse().bold();
+                        (base_style, active_style, active_style, active_style)
+                    })
+            });
         let content_end = cols.saturating_sub(layout.right_arrow as usize);
 
         screen.write_string(origin.row, origin.col, base_style, &" ".repeat(cols));
@@ -196,7 +196,8 @@ impl TabGroup {
                 let entry = format!(" {} ", clipped);
                 screen.write_string(origin.row, current_col, active_style, &entry);
                 if self.tabs[active_index].buffer_view().is_modified() {
-                    let marker_col = current_col + 1 + UnicodeWidthStr::width(clipped.as_str()) as u16;
+                    let marker_col =
+                        current_col + 1 + UnicodeWidthStr::width(clipped.as_str()) as u16;
                     let marker_style = active_style.accent(modified_style);
                     screen.write_string(origin.row, marker_col, marker_style, "*");
                 }
@@ -219,7 +220,8 @@ impl TabGroup {
                 let entry = format!(" {} ", clipped);
                 screen.write_string(origin.row, current_col, style, &entry);
                 if self.tabs[index].buffer_view().is_modified() {
-                    let marker_col = current_col + 1 + UnicodeWidthStr::width(clipped.as_str()) as u16;
+                    let marker_col =
+                        current_col + 1 + UnicodeWidthStr::width(clipped.as_str()) as u16;
                     let marker_style = style.accent(modified_style);
                     screen.write_string(origin.row, marker_col, marker_style, "*");
                 }

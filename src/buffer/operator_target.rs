@@ -34,7 +34,9 @@ impl Buffer {
                 TextObject::AroundBracket(kind) => {
                     self.get_around_bracket_range_with_count(cursor, kind, 1)
                 }
-                TextObject::InnerQuote(kind) => self.get_inner_quote_range_with_count(cursor, kind, 1),
+                TextObject::InnerQuote(kind) => {
+                    self.get_inner_quote_range_with_count(cursor, kind, 1)
+                }
                 TextObject::AroundQuote(kind) => {
                     self.get_around_quote_range_with_count(cursor, kind, 1)
                 }
@@ -67,7 +69,9 @@ impl Buffer {
                 TextObject::AroundBracket(kind) => {
                     self.get_around_bracket_range_with_count(cursor, kind, count)
                 }
-                TextObject::InnerQuote(kind) => self.get_inner_quote_range_with_count(cursor, kind, count),
+                TextObject::InnerQuote(kind) => {
+                    self.get_inner_quote_range_with_count(cursor, kind, count)
+                }
                 TextObject::AroundQuote(kind) => {
                     self.get_around_quote_range_with_count(cursor, kind, count)
                 }

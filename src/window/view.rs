@@ -67,7 +67,8 @@ impl BufferView {
 
     /// Returns true when the shared buffer differs from its last saved baseline.
     pub fn is_modified(&self) -> bool {
-        self.with_buffer(|buffer| buffer.is_modified()).unwrap_or(false)
+        self.with_buffer(|buffer| buffer.is_modified())
+            .unwrap_or(false)
     }
 
     fn current_visual_col(&self) -> usize {

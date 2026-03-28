@@ -941,6 +941,54 @@ fn test_di_paren_with_no_matching_pair_is_noop() {
 }
 
 #[test]
+fn test_di_paren_on_empty_pair_is_noop() {
+    let buffer = Buffer::from_str("()");
+    let mut window = Window::new(buffer);
+
+    window.buffer_view.set_cursor(Cursor::new(0, 0));
+    let result = window.process_action(&Action::Operation(
+        Operator::Delete,
+        OperatorTarget::TextObject(TextObject::InnerBracket(BracketKind::Paren)),
+    ));
+
+    assert_eq!(result, ActionResult::Handled);
+    assert_eq!(buffer_text(window.buffer_view()), "()");
+    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
+}
+
+#[test]
+fn test_ci_paren_on_empty_pair_enters_insert_point() {
+    let buffer = Buffer::from_str("()");
+    let mut window = Window::new(buffer);
+
+    window.buffer_view.set_cursor(Cursor::new(0, 0));
+    let result = window.process_action(&Action::Operation(
+        Operator::Change,
+        OperatorTarget::TextObject(TextObject::InnerBracket(BracketKind::Paren)),
+    ));
+
+    assert_eq!(result, ActionResult::Handled);
+    assert_eq!(buffer_text(window.buffer_view()), "()");
+    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 1));
+}
+
+#[test]
+fn test_ci_quote_on_empty_pair_enters_insert_point() {
+    let buffer = Buffer::from_str("\"\"");
+    let mut window = Window::new(buffer);
+
+    window.buffer_view.set_cursor(Cursor::new(0, 0));
+    let result = window.process_action(&Action::Operation(
+        Operator::Change,
+        OperatorTarget::TextObject(TextObject::InnerQuote(QuoteKind::Double)),
+    ));
+
+    assert_eq!(result, ActionResult::Handled);
+    assert_eq!(buffer_text(window.buffer_view()), "\"\"");
+    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 1));
+}
+
+#[test]
 fn test_delete_forward_undo_and_redo() {
     let buffer = Buffer::from_str("hello");
     let mut window = Window::new(buffer);
