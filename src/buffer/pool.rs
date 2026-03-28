@@ -75,6 +75,9 @@ impl BufferPool {
 
     /// Opens a file-backed buffer from a path, reusing an existing buffer if the
     /// same absolute path is already present in the pool.
+    ///
+    /// If the path does not exist yet, this creates an empty buffer that still
+    /// remembers the resolved path so a later save will create the file.
     pub fn open_buffer(&mut self, path: impl AsRef<Path>) -> io::Result<BufferId> {
         let abs_path = AbsolutePath::from_path(path.as_ref()).ok_or_else(|| {
             io::Error::new(
@@ -87,9 +90,16 @@ impl BufferPool {
             return Ok(id);
         }
 
-        let mut buffer = Buffer::load_from_file(abs_path.as_path())?;
-        buffer.set_path(abs_path.clone());
-        Ok(self.insert_buffer(buffer))
+        match Buffer::load_from_file(abs_path.as_path()) {
+            Ok(mut buffer) => {
+                buffer.set_path(abs_path.clone());
+                Ok(self.insert_buffer(buffer))
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                Ok(self.insert_buffer(Buffer::with_path(abs_path)))
+            }
+            Err(error) => Err(error),
+        }
     }
 
     /// Returns an immutable reference to a buffer by ID.
@@ -103,6 +113,8 @@ impl BufferPool {
     }
 
     /// Saves the buffer using its stored path.
+    ///
+    /// Missing files are created on write if the buffer already has a resolved path.
     pub fn save_buffer(&mut self, id: BufferId) -> io::Result<()> {
         let buffer = self
             .buffers
@@ -119,6 +131,8 @@ impl BufferPool {
 
     /// Saves the buffer to an explicit path after resolving it to an absolute
     /// path.
+    ///
+    /// The destination file is created if it does not already exist.
     pub fn save_buffer_to_path(&mut self, id: BufferId, path: impl AsRef<Path>) -> io::Result<()> {
         let abs_path = AbsolutePath::from_path(path.as_ref()).ok_or_else(|| {
             io::Error::new(
@@ -216,15 +230,73 @@ mod tests {
     }
 
     #[test]
-    fn test_open_buffer_failure_does_not_create_entry() {
-        let path = temp_file("missing.txt");
+    fn test_open_buffer_missing_path_creates_empty_file_backed_buffer() {
+        let path = temp_file("missing-backed.txt");
         let mut pool = BufferPool::new();
 
-        let result = pool.open_buffer(&path);
+        let id = pool.open_buffer(&path).unwrap();
+        let buffer = pool.get(id).unwrap();
+
+        assert_eq!(buffer.as_str(), "");
+        assert!(!buffer.is_modified());
+        assert_eq!(
+            buffer.path().map(|resolved| resolved.as_path()),
+            Some(path.as_path())
+        );
+
+        let reopened = pool.open_buffer(&path).unwrap();
+        assert_eq!(id, reopened);
+    }
+
+    #[test]
+    fn test_save_buffer_creates_missing_file_for_file_backed_buffer() {
+        let path = temp_file("save-creates.txt");
+        let mut pool = BufferPool::new();
+        let id = pool.open_buffer(&path).unwrap();
+
+        pool.with_buffer_mut(id, |buffer| {
+            buffer.insert_text(crate::buffer::Cursor::new(0, 0), "hello");
+        })
+        .unwrap();
+
+        pool.save_buffer(id).unwrap();
+
+        assert_eq!(fs::read_to_string(&path).unwrap(), "hello");
+        assert!(!pool.get(id).unwrap().is_modified());
+
+        fs::remove_file(&path).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_open_buffer_preserves_non_not_found_errors() {
+        let parent = temp_file("blocked-parent");
+        let blocked = parent.join("child.txt");
+        let mut pool = BufferPool::new();
+
+        fs::create_dir_all(&parent).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut permissions = fs::metadata(&parent).unwrap().permissions();
+            permissions.set_mode(0o000);
+            fs::set_permissions(&parent, permissions).unwrap();
+        }
+
+        let result = pool.open_buffer(&blocked);
 
         assert!(result.is_err());
         assert!(pool.paths.is_empty());
         assert!(pool.buffers.is_empty());
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut permissions = fs::metadata(&parent).unwrap().permissions();
+            permissions.set_mode(0o755);
+            fs::set_permissions(&parent, permissions).unwrap();
+        }
+        fs::remove_dir_all(&parent).ok();
     }
 
     #[test]

@@ -75,7 +75,7 @@ fn test_tab_group_new_creates_empty_tab() {
 }
 
 #[test]
-fn test_tab_group_from_paths_loads_success_and_skips_failures() {
+fn test_tab_group_from_paths_opens_missing_files_as_empty_buffers() {
     let temp_dir = std::env::temp_dir().join(format!(
         "urvim-tab-group-{}-{}",
         std::process::id(),
@@ -94,10 +94,21 @@ fn test_tab_group_from_paths_loads_success_and_skips_failures() {
 
     let group = TabGroup::from_paths(&[first.clone(), missing, second.clone()]);
 
-    assert_eq!(group.tabs.len(), 2);
+    assert_eq!(group.tabs.len(), 3);
     assert_eq!(
         buffer_file_name(group.active_window().buffer_view()).unwrap(),
         first.file_name().unwrap()
+    );
+    assert_eq!(
+        buffer_file_name(group.tabs[1].buffer_view()).unwrap(),
+        "missing.txt"
+    );
+    assert_eq!(
+        group.tabs[1]
+            .buffer_view()
+            .with_buffer(|buffer| buffer.as_str())
+            .unwrap(),
+        ""
     );
 }
 
