@@ -1,7 +1,7 @@
 use super::keymap::{MAX_COUNT, extract_leading_count};
 use super::{
     Action, BoundaryMotion, BracketKind, CountParser, HandleKeyResult, Keymap, LinewiseMotion,
-    Mode, ModeKind, Operator, OperatorTarget, TextObject, TrieKeymap,
+    Mode, ModeKind, Operator, OperatorTarget, QuoteKind, TextObject, TrieKeymap,
 };
 use crate::buffer::Boundary;
 use crate::motion::chained_keymap::ChainedKeymap;
@@ -83,6 +83,40 @@ impl NormalMode {
                 OperatorTarget::TextObject(TextObject::AroundWord),
             ),
         );
+        for (kind, key) in [
+            (QuoteKind::Single, "'"),
+            (QuoteKind::Double, "\""),
+            (QuoteKind::Backtick, "`"),
+        ] {
+            trie_keymap.insert_sequence(
+                vec!["d".to_string(), "i".to_string(), key.to_string()],
+                Action::Operation(
+                    Operator::Delete,
+                    OperatorTarget::TextObject(TextObject::InnerQuote(kind)),
+                ),
+            );
+            trie_keymap.insert_sequence(
+                vec!["d".to_string(), "a".to_string(), key.to_string()],
+                Action::Operation(
+                    Operator::Delete,
+                    OperatorTarget::TextObject(TextObject::AroundQuote(kind)),
+                ),
+            );
+            trie_keymap.insert_sequence(
+                vec!["c".to_string(), "i".to_string(), key.to_string()],
+                Action::Operation(
+                    Operator::Change,
+                    OperatorTarget::TextObject(TextObject::InnerQuote(kind)),
+                ),
+            );
+            trie_keymap.insert_sequence(
+                vec!["c".to_string(), "a".to_string(), key.to_string()],
+                Action::Operation(
+                    Operator::Change,
+                    OperatorTarget::TextObject(TextObject::AroundQuote(kind)),
+                ),
+            );
+        }
         for (kind, open, close) in [
             (BracketKind::Paren, '(', ')'),
             (BracketKind::Square, '[', ']'),

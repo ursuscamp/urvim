@@ -1,0 +1,9 @@
+plain "double quote" example
+single 'quote' example
+backtick `code span` example
+escaped "say \"hi\" and keep going" example
+multi-line "starts here
+and continues here
+and ends here" example
+cursor before a later pair -> later "target" pair
+outer "quoted 'inner' text" sample

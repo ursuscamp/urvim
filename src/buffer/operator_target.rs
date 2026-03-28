@@ -34,6 +34,10 @@ impl Buffer {
                 TextObject::AroundBracket(kind) => {
                     self.get_around_bracket_range_with_count(cursor, kind, 1)
                 }
+                TextObject::InnerQuote(kind) => self.get_inner_quote_range_with_count(cursor, kind, 1),
+                TextObject::AroundQuote(kind) => {
+                    self.get_around_quote_range_with_count(cursor, kind, 1)
+                }
             },
             OperatorTarget::BoundaryMotion(motion) => {
                 self.get_boundary_motion_range(cursor, motion)
@@ -62,6 +66,10 @@ impl Buffer {
                 }
                 TextObject::AroundBracket(kind) => {
                     self.get_around_bracket_range_with_count(cursor, kind, count)
+                }
+                TextObject::InnerQuote(kind) => self.get_inner_quote_range_with_count(cursor, kind, count),
+                TextObject::AroundQuote(kind) => {
+                    self.get_around_quote_range_with_count(cursor, kind, count)
                 }
             },
             OperatorTarget::BoundaryMotion(motion) => {

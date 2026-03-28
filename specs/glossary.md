@@ -277,6 +277,15 @@ A bracket text object that selects only the text between matching delimiters and
 ### Around Bracket Text Object
 A bracket text object that selects the matching delimiters together with the enclosed text. It follows Vim-compatible bracket-object matching rules for the supported delimiter families. Related terms: Bracket Text Object, Inner Bracket Text Object.
 
+### Quote Text Object
+A text object that selects text inside or around matching quote delimiters such as single quote, double quote, or backtick. Quote text objects are used with operators in operator-pending mode and include inner and around forms. Related terms: Inner Quote Text Object, Around Quote Text Object, Text Object.
+
+### Inner Quote Text Object
+A quote text object that selects only the text between matching quote delimiters and excludes the delimiters themselves. It follows Vim-compatible quote-object matching rules for the supported quote delimiters. Related terms: Quote Text Object, Around Quote Text Object.
+
+### Around Quote Text Object
+A quote text object that selects the matching quote delimiters together with the enclosed text. It follows Vim-compatible quote-object matching rules for the supported quote delimiters. Related terms: Quote Text Object, Inner Quote Text Object.
+
 ## Spec-Related Terms
 
 ### Requirements Document

@@ -220,6 +220,55 @@ fn test_bracket_text_object_sequences() {
 }
 
 #[test]
+fn test_quote_text_object_sequences() {
+    let cases = [
+        ('\'', QuoteKind::Single),
+        ('"', QuoteKind::Double),
+        ('`', QuoteKind::Backtick),
+    ];
+
+    for (delimiter, kind) in cases {
+        let mut mode = NormalMode::new();
+        assert!(matches!(
+            mode.handle_key(&key('d')),
+            HandleKeyResult::WaitForMore
+        ));
+        assert!(matches!(
+            mode.handle_key(&key('i')),
+            HandleKeyResult::WaitForMore
+        ));
+        let result = mode.handle_key(&key(delimiter));
+        match result {
+            HandleKeyResult::Complete(Action::Operation(
+                Operator::Delete,
+                OperatorTarget::TextObject(TextObject::InnerQuote(actual)),
+            )) => assert_eq!(actual, kind),
+            other => panic!("unexpected result: {other:?}"),
+        }
+    }
+
+    for (delimiter, kind) in cases {
+        let mut mode = NormalMode::new();
+        assert!(matches!(
+            mode.handle_key(&key('c')),
+            HandleKeyResult::WaitForMore
+        ));
+        assert!(matches!(
+            mode.handle_key(&key('a')),
+            HandleKeyResult::WaitForMore
+        ));
+        let result = mode.handle_key(&key(delimiter));
+        match result {
+            HandleKeyResult::Complete(Action::Operation(
+                Operator::Change,
+                OperatorTarget::TextObject(TextObject::AroundQuote(actual)),
+            )) => assert_eq!(actual, kind),
+            other => panic!("unexpected result: {other:?}"),
+        }
+    }
+}
+
+#[test]
 fn test_cgg_sequence() {
     let mut mode = NormalMode::new();
     assert!(matches!(

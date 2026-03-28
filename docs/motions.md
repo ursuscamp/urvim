@@ -691,6 +691,12 @@ Text objects allow targeted text selection combined with operators. They are tri
 | `a{`/`a}` | Around bracket text object for curly braces |
 | `i<`/`i>` | Inner bracket text object for angle brackets |
 | `a<`/`a>` | Around bracket text object for angle brackets |
+| `i'` | Inner quote text object for single quotes |
+| `a'` | Around quote text object for single quotes |
+| `i"` | Inner quote text object for double quotes |
+| `a"` | Around quote text object for double quotes |
+| `i&#96;` | Inner quote text object for backticks |
+| `a&#96;` | Around quote text object for backticks |
 
 ### Supported Operators
 
@@ -708,6 +714,7 @@ Counts multiply when used with text objects:
 - `3diw` - delete 3 inner words (leading count: 3)
 - `d3iw` - delete 3 inner words (sub-count after operator: 3)
 - `3d3iw` - delete 9 inner words (combined: 3 × 3 = 9)
+- `di"` / `da'` / `ci&#96;` - quote text objects work with the same operator-pending flow
 
 ### Inner Word (iw)
 
@@ -756,6 +763,26 @@ Examples:
 | inside `(bar)` in `foo(bar)baz` | `bar` | `(bar)` |
 | on `b` in `foo(bar)baz` | `bar` | `(bar)` |
 | before the first `(` on the same line | `bar` from the next valid pair on that line, if present | `(bar)` from the next valid pair on that line, if present |
+
+If the cursor is not inside a pair and the current line has no later valid pair, the operation does nothing.
+
+### Quote Text Objects
+
+Quote text objects select text inside or around matching quote delimiters. They support single quotes, double quotes, and backticks.
+
+- **Inner**: excludes the quote delimiters
+- **Around**: includes the quote delimiters
+- **Escaped delimiters**: a quote preceded by an odd number of backslashes does not end or start a region
+- **Cursor outside a pair**: if there is a later valid pair on the current line, urvim selects that pair instead
+- **Multi-line pairs**: selections can span multiple lines
+
+Examples:
+
+| Cursor Position | `di"` deletes | `da"` deletes |
+|----------------|---------------|---------------|
+| inside `"bar"` in `foo "bar" baz` | `bar` | `"bar"` |
+| on `b` in `foo "bar" baz` | `bar` | `"bar"` |
+| before the first `"` on the same line | `bar` from the next valid pair on that line, if present | `"bar"` from the next valid pair on that line, if present |
 
 If the cursor is not inside a pair and the current line has no later valid pair, the operation does nothing.
 

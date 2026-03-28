@@ -1,6 +1,8 @@
 use super::*;
 use crate::buffer::operator_target::LinewiseDeleteRange;
-use crate::editor::{BoundaryMotion, BracketKind, LinewiseMotion, OperatorTarget, TextObject};
+use crate::editor::{
+    BoundaryMotion, BracketKind, LinewiseMotion, OperatorTarget, QuoteKind, TextObject,
+};
 use crate::path::AbsolutePath;
 use std::fs;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -1599,6 +1601,108 @@ fn test_operator_target_bracket_range_missing_pair_is_none() {
         buf.get_operator_target_range(
             Cursor::new(0, 0),
             OperatorTarget::TextObject(TextObject::InnerBracket(BracketKind::Paren)),
+        )
+        .is_none()
+    );
+}
+
+#[test]
+fn test_operator_target_inner_quote_range() {
+    let buf = Buffer::from_str("foo \"bar\" baz");
+    let range = buf
+        .get_operator_target_range(
+            Cursor::new(0, 5),
+            OperatorTarget::TextObject(TextObject::InnerQuote(QuoteKind::Double)),
+        )
+        .unwrap();
+    assert_eq!(
+        range,
+        TextObjectRange {
+            start: Cursor::new(0, 5),
+            end: Cursor::new(0, 8),
+        }
+    );
+}
+
+#[test]
+fn test_operator_target_around_quote_range() {
+    let buf = Buffer::from_str("foo 'bar' baz");
+    let range = buf
+        .get_operator_target_range(
+            Cursor::new(0, 5),
+            OperatorTarget::TextObject(TextObject::AroundQuote(QuoteKind::Single)),
+        )
+        .unwrap();
+    assert_eq!(
+        range,
+        TextObjectRange {
+            start: Cursor::new(0, 4),
+            end: Cursor::new(0, 9),
+        }
+    );
+}
+
+#[test]
+fn test_operator_target_quote_range_uses_next_pair_on_current_line() {
+    let buf = Buffer::from_str("x \"foo\" bar");
+    let range = buf
+        .get_operator_target_range(
+            Cursor::new(0, 0),
+            OperatorTarget::TextObject(TextObject::InnerQuote(QuoteKind::Double)),
+        )
+        .unwrap();
+    assert_eq!(
+        range,
+        TextObjectRange {
+            start: Cursor::new(0, 3),
+            end: Cursor::new(0, 6),
+        }
+    );
+}
+
+#[test]
+fn test_operator_target_quote_range_ignores_escaped_delimiters() {
+    let buf = Buffer::from_str("foo \"say \\\"hi\\\"\" baz");
+    let range = buf
+        .get_operator_target_range(
+            Cursor::new(0, 6),
+            OperatorTarget::TextObject(TextObject::InnerQuote(QuoteKind::Double)),
+        )
+        .unwrap();
+    assert_eq!(
+        range,
+        TextObjectRange {
+            start: Cursor::new(0, 5),
+            end: Cursor::new(0, 15),
+        }
+    );
+}
+
+#[test]
+fn test_operator_target_quote_range_multiline() {
+    let buf = Buffer::from_str("\"foo\nbar\nbaz\"");
+    let range = buf
+        .get_operator_target_range(
+            Cursor::new(1, 1),
+            OperatorTarget::TextObject(TextObject::AroundQuote(QuoteKind::Double)),
+        )
+        .unwrap();
+    assert_eq!(
+        range,
+        TextObjectRange {
+            start: Cursor::new(0, 0),
+            end: Cursor::new(2, 4),
+        }
+    );
+}
+
+#[test]
+fn test_operator_target_quote_range_missing_pair_is_none() {
+    let buf = Buffer::from_str("foo bar");
+    assert!(
+        buf.get_operator_target_range(
+            Cursor::new(0, 0),
+            OperatorTarget::TextObject(TextObject::InnerQuote(QuoteKind::Single)),
         )
         .is_none()
     );

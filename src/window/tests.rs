@@ -7,6 +7,7 @@ use crate::editor::BracketKind;
 use crate::editor::LinewiseMotion;
 use crate::editor::Operator;
 use crate::editor::OperatorTarget;
+use crate::editor::QuoteKind;
 use crate::editor::TextObject;
 use crate::globals;
 use crate::path::AbsolutePath;
@@ -889,6 +890,38 @@ fn test_da_paren_deletes_around_bracket_pair() {
     assert_eq!(result, ActionResult::Handled);
     assert_eq!(buffer_text(window.buffer_view()), "foobaz");
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 3));
+}
+
+#[test]
+fn test_di_quote_deletes_inner_quote_pair() {
+    let buffer = Buffer::from_str("foo \"bar\" baz");
+    let mut window = Window::new(buffer);
+
+    window.buffer_view.set_cursor(Cursor::new(0, 6));
+    let result = window.process_action(&Action::Operation(
+        Operator::Delete,
+        OperatorTarget::TextObject(TextObject::InnerQuote(QuoteKind::Double)),
+    ));
+
+    assert_eq!(result, ActionResult::Handled);
+    assert_eq!(buffer_text(window.buffer_view()), "foo \"\" baz");
+    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 5));
+}
+
+#[test]
+fn test_di_quote_with_no_matching_pair_is_noop() {
+    let buffer = Buffer::from_str("foo bar");
+    let mut window = Window::new(buffer);
+
+    window.buffer_view.set_cursor(Cursor::new(0, 0));
+    let result = window.process_action(&Action::Operation(
+        Operator::Delete,
+        OperatorTarget::TextObject(TextObject::InnerQuote(QuoteKind::Single)),
+    ));
+
+    assert_eq!(result, ActionResult::Handled);
+    assert_eq!(buffer_text(window.buffer_view()), "foo bar");
+    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
 }
 
 #[test]

@@ -42,6 +42,7 @@ mod filetype;
 mod io;
 mod operator_target;
 mod pool;
+mod quote_text_object;
 mod search;
 mod text_object;
 mod undo;

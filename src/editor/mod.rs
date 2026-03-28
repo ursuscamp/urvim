@@ -11,7 +11,7 @@ mod normal;
 
 pub use action::{
     Action, BoundaryMotion, BracketKind, HandleKeyResult, LinewiseMotion, Operator, OperatorTarget,
-    TextObject,
+    QuoteKind, TextObject,
 };
 pub use insert::InsertMode;
 pub use keymap::{CountParser, Keymap, TrieKeymap};

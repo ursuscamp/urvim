@@ -40,6 +40,10 @@ pub enum TextObject {
     InnerBracket(BracketKind),
     /// Text between matching delimiters, including the delimiters.
     AroundBracket(BracketKind),
+    /// Text between matching quotes, excluding the quote delimiters.
+    InnerQuote(QuoteKind),
+    /// Text between matching quotes, including the quote delimiters.
+    AroundQuote(QuoteKind),
 }
 
 /// Supported delimiter families for bracket text objects.
@@ -84,6 +88,28 @@ impl BracketKind {
     /// Returns true when the provided character is the closing delimiter.
     pub fn matches_closing(self, ch: char) -> bool {
         ch == self.closing_delimiter()
+    }
+}
+
+/// Supported delimiter families for quote text objects.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum QuoteKind {
+    /// Single quote delimiters (`'`).
+    Single,
+    /// Double quote delimiters (`"`).
+    Double,
+    /// Backtick delimiters (`` ` ``).
+    Backtick,
+}
+
+impl QuoteKind {
+    /// Returns the delimiter character for this quote family.
+    pub fn delimiter(self) -> char {
+        match self {
+            QuoteKind::Single => '\'',
+            QuoteKind::Double => '"',
+            QuoteKind::Backtick => '`',
+        }
     }
 }
 
