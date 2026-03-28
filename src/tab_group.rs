@@ -197,7 +197,7 @@ impl TabGroup {
                 screen.write_string(origin.row, current_col, active_style, &entry);
                 if self.tabs[active_index].buffer_view().is_modified() {
                     let marker_col = current_col + 1 + UnicodeWidthStr::width(clipped.as_str()) as u16;
-                    let marker_style = active_style.overlay(modified_style);
+                    let marker_style = active_style.accent(modified_style);
                     screen.write_string(origin.row, marker_col, marker_style, "*");
                 }
             }
@@ -220,7 +220,7 @@ impl TabGroup {
                 screen.write_string(origin.row, current_col, style, &entry);
                 if self.tabs[index].buffer_view().is_modified() {
                     let marker_col = current_col + 1 + UnicodeWidthStr::width(clipped.as_str()) as u16;
-                    let marker_style = style.overlay(modified_style);
+                    let marker_style = style.accent(modified_style);
                     screen.write_string(origin.row, marker_col, marker_style, "*");
                 }
                 current_col += UnicodeWidthStr::width(entry.as_str()) as u16;

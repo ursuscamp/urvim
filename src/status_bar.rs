@@ -77,7 +77,7 @@ impl StatusBar {
                 .map(|theme| {
                     (
                         theme.ui.status_bar,
-                        theme.ui.status_bar.overlay(theme.ui.modified_marker),
+                        theme.ui.status_bar.accent(theme.ui.modified_marker),
                     )
                 })
                 .unwrap_or_else(|| (Default::default(), Default::default()))
@@ -143,7 +143,7 @@ mod tests {
         let default_style = Style::new().fg(Color::ansi(10)).bg(Color::ansi(20));
         let ui_styles = UiStyles::new(
             Style::new().fg(Color::ansi(1)).bg(Color::ansi(2)),
-            Style::new().fg(Color::ansi(3)),
+            Style::new().fg(Color::ansi(3)).bg(Color::ansi(4)).bold(),
             Style::new().fg(Color::ansi(4)),
             Style::new().fg(Color::ansi(5)),
             Style::new().fg(Color::ansi(6)),
@@ -243,7 +243,7 @@ mod tests {
         let status_bar = StatusBar::new();
         let theme = themed_status_bar();
         let expected_style = theme.ui.status_bar;
-        let expected_marker_style = expected_style.overlay(theme.ui.modified_marker);
+        let expected_marker_style = expected_style.accent(theme.ui.modified_marker);
         let _theme_guard = globals::set_test_active_theme(theme);
 
         let mut screen = Screen::new(1, 32);

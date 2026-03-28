@@ -29,7 +29,7 @@ fn themed_group() -> Theme {
     let default_style = Style::new().fg(Color::ansi(10)).bg(Color::ansi(20));
     let ui_styles = UiStyles::new(
         Style::new().fg(Color::ansi(1)).bg(Color::ansi(2)),
-        Style::new().fg(Color::ansi(3)).bg(Color::ansi(4)),
+        Style::new().fg(Color::ansi(3)).bg(Color::ansi(4)).bold(),
         Style::new().fg(Color::ansi(5)).bg(Color::ansi(6)),
         Style::new().fg(Color::ansi(7)).bg(Color::ansi(8)),
         Style::new().fg(Color::ansi(9)).bg(Color::ansi(10)),
@@ -226,7 +226,7 @@ fn test_tab_bar_uses_theme_modified_marker_style() {
     let mut group = TabGroup::from_buffers(vec![buffer]);
     let theme = themed_group();
     let expected_style = theme.ui.tab_active;
-    let expected_marker_style = expected_style.overlay(theme.ui.modified_marker);
+    let expected_marker_style = expected_style.accent(theme.ui.modified_marker);
     let _theme_guard = globals::set_test_active_theme(theme);
 
     let mut screen = crate::screen::Screen::new(2, 20);
