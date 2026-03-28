@@ -5,6 +5,7 @@
 
 use crate::buffer::{Buffer, BufferId, BufferPool};
 use crate::config::Config;
+use crate::editor::Action;
 use crate::theme::Theme;
 use std::sync::{Mutex, OnceLock, RwLock};
 
@@ -35,8 +36,18 @@ pub struct FindState {
     pub direction: Direction,
 }
 
+/// State of the last repeatable edit used by dot repeat.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RepeatState {
+    pub action: Action,
+    pub count: usize,
+    pub insert_text: Option<String>,
+}
+
 /// Global storage for the last character search state
 static LAST_FIND: Mutex<Option<FindState>> = Mutex::new(None);
+#[cfg(not(test))]
+static LAST_REPEAT: Mutex<Option<RepeatState>> = Mutex::new(None);
 static BUFFER_POOL: OnceLock<RwLock<BufferPool>> = OnceLock::new();
 static CONFIG: OnceLock<RwLock<Option<Config>>> = OnceLock::new();
 static ACTIVE_THEME: OnceLock<RwLock<Option<Theme>>> = OnceLock::new();
@@ -45,6 +56,7 @@ static ACTIVE_THEME: OnceLock<RwLock<Option<Theme>>> = OnceLock::new();
 thread_local! {
     static TEST_CONFIG: RefCell<Option<Config>> = RefCell::new(None);
     static TEST_ACTIVE_THEME: RefCell<Option<Theme>> = RefCell::new(None);
+    static TEST_LAST_REPEAT: RefCell<Option<RepeatState>> = RefCell::new(None);
 }
 
 /// Set the last character search state
@@ -57,6 +69,37 @@ pub fn set_last_find(state: FindState) {
 pub fn get_last_find() -> Option<FindState> {
     let last = LAST_FIND.lock().unwrap();
     last.clone()
+}
+
+/// Set the last repeatable edit state used by dot repeat.
+pub fn set_last_repeat(state: RepeatState) {
+    #[cfg(test)]
+    {
+        TEST_LAST_REPEAT.with(|slot| {
+            *slot.borrow_mut() = Some(state);
+        });
+        return;
+    }
+
+    #[cfg(not(test))]
+    {
+        let mut last = LAST_REPEAT.lock().unwrap();
+        *last = Some(state);
+    }
+}
+
+/// Get the last repeatable edit state used by dot repeat.
+pub fn get_last_repeat() -> Option<RepeatState> {
+    #[cfg(test)]
+    {
+        return TEST_LAST_REPEAT.with(|slot| slot.borrow().clone());
+    }
+
+    #[cfg(not(test))]
+    {
+        let last = LAST_REPEAT.lock().unwrap();
+        last.clone()
+    }
 }
 
 /// Returns the global buffer pool read-write lock, initializing it on first use.
@@ -340,5 +383,19 @@ mod tests {
         with_active_theme(|active_theme| {
             assert!(active_theme.is_none());
         });
+    }
+
+    #[test]
+    fn test_repeat_state_round_trip() {
+        set_last_repeat(RepeatState {
+            action: Action::DeleteLine,
+            count: 4,
+            insert_text: Some("hello".to_string()),
+        });
+
+        let state = get_last_repeat().expect("repeat state should be available");
+        assert_eq!(state.count, 4);
+        assert!(matches!(state.action, Action::DeleteLine));
+        assert_eq!(state.insert_text.as_deref(), Some("hello"));
     }
 }

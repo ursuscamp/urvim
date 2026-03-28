@@ -54,6 +54,11 @@ The `c` operator in operator-pending mode. It removes the resolved text range an
 
 **Related Terms:** Operator, Operator-Pending Mode, Operation Action, Delete Line, Change Line
 
+### Repeat Record
+A stored description of the last successful dot-repeatable edit. It records the originating normal-mode action, the count used for that edit, and any committed insert-mode text so `.` can replay the completed change.
+
+**Related Terms:** Change Operator, Insert Mode, Action, Mode
+
 ### Mode
 A trait that defines how the editor responds to key input in different states. Urvim implements two modes:
 - **Normal Mode**: For navigation and command execution. Uses a steady block cursor.

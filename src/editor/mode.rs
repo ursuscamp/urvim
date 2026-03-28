@@ -30,6 +30,10 @@ pub trait Mode {
     fn is_waiting(&self) -> bool;
     /// Clears any buffered partial key sequence.
     fn clear_buffer(&mut self);
+    /// Returns committed insert text for the current mode, if it captured any.
+    fn take_repeat_text(&mut self) -> Option<String> {
+        None
+    }
     /// Returns the editor mode kind used for display purposes.
     fn kind(&self) -> ModeKind;
 }

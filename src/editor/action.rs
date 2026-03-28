@@ -1,4 +1,5 @@
 use crate::buffer::{Boundary, BufferId};
+use crate::globals;
 
 /// Operators that wait for a motion or text object to define the target region.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -175,6 +176,8 @@ pub enum Action {
     TillBackward(char),
     RepeatLastFind,
     RepeatLastFindReverse,
+    /// Repeat the last successful repeatable edit.
+    RepeatLastChange,
     Undo,
     Redo,
     SaveBuffer(Option<BufferId>),
@@ -257,6 +260,7 @@ impl Action {
                 | Action::TillForward(_)
                 | Action::TillBackward(_)
                 | Action::RepeatLastFind
+                | Action::RepeatLastChange
                 | Action::Operation(_, _)
                 | Action::RepeatLastFindReverse
                 | Action::MoveToPreviousParagraph
@@ -357,6 +361,68 @@ impl Action {
             _ => false,
         }
     }
+
+    /// Returns true when this action should become the new dot-repeat source after it succeeds.
+    pub fn is_dot_repeat_source(&self) -> bool {
+        match self {
+            Action::DeleteBackward
+            | Action::DeleteForward
+            | Action::JoinWithSpace
+            | Action::JoinWithoutSpace
+            | Action::DeleteLine
+            | Action::ChangeLine
+            | Action::ChangeToLineEnd
+            | Action::AppendAfterCursor
+            | Action::AppendToLineEnd
+            | Action::InsertAtLineStart
+            | Action::OpenLineBelow
+            | Action::OpenLineAbove
+            | Action::SwitchToInsert
+            | Action::Operation(Operator::Delete, _)
+            | Action::Operation(Operator::Change, _) => true,
+            Action::Count(_, inner) => inner.is_dot_repeat_source(),
+            _ => false,
+        }
+    }
+
+    /// Returns true when this action is the dot-repeat command itself.
+    pub fn is_repeat_command(&self) -> bool {
+        matches!(self, Action::RepeatLastChange)
+            || matches!(self, Action::Count(_, inner) if matches!(**inner, Action::RepeatLastChange))
+    }
+
+    /// Returns the repeat source and count recorded by this action, if it is repeatable.
+    pub fn dot_repeat_source(&self) -> Option<(Action, usize)> {
+        match self {
+            Action::Count(count, inner) => {
+                let (action, source_count) = inner.dot_repeat_source()?;
+                Some((action, count.saturating_mul(source_count)))
+            }
+            action if action.is_dot_repeat_source() => Some((action.clone(), 1)),
+            _ => None,
+        }
+    }
+
+    /// Resolves this action into the buffer edit that should be replayed for dot repeat.
+    pub fn resolve_dot_repeat(&self) -> Option<RepeatReplay> {
+        match self {
+            Action::RepeatLastChange => globals::get_last_repeat().map(|state| RepeatReplay {
+                action: state.action,
+                structural_count: state.count,
+                repeat_count: 1,
+                insert_text: state.insert_text,
+            }),
+            Action::Count(count, inner) if matches!(**inner, Action::RepeatLastChange) => {
+                globals::get_last_repeat().map(|state| RepeatReplay {
+                    action: state.action,
+                    structural_count: state.count,
+                    repeat_count: *count,
+                    insert_text: state.insert_text,
+                })
+            }
+            _ => None,
+        }
+    }
 }
 
 /// Result of processing a key in a mode.
@@ -365,4 +431,17 @@ pub enum HandleKeyResult {
     Complete(Action),
     WaitForMore,
     InvalidSequence,
+}
+
+/// A resolved dot-repeat replay.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RepeatReplay {
+    /// The repeatable normal-mode action to replay.
+    pub action: Action,
+    /// The count to apply to the stored structural action.
+    pub structural_count: usize,
+    /// The number of times to replay the completed edit for the dot command.
+    pub repeat_count: usize,
+    /// The committed insert text captured from the original edit, if any.
+    pub insert_text: Option<String>,
 }

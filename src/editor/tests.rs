@@ -20,6 +20,15 @@ fn test_normal_mode_move_left() {
 }
 
 #[test]
+fn test_normal_mode_dot_repeat_action() {
+    let mut mode = NormalMode::new();
+    assert_eq!(
+        handle_and_unwrap(&mut mode, &key('.')),
+        Action::RepeatLastChange
+    );
+}
+
+#[test]
 fn test_mode_kind_reflects_mode_type() {
     let normal = NormalMode::new();
     let insert = InsertMode::new();
@@ -35,6 +44,49 @@ fn test_insert_mode_escape_switches_to_normal() {
         handle_and_unwrap(&mut mode, &Key::new(crate::terminal::KeyCode::Esc)),
         Action::SwitchToNormal
     );
+}
+
+#[test]
+fn test_insert_mode_captures_repeat_text() {
+    let mut mode = InsertMode::new();
+    assert_eq!(
+        handle_and_unwrap(&mut mode, &key('h')),
+        Action::InsertChar('h')
+    );
+    assert_eq!(
+        handle_and_unwrap(&mut mode, &key('i')),
+        Action::InsertChar('i')
+    );
+    assert_eq!(
+        handle_and_unwrap(&mut mode, &Key::new(crate::terminal::KeyCode::Esc)),
+        Action::SwitchToNormal
+    );
+
+    assert_eq!(mode.take_repeat_text().as_deref(), Some("hi"));
+    assert_eq!(mode.take_repeat_text(), None);
+}
+
+#[test]
+fn test_insert_mode_captured_repeat_text_tracks_backspace() {
+    let mut mode = InsertMode::new();
+    assert_eq!(
+        handle_and_unwrap(&mut mode, &key('h')),
+        Action::InsertChar('h')
+    );
+    assert_eq!(
+        handle_and_unwrap(&mut mode, &key('i')),
+        Action::InsertChar('i')
+    );
+    assert_eq!(
+        handle_and_unwrap(&mut mode, &Key::new(crate::terminal::KeyCode::Backspace)),
+        Action::DeleteBackward
+    );
+    assert_eq!(
+        handle_and_unwrap(&mut mode, &Key::new(crate::terminal::KeyCode::Esc)),
+        Action::SwitchToNormal
+    );
+
+    assert_eq!(mode.take_repeat_text().as_deref(), Some("h"));
 }
 
 #[test]
@@ -497,6 +549,21 @@ fn test_d_counted_word_sequence() {
 fn test_action_with_count() {
     let action = Action::MoveDown.clone().with_count(5);
     assert!(matches!(action, Some(Action::Count(5, _))));
+}
+
+#[test]
+fn test_dot_repeat_source_classification() {
+    assert!(Action::DeleteLine.is_dot_repeat_source());
+    assert!(Action::SwitchToInsert.is_dot_repeat_source());
+    assert!(
+        Action::Operation(
+            Operator::Delete,
+            OperatorTarget::BoundaryMotion(BoundaryMotion::WordForward),
+        )
+        .is_dot_repeat_source()
+    );
+    assert!(!Action::MoveDown.is_dot_repeat_source());
+    assert!(!Action::RepeatLastChange.is_dot_repeat_source());
 }
 
 #[test]

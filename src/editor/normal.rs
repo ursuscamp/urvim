@@ -364,6 +364,7 @@ impl NormalMode {
         trie_keymap.insert("<C-q>".to_string(), Action::Quit);
         trie_keymap.insert("u".to_string(), Action::Undo);
         trie_keymap.insert("U".to_string(), Action::Redo);
+        trie_keymap.insert(".".to_string(), Action::RepeatLastChange);
         trie_keymap.insert("<Left>".to_string(), Action::MoveLeft);
         trie_keymap.insert("<Down>".to_string(), Action::MoveDown);
         trie_keymap.insert("<Up>".to_string(), Action::MoveUp);
