@@ -66,6 +66,8 @@ pub struct RawStyle {
 pub struct RawUiStyles {
     /// The editor status bar.
     pub status_bar: RawStyle,
+    /// The modified-buffer marker.
+    pub modified_marker: RawStyle,
     /// The currently active tab.
     pub tab_active: RawStyle,
     /// A non-active tab.

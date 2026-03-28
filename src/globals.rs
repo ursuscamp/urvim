@@ -202,6 +202,7 @@ mod tests {
             Style::new().fg(Color::ansi(7)).bg(Color::ansi(8)),
             Style::new().fg(Color::ansi(9)).bg(Color::ansi(10)),
             Style::new().fg(Color::ansi(11)).bg(Color::ansi(12)),
+            Style::new().fg(Color::ansi(13)).bg(Color::ansi(14)),
         );
         let syntax_styles = SyntaxStyles::new(
             Style::new(),

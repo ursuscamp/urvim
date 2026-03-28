@@ -157,13 +157,15 @@ impl TabGroup {
         }
 
         let layout = self.compute_layout(self.tab_bar_start, cols, active_index);
-        let (base_style, active_style, indicator_style) = globals::with_active_theme(|theme| {
+        let (base_style, active_style, indicator_style, modified_style) =
+            globals::with_active_theme(|theme| {
             theme
                 .map(|theme| {
                     (
                         theme.ui.tab_inactive,
                         theme.ui.tab_active,
                         theme.ui.tab_scroll_indicator,
+                        theme.ui.modified_marker,
                     )
                 })
                 .unwrap_or_else(|| {
@@ -171,7 +173,7 @@ impl TabGroup {
                         .bg(crate::terminal::Color::ansi(237))
                         .fg(crate::terminal::Color::ansi(250));
                     let active_style = base_style.reverse().bold();
-                    (base_style, active_style, active_style)
+                    (base_style, active_style, active_style, active_style)
                 })
         });
         let content_end = cols.saturating_sub(layout.right_arrow as usize);
@@ -193,6 +195,11 @@ impl TabGroup {
                 let clipped = self.clip_to_width(&label, available.saturating_sub(2) as usize);
                 let entry = format!(" {} ", clipped);
                 screen.write_string(origin.row, current_col, active_style, &entry);
+                if self.tabs[active_index].buffer_view().is_modified() {
+                    let marker_col = current_col + 1 + UnicodeWidthStr::width(clipped.as_str()) as u16;
+                    let marker_style = active_style.overlay(modified_style);
+                    screen.write_string(origin.row, marker_col, marker_style, "*");
+                }
             }
         } else {
             for index in layout.start..layout.end {
@@ -211,6 +218,11 @@ impl TabGroup {
                 let clipped = self.clip_to_width(&label, available.saturating_sub(2) as usize);
                 let entry = format!(" {} ", clipped);
                 screen.write_string(origin.row, current_col, style, &entry);
+                if self.tabs[index].buffer_view().is_modified() {
+                    let marker_col = current_col + 1 + UnicodeWidthStr::width(clipped.as_str()) as u16;
+                    let marker_style = style.overlay(modified_style);
+                    screen.write_string(origin.row, marker_col, marker_style, "*");
+                }
                 current_col += UnicodeWidthStr::width(entry.as_str()) as u16;
             }
         }

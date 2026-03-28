@@ -13,6 +13,7 @@ impl InsertMode {
         let mut keymap = TrieKeymap::new();
         keymap.insert("<Esc>".to_string(), Action::SwitchToNormal);
         keymap.insert("<C-q>".to_string(), Action::Quit);
+        keymap.insert("<C-s>".to_string(), Action::SaveBuffer(None));
         keymap.insert("<Left>".to_string(), Action::MoveLeft);
         keymap.insert("<Down>".to_string(), Action::MoveDown);
         keymap.insert("<Up>".to_string(), Action::MoveUp);

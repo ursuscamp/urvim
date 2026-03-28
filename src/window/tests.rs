@@ -1,5 +1,6 @@
 use super::*;
 use crate::action::ActionResult;
+use crate::buffer::Cursor;
 use crate::editor::Action;
 use crate::editor::BoundaryMotion;
 use crate::editor::BracketKind;
@@ -38,6 +39,7 @@ fn themed_window() -> Theme {
         Style::new().fg(Color::ansi(7)).bg(Color::ansi(8)),
         Style::new().fg(Color::ansi(9)).bg(Color::ansi(10)),
         Style::new().fg(Color::ansi(11)).bg(Color::ansi(12)),
+        Style::new().fg(Color::ansi(13)).bg(Color::ansi(14)),
     );
     let syntax_styles = SyntaxStyles::new(
         Style::new(),
@@ -123,6 +125,17 @@ fn test_buffer_view_filetype_label() {
     let view = BufferView::new(buffer);
 
     assert_eq!(view.filetype_label(), "Rust");
+}
+
+#[test]
+fn test_buffer_view_modified_state_tracks_buffer() {
+    let path = AbsolutePath::from_path(std::path::Path::new("/tmp/example.txt")).unwrap();
+    let mut buffer = Buffer::from_str_with_path("hello", path);
+    assert!(!buffer.is_modified());
+    buffer.insert_char(Cursor::new(0, 5), '!');
+    let view = BufferView::new(buffer);
+
+    assert!(view.is_modified());
 }
 
 #[test]

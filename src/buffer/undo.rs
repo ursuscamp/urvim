@@ -74,7 +74,6 @@ impl Buffer {
         match self.undo_state.undo() {
             Some((lines, cursor)) => {
                 self.lines = lines;
-                self.refresh_filetype();
                 Some(cursor)
             }
             None => None,
@@ -85,7 +84,6 @@ impl Buffer {
         match self.undo_state.redo() {
             Some((lines, cursor)) => {
                 self.lines = lines;
-                self.refresh_filetype();
                 Some(cursor)
             }
             None => None,

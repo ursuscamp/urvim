@@ -2,6 +2,20 @@ use super::*;
 use crate::buffer::operator_target::LinewiseDeleteRange;
 use crate::editor::{BoundaryMotion, BracketKind, LinewiseMotion, OperatorTarget, TextObject};
 use crate::path::AbsolutePath;
+use std::fs;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+fn temp_path(name: &str) -> std::path::PathBuf {
+    std::env::temp_dir().join(format!(
+        "urvim-buffer-tests-{}-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos(),
+        name
+    ))
+}
 
 #[test]
 fn test_new_buffer() {
@@ -9,6 +23,7 @@ fn test_new_buffer() {
     assert!(buf.is_empty());
     assert_eq!(buf.line_count(), 1);
     assert_eq!(buf.as_str(), "");
+    assert!(!buf.is_modified());
 }
 
 #[test]
@@ -17,6 +32,7 @@ fn test_from_str() {
     assert!(!buf.is_empty());
     assert_eq!(buf.line_count(), 1);
     assert_eq!(buf.as_str(), "hello");
+    assert!(!buf.is_modified());
 }
 
 #[test]
@@ -51,7 +67,20 @@ fn test_filetype_updates_after_first_line_edit() {
     buf.remove(Cursor::new(0, 0), Cursor::new(0, shebang_len));
     buf.insert_text(Cursor::new(0, 0), "plain text");
 
+    assert_eq!(buf.filetype(), Filetype::Python);
+    buf.mark_saved();
     assert_eq!(buf.filetype(), Filetype::PlainText);
+}
+
+#[test]
+fn test_modified_state_tracks_edits_and_undo() {
+    let mut buf = Buffer::from_str("hello");
+
+    assert!(!buf.is_modified());
+    buf.insert_char(Cursor::new(0, 5), '!');
+    assert!(buf.is_modified());
+    buf.mark_saved();
+    assert!(!buf.is_modified());
 }
 
 #[test]
@@ -165,14 +194,49 @@ fn test_line_grapheme_len() {
 
 #[test]
 fn test_save_and_load() {
+    let path = temp_path("save_and_load.txt");
     let buf = Buffer::from_str("hello world");
-    buf.save_to_file(std::path::Path::new("/tmp/test_buffer.txt"))
-        .unwrap();
+    buf.save_to_file(&path).unwrap();
 
-    let loaded = Buffer::load_from_file(std::path::Path::new("/tmp/test_buffer.txt")).unwrap();
+    let loaded = Buffer::load_from_file(&path).unwrap();
     assert_eq!(loaded.as_str(), "hello world");
 
-    std::fs::remove_file("/tmp/test_buffer.txt").ok();
+    fs::remove_file(&path).ok();
+}
+
+#[test]
+fn test_save_buffer_clears_modified_state_and_refreshes_filetype() {
+    let path = temp_path("save_buffer");
+    fs::write(&path, "#!/usr/bin/env python3\nprint('hello')").unwrap();
+
+    let mut pool = BufferPool::new();
+    let id = pool.open_buffer(&path).unwrap();
+
+    pool.with_buffer_mut(id, |buffer| {
+        let shebang_len = buffer.line_len(0);
+        buffer.remove(Cursor::new(0, 0), Cursor::new(0, shebang_len));
+        buffer.insert_text(Cursor::new(0, 0), "plain text");
+    })
+    .unwrap();
+
+    assert!(pool.get(id).unwrap().is_modified());
+    assert_eq!(pool.get(id).unwrap().filetype(), Filetype::Python);
+
+    pool.save_buffer(id).unwrap();
+
+    assert!(!pool.get(id).unwrap().is_modified());
+    assert_eq!(pool.get(id).unwrap().filetype(), Filetype::PlainText);
+
+    fs::remove_file(&path).ok();
+}
+
+#[test]
+fn test_save_buffer_without_path_is_rejected() {
+    let mut pool = BufferPool::new();
+    let id = pool.register_buffer(Buffer::from_str("hello"));
+
+    let err = pool.save_buffer(id).expect_err("unnamed buffers should not save");
+    assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
 }
 
 #[test]

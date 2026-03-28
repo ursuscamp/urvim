@@ -95,6 +95,8 @@ impl StyleOverride {
 pub struct UiStyles {
     /// Style used by the status bar.
     pub status_bar: Style,
+    /// Style used by modified-buffer markers.
+    pub modified_marker: Style,
     /// Style used by the active tab.
     pub tab_active: Style,
     /// Style used by inactive tabs.
@@ -111,6 +113,7 @@ impl UiStyles {
     /// Creates a new set of fully resolved UI styles.
     pub fn new(
         status_bar: Style,
+        modified_marker: Style,
         tab_active: Style,
         tab_inactive: Style,
         tab_scroll_indicator: Style,
@@ -119,6 +122,7 @@ impl UiStyles {
     ) -> Self {
         Self {
             status_bar,
+            modified_marker,
             tab_active,
             tab_inactive,
             tab_scroll_indicator,
@@ -352,6 +356,7 @@ mod tests {
             Style::new().fg(Color::ansi(4)),
             Style::new().fg(Color::ansi(5)),
             Style::new().fg(Color::ansi(6)),
+            Style::new().fg(Color::ansi(7)),
         );
         let syntax_styles = SyntaxStyles::new(
             Style::new().fg(Color::ansi(10)),
@@ -380,7 +385,8 @@ mod tests {
         let theme = theme("demo");
 
         assert_eq!(theme.ui.status_bar, Style::new().fg(Color::ansi(1)));
-        assert_eq!(theme.ui.window, Style::new().fg(Color::ansi(6)));
+        assert_eq!(theme.ui.modified_marker, Style::new().fg(Color::ansi(2)));
+        assert_eq!(theme.ui.window, Style::new().fg(Color::ansi(7)));
     }
 
     #[test]

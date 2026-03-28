@@ -64,6 +64,20 @@ A lightweight editor-facing enum used to label the current mode in the status ba
 
 **Related Terms:** Mode, Status Bar, Layout
 
+### Modified Buffer
+A buffer state that indicates the in-memory contents differ from the last successful save on disk. Modified buffers are shown with a compact unsaved-changes marker in the tab bar and status bar.
+
+**Context:** Buffer editing, save workflow, tab bar rendering, status bar rendering
+
+**Related Terms:** Buffer, Tab Group, Status Bar, Save Command
+
+### Save Command
+The user-triggered save action, bound to `<C-s>`, that persists the active path-backed buffer to disk, refreshes filetype classification, and clears the modified state on success.
+
+**Context:** Input handling, buffer persistence, modified-state tracking
+
+**Related Terms:** Buffer, Modified Buffer, Filetype
+
 ### Theme
 A resolved styling configuration that defines the editor's default style plus named UI and syntax styles. Themes determine how buffers, gutters, tab bars, and status bars inherit colors and text attributes during rendering.
 

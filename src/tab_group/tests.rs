@@ -4,6 +4,7 @@ use crate::editor::Action;
 use crate::globals;
 use crate::terminal::{Color, Style};
 use crate::theme::{SyntaxStyles, Theme, ThemeKind, UiStyles};
+use crate::buffer::Cursor;
 use std::path::{Path, PathBuf};
 
 fn abs_path(path: &Path) -> crate::AbsolutePath {
@@ -33,6 +34,7 @@ fn themed_group() -> Theme {
         Style::new().fg(Color::ansi(7)).bg(Color::ansi(8)),
         Style::new().fg(Color::ansi(9)).bg(Color::ansi(10)),
         Style::new().fg(Color::ansi(11)).bg(Color::ansi(12)),
+        Style::new().fg(Color::ansi(13)).bg(Color::ansi(14)),
     );
     let syntax_styles = SyntaxStyles::new(
         Style::new(),
@@ -202,6 +204,29 @@ fn test_tab_bar_active_style_and_unicode_width() {
     let active_style = screen.get_cell_mut(0, 1).unwrap().style;
     let inactive_style = screen.get_cell_mut(0, 5).unwrap().style;
     assert_ne!(active_style, inactive_style);
+}
+
+#[test]
+fn test_tab_bar_uses_theme_modified_marker_style() {
+    let path = PathBuf::from("/tmp/a.txt");
+    let mut buffer = Buffer::from_str_with_path("line1", abs_path(&path));
+    buffer.insert_char(Cursor::new(0, 5), '!');
+
+    let mut group = TabGroup::from_buffers(vec![buffer]);
+    let theme = themed_group();
+    let expected_style = theme.ui.tab_active;
+    let expected_marker_style = expected_style.overlay(theme.ui.modified_marker);
+    let _theme_guard = globals::set_test_active_theme(theme);
+
+    let mut screen = crate::screen::Screen::new(2, 20);
+    group.render(&mut screen, Position::new(0, 0), Size::new(2, 20));
+
+    assert_eq!(screen.get_cell_mut(0, 1).unwrap().style, expected_style);
+    assert_eq!(screen.get_cell_mut(0, 6).unwrap().text, "*");
+    assert_eq!(
+        screen.get_cell_mut(0, 6).unwrap().style,
+        expected_marker_style
+    );
 }
 
 #[test]

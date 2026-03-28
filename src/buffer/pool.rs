@@ -104,16 +104,17 @@ impl BufferPool {
 
     /// Saves the buffer using its stored path.
     pub fn save_buffer(&mut self, id: BufferId) -> io::Result<()> {
-        let path = self
-            .buffers
-            .get(&id)
-            .and_then(|buffer| buffer.path().cloned())
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "buffer has no path"))?;
         let buffer = self
             .buffers
-            .get(&id)
+            .get_mut(&id)
             .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "buffer id not found"))?;
-        buffer.save_to_file(path.as_path())
+        let path = buffer
+            .path()
+            .cloned()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "buffer has no path"))?;
+        buffer.save_to_file(path.as_path())?;
+        buffer.mark_saved();
+        Ok(())
     }
 
     /// Saves the buffer to an explicit path after resolving it to an absolute
@@ -129,9 +130,10 @@ impl BufferPool {
             .buffers
             .get_mut(&id)
             .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "buffer id not found"))?;
-        buffer.set_path(abs_path.clone());
         let result = buffer.save_to_file(abs_path.as_path());
         if result.is_ok() {
+            buffer.set_path(abs_path.clone());
+            buffer.mark_saved();
             self.paths.insert(abs_path, id);
         }
         result

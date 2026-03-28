@@ -5,11 +5,14 @@ impl Buffer {
     pub fn new() -> Self {
         let lines: Vector<Arc<str>> = Vector::unit(Arc::from(""));
         let filetype = Filetype::detect(None, lines.get(0).map(|line| line.as_ref()));
+        let saved_lines = lines.clone();
+        let undo_lines = lines.clone();
         Self {
-            lines: lines.clone(),
+            lines,
+            saved_lines,
             path: None,
             filetype,
-            undo_state: UndoState::new(lines, Cursor::new(0, 0)),
+            undo_state: UndoState::new(undo_lines, Cursor::new(0, 0)),
         }
     }
 
@@ -21,11 +24,14 @@ impl Buffer {
             text.lines().map(Arc::from).collect::<Vector<_>>()
         };
         let filetype = Filetype::detect(None, lines.get(0).map(|line| line.as_ref()));
+        let saved_lines = lines.clone();
+        let undo_lines = lines.clone();
         Self {
-            lines: lines.clone(),
+            lines,
+            saved_lines,
             path: None,
             filetype,
-            undo_state: UndoState::new(lines, Cursor::new(0, 0)),
+            undo_state: UndoState::new(undo_lines, Cursor::new(0, 0)),
         }
     }
 
@@ -39,11 +45,14 @@ impl Buffer {
         let lines: Vector<Arc<str>> = Vector::unit(Arc::from(""));
         let filetype =
             Filetype::detect(Some(path.as_path()), lines.get(0).map(|line| line.as_ref()));
+        let saved_lines = lines.clone();
+        let undo_lines = lines.clone();
         Self {
-            lines: lines.clone(),
+            lines,
+            saved_lines,
             path: Some(path),
             filetype,
-            undo_state: UndoState::new(lines, Cursor::new(0, 0)),
+            undo_state: UndoState::new(undo_lines, Cursor::new(0, 0)),
         }
     }
 

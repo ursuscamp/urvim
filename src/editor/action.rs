@@ -1,4 +1,4 @@
-use crate::buffer::Boundary;
+use crate::buffer::{Boundary, BufferId};
 
 /// Operators that wait for a motion or text object to define the target region.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -151,6 +151,7 @@ pub enum Action {
     RepeatLastFindReverse,
     Undo,
     Redo,
+    SaveBuffer(Option<BufferId>),
     Count(usize, Box<Action>),
     Operation(Operator, OperatorTarget),
 }

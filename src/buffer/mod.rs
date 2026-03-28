@@ -150,6 +150,7 @@ struct UndoState {
 #[derive(Debug, Clone)]
 pub struct Buffer {
     lines: Vector<Arc<str>>,
+    saved_lines: Vector<Arc<str>>,
     path: Option<AbsolutePath>,
     filetype: Filetype,
     undo_state: UndoState,
@@ -211,6 +212,11 @@ impl Buffer {
     /// Returns the resolved filetype for this buffer.
     pub fn filetype(&self) -> Filetype {
         self.filetype
+    }
+
+    /// Returns true when the current buffer contents differ from the last saved baseline.
+    pub fn is_modified(&self) -> bool {
+        self.lines != self.saved_lines
     }
 
     /// Gets the line at the specified index.
@@ -279,6 +285,12 @@ impl Buffer {
             self.path.as_ref().map(|path| path.as_path()),
             self.lines.get(0).map(|line| line.as_ref()),
         );
+    }
+
+    /// Records the current text as the last saved baseline and refreshes filetype detection.
+    pub fn mark_saved(&mut self) {
+        self.saved_lines = self.lines.clone();
+        self.refresh_filetype();
     }
 }
 

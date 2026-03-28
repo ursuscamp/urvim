@@ -6,11 +6,14 @@
 use crate::globals;
 use crate::screen::Screen;
 use crate::window::{Position, Size};
+use unicode_width::UnicodeWidthStr;
 
 /// Derived state used to render the footer status bar.
 pub struct StatusBarContext<'a> {
     /// Human-readable mode label.
     pub mode_label: &'a str,
+    /// Whether the active buffer is modified.
+    pub modified: bool,
     /// Human-readable filetype label.
     pub filetype_label: &'a str,
     /// Active buffer display name.
@@ -40,12 +43,17 @@ impl StatusBar {
             .min(context.line_count.saturating_sub(1))
             + 1;
         let percent = self.progress_percent(context.cursor_line, context.line_count);
+        let buffer_name = if context.modified {
+            format!("{}*", context.buffer_name)
+        } else {
+            context.buffer_name.to_string()
+        };
 
         format!(
             "{} | {} | {} | {}:{} | {}%",
             context.mode_label,
             context.filetype_label,
-            context.buffer_name,
+            buffer_name,
             line_number,
             context.cursor_byte_col,
             percent
@@ -64,13 +72,29 @@ impl StatusBar {
             return;
         }
 
-        let style = globals::with_active_theme(|theme| {
-            theme.map(|theme| theme.ui.status_bar).unwrap_or_default()
+        let (style, modified_style) = globals::with_active_theme(|theme| {
+            theme
+                .map(|theme| {
+                    (
+                        theme.ui.status_bar,
+                        theme.ui.status_bar.overlay(theme.ui.modified_marker),
+                    )
+                })
+                .unwrap_or_else(|| (Default::default(), Default::default()))
         });
 
         let width = size.cols as usize;
+        let text = self.text(context);
         screen.write_string(origin.row, origin.col, style, &" ".repeat(width));
-        screen.write_string(origin.row, origin.col, style, &self.text(context));
+        screen.write_string(origin.row, origin.col, style, &text);
+
+        if context.modified {
+            let prefix_width =
+                UnicodeWidthStr::width(context.mode_label) + 3 + UnicodeWidthStr::width(context.filetype_label) + 3;
+            let marker_col =
+                origin.col + prefix_width as u16 + UnicodeWidthStr::width(context.buffer_name) as u16;
+            screen.write_string(origin.row, marker_col, modified_style, "*");
+        }
     }
 
     fn progress_percent(&self, cursor_line: usize, line_count: usize) -> usize {
@@ -97,6 +121,7 @@ mod tests {
 
     fn context<'a>(
         mode_label: &'a str,
+        modified: bool,
         filetype_label: &'a str,
         buffer_name: &'a str,
         cursor_line: usize,
@@ -105,6 +130,7 @@ mod tests {
     ) -> StatusBarContext<'a> {
         StatusBarContext {
             mode_label,
+            modified,
             filetype_label,
             buffer_name,
             cursor_line,
@@ -122,6 +148,7 @@ mod tests {
             Style::new().fg(Color::ansi(5)),
             Style::new().fg(Color::ansi(6)),
             Style::new().fg(Color::ansi(7)),
+            Style::new().fg(Color::ansi(8)),
         );
         let syntax_styles = SyntaxStyles::new(
             Style::new(),
@@ -148,15 +175,23 @@ mod tests {
     #[test]
     fn test_text_formats_footer_fields() {
         let status_bar = StatusBar::new();
-        let text = status_bar.text(&context("NORMAL", "Rust", "notes.txt", 2, 7, 10));
+        let text = status_bar.text(&context("NORMAL", false, "Rust", "notes.txt", 2, 7, 10));
 
         assert_eq!(text, "NORMAL | Rust | notes.txt | 3:7 | 22%");
     }
 
     #[test]
+    fn test_text_formats_modified_footer_fields() {
+        let status_bar = StatusBar::new();
+        let text = status_bar.text(&context("NORMAL", true, "Rust", "notes.txt", 2, 7, 10));
+
+        assert_eq!(text, "NORMAL | Rust | notes.txt* | 3:7 | 22%");
+    }
+
+    #[test]
     fn test_text_reports_hundred_percent_on_last_line() {
         let status_bar = StatusBar::new();
-        let text = status_bar.text(&context("INSERT", "Python", "notes.txt", 4, 0, 5));
+        let text = status_bar.text(&context("INSERT", false, "Python", "notes.txt", 4, 0, 5));
 
         assert!(text.ends_with("100%"));
     }
@@ -164,7 +199,7 @@ mod tests {
     #[test]
     fn test_text_reports_hundred_percent_for_single_line() {
         let status_bar = StatusBar::new();
-        let text = status_bar.text(&context("NORMAL", "Plain Text", "Untitled", 0, 0, 1));
+        let text = status_bar.text(&context("NORMAL", false, "Plain Text", "Untitled", 0, 0, 1));
 
         assert!(text.ends_with("100%"));
     }
@@ -178,7 +213,7 @@ mod tests {
             &mut screen,
             Position::new(0, 0),
             Size::new(1, 8),
-            &context("NORMAL", "Rust", "notes.txt", 0, 0, 10),
+            &context("NORMAL", false, "Rust", "notes.txt", 0, 0, 10),
         );
 
         let cell = screen.get_cell_mut(0, 0).unwrap();
@@ -197,9 +232,32 @@ mod tests {
             &mut screen,
             Position::new(0, 0),
             Size::new(1, 12),
-            &context("NORMAL", "Rust", "notes.txt", 0, 0, 10),
+            &context("NORMAL", false, "Rust", "notes.txt", 0, 0, 10),
         );
 
         assert_eq!(screen.get_cell_mut(0, 0).unwrap().style, expected_style);
+    }
+
+    #[test]
+    fn test_render_uses_theme_modified_marker_style() {
+        let status_bar = StatusBar::new();
+        let theme = themed_status_bar();
+        let expected_style = theme.ui.status_bar;
+        let expected_marker_style = expected_style.overlay(theme.ui.modified_marker);
+        let _theme_guard = globals::set_test_active_theme(theme);
+
+        let mut screen = Screen::new(1, 32);
+        status_bar.render(
+            &mut screen,
+            Position::new(0, 0),
+            Size::new(1, 32),
+            &context("NORMAL", true, "Rust", "a", 0, 0, 10),
+        );
+
+        assert_eq!(screen.get_cell_mut(0, 17).unwrap().text, "*");
+        assert_eq!(
+            screen.get_cell_mut(0, 17).unwrap().style,
+            expected_marker_style
+        );
     }
 }

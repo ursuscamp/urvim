@@ -33,7 +33,6 @@ impl Buffer {
             new_line.insert(col, ch);
             self.lines = self.lines.update(line_idx, Arc::from(new_line));
         }
-        self.refresh_filetype();
     }
 
     pub fn insert_text(&mut self, mut cursor: Cursor, text: &str) {
@@ -95,7 +94,6 @@ impl Buffer {
             left.append(right);
             self.lines = left;
         }
-        self.refresh_filetype();
     }
 
     pub fn delete_char_before_cursor(&mut self, cursor: Cursor) -> Option<Cursor> {
@@ -122,7 +120,6 @@ impl Buffer {
             left.push_back(merged);
             left.append(right);
             self.lines = left;
-            self.refresh_filetype();
             return Some(Cursor::new(prev_line, prev_content_len));
         }
 
@@ -143,7 +140,6 @@ impl Buffer {
             );
             return Some(Cursor::new(cursor.line, start));
         }
-        self.refresh_filetype();
         Some(cursor)
     }
 
@@ -172,7 +168,6 @@ impl Buffer {
             left.push_back(merged);
             left.append(right);
             self.lines = left;
-            self.refresh_filetype();
             return Some(Cursor::new(current_line, current_content_len));
         }
 
@@ -189,7 +184,6 @@ impl Buffer {
                 return Some(Cursor::new(cursor.line, start));
             }
         }
-        self.refresh_filetype();
         Some(cursor)
     }
 
@@ -227,7 +221,6 @@ impl Buffer {
         left.push_back(Arc::from(joined_content));
         left.append(right);
         self.lines = left;
-        self.refresh_filetype();
         Some(Cursor::new(start_line, joined_len))
     }
 
@@ -257,7 +250,6 @@ impl Buffer {
             self.lines = left;
         }
         let new_line_count = self.lines.len();
-        self.refresh_filetype();
         if new_line_count == 0 {
             Some(Cursor::new(0, 0))
         } else if start_line >= new_line_count {
@@ -271,7 +263,6 @@ impl Buffer {
         let total_lines = self.lines.len();
         if total_lines == 0 {
             self.lines.push_back(Arc::from(""));
-            self.refresh_filetype();
             return Some(Cursor::new(0, 0));
         }
         if start_line >= total_lines {
@@ -293,7 +284,6 @@ impl Buffer {
             left.append(right);
             self.lines = left;
         }
-        self.refresh_filetype();
         Some(Cursor::new(start_line, 0))
     }
 
@@ -322,7 +312,6 @@ impl Buffer {
             if count > 0 {
                 self.lines.push_back(Arc::from(""));
             }
-            self.refresh_filetype();
             return Some(Cursor::new(0, 0));
         }
         let insert_after = line.min(total_lines);
@@ -333,7 +322,6 @@ impl Buffer {
             for _ in 0..count {
                 self.lines.push_back(Arc::from(""));
             }
-            self.refresh_filetype();
             Some(Cursor::new(total_lines, 0))
         } else {
             let mut left = self.lines.take(insert_after + 1);
@@ -343,7 +331,6 @@ impl Buffer {
             }
             left.append(right);
             self.lines = left;
-            self.refresh_filetype();
             Some(Cursor::new(insert_after + 1, 0))
         }
     }
@@ -354,7 +341,6 @@ impl Buffer {
             if count > 0 {
                 self.lines.push_back(Arc::from(""));
             }
-            self.refresh_filetype();
             return Some(Cursor::new(0, 0));
         }
         if count == 0 {
@@ -364,7 +350,6 @@ impl Buffer {
             for _ in 0..count {
                 self.lines.push_front(Arc::from(""));
             }
-            self.refresh_filetype();
             Some(Cursor::new(0, 0))
         } else {
             let insert_before = line.saturating_sub(1);
@@ -372,7 +357,6 @@ impl Buffer {
                 for _ in 0..count {
                     self.lines.push_back(Arc::from(""));
                 }
-                self.refresh_filetype();
                 Some(Cursor::new(total_lines, 0))
             } else {
                 let mut left = self.lines.take(insert_before + 1);
@@ -382,7 +366,6 @@ impl Buffer {
                 }
                 left.append(right);
                 self.lines = left;
-                self.refresh_filetype();
                 Some(Cursor::new(insert_before + 1, 0))
             }
         }

@@ -58,6 +58,7 @@ impl NormalMode {
             Action::JoinWithoutSpace,
         );
         trie_keymap.insert("i".to_string(), Action::SwitchToInsert);
+        trie_keymap.insert("<C-s>".to_string(), Action::SaveBuffer(None));
         trie_keymap.insert("a".to_string(), Action::AppendAfterCursor);
         trie_keymap.insert("A".to_string(), Action::AppendToLineEnd);
         trie_keymap.insert("I".to_string(), Action::InsertAtLineStart);

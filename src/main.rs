@@ -121,6 +121,33 @@ fn main() -> io::Result<()> {
                                         terminal.set_cursor_style(mode.cursor_style())?;
                                         handled = true;
                                     }
+                                    Action::SaveBuffer(target) => {
+                                        let buffer_id = target.unwrap_or_else(|| {
+                                            layout.active_buffer_view().buffer_id()
+                                        });
+                                        let save_result =
+                                            globals::with_buffer_pool(|pool| pool.save_buffer(buffer_id));
+                                        match save_result {
+                                            Ok(()) => {}
+                                            Err(error)
+                                                if error.kind()
+                                                    == io::ErrorKind::InvalidInput =>
+                                            {
+                                                tracing::info!(
+                                                    "Skipping save for unnamed buffer {:?}",
+                                                    buffer_id
+                                                );
+                                            }
+                                            Err(error) => {
+                                                tracing::warn!(
+                                                    "Failed to save buffer {:?}: {}",
+                                                    buffer_id,
+                                                    error
+                                                );
+                                            }
+                                        }
+                                        handled = true;
+                                    }
                                     Action::Quit => break,
                                     Action::None => {
                                         handled = true;

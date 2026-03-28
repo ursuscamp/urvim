@@ -129,6 +129,14 @@ fn resolve_ui_styles(
         resolve_style(
             theme_name,
             "ui",
+            "modified_marker",
+            default_style,
+            &raw.modified_marker,
+            palette,
+        )?,
+        resolve_style(
+            theme_name,
+            "ui",
             "tab_active",
             default_style,
             &raw.tab_active,
@@ -342,6 +350,7 @@ bold = true
 
 [ui]
 status_bar = { fg = "accent" }
+modified_marker = { fg = "base", bold = true }
 tab_active = { fg = "base" }
 tab_inactive = { fg = "base" }
 tab_scroll_indicator = { fg = "base" }
@@ -396,6 +405,7 @@ fg = "base"
 
 [ui]
 status_bar = { fg = "missing" }
+modified_marker = { fg = "base" }
 tab_active = { fg = "base" }
 tab_inactive = { fg = "base" }
 tab_scroll_indicator = { fg = "base" }
@@ -435,6 +445,7 @@ fg = "base"
 
 [ui]
 status_bar = { fg = "base" }
+modified_marker = { fg = "base" }
 tab_active = { fg = "base" }
 tab_inactive = { fg = "base" }
 tab_scroll_indicator = { fg = "base" }
@@ -477,6 +488,7 @@ fg = "base"
 
 [ui]
 status_bar = { fg = "base" }
+modified_marker = { fg = "base" }
 tab_active = { fg = "base" }
 tab_inactive = { fg = "base" }
 tab_scroll_indicator = { fg = "base" }
@@ -522,6 +534,7 @@ bold = true
 
 [ui]
 status_bar = { fg = "accent" }
+modified_marker = { fg = "base", bold = true }
 tab_active = { fg = "base" }
 tab_inactive = { fg = "base" }
 tab_scroll_indicator = { fg = "base" }
@@ -566,6 +579,7 @@ bg = "base"
 
 [ui]
 status_bar = { fg = "base" }
+modified_marker = { fg = "base" }
 tab_active = { fg = "base" }
 tab_inactive = { fg = "base" }
 tab_scroll_indicator = { fg = "base" }

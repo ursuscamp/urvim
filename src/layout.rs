@@ -118,6 +118,7 @@ impl Layout {
         let cursor = buffer_view.cursor();
         let context = StatusBarContext {
             mode_label: self.mode_label(),
+            modified: buffer_view.is_modified(),
             filetype_label,
             buffer_name: buffer_name.as_str(),
             cursor_line: cursor.line,
