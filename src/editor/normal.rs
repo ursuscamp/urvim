@@ -25,87 +25,81 @@ impl NormalMode {
     pub fn new() -> Self {
         let mut trie_keymap = TrieKeymap::new();
 
-        trie_keymap.insert("h".to_string(), Action::MoveLeft);
-        trie_keymap.insert("j".to_string(), Action::MoveDown);
-        trie_keymap.insert("k".to_string(), Action::MoveUp);
-        trie_keymap.insert("l".to_string(), Action::MoveRight);
+        trie_keymap.insert_str("h", Action::MoveLeft);
+        trie_keymap.insert_str("j", Action::MoveDown);
+        trie_keymap.insert_str("k", Action::MoveUp);
+        trie_keymap.insert_str("l", Action::MoveRight);
 
-        trie_keymap.insert("w".to_string(), Action::ForwardTo(Boundary::Word));
-        trie_keymap.insert("b".to_string(), Action::BackTo(Boundary::Word));
-        trie_keymap.insert("e".to_string(), Action::ForwardTo(Boundary::WordEnd));
+        trie_keymap.insert_str("w", Action::ForwardTo(Boundary::Word));
+        trie_keymap.insert_str("b", Action::BackTo(Boundary::Word));
+        trie_keymap.insert_str("e", Action::ForwardTo(Boundary::WordEnd));
 
-        trie_keymap.insert("W".to_string(), Action::ForwardTo(Boundary::BigWord));
-        trie_keymap.insert("B".to_string(), Action::BackTo(Boundary::BigWord));
-        trie_keymap.insert("E".to_string(), Action::ForwardTo(Boundary::BigWordEnd));
+        trie_keymap.insert_str("W", Action::ForwardTo(Boundary::BigWord));
+        trie_keymap.insert_str("B", Action::BackTo(Boundary::BigWord));
+        trie_keymap.insert_str("E", Action::ForwardTo(Boundary::BigWordEnd));
 
-        trie_keymap.insert("$".to_string(), Action::MoveToLineEnd);
-        trie_keymap.insert("0".to_string(), Action::MoveToLineStart);
-        trie_keymap.insert("^".to_string(), Action::MoveToLineContentStart);
+        trie_keymap.insert_str("$", Action::MoveToLineEnd);
+        trie_keymap.insert_str("0", Action::MoveToLineStart);
+        trie_keymap.insert_str("^", Action::MoveToLineContentStart);
 
-        trie_keymap.insert_sequence(
-            vec!["g".to_string(), "g".to_string()],
-            Action::MoveToFirstLine,
-        );
-        trie_keymap.insert("G".to_string(), Action::MoveToLastLine);
-        trie_keymap.insert("H".to_string(), Action::MoveToScreenTop);
-        trie_keymap.insert("M".to_string(), Action::MoveToScreenMiddle);
-        trie_keymap.insert("L".to_string(), Action::MoveToScreenBottom);
-        trie_keymap.insert("{".to_string(), Action::MoveToPreviousParagraph);
-        trie_keymap.insert("}".to_string(), Action::MoveToNextParagraph);
-        trie_keymap.insert("J".to_string(), Action::JoinWithSpace);
-        trie_keymap.insert_sequence(
-            vec!["g".to_string(), "J".to_string()],
-            Action::JoinWithoutSpace,
-        );
-        trie_keymap.insert("i".to_string(), Action::SwitchToInsert);
-        trie_keymap.insert("<C-s>".to_string(), Action::SaveBuffer(None));
-        trie_keymap.insert("a".to_string(), Action::AppendAfterCursor);
-        trie_keymap.insert("A".to_string(), Action::AppendToLineEnd);
-        trie_keymap.insert("I".to_string(), Action::InsertAtLineStart);
-        trie_keymap.insert("o".to_string(), Action::OpenLineBelow);
-        trie_keymap.insert("O".to_string(), Action::OpenLineAbove);
-        trie_keymap.insert_sequence(vec!["[".to_string(), "b".to_string()], Action::PreviousTab);
-        trie_keymap.insert_sequence(vec!["]".to_string(), "b".to_string()], Action::NextTab);
-        trie_keymap.insert("x".to_string(), Action::DeleteForward);
-        trie_keymap.insert("X".to_string(), Action::DeleteBackward);
-        trie_keymap.insert_sequence(vec!["d".to_string(), "d".to_string()], Action::DeleteLine);
-        trie_keymap.insert_sequence(
-            vec!["d".to_string(), "i".to_string(), "w".to_string()],
+        trie_keymap.insert_str("gg", Action::MoveToFirstLine);
+        trie_keymap.insert_str("G", Action::MoveToLastLine);
+        trie_keymap.insert_str("H", Action::MoveToScreenTop);
+        trie_keymap.insert_str("M", Action::MoveToScreenMiddle);
+        trie_keymap.insert_str("L", Action::MoveToScreenBottom);
+        trie_keymap.insert_str("{", Action::MoveToPreviousParagraph);
+        trie_keymap.insert_str("}", Action::MoveToNextParagraph);
+        trie_keymap.insert_str("J", Action::JoinWithSpace);
+        trie_keymap.insert_str("gJ", Action::JoinWithoutSpace);
+        trie_keymap.insert_str("i", Action::SwitchToInsert);
+        trie_keymap.insert_str("<C-s>", Action::SaveBuffer(None));
+        trie_keymap.insert_str("a", Action::AppendAfterCursor);
+        trie_keymap.insert_str("A", Action::AppendToLineEnd);
+        trie_keymap.insert_str("I", Action::InsertAtLineStart);
+        trie_keymap.insert_str("o", Action::OpenLineBelow);
+        trie_keymap.insert_str("O", Action::OpenLineAbove);
+        trie_keymap.insert_str("[b", Action::PreviousTab);
+        trie_keymap.insert_str("]b", Action::NextTab);
+        trie_keymap.insert_str("x", Action::DeleteForward);
+        trie_keymap.insert_str("X", Action::DeleteBackward);
+        trie_keymap.insert_str("dd", Action::DeleteLine);
+        trie_keymap.insert_str(
+            "diw",
             Action::Operation(
                 Operator::Delete,
                 OperatorTarget::TextObject(TextObject::InnerWord),
             ),
         );
-        trie_keymap.insert_sequence(
-            vec!["d".to_string(), "a".to_string(), "w".to_string()],
+        trie_keymap.insert_str(
+            "daw",
             Action::Operation(
                 Operator::Delete,
                 OperatorTarget::TextObject(TextObject::AroundWord),
             ),
         );
-        trie_keymap.insert_sequence(
-            vec!["d".to_string(), "i".to_string(), "W".to_string()],
+        trie_keymap.insert_str(
+            "diW",
             Action::Operation(
                 Operator::Delete,
                 OperatorTarget::TextObject(TextObject::InnerBigWord),
             ),
         );
-        trie_keymap.insert_sequence(
-            vec!["d".to_string(), "a".to_string(), "W".to_string()],
+        trie_keymap.insert_str(
+            "daW",
             Action::Operation(
                 Operator::Delete,
                 OperatorTarget::TextObject(TextObject::AroundBigWord),
             ),
         );
-        trie_keymap.insert_sequence(
-            vec!["c".to_string(), "i".to_string(), "W".to_string()],
+        trie_keymap.insert_str(
+            "ciW",
             Action::Operation(
                 Operator::Change,
                 OperatorTarget::TextObject(TextObject::InnerBigWord),
             ),
         );
-        trie_keymap.insert_sequence(
-            vec!["c".to_string(), "a".to_string(), "W".to_string()],
+        trie_keymap.insert_str(
+            "caW",
             Action::Operation(
                 Operator::Change,
                 OperatorTarget::TextObject(TextObject::AroundBigWord),
@@ -116,29 +110,29 @@ impl NormalMode {
             (QuoteKind::Double, "\""),
             (QuoteKind::Backtick, "`"),
         ] {
-            trie_keymap.insert_sequence(
-                vec!["d".to_string(), "i".to_string(), key.to_string()],
+            trie_keymap.insert_str(
+                &format!("di{key}"),
                 Action::Operation(
                     Operator::Delete,
                     OperatorTarget::TextObject(TextObject::InnerQuote(kind)),
                 ),
             );
-            trie_keymap.insert_sequence(
-                vec!["d".to_string(), "a".to_string(), key.to_string()],
+            trie_keymap.insert_str(
+                &format!("da{key}"),
                 Action::Operation(
                     Operator::Delete,
                     OperatorTarget::TextObject(TextObject::AroundQuote(kind)),
                 ),
             );
-            trie_keymap.insert_sequence(
-                vec!["c".to_string(), "i".to_string(), key.to_string()],
+            trie_keymap.insert_str(
+                &format!("ci{key}"),
                 Action::Operation(
                     Operator::Change,
                     OperatorTarget::TextObject(TextObject::InnerQuote(kind)),
                 ),
             );
-            trie_keymap.insert_sequence(
-                vec!["c".to_string(), "a".to_string(), key.to_string()],
+            trie_keymap.insert_str(
+                &format!("ca{key}"),
                 Action::Operation(
                     Operator::Change,
                     OperatorTarget::TextObject(TextObject::AroundQuote(kind)),
@@ -159,244 +153,244 @@ impl NormalMode {
                 '>' => "<GreaterThan>".to_string(),
                 _ => close.to_string(),
             };
-            trie_keymap.insert_sequence(
-                vec!["d".to_string(), "i".to_string(), open_key.clone()],
+            trie_keymap.insert_str(
+                &format!("di{open_key}"),
                 Action::Operation(
                     Operator::Delete,
                     OperatorTarget::TextObject(TextObject::InnerBracket(kind)),
                 ),
             );
-            trie_keymap.insert_sequence(
-                vec!["d".to_string(), "i".to_string(), close_key.clone()],
+            trie_keymap.insert_str(
+                &format!("di{close_key}"),
                 Action::Operation(
                     Operator::Delete,
                     OperatorTarget::TextObject(TextObject::InnerBracket(kind)),
                 ),
             );
-            trie_keymap.insert_sequence(
-                vec!["d".to_string(), "a".to_string(), open_key.clone()],
-                Action::Operation(
-                    Operator::Delete,
-                    OperatorTarget::TextObject(TextObject::AroundBracket(kind)),
-                ),
-            );
-            trie_keymap.insert_sequence(
-                vec!["d".to_string(), "a".to_string(), close_key.clone()],
+            trie_keymap.insert_str(
+                &format!("da{open_key}"),
                 Action::Operation(
                     Operator::Delete,
                     OperatorTarget::TextObject(TextObject::AroundBracket(kind)),
                 ),
             );
-            trie_keymap.insert_sequence(
-                vec!["c".to_string(), "i".to_string(), open_key.clone()],
+            trie_keymap.insert_str(
+                &format!("da{close_key}"),
+                Action::Operation(
+                    Operator::Delete,
+                    OperatorTarget::TextObject(TextObject::AroundBracket(kind)),
+                ),
+            );
+            trie_keymap.insert_str(
+                &format!("ci{open_key}"),
                 Action::Operation(
                     Operator::Change,
                     OperatorTarget::TextObject(TextObject::InnerBracket(kind)),
                 ),
             );
-            trie_keymap.insert_sequence(
-                vec!["c".to_string(), "i".to_string(), close_key.clone()],
+            trie_keymap.insert_str(
+                &format!("ci{close_key}"),
                 Action::Operation(
                     Operator::Change,
                     OperatorTarget::TextObject(TextObject::InnerBracket(kind)),
                 ),
             );
-            trie_keymap.insert_sequence(
-                vec!["c".to_string(), "a".to_string(), open_key.clone()],
+            trie_keymap.insert_str(
+                &format!("ca{open_key}"),
                 Action::Operation(
                     Operator::Change,
                     OperatorTarget::TextObject(TextObject::AroundBracket(kind)),
                 ),
             );
-            trie_keymap.insert_sequence(
-                vec!["c".to_string(), "a".to_string(), close_key.clone()],
+            trie_keymap.insert_str(
+                &format!("ca{close_key}"),
                 Action::Operation(
                     Operator::Change,
                     OperatorTarget::TextObject(TextObject::AroundBracket(kind)),
                 ),
             );
         }
-        trie_keymap.insert_sequence(
-            vec!["d".to_string(), "w".to_string()],
+        trie_keymap.insert_str(
+            "dw",
             Action::Operation(
                 Operator::Delete,
                 OperatorTarget::BoundaryMotion(BoundaryMotion::WordForward),
             ),
         );
-        trie_keymap.insert_sequence(
-            vec!["d".to_string(), "e".to_string()],
+        trie_keymap.insert_str(
+            "de",
             Action::Operation(
                 Operator::Delete,
                 OperatorTarget::BoundaryMotion(BoundaryMotion::WordEnd),
             ),
         );
-        trie_keymap.insert_sequence(
-            vec!["d".to_string(), "b".to_string()],
+        trie_keymap.insert_str(
+            "db",
             Action::Operation(
                 Operator::Delete,
                 OperatorTarget::BoundaryMotion(BoundaryMotion::WordBackward),
             ),
         );
-        trie_keymap.insert_sequence(
-            vec!["d".to_string(), "$".to_string()],
+        trie_keymap.insert_str(
+            "d$",
             Action::Operation(
                 Operator::Delete,
                 OperatorTarget::BoundaryMotion(BoundaryMotion::LineEnd),
             ),
         );
-        trie_keymap.insert_sequence(
-            vec!["d".to_string(), "0".to_string()],
+        trie_keymap.insert_str(
+            "d0",
             Action::Operation(
                 Operator::Delete,
                 OperatorTarget::BoundaryMotion(BoundaryMotion::LineStart),
             ),
         );
-        trie_keymap.insert_sequence(
-            vec!["d".to_string(), "^".to_string()],
+        trie_keymap.insert_str(
+            "d^",
             Action::Operation(
                 Operator::Delete,
                 OperatorTarget::BoundaryMotion(BoundaryMotion::LineContentStart),
             ),
         );
-        trie_keymap.insert_sequence(
-            vec!["d".to_string(), "W".to_string()],
+        trie_keymap.insert_str(
+            "dW",
             Action::Operation(
                 Operator::Delete,
                 OperatorTarget::BoundaryMotion(BoundaryMotion::BigWordForward),
             ),
         );
-        trie_keymap.insert_sequence(
-            vec!["d".to_string(), "E".to_string()],
+        trie_keymap.insert_str(
+            "dE",
             Action::Operation(
                 Operator::Delete,
                 OperatorTarget::BoundaryMotion(BoundaryMotion::BigWordEnd),
             ),
         );
-        trie_keymap.insert_sequence(
-            vec!["d".to_string(), "B".to_string()],
+        trie_keymap.insert_str(
+            "dB",
             Action::Operation(
                 Operator::Delete,
                 OperatorTarget::BoundaryMotion(BoundaryMotion::BigWordBackward),
             ),
         );
-        trie_keymap.insert_sequence(
-            vec!["d".to_string(), "g".to_string(), "g".to_string()],
+        trie_keymap.insert_str(
+            "dgg",
             Action::Operation(
                 Operator::Delete,
                 OperatorTarget::LinewiseMotion(LinewiseMotion::FirstLine),
             ),
         );
-        trie_keymap.insert_sequence(
-            vec!["d".to_string(), "G".to_string()],
+        trie_keymap.insert_str(
+            "dG",
             Action::Operation(
                 Operator::Delete,
                 OperatorTarget::LinewiseMotion(LinewiseMotion::LastLine),
             ),
         );
-        trie_keymap.insert_sequence(
-            vec!["c".to_string(), "w".to_string()],
+        trie_keymap.insert_str(
+            "cw",
             Action::Operation(
                 Operator::Change,
                 OperatorTarget::BoundaryMotion(BoundaryMotion::WordForward),
             ),
         );
-        trie_keymap.insert_sequence(
-            vec!["c".to_string(), "e".to_string()],
+        trie_keymap.insert_str(
+            "ce",
             Action::Operation(
                 Operator::Change,
                 OperatorTarget::BoundaryMotion(BoundaryMotion::WordEnd),
             ),
         );
-        trie_keymap.insert_sequence(
-            vec!["c".to_string(), "b".to_string()],
+        trie_keymap.insert_str(
+            "cb",
             Action::Operation(
                 Operator::Change,
                 OperatorTarget::BoundaryMotion(BoundaryMotion::WordBackward),
             ),
         );
-        trie_keymap.insert_sequence(
-            vec!["c".to_string(), "W".to_string()],
+        trie_keymap.insert_str(
+            "cW",
             Action::Operation(
                 Operator::Change,
                 OperatorTarget::BoundaryMotion(BoundaryMotion::BigWordForward),
             ),
         );
-        trie_keymap.insert_sequence(
-            vec!["c".to_string(), "E".to_string()],
+        trie_keymap.insert_str(
+            "cE",
             Action::Operation(
                 Operator::Change,
                 OperatorTarget::BoundaryMotion(BoundaryMotion::BigWordEnd),
             ),
         );
-        trie_keymap.insert_sequence(
-            vec!["c".to_string(), "B".to_string()],
+        trie_keymap.insert_str(
+            "cB",
             Action::Operation(
                 Operator::Change,
                 OperatorTarget::BoundaryMotion(BoundaryMotion::BigWordBackward),
             ),
         );
-        trie_keymap.insert_sequence(
-            vec!["c".to_string(), "i".to_string(), "w".to_string()],
+        trie_keymap.insert_str(
+            "ciw",
             Action::Operation(
                 Operator::Change,
                 OperatorTarget::TextObject(TextObject::InnerWord),
             ),
         );
-        trie_keymap.insert_sequence(
-            vec!["c".to_string(), "a".to_string(), "w".to_string()],
+        trie_keymap.insert_str(
+            "caw",
             Action::Operation(
                 Operator::Change,
                 OperatorTarget::TextObject(TextObject::AroundWord),
             ),
         );
-        trie_keymap.insert_sequence(
-            vec!["c".to_string(), "$".to_string()],
+        trie_keymap.insert_str(
+            "c$",
             Action::Operation(
                 Operator::Change,
                 OperatorTarget::BoundaryMotion(BoundaryMotion::LineEnd),
             ),
         );
-        trie_keymap.insert_sequence(
-            vec!["c".to_string(), "0".to_string()],
+        trie_keymap.insert_str(
+            "c0",
             Action::Operation(
                 Operator::Change,
                 OperatorTarget::BoundaryMotion(BoundaryMotion::LineStart),
             ),
         );
-        trie_keymap.insert_sequence(
-            vec!["c".to_string(), "^".to_string()],
+        trie_keymap.insert_str(
+            "c^",
             Action::Operation(
                 Operator::Change,
                 OperatorTarget::BoundaryMotion(BoundaryMotion::LineContentStart),
             ),
         );
-        trie_keymap.insert_sequence(
-            vec!["c".to_string(), "g".to_string(), "g".to_string()],
+        trie_keymap.insert_str(
+            "cgg",
             Action::Operation(
                 Operator::Change,
                 OperatorTarget::LinewiseMotion(LinewiseMotion::FirstLine),
             ),
         );
-        trie_keymap.insert_sequence(
-            vec!["c".to_string(), "G".to_string()],
+        trie_keymap.insert_str(
+            "cG",
             Action::Operation(
                 Operator::Change,
                 OperatorTarget::LinewiseMotion(LinewiseMotion::LastLine),
             ),
         );
-        trie_keymap.insert_sequence(vec!["c".to_string(), "c".to_string()], Action::ChangeLine);
-        trie_keymap.insert("C".to_string(), Action::ChangeToLineEnd);
-        trie_keymap.insert("%".to_string(), Action::MoveToMatchingBracket);
-        trie_keymap.insert(";".to_string(), Action::RepeatLastFind);
-        trie_keymap.insert(",".to_string(), Action::RepeatLastFindReverse);
-        trie_keymap.insert("<C-q>".to_string(), Action::Quit);
-        trie_keymap.insert("u".to_string(), Action::Undo);
-        trie_keymap.insert("U".to_string(), Action::Redo);
-        trie_keymap.insert(".".to_string(), Action::RepeatLastChange);
-        trie_keymap.insert("<Left>".to_string(), Action::MoveLeft);
-        trie_keymap.insert("<Down>".to_string(), Action::MoveDown);
-        trie_keymap.insert("<Up>".to_string(), Action::MoveUp);
-        trie_keymap.insert("<Right>".to_string(), Action::MoveRight);
+        trie_keymap.insert_str("cc", Action::ChangeLine);
+        trie_keymap.insert_str("C", Action::ChangeToLineEnd);
+        trie_keymap.insert_str("%", Action::MoveToMatchingBracket);
+        trie_keymap.insert_str(";", Action::RepeatLastFind);
+        trie_keymap.insert_str(",", Action::RepeatLastFindReverse);
+        trie_keymap.insert_str("<C-q>", Action::Quit);
+        trie_keymap.insert_str("u", Action::Undo);
+        trie_keymap.insert_str("U", Action::Redo);
+        trie_keymap.insert_str(".", Action::RepeatLastChange);
+        trie_keymap.insert_str("<Left>", Action::MoveLeft);
+        trie_keymap.insert_str("<Down>", Action::MoveDown);
+        trie_keymap.insert_str("<Up>", Action::MoveUp);
+        trie_keymap.insert_str("<Right>", Action::MoveRight);
 
         let mut keymap = ChainedKeymap::new();
         keymap.add(Box::new(trie_keymap));

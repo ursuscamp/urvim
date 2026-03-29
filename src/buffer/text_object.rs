@@ -16,7 +16,11 @@ impl Buffer {
     }
 
     pub fn get_around_big_word_range(&self, cursor: Cursor) -> Option<TextObjectRange> {
-        self.get_around_range_for(cursor, Self::is_bigword_char, Self::get_inner_big_word_range)
+        self.get_around_range_for(
+            cursor,
+            Self::is_bigword_char,
+            Self::get_inner_big_word_range,
+        )
     }
 
     pub fn get_around_big_word_range_with_count(
@@ -96,7 +100,8 @@ impl Buffer {
         // On whitespace, include the whole separator block and then the next
         // logical object after it. For `aw`, punctuation is a single object;
         // for `aW`, punctuation is part of the following BigWord.
-        let whitespace_start = self.expand_left_matching(line_str, cursor.col, Self::is_whitespace_char);
+        let whitespace_start =
+            self.expand_left_matching(line_str, cursor.col, Self::is_whitespace_char);
         let whitespace_end =
             self.expand_right_matching(line_str, cursor.col, Self::is_whitespace_char);
         let end = self.end_after_whitespace_and_object(line_str, whitespace_end, token_predicate);
@@ -177,7 +182,9 @@ impl Buffer {
         token_predicate: GraphemePredicate,
     ) -> usize {
         match self.grapheme_at_col(line, start_col) {
-            Some(g) if token_predicate(g) => self.expand_right_matching(line, start_col, token_predicate),
+            Some(g) if token_predicate(g) => {
+                self.expand_right_matching(line, start_col, token_predicate)
+            }
             Some(g) => start_col + g.len(),
             None => start_col,
         }

@@ -132,6 +132,8 @@ A container that owns multiple windows, displays a horizontal tab bar, and route
 ### Keymap
 A data structure that maps key sequences to actions. Supports multi-key bindings like `dd` (delete line) or `gg` (go to first line). Implementations include Trie-based keymaps for fixed sequences, character scan keymaps for parameter-based motions, and chained keymaps that combine multiple keymaps.
 
+**Related Terms:** Canonical String, Key String Parser, TrieKeymap, Character Scan Keymap, Chained Keymap
+
 ### Character Scan Keymap
 A stateless keymap that matches two-key sequences for character scan motions (f, F, t, T). The first key is the trigger (f/F/t/T) and the second key is the target character. Returns the corresponding action with the character as a parameter.
 
@@ -193,11 +195,22 @@ The normalized string representation of a key, used for keymap lookup. Examples:
 - `<C-q>` for Ctrl+q
 - `<Space>` for the space bar
 
+**Related Terms:** Keymap, Key String Parser
+
 ### Event
 Terminal input events:
 - `Key(Key)` - A key press
 - `Resize(rows, cols)` - Terminal size change
 - `Paste(text)` - Bracketed paste content
+
+### Key String Parser
+A helper that turns a canonical key string into an ordered list of trie key tokens. Every non-`<...>` character is treated as one key, and every bracketed canonical special key is treated as one token.
+
+**Context:** Trie keymap insertion helpers and editor key binding setup
+
+**Example:** `gg` becomes `["g", "g"]`, `<C-s>` becomes `["<C-s>"]`, and `d<LessThan>` becomes `["d", "<LessThan>"]`
+
+**Related Terms:** Canonical String, Keymap
 
 ## Rendering
 

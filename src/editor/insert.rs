@@ -15,16 +15,16 @@ impl InsertMode {
     /// Creates a new insert mode with an empty repeat capture buffer.
     pub fn new() -> Self {
         let mut keymap = TrieKeymap::new();
-        keymap.insert("<Esc>".to_string(), Action::SwitchToNormal);
-        keymap.insert("<C-q>".to_string(), Action::Quit);
-        keymap.insert("<C-s>".to_string(), Action::SaveBuffer(None));
-        keymap.insert("<Left>".to_string(), Action::MoveLeft);
-        keymap.insert("<Down>".to_string(), Action::MoveDown);
-        keymap.insert("<Up>".to_string(), Action::MoveUp);
-        keymap.insert("<Right>".to_string(), Action::MoveRight);
-        keymap.insert("<Enter>".to_string(), Action::InsertChar('\n'));
-        keymap.insert("<Backspace>".to_string(), Action::DeleteBackward);
-        keymap.insert("<Delete>".to_string(), Action::DeleteForward);
+        keymap.insert_str("<Esc>", Action::SwitchToNormal);
+        keymap.insert_str("<C-q>", Action::Quit);
+        keymap.insert_str("<C-s>", Action::SaveBuffer(None));
+        keymap.insert_str("<Left>", Action::MoveLeft);
+        keymap.insert_str("<Down>", Action::MoveDown);
+        keymap.insert_str("<Up>", Action::MoveUp);
+        keymap.insert_str("<Right>", Action::MoveRight);
+        keymap.insert_str("<Enter>", Action::InsertChar('\n'));
+        keymap.insert_str("<Backspace>", Action::DeleteBackward);
+        keymap.insert_str("<Delete>", Action::DeleteForward);
 
         InsertMode {
             keymap,

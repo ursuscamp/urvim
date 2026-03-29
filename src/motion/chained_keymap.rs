@@ -76,7 +76,7 @@ mod tests {
     #[test]
     fn test_chained_get_action_trie_first() {
         let mut trie = TrieKeymap::new();
-        trie.insert_sequence(vec!["g".to_string(), "g".to_string()], Action::MoveUp);
+        trie.insert_str("gg", Action::MoveUp);
 
         let mut chained = ChainedKeymap::new();
         chained.add(Box::new(trie));
@@ -103,7 +103,7 @@ mod tests {
     #[test]
     fn test_chained_is_prefix_trie() {
         let mut trie = TrieKeymap::new();
-        trie.insert_sequence(vec!["g".to_string(), "g".to_string()], Action::MoveUp);
+        trie.insert_str("gg", Action::MoveUp);
 
         let mut chained = ChainedKeymap::new();
         chained.add(Box::new(trie));
@@ -128,7 +128,7 @@ mod tests {
     #[test]
     fn test_chained_is_prefix_returns_true_if_any() {
         let mut trie = TrieKeymap::new();
-        trie.insert_sequence(vec!["g".to_string(), "g".to_string()], Action::MoveUp);
+        trie.insert_str("gg", Action::MoveUp);
 
         let mut chained = ChainedKeymap::new();
         chained.add(Box::new(trie));
