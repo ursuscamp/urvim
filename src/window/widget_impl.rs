@@ -27,6 +27,12 @@ impl Widget for Window {
                 self.insert_char(*c);
                 ActionResult::Handled
             }
+            Action::InsertText(text) => {
+                for ch in text.chars() {
+                    self.insert_char(ch);
+                }
+                ActionResult::Handled
+            }
             Action::ForwardTo(boundary) => {
                 self.move_cursor_forward_to(*boundary);
                 ActionResult::Handled

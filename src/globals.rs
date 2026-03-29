@@ -272,6 +272,7 @@ mod tests {
     fn themed_config(theme: &str) -> Config {
         Config {
             theme: theme.to_string(),
+            insert_escape: None,
         }
     }
 

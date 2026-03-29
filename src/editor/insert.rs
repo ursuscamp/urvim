@@ -1,5 +1,7 @@
 use super::{Action, HandleKeyResult, Mode, ModeKind, TrieKeymap};
 use crate::buffer::{Buffer, Cursor};
+use crate::editor::validate_key_string;
+use crate::globals;
 use crate::terminal::{CursorStyle, Key, KeyCode};
 
 /// Insert mode for text input.
@@ -25,6 +27,13 @@ impl InsertMode {
         keymap.insert_str("<Enter>", Action::InsertChar('\n'));
         keymap.insert_str("<Backspace>", Action::DeleteBackward);
         keymap.insert_str("<Delete>", Action::DeleteForward);
+        globals::with_config(|config| {
+            if let Some(insert_escape) = config.and_then(|config| config.insert_escape.as_deref()) {
+                let parsed = validate_key_string(insert_escape)
+                    .expect("invalid canonical insert escape binding in resolved config");
+                keymap.insert_sequence(parsed, Action::SwitchToNormal);
+            }
+        });
 
         InsertMode {
             keymap,
@@ -38,6 +47,7 @@ impl InsertMode {
     fn record_action(&mut self, action: &Action) {
         match action {
             Action::InsertChar(ch) => self.record_insert_char(*ch),
+            Action::InsertText(text) => self.record_insert_text(text),
             Action::DeleteBackward => self.record_delete_backward(),
             Action::DeleteForward => self.record_delete_forward(),
             Action::MoveLeft => self.record_move_left(),
@@ -55,6 +65,12 @@ impl InsertMode {
             '\n' => Cursor::new(cursor.line + 1, 0),
             _ => Cursor::new(cursor.line, cursor.col + ch.len_utf8()),
         };
+    }
+
+    fn record_insert_text(&mut self, text: &str) {
+        for ch in text.chars() {
+            self.record_insert_char(ch);
+        }
     }
 
     fn record_delete_backward(&mut self) {
@@ -123,18 +139,32 @@ impl Mode for InsertMode {
         }
 
         let key_str = key.canonical_string();
-        let key_str_ref = std::slice::from_ref(&key_str);
-        if let Some(action) = self.keymap.get_action(key_str_ref) {
+        let prior_buffer = self.buffer.clone();
+        self.buffer.push(key_str);
+        if let Some(action) = self.keymap.get_action(&self.buffer) {
             self.buffer.clear();
             self.waiting = false;
             self.record_action(&action);
             return HandleKeyResult::Complete(action);
         }
 
-        self.buffer.push(key_str);
         if self.keymap.is_prefix(&self.buffer) {
             self.waiting = true;
             return HandleKeyResult::WaitForMore;
+        }
+
+        if !prior_buffer.is_empty()
+            && let Some(text) = buffered_text(&prior_buffer)
+            && let KeyCode::Char(c) = key.code
+            && !key.modifiers.has_ctrl()
+        {
+            self.buffer.clear();
+            self.waiting = false;
+            let mut inserted = text;
+            inserted.push(c);
+            let action = Action::InsertText(inserted);
+            self.record_action(&action);
+            return HandleKeyResult::Complete(action);
         }
 
         if let KeyCode::Char(c) = key.code
@@ -181,4 +211,16 @@ impl Mode for InsertMode {
     fn kind(&self) -> ModeKind {
         ModeKind::Insert
     }
+}
+
+fn buffered_text(buffer: &[String]) -> Option<String> {
+    let mut text = String::new();
+    for token in buffer {
+        if token.starts_with('<') || token.is_empty() {
+            return None;
+        }
+        text.push_str(token);
+    }
+
+    Some(text)
 }

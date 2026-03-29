@@ -10,6 +10,8 @@ use std::fmt;
 use std::fs;
 use std::path::PathBuf;
 
+use crate::editor::validate_key_string;
+
 const DEFAULT_THEME: &str = "Friday Night";
 const CONFIG_RELATIVE_PATH: &str = "urvim/config.toml";
 const DEFAULT_XDG_CONFIG_DIRS: &str = "/etc/xdg";
@@ -19,6 +21,8 @@ const DEFAULT_XDG_CONFIG_DIRS: &str = "/etc/xdg";
 pub struct Config {
     /// The active theme name selected after merging file and CLI inputs.
     pub theme: String,
+    /// The optional insert-mode escape binding loaded from config.
+    pub insert_escape: Option<String>,
 }
 
 /// The TOML-backed config file schema.
@@ -27,6 +31,8 @@ pub struct Config {
 pub struct PartialConfig {
     /// The theme name stored in the config file.
     pub theme: Option<String>,
+    /// The optional insert-mode escape binding stored in the config file.
+    pub insert_escape: Option<String>,
 }
 
 /// Errors that can occur while loading or resolving startup configuration.
@@ -72,8 +78,12 @@ impl Config {
             .map(ToOwned::to_owned)
             .or_else(|| file.and_then(|config| config.theme.clone()))
             .unwrap_or_else(|| DEFAULT_THEME.to_string());
+        let insert_escape = file.and_then(|config| config.insert_escape.clone());
 
-        Self { theme }
+        Self {
+            theme,
+            insert_escape,
+        }
     }
 }
 
@@ -155,6 +165,14 @@ fn validate_partial_config(config: &PartialConfig) -> Result<(), ConfigLoadError
         }
     }
 
+    if let Some(insert_escape) = config.insert_escape.as_ref() {
+        validate_key_string(insert_escape).map_err(|error| {
+            ConfigLoadError::invalid(format!(
+                "config insert_escape must be a valid canonical key string: {error}"
+            ))
+        })?;
+    }
+
     Ok(())
 }
 
@@ -203,6 +221,7 @@ mod tests {
     fn resolve_prefers_cli_then_file_then_default() {
         let file = PartialConfig {
             theme: Some("file-theme".to_string()),
+            insert_escape: Some("jk".to_string()),
         };
 
         assert_eq!(
@@ -210,7 +229,12 @@ mod tests {
             "cli-theme"
         );
         assert_eq!(Config::resolve(Some(&file), None).theme, "file-theme");
+        assert_eq!(
+            Config::resolve(Some(&file), None).insert_escape.as_deref(),
+            Some("jk")
+        );
         assert_eq!(Config::resolve(None, None).theme, DEFAULT_THEME);
+        assert_eq!(Config::resolve(None, None).insert_escape, None);
     }
 
     #[test]
@@ -261,6 +285,31 @@ mod tests {
         match error {
             ConfigLoadError::Invalid { message } => {
                 assert!(message.contains("theme"));
+            }
+            other => panic!("expected validation error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn load_from_locations_loads_insert_escape_binding() {
+        let home = unique_temp_dir("insert-escape-home");
+        write_config(&home, "insert_escape = \"jk\"");
+
+        let config = Config::load_from_locations(home, vec![], None).expect("should load");
+
+        assert_eq!(config.insert_escape.as_deref(), Some("jk"));
+    }
+
+    #[test]
+    fn load_from_locations_rejects_invalid_insert_escape_binding() {
+        let home = unique_temp_dir("invalid-insert-escape-home");
+        write_config(&home, "insert_escape = \"   \"");
+
+        let error = Config::load_from_locations(home, vec![], None).expect_err("should fail");
+
+        match error {
+            ConfigLoadError::Invalid { message } => {
+                assert!(message.contains("insert_escape"));
             }
             other => panic!("expected validation error, got {other:?}"),
         }

@@ -14,7 +14,7 @@ pub use action::{
     QuoteKind, RepeatReplay, TextObject,
 };
 pub use insert::InsertMode;
-pub use keymap::{CountParser, Keymap, TrieKeymap};
+pub use keymap::{CountParser, KeyStringParseError, Keymap, TrieKeymap, validate_key_string};
 pub use mode::{Mode, ModeKind};
 pub use normal::NormalMode;
 

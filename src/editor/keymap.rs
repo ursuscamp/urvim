@@ -1,5 +1,6 @@
 use super::Action;
 use std::collections::BTreeMap;
+use std::fmt;
 
 /// A mapping from key sequences to actions.
 pub trait Keymap {
@@ -79,7 +80,7 @@ impl TrieKeymap {
     /// The string uses the same canonical notation produced by
     /// `Key::canonical_string()`.
     pub fn insert_str(&mut self, keys: &str, action: Action) {
-        let parsed = parse_key_string(keys);
+        let parsed = validate_key_string(keys).expect("invalid canonical key string");
         self.insert_sequence(parsed, action);
     }
 
@@ -152,6 +153,75 @@ impl Default for TrieKeymap {
     }
 }
 
+/// Errors that can occur while parsing a canonical key string.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum KeyStringParseError {
+    /// The input string was empty or only whitespace.
+    Empty,
+    /// A `<...>` token started but did not terminate with `>`.
+    UnterminatedSpecialToken,
+    /// An empty special token `<>` was provided.
+    EmptySpecialToken,
+}
+
+impl fmt::Display for KeyStringParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Empty => write!(f, "key string must not be empty or whitespace"),
+            Self::UnterminatedSpecialToken => {
+                write!(f, "key string contains an unterminated special token")
+            }
+            Self::EmptySpecialToken => write!(f, "key string contains an empty special token"),
+        }
+    }
+}
+
+impl std::error::Error for KeyStringParseError {}
+
+/// Validates a canonical key string and returns its parsed token sequence.
+pub fn validate_key_string(keys: &str) -> Result<Vec<String>, KeyStringParseError> {
+    if keys.trim().is_empty() {
+        return Err(KeyStringParseError::Empty);
+    }
+
+    let mut tokens = Vec::new();
+    let mut chars = keys.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        if ch == '<' {
+            let mut token = String::from("<");
+            let mut found_closing = false;
+
+            while let Some(next) = chars.next() {
+                token.push(next);
+                if next == '>' {
+                    found_closing = true;
+                    break;
+                }
+            }
+
+            if !found_closing {
+                return Err(KeyStringParseError::UnterminatedSpecialToken);
+            }
+
+            if token == "<>" {
+                return Err(KeyStringParseError::EmptySpecialToken);
+            }
+
+            tokens.push(token);
+            continue;
+        }
+
+        tokens.push(ch.to_string());
+    }
+
+    if tokens.is_empty() {
+        return Err(KeyStringParseError::Empty);
+    }
+
+    Ok(tokens)
+}
+
 /// Parser that extracts action keys and multiplicative count from key sequences.
 pub struct CountParser;
 
@@ -209,66 +279,38 @@ impl CountParser {
     }
 }
 
-#[derive(Debug)]
-struct KeyStringParseError;
-
-fn parse_key_string(keys: &str) -> Vec<String> {
-    let mut tokens = Vec::new();
-    let mut chars = keys.chars().peekable();
-
-    while let Some(ch) = chars.next() {
-        if ch == '<' {
-            let mut token = String::from("<");
-            let mut found_closing = false;
-
-            while let Some(next) = chars.next() {
-                token.push(next);
-                if next == '>' {
-                    found_closing = true;
-                    break;
-                }
-            }
-
-            if !found_closing || token == "<>" {
-                panic!("{:?}", KeyStringParseError);
-            }
-
-            tokens.push(token);
-            continue;
-        }
-
-        tokens.push(ch.to_string());
-    }
-
-    tokens
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_parse_key_string_single_key() {
-        assert_eq!(parse_key_string("g"), vec!["g".to_string()]);
+        assert_eq!(
+            validate_key_string("g").expect("should parse"),
+            vec!["g".to_string()]
+        );
     }
 
     #[test]
     fn test_parse_key_string_multi_key() {
         assert_eq!(
-            parse_key_string("gg"),
+            validate_key_string("gg").expect("should parse"),
             vec!["g".to_string(), "g".to_string()]
         );
     }
 
     #[test]
     fn test_parse_key_string_special_token() {
-        assert_eq!(parse_key_string("<C-s>"), vec!["<C-s>".to_string()]);
+        assert_eq!(
+            validate_key_string("<C-s>").expect("should parse"),
+            vec!["<C-s>".to_string()]
+        );
     }
 
     #[test]
     fn test_parse_key_string_mixed_sequence() {
         assert_eq!(
-            parse_key_string("d<LessThan>"),
+            validate_key_string("d<LessThan>").expect("should parse"),
             vec!["d".to_string(), "<LessThan>".to_string()]
         );
     }
@@ -285,8 +327,18 @@ mod tests {
     }
 
     #[test]
-    #[should_panic]
-    fn test_parse_key_string_rejects_unterminated_special_token() {
-        let _ = parse_key_string("<Esc");
+    fn test_validate_key_string_rejects_unterminated_special_token() {
+        assert!(matches!(
+            validate_key_string("<Esc"),
+            Err(KeyStringParseError::UnterminatedSpecialToken)
+        ));
+    }
+
+    #[test]
+    fn test_validate_key_string_rejects_empty_input() {
+        assert!(matches!(
+            validate_key_string("   "),
+            Err(KeyStringParseError::Empty)
+        ));
     }
 }

@@ -1,4 +1,6 @@
 use super::*;
+use crate::config::Config;
+use crate::globals::set_test_config;
 use crate::terminal::Key;
 
 fn key(c: char) -> Key {
@@ -10,6 +12,13 @@ fn handle_and_unwrap(mode: &mut impl Mode, k: &Key) -> Action {
         HandleKeyResult::Complete(action) => action,
         HandleKeyResult::WaitForMore => Action::None,
         HandleKeyResult::InvalidSequence => Action::None,
+    }
+}
+
+fn configured_test_config(insert_escape: Option<&str>) -> Config {
+    Config {
+        theme: "test-theme".to_string(),
+        insert_escape: insert_escape.map(str::to_owned),
     }
 }
 
@@ -44,6 +53,73 @@ fn test_insert_mode_escape_switches_to_normal() {
         handle_and_unwrap(&mut mode, &Key::new(crate::terminal::KeyCode::Esc)),
         Action::SwitchToNormal
     );
+}
+
+#[test]
+fn test_insert_mode_configured_escape_binding_switches_to_normal() {
+    let _guard = set_test_config(configured_test_config(Some("jk")));
+    let mut mode = InsertMode::new();
+
+    assert!(matches!(
+        mode.handle_key(&key('j')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert_eq!(
+        handle_and_unwrap(&mut mode, &key('k')),
+        Action::SwitchToNormal
+    );
+    assert_eq!(mode.take_repeat_text(), None);
+}
+
+#[test]
+fn test_insert_mode_configured_escape_binding_keeps_builtin_escape() {
+    let _guard = set_test_config(configured_test_config(Some("jk")));
+    let mut mode = InsertMode::new();
+
+    assert_eq!(
+        handle_and_unwrap(&mut mode, &Key::new(crate::terminal::KeyCode::Esc)),
+        Action::SwitchToNormal
+    );
+}
+
+#[test]
+fn test_configured_escape_binding_does_not_affect_normal_mode() {
+    let _guard = set_test_config(configured_test_config(Some("jk")));
+    let mut mode = NormalMode::new();
+
+    assert_eq!(handle_and_unwrap(&mut mode, &key('j')), Action::MoveDown);
+}
+
+#[test]
+fn test_insert_mode_partial_escape_sequence_falls_back_to_literal_text() {
+    let _guard = set_test_config(configured_test_config(Some("jk")));
+    let mut mode = InsertMode::new();
+
+    assert!(matches!(
+        mode.handle_key(&key('j')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert_eq!(
+        handle_and_unwrap(&mut mode, &key('j')),
+        Action::InsertText("jj".to_string())
+    );
+    assert_eq!(mode.take_repeat_text().as_deref(), Some("jj"));
+}
+
+#[test]
+fn test_insert_mode_partial_escape_sequence_keeps_following_text() {
+    let _guard = set_test_config(configured_test_config(Some("jk")));
+    let mut mode = InsertMode::new();
+
+    assert!(matches!(
+        mode.handle_key(&key('j')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert_eq!(
+        handle_and_unwrap(&mut mode, &key('u')),
+        Action::InsertText("ju".to_string())
+    );
+    assert_eq!(mode.take_repeat_text().as_deref(), Some("ju"));
 }
 
 #[test]

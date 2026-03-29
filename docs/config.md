@@ -23,10 +23,11 @@ Command-line flags override config file values.
 
 ## Current Schema
 
-The first canonical config value is `theme`.
+The canonical config values are `theme` and `insert_escape`.
 
 ```toml
 theme = "Friday Night"
+insert_escape = "jk"
 ```
 
 ### `theme`
@@ -36,6 +37,16 @@ Sets the active editor theme by name.
 - Type: string
 - Default: existing built-in default theme
 - Override: `--theme <name>`
+
+### `insert_escape`
+
+Sets an optional alternate insert-mode escape binding using urvim's canonical key string format.
+
+- Type: string
+- Default: not set
+- Behavior: adds an additional insert-mode binding alongside `<Esc>`
+- Examples: `jk`, `<C-[>`
+- Validation: empty, whitespace-only, or malformed key strings are rejected at startup
 
 ## Notes
 

@@ -203,6 +203,15 @@ Terminal input events:
 - `Resize(rows, cols)` - Terminal size change
 - `Paste(text)` - Bracketed paste content
 
+### Insert Mode Escape Binding
+A user-configurable canonical key string that exits insert mode and switches back to normal mode. It is added alongside the built-in `<Esc>` binding so users can choose a more ergonomic home-row escape sequence such as `jk`.
+
+**Context:** Configuration loading, insert mode keymap setup
+
+**Example:** `insert_escape = "jk"` adds `j` followed by `k` as an alternate way to leave insert mode.
+
+**Related Terms:** Insert Mode, Keymap, Canonical String, Configuration
+
 ### Key String Parser
 A helper that turns a canonical key string into an ordered list of trie key tokens. Every non-`<...>` character is treated as one key, and every bracketed canonical special key is treated as one token.
 

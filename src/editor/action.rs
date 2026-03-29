@@ -143,6 +143,8 @@ pub enum Action {
     MoveUp,
     MoveRight,
     InsertChar(char),
+    /// Insert a batch of literal text characters.
+    InsertText(String),
     SwitchToNormal,
     SwitchToInsert,
     Quit,
@@ -201,6 +203,7 @@ impl Action {
                 | Action::MoveToLineStart
                 | Action::MoveToLineContentStart
                 | Action::InsertChar(_)
+                | Action::InsertText(_)
                 | Action::DeleteBackward
                 | Action::DeleteForward
                 | Action::DeleteLine
@@ -326,7 +329,8 @@ impl Action {
             | Action::AppendToLineEnd
             | Action::InsertAtLineStart
             | Action::OpenLineBelow
-            | Action::OpenLineAbove => true,
+            | Action::OpenLineAbove
+            | Action::InsertText(_) => true,
             Action::InsertChar(_) => false,
             Action::Undo | Action::Redo => false,
             Action::Count(_, inner) => inner.is_snapshottable(),
