@@ -152,6 +152,13 @@ Types of word boundaries for text navigation:
 - **BigWord**: Any non-whitespace character
 - **BigWordEnd**: End of a BigWord
 
+### BigWord Text Object
+An operator-pending text object family that selects whitespace-delimited runs using `Boundary::BigWord` semantics. In urvim, the expected bindings are `iW` for the inner selection and `aW` for the around selection.
+
+**Context:** Operator-pending mode, text object resolution, normal-mode keymaps
+
+**Related Terms:** Boundary, Text Object, Operator-Pending Mode
+
 ### Grapheme Cluster
 A user-perceived character, which may consist of multiple Unicode code points (e.g., emoji with skin tone modifiers, combining characters).
 
@@ -253,7 +260,7 @@ The position in the buffer that corresponds to the top-left of the viewport.
 An action that waits for a motion or text object to define its target region. Examples: `Delete`, `Change`, `Yank`.
 
 ### Text Object
-A selection of text defined by boundaries (start and end positions). Text objects are used with operators in operator-pending mode. Examples: `InnerWord`, `AroundWord`, `InnerBracket`, `AroundBracket`.
+A selection of text defined by boundaries (start and end positions). Text objects are used with operators in operator-pending mode. Examples: `InnerWord`, `AroundWord`, `InnerBracket`, `AroundBracket`. Word-family variants can be based on either `Boundary::Word` or `Boundary::BigWord` semantics.
 
 ### Operator-Pending Mode
 A state where the editor waits for a motion or text object after an operator key is pressed. For example, after pressing `d`, the editor waits for `w` (motion) or `iw` (text object) to define what to delete.

@@ -37,6 +37,10 @@ pub enum BoundaryMotion {
 pub enum TextObject {
     InnerWord,
     AroundWord,
+    /// Text between BigWord boundaries, excluding trailing whitespace.
+    InnerBigWord,
+    /// Text between BigWord boundaries, including trailing whitespace.
+    AroundBigWord,
     /// Text between matching delimiters, excluding the delimiters themselves.
     InnerBracket(BracketKind),
     /// Text between matching delimiters, including the delimiters.

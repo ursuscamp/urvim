@@ -4,3 +4,5 @@ This is a list, in no particular order, of things that need to be addressed whic
 
 - operations + text objects
 - registers
+
+- trie keymap insert_str method for easier reading/writing in code

@@ -1,89 +1,34 @@
 use super::*;
 
-impl Buffer {
-    pub fn get_inner_word_range(&self, cursor: Cursor) -> Option<TextObjectRange> {
-        let line = self.line_at(cursor.line)?;
-        let line_str = line.as_ref();
-        let line_len = line_str.len();
-        let cursor_grapheme = self.grapheme_at_byte(cursor.line, cursor.col);
+type GraphemePredicate = fn(&str) -> bool;
 
-        if cursor_grapheme.is_none_or(Self::is_word_char) {
-            let mut word_start = cursor.col;
-            let mut word_end = cursor.col;
-            let mut col = cursor.col;
-            while col > 0 {
-                let prev_col = self.prev_grapheme_start(line_str, col);
-                if prev_col == col {
-                    break;
-                }
-                col = prev_col;
-                if let Some(g) = line_str.get(col..).and_then(|s| s.graphemes(true).next()) {
-                    if Self::is_word_char(g) {
-                        word_start = col;
-                    } else {
-                        break;
-                    }
-                } else {
-                    break;
-                }
-            }
-            col = cursor.col;
-            while col < line_len {
-                let next_grapheme = line_str.get(col..).and_then(|s| s.graphemes(true).next());
-                if let Some(g) = next_grapheme {
-                    if Self::is_word_char(g) {
-                        word_end = col + g.len();
-                        col = word_end;
-                    } else {
-                        break;
-                    }
-                } else {
-                    break;
-                }
-            }
-            Some(TextObjectRange {
-                start: Cursor::new(cursor.line, word_start),
-                end: Cursor::new(cursor.line, word_end),
-            })
-        } else {
-            let mut ws_start = cursor.col;
-            let mut ws_end = cursor.col;
-            let mut col = cursor.col;
-            while col > 0 {
-                let prev_col = self.prev_grapheme_start(line_str, col);
-                if prev_col == col {
-                    break;
-                }
-                col = prev_col;
-                if let Some(g) = line_str.get(col..).and_then(|s| s.graphemes(true).next()) {
-                    if Self::is_whitespace_char(g) {
-                        ws_start = col;
-                    } else {
-                        break;
-                    }
-                } else {
-                    break;
-                }
-            }
-            col = cursor.col;
-            while col < line_len {
-                let next_grapheme = line_str.get(col..).and_then(|s| s.graphemes(true).next());
-                if let Some(g) = next_grapheme {
-                    if Self::is_whitespace_char(g) {
-                        ws_end = col + g.len();
-                        col = ws_end;
-                    } else {
-                        break;
-                    }
-                } else {
-                    break;
-                }
-            }
-            Some(TextObjectRange {
-                start: Cursor::new(cursor.line, ws_start),
-                end: Cursor::new(cursor.line, ws_end),
-            })
-        }
+impl Buffer {
+    pub fn get_inner_big_word_range(&self, cursor: Cursor) -> Option<TextObjectRange> {
+        self.get_inner_range_for(cursor, Self::is_bigword_char)
+    }
+
+    pub fn get_inner_big_word_range_with_count(
+        &self,
+        cursor: Cursor,
+        count: usize,
+    ) -> Option<TextObjectRange> {
+        self.expand_text_object_count(cursor, count, Self::get_inner_big_word_range)
+    }
+
+    pub fn get_around_big_word_range(&self, cursor: Cursor) -> Option<TextObjectRange> {
+        self.get_around_range_for(cursor, Self::is_bigword_char, Self::get_inner_big_word_range)
+    }
+
+    pub fn get_around_big_word_range_with_count(
+        &self,
+        cursor: Cursor,
+        count: usize,
+    ) -> Option<TextObjectRange> {
+        self.expand_text_object_count(cursor, count, Self::get_around_big_word_range)
+    }
+
+    pub fn get_inner_word_range(&self, cursor: Cursor) -> Option<TextObjectRange> {
+        self.get_inner_range_for(cursor, Self::is_word_char)
     }
 
     pub fn get_inner_word_range_with_count(
@@ -91,104 +36,11 @@ impl Buffer {
         cursor: Cursor,
         count: usize,
     ) -> Option<TextObjectRange> {
-        let mut range = self.get_inner_word_range(cursor)?;
-        for _ in 1..count {
-            let next_cursor = self.next_non_whitespace_cursor(range.end)?;
-            let next_range = self.get_inner_word_range(next_cursor)?;
-            range.end = next_range.end;
-        }
-        Some(range)
+        self.expand_text_object_count(cursor, count, Self::get_inner_word_range)
     }
 
     pub fn get_around_word_range(&self, cursor: Cursor) -> Option<TextObjectRange> {
-        let line = self.line_at(cursor.line)?;
-        let line_str = line.as_ref();
-        let line_len = line_str.len();
-        let cursor_grapheme = self.grapheme_at_byte(cursor.line, cursor.col);
-        if cursor_grapheme.is_none_or(Self::is_word_char) {
-            let inner = self.get_inner_word_range(cursor)?;
-            let mut end_col = inner.end.col;
-            let mut col = inner.end.col;
-            while col < line_len {
-                let next_grapheme = line_str.get(col..).and_then(|s| s.graphemes(true).next());
-                if let Some(g) = next_grapheme {
-                    if Self::is_whitespace_char(g) {
-                        end_col = col + g.len();
-                        col = end_col;
-                    } else {
-                        break;
-                    }
-                } else {
-                    break;
-                }
-            }
-            Some(TextObjectRange {
-                start: inner.start,
-                end: Cursor::new(cursor.line, end_col),
-            })
-        } else {
-            let mut ws_start = cursor.col;
-            let mut ws_end = cursor.col;
-            let mut word_end_col = cursor.col;
-            let mut col = cursor.col;
-            while col > 0 {
-                let prev_col = self.prev_grapheme_start(line_str, col);
-                if prev_col == col {
-                    break;
-                }
-                col = prev_col;
-                if let Some(g) = line_str.get(col..).and_then(|s| s.graphemes(true).next()) {
-                    if Self::is_whitespace_char(g) {
-                        ws_start = col;
-                    } else {
-                        break;
-                    }
-                } else {
-                    break;
-                }
-            }
-            col = cursor.col;
-            while col < line_len {
-                let next_grapheme = line_str.get(col..).and_then(|s| s.graphemes(true).next());
-                if let Some(g) = next_grapheme {
-                    if Self::is_whitespace_char(g) {
-                        ws_end = col + g.len();
-                        col = ws_end;
-                    } else if Self::is_word_char(g) {
-                        word_end_col = col;
-                        while word_end_col < line_len {
-                            let word_grapheme = line_str
-                                .get(word_end_col..)
-                                .and_then(|s| s.graphemes(true).next());
-                            if let Some(wg) = word_grapheme {
-                                if Self::is_word_char(wg) {
-                                    word_end_col += wg.len();
-                                } else {
-                                    break;
-                                }
-                            } else {
-                                break;
-                            }
-                        }
-                        break;
-                    } else {
-                        word_end_col = col + g.len();
-                        break;
-                    }
-                } else {
-                    break;
-                }
-            }
-            let end_col = if word_end_col > ws_end {
-                word_end_col
-            } else {
-                ws_end
-            };
-            Some(TextObjectRange {
-                start: Cursor::new(cursor.line, ws_start),
-                end: Cursor::new(cursor.line, end_col),
-            })
-        }
+        self.get_around_range_for(cursor, Self::is_word_char, Self::get_inner_word_range)
     }
 
     pub fn get_around_word_range_with_count(
@@ -196,13 +48,143 @@ impl Buffer {
         cursor: Cursor,
         count: usize,
     ) -> Option<TextObjectRange> {
-        let mut range = self.get_around_word_range(cursor)?;
+        self.expand_text_object_count(cursor, count, Self::get_around_word_range)
+    }
+
+    fn get_inner_range_for(
+        &self,
+        cursor: Cursor,
+        token_predicate: GraphemePredicate,
+    ) -> Option<TextObjectRange> {
+        let line = self.line_at(cursor.line)?;
+        let line_str = line.as_ref();
+        let cursor_grapheme = self.grapheme_at_byte(cursor.line, cursor.col);
+        let region_predicate = if cursor_grapheme.is_none_or(token_predicate) {
+            token_predicate
+        } else {
+            Self::is_whitespace_char
+        };
+        let start = self.expand_left_matching(line_str, cursor.col, region_predicate);
+        let end = self.expand_right_matching(line_str, cursor.col, region_predicate);
+        Some(TextObjectRange {
+            start: Cursor::new(cursor.line, start),
+            end: Cursor::new(cursor.line, end),
+        })
+    }
+
+    fn get_around_range_for(
+        &self,
+        cursor: Cursor,
+        token_predicate: GraphemePredicate,
+        inner_resolver: fn(&Self, Cursor) -> Option<TextObjectRange>,
+    ) -> Option<TextObjectRange> {
+        let line = self.line_at(cursor.line)?;
+        let line_str = line.as_ref();
+        let cursor_grapheme = self.grapheme_at_byte(cursor.line, cursor.col);
+
+        if cursor_grapheme.is_none_or(token_predicate) {
+            // Around-text-objects on a token are just the inner selection plus
+            // any immediately trailing whitespace.
+            let inner = inner_resolver(self, cursor)?;
+            let end = self.expand_right_matching(line_str, inner.end.col, Self::is_whitespace_char);
+            return Some(TextObjectRange {
+                start: inner.start,
+                end: Cursor::new(cursor.line, end),
+            });
+        }
+
+        // On whitespace, include the whole separator block and then the next
+        // logical object after it. For `aw`, punctuation is a single object;
+        // for `aW`, punctuation is part of the following BigWord.
+        let whitespace_start = self.expand_left_matching(line_str, cursor.col, Self::is_whitespace_char);
+        let whitespace_end =
+            self.expand_right_matching(line_str, cursor.col, Self::is_whitespace_char);
+        let end = self.end_after_whitespace_and_object(line_str, whitespace_end, token_predicate);
+        Some(TextObjectRange {
+            start: Cursor::new(cursor.line, whitespace_start),
+            end: Cursor::new(cursor.line, end.max(whitespace_end)),
+        })
+    }
+
+    fn expand_text_object_count(
+        &self,
+        cursor: Cursor,
+        count: usize,
+        resolver: fn(&Self, Cursor) -> Option<TextObjectRange>,
+    ) -> Option<TextObjectRange> {
+        let mut range = resolver(self, cursor)?;
+        // Counts are expanded by resolving the next object from the first
+        // non-whitespace cursor after the current range. That keeps count logic
+        // separate from the object-specific scanning rules.
         for _ in 1..count {
             let next_cursor = self.next_non_whitespace_cursor(range.end)?;
-            let next_range = self.get_around_word_range(next_cursor)?;
+            let next_range = resolver(self, next_cursor)?;
             range.end = next_range.end;
         }
         Some(range)
+    }
+
+    fn expand_left_matching(
+        &self,
+        line: &str,
+        start_col: usize,
+        predicate: GraphemePredicate,
+    ) -> usize {
+        let mut start = start_col;
+        let mut col = start_col;
+        while col > 0 {
+            let prev_col = self.prev_grapheme_start(line, col);
+            if prev_col == col {
+                break;
+            }
+            col = prev_col;
+            if matches!(self.grapheme_at_col(line, col), Some(g) if predicate(g)) {
+                start = col;
+            } else {
+                break;
+            }
+        }
+        start
+    }
+
+    fn expand_right_matching(
+        &self,
+        line: &str,
+        start_col: usize,
+        predicate: GraphemePredicate,
+    ) -> usize {
+        let mut end = start_col;
+        let mut col = start_col;
+        while col < line.len() {
+            if let Some(g) = self.grapheme_at_col(line, col) {
+                if predicate(g) {
+                    end = col + g.len();
+                    col = end;
+                } else {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+        end
+    }
+
+    fn end_after_whitespace_and_object(
+        &self,
+        line: &str,
+        start_col: usize,
+        token_predicate: GraphemePredicate,
+    ) -> usize {
+        match self.grapheme_at_col(line, start_col) {
+            Some(g) if token_predicate(g) => self.expand_right_matching(line, start_col, token_predicate),
+            Some(g) => start_col + g.len(),
+            None => start_col,
+        }
+    }
+
+    fn grapheme_at_col<'a>(&self, line: &'a str, col: usize) -> Option<&'a str> {
+        line.get(col..).and_then(|s| s.graphemes(true).next())
     }
 
     pub(super) fn prev_grapheme_start(&self, line: &str, byte_offset: usize) -> usize {

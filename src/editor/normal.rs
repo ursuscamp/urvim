@@ -83,6 +83,34 @@ impl NormalMode {
                 OperatorTarget::TextObject(TextObject::AroundWord),
             ),
         );
+        trie_keymap.insert_sequence(
+            vec!["d".to_string(), "i".to_string(), "W".to_string()],
+            Action::Operation(
+                Operator::Delete,
+                OperatorTarget::TextObject(TextObject::InnerBigWord),
+            ),
+        );
+        trie_keymap.insert_sequence(
+            vec!["d".to_string(), "a".to_string(), "W".to_string()],
+            Action::Operation(
+                Operator::Delete,
+                OperatorTarget::TextObject(TextObject::AroundBigWord),
+            ),
+        );
+        trie_keymap.insert_sequence(
+            vec!["c".to_string(), "i".to_string(), "W".to_string()],
+            Action::Operation(
+                Operator::Change,
+                OperatorTarget::TextObject(TextObject::InnerBigWord),
+            ),
+        );
+        trie_keymap.insert_sequence(
+            vec!["c".to_string(), "a".to_string(), "W".to_string()],
+            Action::Operation(
+                Operator::Change,
+                OperatorTarget::TextObject(TextObject::AroundBigWord),
+            ),
+        );
         for (kind, key) in [
             (QuoteKind::Single, "'"),
             (QuoteKind::Double, "\""),

@@ -28,6 +28,8 @@ impl Buffer {
             OperatorTarget::TextObject(text_object) => match text_object {
                 TextObject::InnerWord => self.get_inner_word_range_with_count(cursor, 1),
                 TextObject::AroundWord => self.get_around_word_range_with_count(cursor, 1),
+                TextObject::InnerBigWord => self.get_inner_big_word_range_with_count(cursor, 1),
+                TextObject::AroundBigWord => self.get_around_big_word_range_with_count(cursor, 1),
                 TextObject::InnerBracket(kind) => {
                     self.get_inner_bracket_range_with_count(cursor, kind, 1)
                 }
@@ -63,6 +65,8 @@ impl Buffer {
             OperatorTarget::TextObject(text_object) => match text_object {
                 TextObject::InnerWord => self.get_inner_word_range_with_count(cursor, count),
                 TextObject::AroundWord => self.get_around_word_range_with_count(cursor, count),
+                TextObject::InnerBigWord => self.get_inner_big_word_range_with_count(cursor, count),
+                TextObject::AroundBigWord => self.get_around_big_word_range_with_count(cursor, count),
                 TextObject::InnerBracket(kind) => {
                     self.get_inner_bracket_range_with_count(cursor, kind, count)
                 }

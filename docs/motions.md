@@ -683,6 +683,8 @@ Text objects allow targeted text selection combined with operators. They are tri
 |------------|-------------|
 | `iw` | Inner word: word under cursor (excludes whitespace boundaries) |
 | `aw` | Around word: word under cursor plus trailing whitespace |
+| `iW` | Inner BigWord: whitespace-delimited run under cursor (excludes trailing whitespace) |
+| `aW` | Around BigWord: whitespace-delimited run under cursor plus trailing whitespace |
 | `i(`/`i)` | Inner bracket text object for parentheses |
 | `a(`/`a)` | Around bracket text object for parentheses |
 | `i[`/`i]` | Inner bracket text object for square brackets |
@@ -714,6 +716,7 @@ Counts multiply when used with text objects:
 - `3diw` - delete 3 inner words (leading count: 3)
 - `d3iw` - delete 3 inner words (sub-count after operator: 3)
 - `3d3iw` - delete 9 inner words (combined: 3 × 3 = 9)
+- `3diW` - delete 3 BigWords (same multiplicative count behavior)
 - `di"` / `da'` / `ci&#96;` - quote text objects work with the same operator-pending flow
 
 ### Inner Word (iw)
@@ -745,6 +748,34 @@ Examples on "  hello world  " with cursor positions:
 | on 'h' in "hello" | "hello " | "  world  " |
 | on 'w' in "world" | "world  " | "  hello " |
 | inside "  " (between words) | "  world" | "  hello  " |
+
+### Inner BigWord (iW)
+
+Selects the whitespace-delimited run under the cursor without surrounding whitespace:
+
+- **Cursor inside a BigWord**: Selects that contiguous non-whitespace run
+- **Cursor inside whitespace**: Selects the entire whitespace region
+
+Examples on `"foo-bar baz"` with cursor positions:
+
+| Cursor Position | `diW` deletes | Result |
+| --- | --- | --- |
+| on `f` in `"foo-bar"` | `"foo-bar"` | `" baz"` |
+| inside `" "` between words | `" "` | `"foo-barbaz"` |
+
+### Around BigWord (aW)
+
+Selects the whitespace-delimited run under the cursor plus trailing whitespace:
+
+- **Cursor inside a BigWord**: Selects the BigWord plus all trailing whitespace
+- **Cursor inside whitespace**: Selects whitespace plus the trailing BigWord after it
+
+Examples on `"foo-bar   baz"` with cursor positions:
+
+| Cursor Position | `daW` deletes | Result |
+| --- | --- | --- |
+| on `f` in `"foo-bar"` | `"foo-bar   "` | `"baz"` |
+| inside `"   "` between words | `"   baz"` | `"foo-bar"` |
 
 ### Bracket Text Objects
 

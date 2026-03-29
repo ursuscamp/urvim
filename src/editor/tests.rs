@@ -179,6 +179,90 @@ fn test_ciw_sequence() {
 }
 
 #[test]
+fn test_diw_capital_w_sequence() {
+    let mut mode = NormalMode::new();
+    assert!(matches!(
+        mode.handle_key(&key('d')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert!(matches!(
+        mode.handle_key(&key('i')),
+        HandleKeyResult::WaitForMore
+    ));
+    let result = mode.handle_key(&key('W'));
+    assert!(matches!(
+        result,
+        HandleKeyResult::Complete(Action::Operation(
+            Operator::Delete,
+            OperatorTarget::TextObject(TextObject::InnerBigWord),
+        ))
+    ));
+}
+
+#[test]
+fn test_daw_capital_w_sequence() {
+    let mut mode = NormalMode::new();
+    assert!(matches!(
+        mode.handle_key(&key('d')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert!(matches!(
+        mode.handle_key(&key('a')),
+        HandleKeyResult::WaitForMore
+    ));
+    let result = mode.handle_key(&key('W'));
+    assert!(matches!(
+        result,
+        HandleKeyResult::Complete(Action::Operation(
+            Operator::Delete,
+            OperatorTarget::TextObject(TextObject::AroundBigWord),
+        ))
+    ));
+}
+
+#[test]
+fn test_ciw_capital_w_sequence() {
+    let mut mode = NormalMode::new();
+    assert!(matches!(
+        mode.handle_key(&key('c')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert!(matches!(
+        mode.handle_key(&key('i')),
+        HandleKeyResult::WaitForMore
+    ));
+    let result = mode.handle_key(&key('W'));
+    assert!(matches!(
+        result,
+        HandleKeyResult::Complete(Action::Operation(
+            Operator::Change,
+            OperatorTarget::TextObject(TextObject::InnerBigWord),
+        ))
+    ));
+}
+
+#[test]
+fn test_caw_capital_w_sequence() {
+    let mut mode = NormalMode::new();
+    assert!(matches!(
+        mode.handle_key(&key('c')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert!(matches!(
+        mode.handle_key(&key('a')),
+        HandleKeyResult::WaitForMore
+    ));
+    let result = mode.handle_key(&key('W'));
+    assert!(matches!(
+        result,
+        HandleKeyResult::Complete(Action::Operation(
+            Operator::Change,
+            OperatorTarget::TextObject(TextObject::AroundBigWord),
+        ))
+    ));
+}
+
+#[test]
 fn test_bracket_text_object_sequences() {
     let cases = [
         (

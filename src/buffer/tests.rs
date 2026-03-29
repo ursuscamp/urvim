@@ -1338,6 +1338,114 @@ fn test_operator_target_bigword_backward_range() {
 }
 
 #[test]
+fn test_operator_target_inner_bigword_range() {
+    let buf = Buffer::from_str("foo-bar baz");
+    let range = buf
+        .get_operator_target_range(
+            Cursor::new(0, 2),
+            OperatorTarget::TextObject(TextObject::InnerBigWord),
+        )
+        .unwrap();
+    assert_eq!(
+        range,
+        TextObjectRange {
+            start: Cursor::new(0, 0),
+            end: Cursor::new(0, 7),
+        }
+    );
+}
+
+#[test]
+fn test_operator_target_around_bigword_range() {
+    let buf = Buffer::from_str("foo-bar   baz");
+    let range = buf
+        .get_operator_target_range(
+            Cursor::new(0, 2),
+            OperatorTarget::TextObject(TextObject::AroundBigWord),
+        )
+        .unwrap();
+    assert_eq!(
+        range,
+        TextObjectRange {
+            start: Cursor::new(0, 0),
+            end: Cursor::new(0, 10),
+        }
+    );
+}
+
+#[test]
+fn test_operator_target_inner_bigword_whitespace_range() {
+    let buf = Buffer::from_str("x foo-bar baz");
+    let range = buf
+        .get_operator_target_range(
+            Cursor::new(0, 1),
+            OperatorTarget::TextObject(TextObject::InnerBigWord),
+        )
+        .unwrap();
+    assert_eq!(
+        range,
+        TextObjectRange {
+            start: Cursor::new(0, 1),
+            end: Cursor::new(0, 2),
+        }
+    );
+}
+
+#[test]
+fn test_operator_target_around_bigword_whitespace_range() {
+    let buf = Buffer::from_str("x foo-bar baz");
+    let range = buf
+        .get_operator_target_range(
+            Cursor::new(0, 1),
+            OperatorTarget::TextObject(TextObject::AroundBigWord),
+        )
+        .unwrap();
+    assert_eq!(
+        range,
+        TextObjectRange {
+            start: Cursor::new(0, 1),
+            end: Cursor::new(0, 9),
+        }
+    );
+}
+
+#[test]
+fn test_operator_target_bigword_whitespace_only_range() {
+    let buf = Buffer::from_str("   ");
+    let range = buf
+        .get_operator_target_range(
+            Cursor::new(0, 0),
+            OperatorTarget::TextObject(TextObject::InnerBigWord),
+        )
+        .unwrap();
+    assert_eq!(
+        range,
+        TextObjectRange {
+            start: Cursor::new(0, 0),
+            end: Cursor::new(0, 3),
+        }
+    );
+}
+
+#[test]
+fn test_operator_target_bigword_empty_line_is_zero_length() {
+    let buf = Buffer::new();
+    let range = buf
+        .get_operator_target_range(
+            Cursor::new(0, 0),
+            OperatorTarget::TextObject(TextObject::InnerBigWord),
+        )
+        .unwrap();
+    assert_eq!(
+        range,
+        TextObjectRange {
+            start: Cursor::new(0, 0),
+            end: Cursor::new(0, 0),
+        }
+    );
+}
+
+#[test]
 fn test_operator_target_line_end_range() {
     let buf = Buffer::from_str("hello world");
     let range = buf
@@ -1502,6 +1610,33 @@ fn test_operator_target_invalid_count_is_none() {
             0,
         )
         .is_none()
+    );
+    assert!(
+        buf.get_operator_target_range_with_count(
+            Cursor::new(0, 0),
+            OperatorTarget::TextObject(TextObject::InnerBigWord),
+            0,
+        )
+        .is_none()
+    );
+}
+
+#[test]
+fn test_operator_target_counted_bigword_range() {
+    let buf = Buffer::from_str("foo-bar baz qux");
+    let range = buf
+        .get_operator_target_range_with_count(
+            Cursor::new(0, 0),
+            OperatorTarget::TextObject(TextObject::InnerBigWord),
+            2,
+        )
+        .unwrap();
+    assert_eq!(
+        range,
+        TextObjectRange {
+            start: Cursor::new(0, 0),
+            end: Cursor::new(0, 11),
+        }
     );
 }
 
