@@ -4,10 +4,11 @@ use std::collections::BTreeMap;
 
 use crate::terminal::{Color, Rgb, Style};
 
+use super::Tag;
 use super::error::ThemeLoadError;
-use super::model::{StyleOverride, SyntaxStyles, Theme, ThemeKind, UiStyles};
+use super::model::{StyleOverride, SyntaxTagStyles, Theme, ThemeKind, UiStyles};
 use super::parser::parse_theme;
-use super::schema::{RawColorValue, RawStyle, RawSyntaxStyles, RawTheme, RawUiStyles};
+use super::schema::{RawColorValue, RawStyle, RawTheme, RawUiStyles};
 
 /// Parses and resolves a TOML theme document in one step.
 pub fn resolve_theme_from_str(source: &str, input: &str) -> Result<Theme, ThemeLoadError> {
@@ -179,98 +180,35 @@ fn resolve_ui_styles(
 
 fn resolve_syntax_styles(
     theme_name: &str,
-    raw: &RawSyntaxStyles,
+    raw: &std::collections::BTreeMap<String, RawStyle>,
     default_style: Style,
     palette: &BTreeMap<String, Color>,
-) -> Result<SyntaxStyles, ThemeLoadError> {
-    Ok(SyntaxStyles::new(
-        resolve_style(
+) -> Result<SyntaxTagStyles, ThemeLoadError> {
+    let mut styles = SyntaxTagStyles::default();
+    for (tag, raw_style) in raw {
+        let tag = Tag::parse(tag).map_err(|_| ThemeLoadError::InvalidTag {
+            theme: theme_name.to_string(),
+            section: "syntax",
+            tag: tag.to_string(),
+        })?;
+        let resolved = resolve_style(
             theme_name,
             "syntax",
-            "comment",
+            tag.as_str(),
             default_style,
-            &raw.comment,
+            raw_style,
             palette,
-        )?,
-        resolve_style(
-            theme_name,
-            "syntax",
-            "constant",
-            default_style,
-            &raw.constant,
-            palette,
-        )?,
-        resolve_style(
-            theme_name,
-            "syntax",
-            "function",
-            default_style,
-            &raw.function,
-            palette,
-        )?,
-        resolve_style(
-            theme_name,
-            "syntax",
-            "keyword",
-            default_style,
-            &raw.keyword,
-            palette,
-        )?,
-        resolve_style(
-            theme_name,
-            "syntax",
-            "number",
-            default_style,
-            &raw.number,
-            palette,
-        )?,
-        resolve_style(
-            theme_name,
-            "syntax",
-            "operator",
-            default_style,
-            &raw.operator,
-            palette,
-        )?,
-        resolve_style(
-            theme_name,
-            "syntax",
-            "punctuation",
-            default_style,
-            &raw.punctuation,
-            palette,
-        )?,
-        resolve_style(
-            theme_name,
-            "syntax",
-            "string",
-            default_style,
-            &raw.string,
-            palette,
-        )?,
-        resolve_style(
-            theme_name,
-            "syntax",
-            "type",
-            default_style,
-            &raw.type_,
-            palette,
-        )?,
-        resolve_style(
-            theme_name,
-            "syntax",
-            "variable",
-            default_style,
-            &raw.variable,
-            palette,
-        )?,
-    ))
+        )?;
+        styles.insert(tag, resolved);
+    }
+
+    Ok(styles)
 }
 
 fn resolve_style(
     theme_name: &str,
     section: &'static str,
-    key: &'static str,
+    key: &str,
     base: Style,
     raw: &RawStyle,
     palette: &BTreeMap<String, Color>,
@@ -282,7 +220,7 @@ fn resolve_style(
 fn resolve_style_override(
     theme_name: &str,
     section: &'static str,
-    key: &'static str,
+    key: &str,
     raw: &RawStyle,
     palette: &BTreeMap<String, Color>,
 ) -> Result<StyleOverride, ThemeLoadError> {
@@ -312,7 +250,7 @@ fn resolve_style_override(
 fn resolve_palette_reference(
     theme_name: &str,
     section: &'static str,
-    key: &'static str,
+    key: &str,
     field: &'static str,
     reference: Option<&String>,
     palette: &BTreeMap<String, Color>,
@@ -333,7 +271,11 @@ fn resolve_palette_reference(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::theme::ThemeRegistry;
+    use crate::theme::{Tag, ThemeRegistry};
+
+    fn tag(value: &str) -> Tag {
+        Tag::parse(value).expect("valid tag")
+    }
 
     fn sample_theme() -> &'static str {
         r##"
@@ -384,7 +326,7 @@ variable = { fg = "base" }
                 .bold()
         );
         assert_eq!(
-            theme.syntax.keyword,
+            theme.syntax_style_for_tag(&tag("keyword")),
             Style::new()
                 .fg(Color::Rgb(Rgb::new(17, 34, 51)))
                 .bg(Color::Rgb(Rgb::new(17, 34, 51)))
@@ -476,7 +418,7 @@ variable = { fg = "base" }
     }
 
     #[test]
-    fn rejects_unknown_syntax_key() {
+    fn rejects_invalid_syntax_tag() {
         let theme = r#"
 name = "demo"
 
@@ -506,16 +448,11 @@ punctuation = { fg = "base" }
 string = { fg = "base" }
 type = { fg = "base" }
 variable = { fg = "base" }
-extra = { fg = "base" }
+Extra = { fg = "base" }
 "#;
 
         let err = resolve_theme_from_str("sample", theme).expect_err("validation should fail");
-        match err {
-            ThemeLoadError::Parse { message, .. } => {
-                assert!(message.contains("extra"));
-            }
-            other => panic!("unexpected error: {other:?}"),
-        }
+        assert!(matches!(err, ThemeLoadError::InvalidTag { .. }));
     }
 
     #[test]
@@ -560,7 +497,7 @@ variable = { fg = "base" }
             Style::new().fg(Color::ansi(1)).bg(Color::ansi(1)).bold()
         );
         assert_eq!(
-            theme.syntax.keyword,
+            theme.syntax_style_for_tag(&tag("keyword")),
             Style::new().fg(Color::ansi(1)).bg(Color::ansi(1)).bold()
         );
     }
@@ -606,6 +543,7 @@ variable = { fg = "base" }
     #[test]
     fn builtin_themes_parse_and_classify() {
         let registry = ThemeRegistry::load_builtin().expect("builtins should load");
+        let friday_night = registry.default_theme();
 
         assert_eq!(registry.default_theme().name(), "Friday Night");
         assert_eq!(
@@ -631,6 +569,10 @@ variable = { fg = "base" }
         assert_eq!(
             registry.get("Catppuccin").unwrap().kind(),
             ThemeKind::TrueColor
+        );
+        assert_eq!(
+            friday_night.syntax_style_for_tag(&Tag::parse("string.interpolation").unwrap()),
+            Style::new().fg(Color::ansi(75)).bg(Color::ansi(16))
         );
     }
 }

@@ -23,11 +23,12 @@ Command-line flags override config file values.
 
 ## Current Schema
 
-The canonical config values are `theme` and `insert_escape`.
+The canonical config values are `theme`, `insert_escape`, and `syntax`.
 
 ```toml
 theme = "Friday Night"
 insert_escape = "jk"
+syntax = true
 ```
 
 ### `theme`
@@ -47,6 +48,15 @@ Sets an optional alternate insert-mode escape binding using urvim's canonical ke
 - Behavior: adds an additional insert-mode binding alongside `<Esc>`
 - Examples: `jk`, `<C-[>`
 - Validation: empty, whitespace-only, or malformed key strings are rejected at startup
+
+### `syntax`
+
+Controls whether syntax highlighting is enabled for rendered buffers.
+
+- Type: boolean
+- Default: `true`
+- Override: `--no-syntax`
+- Behavior: when `false`, buffers still detect filetypes and the status bar still shows the syntax label, but rendered text uses the base theme style only
 
 ## Notes
 

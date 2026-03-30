@@ -1,0 +1,129 @@
+[metadata]
+name = "kotlin"
+display_name = "Kotlin"
+alias = ["kt"]
+filename = ["\\.(kt|kts)$"]
+shebang = []
+
+[[rules]]
+kind = "regex"
+pattern = "//.*$"
+tag = "comment.line"
+
+[[rules]]
+kind = "regex"
+pattern = "\\*/"
+tag = "comment.block"
+context = { requires = ["kotlin_block_comment"], pop = ["kotlin_block_comment"] }
+
+[[rules]]
+kind = "regex"
+pattern = "/\\*"
+tag = "comment.block"
+context = { push = ["kotlin_block_comment"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\"\"\""
+tag = "string"
+context = { requires = ["kotlin_triple_string"], pop = ["kotlin_triple_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\"\"\""
+tag = "string"
+context = { push = ["kotlin_triple_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "[^\"\\\\]+"
+tag = "string"
+context = { requires = ["kotlin_triple_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\""
+tag = "string"
+context = { requires = ["kotlin_string"], pop = ["kotlin_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\""
+tag = "string"
+context = { push = ["kotlin_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "[^\"\\\\\\n]+"
+tag = "string"
+context = { requires = ["kotlin_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\\\\."
+tag = "punctuation"
+context = { requires = ["kotlin_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "'"
+tag = "constant"
+context = { requires = ["kotlin_char"], pop = ["kotlin_char"] }
+
+[[rules]]
+kind = "regex"
+pattern = "'"
+tag = "constant"
+context = { push = ["kotlin_char"] }
+
+[[rules]]
+kind = "regex"
+pattern = "[^'\\\\\\n]+"
+tag = "constant"
+context = { requires = ["kotlin_char"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\\\\."
+tag = "punctuation"
+context = { requires = ["kotlin_char"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\\b(?:0x[0-9A-Fa-f_]+|0b[01_]+|\\d[\\d_]*(?:\\.\\d[\\d_]*)?(?:[eE][+-]?\\d[\\d_]*)?[fFdDlL]?)\\b"
+tag = "number"
+
+[[rules]]
+kind = "regex"
+pattern = "^\\s*@[_A-Za-z][A-Za-z0-9_\\.]*"
+tag = "keyword"
+
+[[rules]]
+kind = "regex"
+pattern = "\\b(?:as|break|class|continue|do|else|for|fun|if|in|interface|is|object|package|return|super|this|throw|try|typealias|val|var|when|while|by|catch|constructor|delegate|dynamic|field|file|get|import|init|param|property|receiver|set|where)\\b"
+tag = "keyword"
+
+[[rules]]
+kind = "regex"
+pattern = "\\b(?:Any|Boolean|Byte|Char|Double|Float|Int|Long|Short|String|Unit|List|Map|Set|MutableList|MutableMap|MutableSet|Array)\\b"
+tag = "type"
+
+[[rules]]
+kind = "regex"
+pattern = "\\b(?:false|null|true)\\b"
+tag = "constant"
+
+[[rules]]
+kind = "regex"
+pattern = "\\b[A-Z][A-Za-z0-9_]*\\b"
+tag = "type"
+
+[[rules]]
+kind = "regex"
+pattern = "[(){}\\[\\],.;:]"
+tag = "punctuation"
+
+[[rules]]
+kind = "regex"
+pattern = "(?:===|!==|==|!=|<=|>=|=>|\\?\\?|\\?\\.|\\+\\+|--|[+\\-*/%=&|!<>^~?])"
+tag = "operator"

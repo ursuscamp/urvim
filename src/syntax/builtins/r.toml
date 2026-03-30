@@ -1,0 +1,78 @@
+[metadata]
+name = "r"
+display_name = "R"
+alias = ["rscript"]
+filename = ["\\.r$"]
+shebang = ["^#!.*\\brscript(?:\\s|$)"]
+
+[[rules]]
+kind = "regex"
+pattern = "#.*$"
+tag = "comment"
+
+[[rules]]
+kind = "regex"
+pattern = "\""
+tag = "string"
+context = { requires = ["r_string"], pop = ["r_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\""
+tag = "string"
+context = { push = ["r_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "[^\"\\\\\\n]+"
+tag = "string"
+context = { requires = ["r_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\\\\."
+tag = "punctuation"
+context = { requires = ["r_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "'"
+tag = "string"
+context = { requires = ["r_single_string"], pop = ["r_single_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "'"
+tag = "string"
+context = { push = ["r_single_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "[^'\\n]+"
+tag = "string"
+context = { requires = ["r_single_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\\b(?:if|else|for|in|repeat|while|function|break|next|return|switch)\\b"
+tag = "keyword"
+
+[[rules]]
+kind = "regex"
+pattern = "\\b(?:TRUE|FALSE|NULL|NA|NaN|Inf)\\b"
+tag = "constant"
+
+[[rules]]
+kind = "regex"
+pattern = "\\b\\d+(?:\\.\\d+)?\\b"
+tag = "number"
+
+[[rules]]
+kind = "regex"
+pattern = "<<?-|->>|<-|->|="
+tag = "operator"
+
+[[rules]]
+kind = "regex"
+pattern = "[(){}\\[\\],.;:]"
+tag = "punctuation"

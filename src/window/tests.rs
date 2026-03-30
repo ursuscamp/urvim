@@ -1,6 +1,7 @@
 use super::*;
 use crate::action::ActionResult;
-use crate::buffer::Cursor;
+use crate::buffer::{BufferId, Cursor};
+use crate::config::Config;
 use crate::editor::Action;
 use crate::editor::BoundaryMotion;
 use crate::editor::BracketKind;
@@ -12,7 +13,8 @@ use crate::editor::TextObject;
 use crate::globals;
 use crate::path::AbsolutePath;
 use crate::terminal::{Color, Style};
-use crate::theme::{SyntaxStyles, Theme, ThemeKind, UiStyles};
+use crate::theme::{SyntaxTagStyles, Tag, Theme, ThemeKind, UiStyles};
+use std::collections::BTreeMap;
 
 fn process_action_and_snapshot(window: &mut Window, action: &Action) {
     assert_eq!(window.process_action(action), ActionResult::Handled);
@@ -31,6 +33,21 @@ fn buffer_text(view: &BufferView) -> String {
         .unwrap_or_default()
 }
 
+fn temp_path_with_ext(name: &str, ext: &str) -> AbsolutePath {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("time should move forward")
+        .as_nanos();
+    let path = std::env::temp_dir().join(format!(
+        "urvim-window-tests-{}-{}-{}.{}",
+        std::process::id(),
+        nanos,
+        name,
+        ext
+    ));
+    AbsolutePath::from_path(path.as_path()).unwrap()
+}
+
 fn themed_window() -> Theme {
     let default_style = Style::new().fg(Color::ansi(15)).bg(Color::ansi(30));
     let ui_styles = UiStyles::new(
@@ -42,18 +59,21 @@ fn themed_window() -> Theme {
         Style::new().fg(Color::ansi(11)).bg(Color::ansi(12)),
         Style::new().fg(Color::ansi(13)).bg(Color::ansi(14)),
     );
-    let syntax_styles = SyntaxStyles::new(
-        Style::new(),
-        Style::new(),
-        Style::new(),
-        Style::new(),
-        Style::new(),
-        Style::new(),
-        Style::new(),
-        Style::new(),
-        Style::new(),
-        Style::new(),
-    );
+    let mut syntax_map = BTreeMap::new();
+    for tag_name in [
+        "comment",
+        "constant",
+        "function",
+        "keyword",
+        "operator",
+        "punctuation",
+        "string",
+        "type",
+        "variable",
+    ] {
+        syntax_map.insert(Tag::parse(tag_name).expect("valid tag"), Style::new());
+    }
+    let syntax_styles = SyntaxTagStyles::new(syntax_map);
 
     Theme::new(
         "demo",
@@ -62,6 +82,54 @@ fn themed_window() -> Theme {
         ui_styles,
         syntax_styles,
     )
+}
+
+fn syntax_themed_window() -> Theme {
+    let default_style = Style::new().fg(Color::ansi(15)).bg(Color::ansi(30));
+    let ui_styles = UiStyles::new(
+        Style::new().fg(Color::ansi(1)).bg(Color::ansi(2)),
+        Style::new().fg(Color::ansi(3)).bg(Color::ansi(4)),
+        Style::new().fg(Color::ansi(5)).bg(Color::ansi(6)),
+        Style::new().fg(Color::ansi(7)).bg(Color::ansi(8)),
+        Style::new().fg(Color::ansi(9)).bg(Color::ansi(10)),
+        Style::new().fg(Color::ansi(11)).bg(Color::ansi(12)),
+        Style::new().fg(Color::ansi(13)).bg(Color::ansi(14)),
+    );
+    let mut syntax_map = BTreeMap::new();
+    for (tag_name, color) in [
+        ("comment", 20),
+        ("constant", 21),
+        ("function", 22),
+        ("keyword", 23),
+        ("operator", 25),
+        ("punctuation", 26),
+        ("string", 27),
+        ("string.escape", 30),
+        ("type", 28),
+        ("variable", 29),
+    ] {
+        syntax_map.insert(
+            Tag::parse(tag_name).expect("valid tag"),
+            Style::new().fg(Color::ansi(color)),
+        );
+    }
+    syntax_map.insert(
+        Tag::parse("markup").expect("valid tag"),
+        Style::new().fg(Color::ansi(24)),
+    );
+    let syntax_styles = SyntaxTagStyles::new(syntax_map);
+
+    Theme::new(
+        "demo-syntax",
+        ThemeKind::Ansi256,
+        default_style,
+        ui_styles,
+        syntax_styles,
+    )
+}
+
+fn tag(value: &str) -> Tag {
+    Tag::parse(value).expect("valid tag")
 }
 
 #[test]
@@ -120,12 +188,19 @@ fn test_buffer_view_scroll_offset() {
 }
 
 #[test]
-fn test_buffer_view_filetype_label() {
+fn test_buffer_view_syntax_label() {
     let path = AbsolutePath::from_path(std::path::Path::new("/tmp/example.rs")).unwrap();
     let buffer = Buffer::from_str_with_path("fn main() {}", path);
     let view = BufferView::new(buffer);
 
-    assert_eq!(view.filetype_label(), "Rust");
+    assert_eq!(view.syntax_label(), "Rust");
+}
+
+#[test]
+fn test_buffer_view_syntax_label_uses_plain_text_for_missing_buffer() {
+    let view = BufferView::from_buffer_id(BufferId::new(usize::MAX));
+
+    assert_eq!(view.syntax_label(), "Plain Text");
 }
 
 #[test]
@@ -212,6 +287,137 @@ fn test_window_render_fills_empty_content_rows_with_theme_default() {
     assert_eq!(
         screen.get_cell_mut(2, 3).unwrap().style,
         expected_default_style
+    );
+}
+
+#[test]
+fn test_window_render_uses_syntax_styles_for_supported_filetypes() {
+    let path = temp_path_with_ext("syntax", "rs");
+    let buffer = Buffer::from_str_with_path(
+        "fn main() { let value: Option<String> = Some(\"hi\"); } // note",
+        path,
+    );
+    let mut window = Window::new(buffer);
+    let theme = syntax_themed_window();
+    let expected_keyword_style = theme
+        .default_style()
+        .overlay(theme.syntax_style_for_tag(&tag("keyword")));
+    let expected_constant_style = theme
+        .default_style()
+        .overlay(theme.syntax_style_for_tag(&tag("constant")));
+    let expected_type_style = theme
+        .default_style()
+        .overlay(theme.syntax_style_for_tag(&tag("type")));
+    let expected_variable_style = theme
+        .default_style()
+        .overlay(theme.syntax_style_for_tag(&tag("variable")));
+    let expected_string_style = theme
+        .default_style()
+        .overlay(theme.syntax_style_for_tag(&tag("string")));
+    let expected_comment_style = theme
+        .default_style()
+        .overlay(theme.syntax_style_for_tag(&tag("comment")));
+    let _theme_guard = globals::set_test_active_theme(theme);
+
+    let mut screen = crate::screen::Screen::new(1, 80);
+    window.render(&mut screen, Position::new(0, 0), Size::new(1, 80));
+
+    let line = window
+        .render_data()
+        .get_line(0)
+        .expect("rendered line should exist");
+    assert!(
+        line.iter()
+            .any(|chunk| chunk.text == "fn" && chunk.style == expected_keyword_style)
+    );
+    assert!(
+        line.iter()
+            .any(|chunk| chunk.text == "Some" && chunk.style == expected_constant_style)
+    );
+    assert!(
+        line.iter()
+            .any(|chunk| chunk.text == "Option" && chunk.style == expected_type_style)
+    );
+    assert!(
+        line.iter()
+            .any(|chunk| chunk.text == "value" && chunk.style == expected_variable_style)
+    );
+    assert!(
+        line.iter()
+            .any(|chunk| chunk.text.contains("hi") && chunk.style == expected_string_style)
+    );
+    assert!(
+        line.iter()
+            .any(|chunk| chunk.text.contains("note") && chunk.style == expected_comment_style)
+    );
+}
+
+#[test]
+fn test_window_render_omits_syntax_styles_when_disabled() {
+    let path = temp_path_with_ext("syntax-disabled", "rs");
+    let buffer = Buffer::from_str_with_path(
+        "fn main() { let value: Option<String> = Some(\"hi\"); } // note",
+        path,
+    );
+    let mut window = Window::new(buffer);
+    let theme = syntax_themed_window();
+    let expected_default_style = theme.default_style();
+    let _theme_guard = globals::set_test_active_theme(theme);
+    let _config_guard = globals::set_test_config(Config {
+        theme: "demo-syntax".to_string(),
+        insert_escape: None,
+        syntax: false,
+    });
+
+    let mut screen = crate::screen::Screen::new(1, 80);
+    window.render(&mut screen, Position::new(0, 0), Size::new(1, 80));
+
+    let line = window
+        .render_data()
+        .get_line(0)
+        .expect("rendered line should exist");
+
+    assert!(!line.is_empty());
+    assert!(
+        line.iter()
+            .all(|chunk| chunk.style == expected_default_style)
+    );
+    assert!(line.iter().any(|chunk| chunk.text.contains("fn main()")));
+}
+
+#[test]
+fn test_window_render_distinguishes_rust_format_string_escapes() {
+    let path = temp_path_with_ext("syntax-format-escape", "rs");
+    let buffer = Buffer::from_str_with_path("let msg = format!(\"{{literal}}\");", path);
+    let mut window = Window::new(buffer);
+    let theme = syntax_themed_window();
+    let expected_string_style = theme
+        .default_style()
+        .overlay(theme.syntax_style_for_tag(&tag("string")));
+    let expected_escape_style = theme
+        .default_style()
+        .overlay(theme.syntax_style_for_tag(&tag("string.escape")));
+    let _theme_guard = globals::set_test_active_theme(theme);
+
+    let mut screen = crate::screen::Screen::new(1, 80);
+    window.render(&mut screen, Position::new(0, 0), Size::new(1, 80));
+
+    let line = window
+        .render_data()
+        .get_line(0)
+        .expect("rendered line should exist");
+
+    assert!(
+        line.iter()
+            .any(|chunk| chunk.text == "literal" && chunk.style == expected_string_style)
+    );
+    assert!(
+        line.iter()
+            .any(|chunk| chunk.text == "{{" && chunk.style == expected_escape_style)
+    );
+    assert!(
+        line.iter()
+            .any(|chunk| chunk.text == "}}" && chunk.style == expected_escape_style)
     );
 }
 

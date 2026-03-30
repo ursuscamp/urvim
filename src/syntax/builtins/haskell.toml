@@ -1,0 +1,94 @@
+[metadata]
+name = "haskell"
+display_name = "Haskell"
+alias = ["hs"]
+filename = ["\\.hs$"]
+shebang = ["^#!.*\\b(?:ghci|runghc)(?:\\s|$)"]
+
+[[rules]]
+kind = "regex"
+pattern = "--.*$"
+tag = "comment.line"
+
+[[rules]]
+kind = "regex"
+pattern = "#-}"
+tag = "keyword"
+context = { requires = ["haskell_pragmas"], pop = ["haskell_pragmas"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\\{-#"
+tag = "keyword"
+context = { push = ["haskell_pragmas"] }
+
+[[rules]]
+kind = "regex"
+pattern = "-}"
+tag = "comment.block"
+context = { requires = ["haskell_block_comment"], pop = ["haskell_block_comment"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\\{-"
+tag = "comment.block"
+context = { push = ["haskell_block_comment"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\""
+tag = "string"
+context = { requires = ["haskell_string"], pop = ["haskell_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\""
+tag = "string"
+context = { push = ["haskell_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "[^\"\\\\\\n]+"
+tag = "string"
+context = { requires = ["haskell_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\\\\."
+tag = "punctuation"
+context = { requires = ["haskell_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "'(?:[^'\\\\\\n]|\\\\.)'"
+tag = "constant"
+
+[[rules]]
+kind = "regex"
+pattern = "\\b(?:case|class|data|default|deriving|do|else|false|forall|if|import|in|infix|infixl|infixr|instance|let|module|newtype|of|then|true|type|where)\\b"
+tag = "keyword"
+
+[[rules]]
+kind = "regex"
+pattern = "\\b(?:Bool|Char|Double|Float|Int|Integer|Maybe|Monad|Ordering|String|IO|Either|[A-Z][A-Za-z0-9_']*)\\b"
+tag = "type"
+
+[[rules]]
+kind = "regex"
+pattern = "\\b(?:False|True)\\b"
+tag = "constant"
+
+[[rules]]
+kind = "regex"
+pattern = "\\b\\d+(?:\\.\\d+)?\\b"
+tag = "number"
+
+[[rules]]
+kind = "regex"
+pattern = "[(){}\\[\\],.;:]"
+tag = "punctuation"
+
+[[rules]]
+kind = "regex"
+pattern = "(?:::|->|<-|=>|=|\\|\\||&&|[+\\-*/%=&|!<>^~?:.])"
+tag = "operator"

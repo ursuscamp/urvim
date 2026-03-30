@@ -1,0 +1,119 @@
+[metadata]
+name = "go"
+display_name = "Go"
+alias = ["golang"]
+filename = ["\\.go$"]
+shebang = ["^#!.*\\bgo(?:\\s|$)"]
+
+[[rules]]
+kind = "regex"
+pattern = "//.*$"
+tag = "comment.line"
+
+[[rules]]
+kind = "regex"
+pattern = "\\*/"
+tag = "comment.block"
+context = { requires = ["go_block_comment"], pop = ["go_block_comment"] }
+
+[[rules]]
+kind = "regex"
+pattern = "/\\*"
+tag = "comment.block"
+context = { push = ["go_block_comment"] }
+
+[[rules]]
+kind = "regex"
+pattern = "`"
+tag = "string"
+context = { requires = ["go_raw_string"], pop = ["go_raw_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "`"
+tag = "string"
+context = { push = ["go_raw_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "[^`]+"
+tag = "string"
+context = { requires = ["go_raw_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\""
+tag = "string"
+context = { requires = ["go_string"], pop = ["go_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\""
+tag = "string"
+context = { push = ["go_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "[^\"\\\\\\n]+"
+tag = "string"
+context = { requires = ["go_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\\\\."
+tag = "punctuation"
+context = { requires = ["go_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "'"
+tag = "constant"
+context = { requires = ["go_char"], pop = ["go_char"] }
+
+[[rules]]
+kind = "regex"
+pattern = "'"
+tag = "constant"
+context = { push = ["go_char"] }
+
+[[rules]]
+kind = "regex"
+pattern = "[^'\\\\\\n]+"
+tag = "constant"
+context = { requires = ["go_char"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\\\\."
+tag = "punctuation"
+context = { requires = ["go_char"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\\b(?:0[xX][0-9A-Fa-f](?:_?[0-9A-Fa-f])*(?:[iI])?|0[oO][0-7](?:_?[0-7])*(?:[iI])?|0[bB][01](?:_?[01])*(?:[iI])?|(?:\\d(?:_?\\d)*(?:\\.\\d(?:_?\\d)*)?|\\.\\d(?:_?\\d)*)(?:[eE][+-]?\\d(?:_?\\d)*)?(?:[iI])?)\\b"
+tag = "number"
+
+[[rules]]
+kind = "regex"
+pattern = "\\b(?:break|case|chan|const|continue|default|defer|else|fallthrough|for|func|go|goto|if|import|interface|map|package|range|return|select|struct|switch|type|var)\\b"
+tag = "keyword"
+
+[[rules]]
+kind = "regex"
+pattern = "\\b(?:any|bool|byte|comparable|complex64|complex128|error|float32|float64|int|int8|int16|int32|int64|rune|string|uint|uint8|uint16|uint32|uint64|uintptr)\\b"
+tag = "type"
+
+[[rules]]
+kind = "regex"
+pattern = "\\b(?:false|iota|nil|true)\\b"
+tag = "constant"
+
+[[rules]]
+kind = "regex"
+pattern = "[(){}\\[\\],.;:]"
+tag = "punctuation"
+
+[[rules]]
+kind = "regex"
+pattern = "(?:==|!=|<=|>=|:=|\\+\\+|--|[+\\-*/%=&|!<>^~?])"
+tag = "operator"

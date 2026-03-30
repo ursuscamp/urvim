@@ -13,8 +13,10 @@ signal-hook = "0.3"
 terminal_size = "0.2"
 base64 = "0.22"
 imbl = "7.0.0"
+smol_str = "0.3"
 unicode-segmentation = "1.11"
 unicode-width = "0.2"
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"
+regex = "1"

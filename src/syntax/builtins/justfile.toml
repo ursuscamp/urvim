@@ -1,0 +1,84 @@
+[metadata]
+name = "justfile"
+display_name = "Justfile"
+alias = ["just"]
+filename = ["^justfile$"]
+shebang = []
+
+[[rules]]
+kind = "regex"
+pattern = "\""
+tag = "string"
+context = { requires = ["just_double_string"], pop = ["just_double_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\""
+tag = "string"
+context = { push = ["just_double_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "[^\"\\n{}]+"
+tag = "string"
+context = { requires = ["just_double_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\\{\\{[^\\n}]+\\}\\}"
+tag = "variable"
+context = { requires = ["just_double_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\\\\."
+tag = "punctuation"
+context = { requires = ["just_double_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "'"
+tag = "string"
+context = { requires = ["just_single_string"], pop = ["just_single_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "'"
+tag = "string"
+context = { push = ["just_single_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "[^'\\n]+"
+tag = "string"
+context = { requires = ["just_single_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "#.*$"
+tag = "comment"
+
+[[rules]]
+kind = "regex"
+pattern = "^\\s*[A-Za-z0-9_-]+\\s*:(?:\\s+[^=]|$)"
+tag = "keyword"
+
+[[rules]]
+kind = "regex"
+pattern = "^\\s*[A-Za-z0-9_-]+\\s*(:=|\\+=|\\?=|=)"
+tag = "operator"
+
+[[rules]]
+kind = "regex"
+pattern = "\\b\\d+(?:\\.\\d+)?\\b"
+tag = "number"
+
+[[rules]]
+kind = "regex"
+pattern = "\\b(?:default|export|import|set)\\b"
+tag = "keyword"
+
+[[rules]]
+kind = "regex"
+pattern = "[(){}\\[\\],:=]"
+tag = "punctuation"

@@ -1,5 +1,5 @@
 use super::*;
-use crate::buffer::{BufferId, Filetype};
+use crate::buffer::BufferId;
 
 impl BufferView {
     /// Creates a new view and registers the buffer in the global pool.
@@ -54,15 +54,22 @@ impl BufferView {
         .flatten()
     }
 
-    /// Returns the shared buffer's resolved filetype, if it still exists.
-    pub fn filetype(&self) -> Filetype {
-        self.with_buffer(|buffer| buffer.filetype())
-            .unwrap_or(Filetype::PlainText)
+    /// Returns the shared buffer's resolved syntax name, if it still exists.
+    pub fn syntax_name(&self) -> String {
+        self.with_buffer(|buffer| buffer.syntax_name().to_string())
+            .unwrap_or_else(|| crate::syntax::fallback_syntax_name().to_string())
     }
 
-    /// Returns the shared buffer's filetype label for display purposes.
-    pub fn filetype_label(&self) -> &'static str {
-        self.filetype().label()
+    /// Returns the shared buffer's syntax label for display purposes.
+    pub fn syntax_label(&self) -> String {
+        self.with_buffer(|buffer| buffer.syntax_label())
+            .unwrap_or_else(|| {
+                crate::syntax::builtin_syntax_registry()
+                    .ok()
+                    .and_then(|registry| registry.display_name(crate::syntax::fallback_syntax_name()))
+                    .map(|label| label.to_string())
+                    .unwrap_or_else(|| "Plain Text".to_string())
+            })
     }
 
     /// Returns true when the shared buffer differs from its last saved baseline.
@@ -162,24 +169,41 @@ impl BufferView {
     /// Builds render data for the visible buffer region using a base style.
     pub fn build_render_data_with_style(&self, size: Size, default_style: Style) -> RenderData {
         let mut render_data = RenderData::new(size.rows);
-        let _ = self.with_buffer(|buffer| {
+        let syntax_styles =
+            globals::with_active_theme(|theme| theme.map(|theme| theme.syntax.clone()));
+        let syntax_enabled =
+            globals::with_config(|config| config.map(|config| config.syntax)).unwrap_or(true);
+        let _ = self.with_buffer_mut(|buffer| {
             let start_line = self.scroll_offset.row as usize;
             let total_lines_needed = size.rows as usize + 10;
             let horizontal_offset = self.scroll_offset.col as usize;
 
             for screen_line in 0..total_lines_needed {
                 let buffer_line_idx = start_line + screen_line;
-                if let Some(line) = buffer.line_at(buffer_line_idx) {
-                    let line_text = line.as_ref();
+                if let Some(line_text) = buffer.line_at(buffer_line_idx).cloned() {
+                    let line_text = line_text.as_ref();
                     let (byte_offset, width_offset, visible_text) =
                         Self::calculate_horizontal_offset(line_text, horizontal_offset);
-
-                    let chunk = RenderChunk::new(&visible_text, Style::default());
+                    let syntax_spans = if syntax_enabled {
+                        buffer
+                            .syntax_spans_for_line(buffer_line_idx)
+                            .unwrap_or_default()
+                    } else {
+                        Vec::new()
+                    };
+                    let chunks = Self::build_chunks_for_visible_line(
+                        line_text,
+                        byte_offset,
+                        &visible_text,
+                        &syntax_spans,
+                        default_style,
+                        syntax_styles.as_ref(),
+                    );
                     let line_data = LineData {
                         buffer_line: buffer_line_idx,
                         byte_offset,
                         width_offset,
-                        chunks: vec![chunk],
+                        chunks,
                     };
                     render_data.line_data.push(line_data);
                 } else {
@@ -195,6 +219,74 @@ impl BufferView {
         }
 
         render_data
+    }
+
+    fn build_chunks_for_visible_line(
+        line_text: &str,
+        visible_start: usize,
+        visible_text: &str,
+        syntax_spans: &[crate::buffer::SyntaxSpan],
+        default_style: Style,
+        syntax_styles: Option<&crate::theme::SyntaxTagStyles>,
+    ) -> Vec<RenderChunk> {
+        if visible_text.is_empty() {
+            return vec![RenderChunk::new("", default_style)];
+        }
+
+        let visible_end = line_text.len();
+        let mut chunks = Vec::new();
+        let mut chunk_start = visible_start;
+
+        for span in syntax_spans {
+            // Ignore spans that end before the visible slice starts.
+            if span.end_byte <= visible_start {
+                continue;
+            }
+            // Stop once spans move past the visible slice.
+            if span.start_byte >= visible_end {
+                break;
+            }
+
+            // Clamp the span to the visible slice so horizontal scrolling works.
+            let span_start = span.start_byte.max(visible_start);
+            let span_end = span.end_byte.min(visible_end);
+
+            // Emit any plain text between the last emitted chunk and this span.
+            if chunk_start < span_start {
+                chunks.push(RenderChunk::new(
+                    &line_text[chunk_start..span_start],
+                    default_style,
+                ));
+            }
+
+            if span_start < span_end {
+                // Convert the syntax category into the active theme's concrete style.
+                let syntax_style = syntax_styles
+                    .map(|styles| styles.style_for_tag(&span.style, default_style))
+                    .unwrap_or_default();
+                chunks.push(RenderChunk::new(
+                    &line_text[span_start..span_end],
+                    default_style.overlay(syntax_style),
+                ));
+                // Advance past the highlighted region so the next gap is computed correctly.
+                chunk_start = span_end;
+            }
+        }
+
+        // Emit any remaining plain text after the last highlighted span.
+        if chunk_start < visible_end {
+            chunks.push(RenderChunk::new(
+                &line_text[chunk_start..visible_end],
+                default_style,
+            ));
+        }
+
+        // If no spans applied, fall back to a single plain chunk.
+        if chunks.is_empty() {
+            chunks.push(RenderChunk::new(visible_text, default_style));
+        }
+
+        chunks
     }
 
     fn calculate_horizontal_offset(

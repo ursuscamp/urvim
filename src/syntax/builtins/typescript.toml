@@ -1,0 +1,184 @@
+[metadata]
+name = "typescript"
+display_name = "TypeScript"
+alias = ["ts"]
+filename = ["\\.(ts|tsx)$"]
+shebang = []
+
+[[rules]]
+kind = "regex"
+pattern = "//.*$"
+tag = "comment.line"
+
+[[rules]]
+kind = "regex"
+pattern = "/\\*"
+tag = "comment.block"
+context = { push = ["ts_comment"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\\*/"
+tag = "comment.block"
+context = { requires = ["ts_comment"], pop = ["ts_comment"] }
+
+[[rules]]
+kind = "regex"
+pattern = "[^*\\n]+"
+tag = "comment.block"
+context = { requires = ["ts_comment"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\\*"
+tag = "comment.block"
+context = { requires = ["ts_comment"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\""
+tag = "string"
+context = { push = ["ts_double"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\""
+tag = "string"
+context = { requires = ["ts_double"], pop = ["ts_double"] }
+
+[[rules]]
+kind = "regex"
+pattern = "[^\"\\\\\\n]+"
+tag = "string"
+context = { requires = ["ts_double"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\\\\."
+tag = "string.escape"
+context = { requires = ["ts_double"] }
+
+[[rules]]
+kind = "regex"
+pattern = "'"
+tag = "string"
+context = { push = ["ts_single"] }
+
+[[rules]]
+kind = "regex"
+pattern = "'"
+tag = "string"
+context = { requires = ["ts_single"], pop = ["ts_single"] }
+
+[[rules]]
+kind = "regex"
+pattern = "[^'\\\\\\n]+"
+tag = "string"
+context = { requires = ["ts_single"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\\\\."
+tag = "string.escape"
+context = { requires = ["ts_single"] }
+
+[[rules]]
+kind = "regex"
+pattern = "`"
+tag = "string"
+context = { requires = ["ts_template"], pop = ["ts_template"] }
+
+[[rules]]
+kind = "regex"
+pattern = "`"
+tag = "string"
+context = { push = ["ts_template"] }
+
+[[rules]]
+kind = "regex"
+pattern = "[^`\\\\$]+"
+tag = "string"
+context = { requires = ["ts_template"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\\$\\{"
+tag = "punctuation"
+context = { requires = ["ts_template"], pop = ["ts_template"], push = ["ts_template_expr"] }
+
+[[rules]]
+kind = "injection"
+context = { requires = ["ts_template_expr"] }
+selector = { name = "typescript" }
+fallback = "unstyled"
+
+[[rules]]
+kind = "regex"
+pattern = "\\}"
+tag = "punctuation"
+context = { requires = ["ts_template_expr"], pop = ["ts_template_expr"], push = ["ts_template"] }
+
+[[rules]]
+kind = "regex"
+pattern = "/(?:\\\\.|[^/\\\\\\n])+/[dgimsuvy]*"
+tag = "string"
+
+[[rules]]
+kind = "regex"
+pattern = "\\b(?:0[xX][0-9A-Fa-f](?:_?[0-9A-Fa-f])*(?:n)?|0[oO][0-7](?:_?[0-7])*(?:n)?|0[bB][01](?:_?[01])*(?:n)?|(?:\\d(?:_?\\d)*(?:\\.\\d(?:_?\\d)*)?|\\.\\d(?:_?\\d)*)(?:[eE][+-]?\\d(?:_?\\d)*)?(?:n)?)\\b"
+tag = "number"
+
+[[rules]]
+kind = "regex"
+pattern = "^\\s*@[_A-Za-z][A-Za-z0-9_\\.]*\\b"
+tag = "keyword"
+
+[[rules]]
+kind = "regex"
+pattern = "#[A-Za-z_][A-Za-z0-9_]*"
+tag = "variable"
+
+[[rules]]
+kind = "regex"
+pattern = "\\b(?:as|async|await|abstract|break|case|catch|class|const|continue|declare|default|delete|do|else|enum|export|extends|false|finally|for|from|function|if|implements|import|in|infer|interface|is|keyof|let|module|namespace|new|null|of|readonly|return|satisfies|static|super|switch|this|throw|true|try|type|typeof|undefined|unknown|var|void|while|with|yield|public|private|protected|override|get|set)\\b"
+tag = "keyword"
+
+[[rules]]
+kind = "regex"
+pattern = "\\b(?:true|false|null|undefined)\\b"
+tag = "constant"
+
+[[rules]]
+kind = "regex"
+pattern = "\\b(?:Array|Boolean|Date|Error|Map|Number|Object|Promise|Record|Set|String|Symbol|WeakMap|WeakSet|any|bigint|boolean|never|number|object|string|symbol|unknown|void|[A-Z][A-Za-z0-9]*)\\b"
+tag = "type"
+
+[[rules]]
+kind = "regex"
+pattern = "\\b[A-Za-z_:][A-Za-z0-9:._-]*="
+tag = "variable.property"
+
+[[rules]]
+kind = "regex"
+pattern = "\\b[$A-Za-z_][$A-Za-z0-9_]*\\b"
+tag = "variable"
+
+[[rules]]
+kind = "regex"
+pattern = "[(){}\\[\\],.;:]"
+tag = "punctuation"
+
+[[rules]]
+kind = "regex"
+pattern = "</?[A-Z][A-Za-z0-9._:-]*"
+tag = "markup.tag"
+
+[[rules]]
+kind = "regex"
+pattern = "[<>/]"
+tag = "punctuation"
+
+[[rules]]
+kind = "regex"
+pattern = "(?:===|!==|==|!=|<=|>=|=>|\\?\\?|&&|\\|\\||\\+\\+|--|[+\\-*/%=&|!<>^~?])"
+tag = "operator"

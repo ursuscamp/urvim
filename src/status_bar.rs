@@ -14,8 +14,8 @@ pub struct StatusBarContext<'a> {
     pub mode_label: &'a str,
     /// Whether the active buffer is modified.
     pub modified: bool,
-    /// Human-readable filetype label.
-    pub filetype_label: &'a str,
+    /// Human-readable syntax label.
+    pub syntax_label: &'a str,
     /// Active buffer display name.
     pub buffer_name: &'a str,
     /// Zero-based cursor line in the active buffer.
@@ -52,7 +52,7 @@ impl StatusBar {
         format!(
             "{} | {} | {} | {}:{} | {}%",
             context.mode_label,
-            context.filetype_label,
+            context.syntax_label,
             buffer_name,
             line_number,
             context.cursor_byte_col,
@@ -91,7 +91,7 @@ impl StatusBar {
         if context.modified {
             let prefix_width = UnicodeWidthStr::width(context.mode_label)
                 + 3
-                + UnicodeWidthStr::width(context.filetype_label)
+                + UnicodeWidthStr::width(context.syntax_label)
                 + 3;
             let marker_col = origin.col
                 + prefix_width as u16
@@ -120,12 +120,13 @@ mod tests {
     use crate::globals;
     use crate::terminal::Color;
     use crate::terminal::Style;
-    use crate::theme::{SyntaxStyles, Theme, ThemeKind, UiStyles};
+    use crate::theme::{SyntaxTagStyles, Theme, ThemeKind, UiStyles};
+    use std::collections::BTreeMap;
 
     fn context<'a>(
         mode_label: &'a str,
         modified: bool,
-        filetype_label: &'a str,
+        syntax_label: &'a str,
         buffer_name: &'a str,
         cursor_line: usize,
         cursor_byte_col: usize,
@@ -134,7 +135,7 @@ mod tests {
         StatusBarContext {
             mode_label,
             modified,
-            filetype_label,
+            syntax_label,
             buffer_name,
             cursor_line,
             cursor_byte_col,
@@ -153,18 +154,8 @@ mod tests {
             Style::new().fg(Color::ansi(7)),
             Style::new().fg(Color::ansi(8)),
         );
-        let syntax_styles = SyntaxStyles::new(
-            Style::new(),
-            Style::new(),
-            Style::new(),
-            Style::new(),
-            Style::new(),
-            Style::new(),
-            Style::new(),
-            Style::new(),
-            Style::new(),
-            Style::new(),
-        );
+        let syntax_map = BTreeMap::new();
+        let syntax_styles = SyntaxTagStyles::new(syntax_map);
 
         Theme::new(
             "demo",

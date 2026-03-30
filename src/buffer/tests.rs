@@ -4,6 +4,7 @@ use crate::editor::{
     BoundaryMotion, BracketKind, LinewiseMotion, OperatorTarget, QuoteKind, TextObject,
 };
 use crate::path::AbsolutePath;
+use crate::theme::Tag;
 use std::fs;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -18,6 +19,64 @@ fn temp_path(name: &str) -> std::path::PathBuf {
         name
     ))
 }
+
+fn temp_path_with_ext(name: &str, ext: &str) -> std::path::PathBuf {
+    temp_path(name).with_extension(ext)
+}
+
+fn assert_spans_include_style(spans: &[crate::buffer::syntax::SyntaxSpan], style: Tag) {
+    assert!(
+        spans.iter().any(|span| span.style == style),
+        "expected spans to include style {style:?}"
+    );
+}
+
+fn assert_spans_include_exact_style(
+    spans: &[crate::buffer::syntax::SyntaxSpan],
+    line: &str,
+    fragment: &str,
+    style: Tag,
+) {
+    let start_byte = line
+        .find(fragment)
+        .unwrap_or_else(|| panic!("expected line to contain fragment {fragment:?}"));
+    let end_byte = start_byte + fragment.len();
+
+    assert!(
+        spans.iter().any(|span| {
+            span.start_byte == start_byte && span.end_byte == end_byte && span.style == style
+        }),
+        "expected spans to include exact style {style:?} for fragment {fragment:?} at {start_byte}..{end_byte}"
+    );
+}
+
+fn assert_spans_include_comment_style(spans: &[crate::buffer::syntax::SyntaxSpan]) {
+    assert!(
+        spans.iter().any(|span| {
+            span.style == tag("comment")
+                || span.style == tag("comment.line")
+                || span.style == tag("comment.block")
+                || span.style == tag("comment.documentation")
+        }),
+        "expected spans to include a comment style"
+    );
+}
+
+fn tag(value: &str) -> Tag {
+    Tag::parse(value).expect("valid tag")
+}
+
+fn fixture_buffer(name: &str, ext: &str, contents: &str) -> Buffer {
+    let path = AbsolutePath::from_path(temp_path_with_ext(name, ext).as_path()).unwrap();
+    Buffer::from_str_with_path(contents, path)
+}
+
+fn named_fixture_buffer(name: &str, contents: &str) -> Buffer {
+    let path = AbsolutePath::from_path(std::env::temp_dir().join(name).as_path()).unwrap();
+    Buffer::from_str_with_path(contents, path)
+}
+
+mod syntax;
 
 #[test]
 fn test_new_buffer() {
@@ -38,40 +97,40 @@ fn test_from_str() {
 }
 
 #[test]
-fn test_filetype_from_shebang() {
+fn test_syntax_name_from_shebang() {
     let buf = Buffer::from_str("#!/usr/bin/env python3 -O\nprint('hello')");
-    assert_eq!(buf.filetype(), Filetype::Python);
+    assert_eq!(buf.syntax_name(), "python");
 }
 
 #[test]
-fn test_filetype_from_filename() {
+fn test_syntax_name_from_filename() {
     let path = AbsolutePath::from_path(std::path::Path::new("/tmp/example.php")).unwrap();
     let buf = Buffer::from_str_with_path("<?php echo 'hello';", path);
 
-    assert_eq!(buf.filetype(), Filetype::Php);
+    assert_eq!(buf.syntax_name(), "php");
 }
 
 #[test]
-fn test_filetype_filename_takes_precedence_over_shebang() {
+fn test_syntax_name_shebang_takes_precedence_over_filename() {
     let path = AbsolutePath::from_path(std::path::Path::new("/tmp/example.rs")).unwrap();
     let buf = Buffer::from_str_with_path("#!/usr/bin/env python3\nprint('hello')", path);
 
-    assert_eq!(buf.filetype(), Filetype::Rust);
+    assert_eq!(buf.syntax_name(), "python");
 }
 
 #[test]
-fn test_filetype_updates_after_first_line_edit() {
+fn test_syntax_name_updates_after_first_line_edit() {
     let mut buf = Buffer::from_str("#!/usr/bin/env python3\nprint('hello')");
 
-    assert_eq!(buf.filetype(), Filetype::Python);
+    assert_eq!(buf.syntax_name(), "python");
 
     let shebang_len = buf.line_len(0);
     buf.remove(Cursor::new(0, 0), Cursor::new(0, shebang_len));
     buf.insert_text(Cursor::new(0, 0), "plain text");
 
-    assert_eq!(buf.filetype(), Filetype::Python);
+    assert_eq!(buf.syntax_name(), "plaintext");
     buf.mark_saved();
-    assert_eq!(buf.filetype(), Filetype::PlainText);
+    assert_eq!(buf.syntax_name(), "plaintext");
 }
 
 #[test]
@@ -207,7 +266,7 @@ fn test_save_and_load() {
 }
 
 #[test]
-fn test_save_buffer_clears_modified_state_and_refreshes_filetype() {
+fn test_save_buffer_clears_modified_state_and_refreshes_syntax() {
     let path = temp_path("save_buffer");
     fs::write(&path, "#!/usr/bin/env python3\nprint('hello')").unwrap();
 
@@ -222,14 +281,931 @@ fn test_save_buffer_clears_modified_state_and_refreshes_filetype() {
     .unwrap();
 
     assert!(pool.get(id).unwrap().is_modified());
-    assert_eq!(pool.get(id).unwrap().filetype(), Filetype::Python);
+    assert_eq!(pool.get(id).unwrap().syntax_name(), "plaintext");
 
     pool.save_buffer(id).unwrap();
 
     assert!(!pool.get(id).unwrap().is_modified());
-    assert_eq!(pool.get(id).unwrap().filetype(), Filetype::PlainText);
+    assert_eq!(pool.get(id).unwrap().syntax_name(), "plaintext");
 
     fs::remove_file(&path).ok();
+}
+
+#[test]
+fn test_syntax_spans_for_supported_filetype() {
+    let path =
+        AbsolutePath::from_path(temp_path_with_ext("syntax-supported", "rs").as_path()).unwrap();
+    let mut buf = Buffer::from_str_with_path(
+        "fn main() { let value: Option<String> = Some(\"hi\"); } // note",
+        path,
+    );
+
+    let spans = buf.syntax_spans_for_line(0).expect("line should exist");
+    assert!(spans.iter().any(|span| span.style == tag("keyword")));
+    assert!(spans.iter().any(|span| span.style == tag("constant")));
+    assert!(spans.iter().any(|span| span.style == tag("type")));
+    assert!(spans.iter().any(|span| span.style == tag("variable")));
+    assert!(spans.iter().any(|span| span.style == tag("string")));
+    assert_spans_include_comment_style(&spans);
+    assert!(!spans.iter().any(|span| span.style == tag("function")));
+}
+
+#[test]
+fn test_syntax_spans_update_after_edit() {
+    let path = AbsolutePath::from_path(temp_path_with_ext("syntax-edit", "rs").as_path()).unwrap();
+    let mut buf = Buffer::from_str_with_path("let value = 1;", path);
+
+    assert!(
+        buf.syntax_spans_for_line(0)
+            .expect("line should exist")
+            .iter()
+            .any(|span| span.style == tag("keyword"))
+    );
+    assert!(
+        buf.syntax_spans_for_line(0)
+            .expect("line should exist")
+            .iter()
+            .any(|span| span.style == tag("variable"))
+    );
+
+    buf.insert_text(Cursor::new(0, 0), "// ");
+
+    let spans = buf.syntax_spans_for_line(0).expect("line should exist");
+    assert_spans_include_comment_style(&spans);
+}
+
+#[test]
+fn test_syntax_spans_preserve_multiline_state() {
+    let path =
+        AbsolutePath::from_path(temp_path_with_ext("syntax-multiline", "toml").as_path()).unwrap();
+    let mut buf = Buffer::from_str_with_path("value = \"\"\"hello\nworld\"\"\"", path);
+
+    let first_line = buf
+        .syntax_spans_for_line(0)
+        .expect("first line should exist");
+    let second_line = buf
+        .syntax_spans_for_line(1)
+        .expect("second line should exist");
+
+    assert!(first_line.iter().any(|span| span.style == tag("string")));
+    assert!(second_line.iter().any(|span| span.style == tag("string")));
+}
+
+#[test]
+fn test_markdown_code_fence_injects_nested_syntax() {
+    let path = AbsolutePath::from_path(temp_path_with_ext("syntax-fence", "md").as_path()).unwrap();
+    let mut buf = Buffer::from_str_with_path(
+        "```rust\nfn main() { let value = Some(\"hi\"); }\n```",
+        path,
+    );
+
+    let first_line = buf
+        .syntax_spans_for_line(0)
+        .expect("first line should exist");
+    let second_line = buf
+        .syntax_spans_for_line(1)
+        .expect("second line should exist");
+    let third_line = buf
+        .syntax_spans_for_line(2)
+        .expect("third line should exist");
+
+    assert!(
+        first_line
+            .iter()
+            .any(|span| span.style == tag("markup.code"))
+    );
+    assert!(second_line.iter().any(|span| span.style == tag("keyword")));
+    assert!(second_line.iter().any(|span| span.style == tag("constant")));
+    assert!(second_line.iter().any(|span| span.style == tag("variable")));
+    assert!(second_line.iter().any(|span| span.style == tag("string")));
+    assert!(
+        third_line
+            .iter()
+            .any(|span| span.style == tag("markup.code"))
+    );
+}
+
+#[test]
+fn test_markdown_code_fence_updates_after_opening_language_edit() {
+    let path =
+        AbsolutePath::from_path(temp_path_with_ext("syntax-fence-edit", "md").as_path()).unwrap();
+    let mut buf = Buffer::from_str_with_path(
+        "```rust\nfn main() { let value = Some(\"hi\"); }\n```",
+        path,
+    );
+
+    let initial_body = buf
+        .syntax_spans_for_line(1)
+        .expect("body line should exist");
+    assert_spans_include_style(&initial_body, tag("keyword"));
+    assert_spans_include_style(&initial_body, tag("string"));
+
+    buf.remove(Cursor::new(0, 3), Cursor::new(0, 7));
+    buf.insert_text(Cursor::new(0, 3), "wat");
+
+    let updated_body = buf
+        .syntax_spans_for_line(1)
+        .expect("body line should exist");
+    let closing = buf
+        .syntax_spans_for_line(2)
+        .expect("closing line should exist");
+
+    assert!(updated_body.is_empty());
+    assert_eq!(closing.len(), 1);
+    assert_eq!(closing[0].style, tag("markup.code"));
+}
+
+#[test]
+fn test_javascript_types_use_type_rules() {
+    let path =
+        AbsolutePath::from_path(temp_path_with_ext("syntax-js-type", "js").as_path()).unwrap();
+    let mut buf = Buffer::from_str_with_path("class Thing extends Error {}", path);
+
+    let spans = buf.syntax_spans_for_line(0).expect("line should exist");
+    assert_spans_include_style(&spans, tag("keyword"));
+    assert_spans_include_style(&spans, tag("type"));
+}
+
+#[test]
+fn test_markdown_code_fence_resolves_canonical_capture() {
+    let path =
+        AbsolutePath::from_path(temp_path_with_ext("syntax-fence-js", "md").as_path()).unwrap();
+    let mut buf = Buffer::from_str_with_path(
+        "```javascript\nconst value = null; const count = 1;\n```",
+        path,
+    );
+
+    let body = buf
+        .syntax_spans_for_line(1)
+        .expect("body line should exist");
+    assert!(body.iter().any(|span| span.style == tag("keyword")));
+    assert!(body.iter().any(|span| span.style == tag("constant")));
+    assert!(body.iter().any(|span| span.style == tag("variable")));
+    assert!(body.iter().any(|span| span.style == tag("number")));
+}
+
+#[test]
+fn test_markdown_code_fence_resolves_alias_capture() {
+    let path = AbsolutePath::from_path(temp_path_with_ext("syntax-fence-js-alias", "md").as_path())
+        .unwrap();
+    let mut buf =
+        Buffer::from_str_with_path("```js\nconst value = null; const count = 1;\n```", path);
+
+    let body = buf
+        .syntax_spans_for_line(1)
+        .expect("body line should exist");
+    assert!(body.iter().any(|span| span.style == tag("keyword")));
+    assert!(body.iter().any(|span| span.style == tag("constant")));
+    assert!(body.iter().any(|span| span.style == tag("variable")));
+    assert!(body.iter().any(|span| span.style == tag("number")));
+}
+
+#[test]
+fn test_markdown_fixture_js_closing_fence_uses_code_block_tag() {
+    let path =
+        AbsolutePath::from_path(temp_path_with_ext("syntax-fixture", "md").as_path()).unwrap();
+    let fixture = include_str!("tests/syntax/fixtures/markdown.md");
+    let mut buf = Buffer::from_str_with_path(fixture, path);
+
+    let closing = buf
+        .syntax_spans_for_line(22)
+        .expect("fixture closing fence should exist");
+    assert_eq!(closing.len(), 1);
+    assert_eq!(closing[0].style, tag("markup.code"));
+}
+
+#[test]
+fn test_json_fixture_uses_grammar_rules() {
+    let fixture = include_str!("tests/syntax/fixtures/json.json");
+    let mut buf = fixture_buffer("syntax-json-fixture", "json", fixture);
+
+    let line_one = buf.syntax_spans_for_line(1).expect("line should exist");
+    let line_three = buf.syntax_spans_for_line(3).expect("line should exist");
+    let line_four = buf.syntax_spans_for_line(4).expect("line should exist");
+    let line_five = buf.syntax_spans_for_line(5).expect("line should exist");
+
+    assert_spans_include_style(&line_one, tag("string"));
+    assert_spans_include_style(&line_one, tag("punctuation"));
+    assert_spans_include_style(&line_three, tag("constant"));
+    assert_spans_include_style(&line_three, tag("punctuation"));
+    assert_spans_include_style(&line_four, tag("number"));
+    assert_spans_include_style(&line_four, tag("punctuation"));
+    assert_spans_include_style(&line_five, tag("punctuation"));
+}
+
+#[test]
+fn test_toml_fixture_uses_grammar_rules() {
+    let fixture = include_str!("tests/syntax/fixtures/toml.toml");
+    let mut buf = fixture_buffer("syntax-toml-fixture", "toml", fixture);
+
+    let comment = buf
+        .syntax_spans_for_line(0)
+        .expect("comment line should exist");
+    let string_line = buf
+        .syntax_spans_for_line(1)
+        .expect("string line should exist");
+    let number_line = buf
+        .syntax_spans_for_line(2)
+        .expect("number line should exist");
+    let bool_line = buf
+        .syntax_spans_for_line(3)
+        .expect("bool line should exist");
+    let table_line = buf
+        .syntax_spans_for_line(5)
+        .expect("table line should exist");
+    let array_line = buf
+        .syntax_spans_for_line(11)
+        .expect("array line should exist");
+
+    assert_spans_include_comment_style(&comment);
+    assert_spans_include_style(&string_line, tag("string"));
+    assert_spans_include_style(&string_line, tag("operator"));
+    assert_spans_include_style(&number_line, tag("number"));
+    assert_spans_include_style(&number_line, tag("operator"));
+    assert_spans_include_style(&bool_line, tag("constant"));
+    assert_spans_include_style(&bool_line, tag("operator"));
+    assert_spans_include_style(&table_line, tag("keyword"));
+    assert_spans_include_style(&array_line, tag("number"));
+    assert_spans_include_style(&array_line, tag("punctuation"));
+}
+
+#[test]
+fn test_javascript_fixture_uses_grammar_rules() {
+    let fixture = include_str!("tests/syntax/fixtures/javascript.js");
+    let mut buf = fixture_buffer("syntax-js-fixture", "js", fixture);
+
+    let comment = buf
+        .syntax_spans_for_line(0)
+        .expect("comment line should exist");
+    let keyword_line = buf
+        .syntax_spans_for_line(3)
+        .expect("keyword line should exist");
+    let object_line = buf
+        .syntax_spans_for_line(5)
+        .expect("object line should exist");
+    let operator_line = buf
+        .syntax_spans_for_line(12)
+        .expect("operator line should exist");
+
+    assert_spans_include_comment_style(&comment);
+    assert_spans_include_style(&keyword_line, tag("keyword"));
+    assert_spans_include_style(&keyword_line, tag("punctuation"));
+    assert_spans_include_style(&object_line, tag("punctuation"));
+    assert_spans_include_style(&object_line, tag("constant"));
+    assert_spans_include_style(&operator_line, tag("operator"));
+    assert_spans_include_style(&operator_line, tag("constant"));
+}
+
+#[test]
+fn test_rust_fixture_uses_grammar_rules() {
+    let fixture = include_str!("tests/syntax/fixtures/rust.rs");
+    let mut buf = fixture_buffer("syntax-rust-fixture", "rs", fixture);
+
+    let comment = buf
+        .syntax_spans_for_line(0)
+        .expect("comment line should exist");
+    let type_line = buf
+        .syntax_spans_for_line(4)
+        .expect("type line should exist");
+    let operator_line = buf
+        .syntax_spans_for_line(11)
+        .expect("operator line should exist");
+
+    assert_spans_include_comment_style(&comment);
+    assert_spans_include_style(&type_line, tag("type"));
+    assert_spans_include_style(&type_line, tag("punctuation"));
+    assert_spans_include_style(&type_line, tag("operator"));
+    assert_spans_include_style(&operator_line, tag("operator"));
+    assert_spans_include_style(&operator_line, tag("keyword"));
+    assert_spans_include_style(&operator_line, tag("punctuation"));
+}
+
+#[test]
+fn test_python_fixture_uses_grammar_rules() {
+    let fixture = include_str!("tests/syntax/fixtures/python.py");
+    let mut buf = fixture_buffer("syntax-py-fixture", "py", fixture);
+
+    let docstring = buf
+        .syntax_spans_for_line(1)
+        .expect("docstring line should exist");
+    let comment = buf
+        .syntax_spans_for_line(6)
+        .expect("comment line should exist");
+    let definition = buf
+        .syntax_spans_for_line(8)
+        .expect("definition line should exist");
+    let mapping = buf
+        .syntax_spans_for_line(21)
+        .expect("mapping line should exist");
+
+    assert_spans_include_style(&docstring, tag("string"));
+    assert_spans_include_comment_style(&comment);
+    assert_spans_include_style(&definition, tag("keyword"));
+    assert_spans_include_style(&definition, tag("type"));
+    assert_spans_include_style(&definition, tag("punctuation"));
+    assert_spans_include_style(&definition, tag("operator"));
+    assert_spans_include_style(&mapping, tag("punctuation"));
+    assert_spans_include_style(&mapping, tag("constant"));
+}
+
+#[test]
+fn test_shell_fixture_uses_grammar_rules() {
+    let fixture = include_str!("tests/syntax/fixtures/shell.sh");
+    let mut buf = fixture_buffer("syntax-shell-fixture", "sh", fixture);
+
+    let comment = buf
+        .syntax_spans_for_line(1)
+        .expect("comment line should exist");
+    let function_line = buf
+        .syntax_spans_for_line(3)
+        .expect("function line should exist");
+    let assignment_line = buf
+        .syntax_spans_for_line(4)
+        .expect("assignment line should exist");
+    let keyword_line = buf
+        .syntax_spans_for_line(9)
+        .expect("keyword line should exist");
+
+    assert_spans_include_comment_style(&comment);
+    assert_spans_include_style(&function_line, tag("punctuation"));
+    assert_spans_include_style(&assignment_line, tag("type"));
+    assert_spans_include_style(&assignment_line, tag("operator"));
+    assert_spans_include_style(&assignment_line, tag("string"));
+    assert_spans_include_style(&keyword_line, tag("keyword"));
+    assert_spans_include_style(&keyword_line, tag("constant"));
+    assert_spans_include_style(&keyword_line, tag("punctuation"));
+}
+
+#[test]
+fn test_rust_fixture_highlights_extended_literals() {
+    let fixture = include_str!("tests/syntax/fixtures/rust.rs");
+    let mut buf = fixture_buffer("syntax-rust-extended", "rs", fixture);
+
+    let doc_comment = buf
+        .syntax_spans_for_line(28)
+        .expect("doc comment line should exist");
+    let attribute = buf
+        .syntax_spans_for_line(30)
+        .expect("attribute line should exist");
+    let raw_string = buf
+        .syntax_spans_for_line(32)
+        .expect("raw string line should exist");
+    let raw_multiline = buf
+        .syntax_spans_for_line(33)
+        .expect("raw multiline line should exist");
+    let byte_string = buf
+        .syntax_spans_for_line(35)
+        .expect("byte string line should exist");
+    let raw_bytes = buf
+        .syntax_spans_for_line(36)
+        .expect("raw byte string line should exist");
+    let numeric = buf
+        .syntax_spans_for_line(38)
+        .expect("numeric line should exist");
+
+    assert_spans_include_style(&doc_comment, tag("comment.documentation"));
+    assert_spans_include_style(&attribute, tag("keyword"));
+    assert_spans_include_style(&raw_string, tag("string"));
+    assert_spans_include_style(&raw_multiline, tag("string"));
+    assert_spans_include_style(&byte_string, tag("string"));
+    assert_spans_include_style(&raw_bytes, tag("string"));
+    assert_spans_include_style(&numeric, tag("number"));
+    assert!(raw_multiline.iter().any(|span| span.style == tag("string")));
+}
+
+#[test]
+fn test_python_fixture_highlights_extended_prefixes() {
+    let fixture = include_str!("tests/syntax/fixtures/python.py");
+    let mut buf = fixture_buffer("syntax-python-extended", "py", fixture);
+
+    let decorator = buf
+        .syntax_spans_for_line(28)
+        .expect("decorator line should exist");
+    let raw_string = buf
+        .syntax_spans_for_line(30)
+        .expect("raw string line should exist");
+    let bytes_string = buf
+        .syntax_spans_for_line(31)
+        .expect("bytes string line should exist");
+    let raw_bytes = buf
+        .syntax_spans_for_line(33)
+        .expect("raw bytes line should exist");
+    let combined = buf
+        .syntax_spans_for_line(34)
+        .expect("combined f-string line should exist");
+    let raw_combined = buf
+        .syntax_spans_for_line(35)
+        .expect("raw combined f-string line should exist");
+    let numeric = buf
+        .syntax_spans_for_line(37)
+        .expect("numeric line should exist");
+
+    assert_spans_include_style(&decorator, tag("keyword"));
+    assert_spans_include_style(&raw_string, tag("string"));
+    assert_spans_include_style(&bytes_string, tag("string"));
+    assert_spans_include_style(&raw_bytes, tag("string"));
+    assert_spans_include_style(&combined, tag("string"));
+    assert_spans_include_style(&raw_combined, tag("string"));
+    assert_spans_include_style(&numeric, tag("number"));
+}
+
+#[test]
+fn test_python_raw_fstring_highlights_interpolation_body() {
+    let mut buf = fixture_buffer(
+        "syntax-python-raw-fstring",
+        "py",
+        r#"value = rf"hello {name}\n""#,
+    );
+    let spans = buf
+        .syntax_spans_for_line(0)
+        .expect("raw f-string line should exist");
+
+    assert_spans_include_style(&spans, tag("string"));
+    assert_spans_include_style(&spans, tag("variable"));
+}
+
+#[test]
+fn test_javascript_fixture_highlights_regex_private_fields_and_bigints() {
+    let fixture = include_str!("tests/syntax/fixtures/javascript.js");
+    let mut buf = fixture_buffer("syntax-js-extended", "js", fixture);
+
+    let regex_line = buf
+        .syntax_spans_for_line(19)
+        .expect("regex line should exist");
+    let bigint_line = buf
+        .syntax_spans_for_line(20)
+        .expect("bigint line should exist");
+    let private_field = buf
+        .syntax_spans_for_line(26)
+        .expect("private field line should exist");
+    let private_access = buf
+        .syntax_spans_for_line(28)
+        .expect("private access line should exist");
+
+    assert_spans_include_style(&regex_line, tag("string"));
+    assert_spans_include_style(&bigint_line, tag("number"));
+    assert_spans_include_style(&private_field, tag("variable"));
+    assert_spans_include_style(&private_access, tag("variable"));
+}
+
+#[test]
+fn test_json_fixture_rejects_identifier_like_text() {
+    let fixture = include_str!("tests/syntax/fixtures/json.json");
+    let mut buf = fixture_buffer("syntax-json-extended", "json", fixture);
+
+    let negative = buf
+        .syntax_spans_for_line(12)
+        .expect("negative number line should exist");
+    let identifier = buf
+        .syntax_spans_for_line(13)
+        .expect("identifier-like line should exist");
+
+    assert_spans_include_style(&negative, tag("number"));
+    assert!(identifier.is_empty());
+}
+
+#[test]
+fn test_toml_fixture_highlights_tables_and_extended_numbers() {
+    let fixture = include_str!("tests/syntax/fixtures/toml.toml");
+    let mut buf = fixture_buffer("syntax-toml-extended", "toml", fixture);
+
+    let dotted_key = buf
+        .syntax_spans_for_line(17)
+        .expect("dotted key line should exist");
+    let table = buf
+        .syntax_spans_for_line(19)
+        .expect("table line should exist");
+    let base_numbers = buf
+        .syntax_spans_for_line(20)
+        .expect("base number line should exist");
+    let inline_table = buf
+        .syntax_spans_for_line(21)
+        .expect("inline table line should exist");
+    let array_of_tables = buf
+        .syntax_spans_for_line(23)
+        .expect("array of tables line should exist");
+
+    assert_spans_include_style(&dotted_key, tag("variable"));
+    assert_spans_include_style(&dotted_key, tag("operator"));
+    assert_spans_include_style(&table, tag("keyword"));
+    assert_spans_include_style(&base_numbers, tag("number"));
+    assert_spans_include_style(&inline_table, tag("number"));
+    assert_spans_include_style(&inline_table, tag("constant"));
+    assert_spans_include_style(&array_of_tables, tag("keyword"));
+}
+
+#[test]
+fn test_markdown_fixture_highlights_extended_structures() {
+    let path =
+        AbsolutePath::from_path(temp_path_with_ext("syntax-markdown-extended", "md").as_path())
+            .unwrap();
+    let fixture = include_str!("tests/syntax/fixtures/markdown.md");
+    let mut buf = Buffer::from_str_with_path(fixture, path);
+
+    let setext = buf
+        .syntax_spans_for_line(31)
+        .expect("setext underline line should exist");
+    let reference_link = buf
+        .syntax_spans_for_line(33)
+        .expect("reference link line should exist");
+    let reference_definition = buf
+        .syntax_spans_for_line(34)
+        .expect("reference definition line should exist");
+    let autolink = buf
+        .syntax_spans_for_line(37)
+        .expect("autolink line should exist");
+    let underscore_line = buf
+        .syntax_spans_for_line(39)
+        .expect("underscore emphasis line should exist");
+    let indented_code = buf
+        .syntax_spans_for_line(41)
+        .expect("indented code line should exist");
+    let tilde_fence = buf
+        .syntax_spans_for_line(43)
+        .expect("tilde fence line should exist");
+    let tilde_body = buf
+        .syntax_spans_for_line(44)
+        .expect("tilde fence body line should exist");
+
+    assert_spans_include_style(&setext, tag("markup.heading"));
+    assert_spans_include_style(&reference_link, tag("markup.link"));
+    assert_spans_include_style(&reference_definition, tag("markup.link"));
+    assert_spans_include_style(&autolink, tag("markup.link"));
+    assert_spans_include_style(&underscore_line, tag("markup.emphasis"));
+    assert_spans_include_style(&underscore_line, tag("markup.strong"));
+    assert_spans_include_style(&indented_code, tag("markup.code"));
+    assert_spans_include_style(&tilde_fence, tag("markup.code"));
+    assert_spans_include_style(&tilde_body, tag("variable"));
+}
+
+#[test]
+fn test_shell_fixture_highlights_substitutions_and_heredoc_marker() {
+    let fixture = include_str!("tests/syntax/fixtures/shell.sh");
+    let mut buf = fixture_buffer("syntax-shell-extended", "sh", fixture);
+
+    let parameter = buf
+        .syntax_spans_for_line(21)
+        .expect("parameter expansion line should exist");
+    let command = buf
+        .syntax_spans_for_line(22)
+        .expect("command substitution line should exist");
+    let arithmetic = buf
+        .syntax_spans_for_line(23)
+        .expect("arithmetic substitution line should exist");
+    let heredoc = buf
+        .syntax_spans_for_line(26)
+        .expect("heredoc opener line should exist");
+
+    assert_spans_include_style(&parameter, tag("string"));
+    assert_spans_include_style(&parameter, tag("variable"));
+    assert_spans_include_style(&command, tag("string"));
+    assert_spans_include_style(&command, tag("punctuation"));
+    assert_spans_include_style(&arithmetic, tag("string"));
+    assert_spans_include_style(&arithmetic, tag("punctuation"));
+    assert_spans_include_style(&heredoc, tag("string.escape"));
+}
+
+#[test]
+fn test_markdown_prose_does_not_use_generic_identifier_heuristics() {
+    let path = AbsolutePath::from_path(temp_path_with_ext("syntax-prose", "md").as_path()).unwrap();
+    let mut buf = Buffer::from_str_with_path("Capitalized SCREAMY_CASE words stay plain", path);
+
+    let spans = buf
+        .syntax_spans_for_line(0)
+        .expect("prose line should exist");
+    assert!(spans.is_empty());
+}
+
+#[test]
+fn test_markdown_fixture_highlights_common_constructs() {
+    let path =
+        AbsolutePath::from_path(temp_path_with_ext("syntax-markdown-common", "md").as_path())
+            .unwrap();
+    let fixture = include_str!("tests/syntax/fixtures/markdown.md");
+    let mut buf = Buffer::from_str_with_path(fixture, path);
+
+    let heading = buf
+        .syntax_spans_for_line(0)
+        .expect("heading line should exist");
+    let prose = buf
+        .syntax_spans_for_line(2)
+        .expect("prose line should exist");
+    let quote = buf
+        .syntax_spans_for_line(6)
+        .expect("quote line should exist");
+    let list = buf
+        .syntax_spans_for_line(8)
+        .expect("list line should exist");
+    let thematic_break = buf
+        .syntax_spans_for_line(11)
+        .expect("thematic break line should exist");
+    let plain = buf
+        .syntax_spans_for_line(28)
+        .expect("plain line should exist");
+
+    assert_spans_include_style(&heading, tag("markup.heading"));
+    assert_spans_include_style(&prose, tag("markup.emphasis"));
+    assert_spans_include_style(&prose, tag("markup.strong"));
+    assert_spans_include_style(&prose, tag("markup.code.inline"));
+    assert_spans_include_style(&prose, tag("markup.link"));
+    assert!(
+        prose
+            .iter()
+            .any(|span| span.style == tag("markup.emphasis.text"))
+    );
+    assert!(
+        prose
+            .iter()
+            .any(|span| span.style == tag("markup.strong.text"))
+    );
+    assert!(
+        prose
+            .iter()
+            .any(|span| span.style == tag("markup.code.inline.text"))
+    );
+    assert_spans_include_style(&quote, tag("markup.quote"));
+    assert_spans_include_style(&list, tag("markup.list"));
+    assert_spans_include_style(&thematic_break, tag("markup.thematic_break"));
+    assert!(plain.is_empty());
+}
+
+#[test]
+fn test_markdown_code_fence_unknown_capture_is_unstyled() {
+    let path = AbsolutePath::from_path(temp_path_with_ext("syntax-fence-unknown", "md").as_path())
+        .unwrap();
+    let mut buf = Buffer::from_str_with_path("```wat\nconst value = 1;\n```", path);
+
+    let body = buf
+        .syntax_spans_for_line(1)
+        .expect("body line should exist");
+    assert!(body.is_empty());
+    let closing = buf
+        .syntax_spans_for_line(2)
+        .expect("closing line should exist");
+    assert!(closing.iter().any(|span| span.style == tag("markup.code")));
+}
+
+#[test]
+fn test_javascript_template_string_highlights_interpolation_body() {
+    let path =
+        AbsolutePath::from_path(temp_path_with_ext("syntax-js-template", "js").as_path()).unwrap();
+    let mut buf = Buffer::from_str_with_path("const msg = `hi ${1 + 2} there`;", path);
+
+    let spans = buf.syntax_spans_for_line(0).expect("line should exist");
+    assert_spans_include_style(&spans, tag("string"));
+    assert_spans_include_style(&spans, tag("punctuation"));
+    assert_spans_include_style(&spans, tag("number"));
+    assert_spans_include_style(&spans, tag("operator"));
+}
+
+#[test]
+fn test_javascript_escape_sequences_use_escape_regions() {
+    let path =
+        AbsolutePath::from_path(temp_path_with_ext("syntax-js-escape", "js").as_path()).unwrap();
+    let mut buf = Buffer::from_str_with_path("const msg = \"line 1\\nline 2\";", path);
+
+    let spans = buf.syntax_spans_for_line(0).expect("line should exist");
+    assert_spans_include_style(&spans, tag("string"));
+    assert_spans_include_style(&spans, tag("punctuation"));
+}
+
+#[test]
+fn test_javascript_constants_use_constant_rules() {
+    let path =
+        AbsolutePath::from_path(temp_path_with_ext("syntax-js-constant", "js").as_path()).unwrap();
+    let mut buf = Buffer::from_str_with_path("const value = null;", path);
+
+    let spans = buf.syntax_spans_for_line(0).expect("line should exist");
+    assert_spans_include_style(&spans, tag("keyword"));
+    assert_spans_include_style(&spans, tag("constant"));
+}
+
+#[test]
+fn test_python_fstring_highlights_interpolation_body() {
+    let path =
+        AbsolutePath::from_path(temp_path_with_ext("syntax-py-fstring", "py").as_path()).unwrap();
+    let mut buf = Buffer::from_str_with_path("msg = f\"hello {1 + 2}\"", path);
+
+    let spans = buf.syntax_spans_for_line(0).expect("line should exist");
+    assert_spans_include_style(&spans, tag("string"));
+    assert_spans_include_style(&spans, tag("punctuation"));
+    assert_spans_include_style(&spans, tag("number"));
+    assert_spans_include_style(&spans, tag("operator"));
+}
+
+#[test]
+fn test_python_constants_use_constant_rules() {
+    let path =
+        AbsolutePath::from_path(temp_path_with_ext("syntax-py-constant", "py").as_path()).unwrap();
+    let mut buf = Buffer::from_str_with_path("value = True\nmissing = None", path);
+
+    let first_line = buf
+        .syntax_spans_for_line(0)
+        .expect("first line should exist");
+    let second_line = buf
+        .syntax_spans_for_line(1)
+        .expect("second line should exist");
+    assert_spans_include_style(&first_line, tag("constant"));
+    assert_spans_include_style(&second_line, tag("constant"));
+}
+
+#[test]
+fn test_python_types_use_type_rules() {
+    let path =
+        AbsolutePath::from_path(temp_path_with_ext("syntax-py-type", "py").as_path()).unwrap();
+    let mut buf = Buffer::from_str_with_path("class Thing(Exception):\n    pass", path);
+
+    let first_line = buf
+        .syntax_spans_for_line(0)
+        .expect("first line should exist");
+    assert_spans_include_style(&first_line, tag("keyword"));
+    assert_spans_include_style(&first_line, tag("type"));
+}
+
+#[test]
+fn test_json_strings_use_escape_regions() {
+    let path = AbsolutePath::from_path(temp_path_with_ext("syntax-json-string", "json").as_path())
+        .unwrap();
+    let mut buf =
+        Buffer::from_str_with_path("{\"key\": \"line 1\\nline 2\", \"enabled\": true}", path);
+
+    let spans = buf.syntax_spans_for_line(0).expect("line should exist");
+    assert_spans_include_style(&spans, tag("string"));
+    assert_spans_include_style(&spans, tag("punctuation"));
+    assert_spans_include_style(&spans, tag("constant"));
+}
+
+#[test]
+fn test_toml_constants_use_constant_rules() {
+    let path =
+        AbsolutePath::from_path(temp_path_with_ext("syntax-toml-constant", "toml").as_path())
+            .unwrap();
+    let mut buf = Buffer::from_str_with_path("flag = true", path);
+
+    let spans = buf.syntax_spans_for_line(0).expect("line should exist");
+    assert_spans_include_style(&spans, tag("constant"));
+}
+
+#[test]
+fn test_toml_datetimes_use_number_rules() {
+    let path =
+        AbsolutePath::from_path(temp_path_with_ext("syntax-toml-datetime", "toml").as_path())
+            .unwrap();
+    let mut buf = Buffer::from_str_with_path(
+        "offset = 1979-05-27T07:32:00Z\nlocal = 1979-05-27 07:32:00\ndate = 1979-05-27\ntime = 07:32:00",
+        path,
+    );
+
+    for line in 0..4 {
+        let spans = buf.syntax_spans_for_line(line).expect("line should exist");
+        assert_spans_include_style(&spans, tag("number"));
+    }
+}
+
+#[test]
+fn test_toml_literal_strings_remain_plain() {
+    let path = AbsolutePath::from_path(temp_path_with_ext("syntax-toml-literal", "toml").as_path())
+        .unwrap();
+    let mut buf = Buffer::from_str_with_path("raw = 'line \\n two'", path);
+
+    let spans = buf.syntax_spans_for_line(0).expect("line should exist");
+    assert_spans_include_style(&spans, tag("string"));
+    assert!(!spans.iter().any(|span| span.style == tag("punctuation")));
+}
+
+#[test]
+fn test_rust_strings_use_escape_regions() {
+    let path =
+        AbsolutePath::from_path(temp_path_with_ext("syntax-rust-string", "rs").as_path()).unwrap();
+    let mut buf = Buffer::from_str_with_path("let msg = \"hello\\nworld\";", path);
+
+    let spans = buf.syntax_spans_for_line(0).expect("line should exist");
+    assert_spans_include_style(&spans, tag("string"));
+    assert_spans_include_style(&spans, tag("punctuation"));
+}
+
+#[test]
+fn test_rust_format_macro_highlights_context_sensitive_format_string() {
+    let path =
+        AbsolutePath::from_path(temp_path_with_ext("syntax-rust-format", "rs").as_path()).unwrap();
+    let mut buf = Buffer::from_str_with_path("let msg = format!(\"hello {name}\");", path);
+
+    let line = buf.line_at(0).expect("line should exist").to_string();
+    let spans = buf.syntax_spans_for_line(0).expect("line should exist");
+    assert_spans_include_style(&spans, tag("function.macro"));
+    assert_spans_include_style(&spans, tag("punctuation"));
+    assert_spans_include_style(&spans, tag("string"));
+    assert_spans_include_style(&spans, tag("variable"));
+    assert!(spans.iter().any(|span| span.style == tag("string")
+        && line[span.start_byte..span.end_byte].contains("hello ")));
+}
+
+#[test]
+fn test_rust_fixture_format_strings_follow_std_fmt_rules() {
+    let fixture = include_str!("tests/syntax/fixtures/rust.rs");
+    let mut buf = fixture_buffer("syntax-rust-fixture-fmt", "rs", fixture);
+
+    let positional = buf
+        .syntax_spans_for_line(23)
+        .expect("positional format line should exist");
+    let specifier = buf
+        .syntax_spans_for_line(24)
+        .expect("specifier format line should exist");
+    let escaped = buf
+        .syntax_spans_for_line(25)
+        .expect("escaped format line should exist");
+    let escaped_line = buf.line_at(25).expect("escaped format line should exist");
+    let escaped_body_start = escaped_line.find('"').expect("opening quote should exist") + 1;
+    let escaped_body_end = escaped_line.rfind('"').expect("closing quote should exist");
+    let escaped_body = escaped
+        .iter()
+        .filter(|span| span.start_byte >= escaped_body_start && span.end_byte <= escaped_body_end)
+        .collect::<Vec<_>>();
+
+    assert_spans_include_style(&positional, tag("function.macro"));
+    assert_spans_include_style(&positional, tag("string"));
+    assert_spans_include_style(&positional, tag("punctuation"));
+    assert_spans_include_style(&positional, tag("variable"));
+
+    assert_spans_include_style(&specifier, tag("function.macro"));
+    assert_spans_include_style(&specifier, tag("string"));
+    assert_spans_include_style(&specifier, tag("punctuation"));
+    assert_spans_include_style(&specifier, tag("variable"));
+    assert_spans_include_style(&specifier, tag("number"));
+
+    assert_spans_include_style(&escaped, tag("function.macro"));
+    assert_spans_include_style(&escaped, tag("string"));
+    assert_spans_include_style(&escaped, tag("string.escape"));
+    assert!(
+        !escaped_body
+            .iter()
+            .any(|span| span.style == tag("variable"))
+    );
+    assert!(!escaped_body.iter().any(|span| span.style == tag("number")));
+}
+
+#[test]
+fn test_rust_non_format_string_remains_plain() {
+    let path =
+        AbsolutePath::from_path(temp_path_with_ext("syntax-rust-plain-string", "rs").as_path())
+            .unwrap();
+    let mut buf = Buffer::from_str_with_path("\"hello {name}\"", path);
+
+    let spans = buf.syntax_spans_for_line(0).expect("line should exist");
+    assert_spans_include_style(&spans, tag("string"));
+    assert!(!spans.iter().any(|span| span.style == tag("function.macro")));
+    assert!(!spans.iter().any(|span| span.style == tag("variable")));
+    assert!(!spans.iter().any(|span| span.style == tag("punctuation")));
+}
+
+#[test]
+fn test_rust_format_macro_highlighting_updates_after_edit() {
+    let path =
+        AbsolutePath::from_path(temp_path_with_ext("syntax-rust-format-edit", "rs").as_path())
+            .unwrap();
+    let mut buf = Buffer::from_str_with_path("format!(\"hello {name}\")", path);
+
+    assert_spans_include_style(
+        &buf.syntax_spans_for_line(0).expect("line should exist"),
+        tag("function.macro"),
+    );
+
+    buf.insert_text(Cursor::new(0, 0), "let msg = ");
+
+    let spans = buf.syntax_spans_for_line(0).expect("line should exist");
+    assert_spans_include_style(&spans, tag("function.macro"));
+    assert_spans_include_style(&spans, tag("string"));
+}
+
+#[test]
+fn test_shell_single_quotes_remain_plain() {
+    let path =
+        AbsolutePath::from_path(temp_path_with_ext("syntax-shell-single", "sh").as_path()).unwrap();
+    let mut buf = Buffer::from_str_with_path("msg='line \\n two'", path);
+
+    let spans = buf.syntax_spans_for_line(0).expect("line should exist");
+    assert_spans_include_style(&spans, tag("string"));
+    assert!(!spans.iter().any(|span| span.style == tag("punctuation")));
+}
+
+#[test]
+fn test_shell_constants_use_constant_rules() {
+    let path = AbsolutePath::from_path(temp_path_with_ext("syntax-shell-constant", "sh").as_path())
+        .unwrap();
+    let mut buf = Buffer::from_str_with_path("if true; then echo ok; fi", path);
+
+    let spans = buf.syntax_spans_for_line(0).expect("line should exist");
+    assert_spans_include_style(&spans, tag("constant"));
+}
+
+#[test]
+fn test_shell_types_use_type_rules() {
+    let path =
+        AbsolutePath::from_path(temp_path_with_ext("syntax-shell-type", "sh").as_path()).unwrap();
+    let mut buf = Buffer::from_str_with_path("local name=\"Ada\"; export PATH=/usr/bin", path);
+
+    let spans = buf.syntax_spans_for_line(0).expect("line should exist");
+    assert_spans_include_style(&spans, tag("type"));
 }
 
 #[test]

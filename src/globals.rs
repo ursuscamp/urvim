@@ -54,9 +54,9 @@ static ACTIVE_THEME: OnceLock<RwLock<Option<Theme>>> = OnceLock::new();
 
 #[cfg(test)]
 thread_local! {
-    static TEST_CONFIG: RefCell<Option<Config>> = RefCell::new(None);
-    static TEST_ACTIVE_THEME: RefCell<Option<Theme>> = RefCell::new(None);
-    static TEST_LAST_REPEAT: RefCell<Option<RepeatState>> = RefCell::new(None);
+    static TEST_CONFIG: RefCell<Option<Config>> = const { RefCell::new(None) };
+    static TEST_ACTIVE_THEME: RefCell<Option<Theme>> = const { RefCell::new(None) };
+    static TEST_LAST_REPEAT: RefCell<Option<RepeatState>> = const { RefCell::new(None) };
 }
 
 /// Set the last character search state
@@ -78,7 +78,6 @@ pub fn set_last_repeat(state: RepeatState) {
         TEST_LAST_REPEAT.with(|slot| {
             *slot.borrow_mut() = Some(state);
         });
-        return;
     }
 
     #[cfg(not(test))]
@@ -92,7 +91,7 @@ pub fn set_last_repeat(state: RepeatState) {
 pub fn get_last_repeat() -> Option<RepeatState> {
     #[cfg(test)]
     {
-        return TEST_LAST_REPEAT.with(|slot| slot.borrow().clone());
+        TEST_LAST_REPEAT.with(|slot| slot.borrow().clone())
     }
 
     #[cfg(not(test))]
@@ -143,7 +142,7 @@ pub fn with_config<R>(f: impl FnOnce(Option<&Config>) -> R) -> R {
         if let Some(config) = test_config.as_ref() {
             return f(Some(config));
         }
-        return f(None);
+        f(None)
     }
 
     #[cfg(not(test))]
@@ -174,7 +173,7 @@ pub fn with_active_theme<R>(f: impl FnOnce(Option<&Theme>) -> R) -> R {
         if let Some(theme) = test_theme.as_ref() {
             return f(Some(theme));
         }
-        return f(None);
+        f(None)
     }
 
     #[cfg(not(test))]
@@ -234,7 +233,8 @@ mod tests {
     use crate::config::Config;
     use crate::terminal::Color;
     use crate::terminal::Style;
-    use crate::theme::{SyntaxStyles, ThemeKind, UiStyles};
+    use crate::theme::{SyntaxTagStyles, Theme, ThemeKind, UiStyles};
+    use std::collections::BTreeMap;
 
     fn themed_theme() -> Theme {
         let default_style = Style::new().fg(Color::ansi(10)).bg(Color::ansi(20));
@@ -247,18 +247,7 @@ mod tests {
             Style::new().fg(Color::ansi(11)).bg(Color::ansi(12)),
             Style::new().fg(Color::ansi(13)).bg(Color::ansi(14)),
         );
-        let syntax_styles = SyntaxStyles::new(
-            Style::new(),
-            Style::new(),
-            Style::new(),
-            Style::new(),
-            Style::new(),
-            Style::new(),
-            Style::new(),
-            Style::new(),
-            Style::new(),
-            Style::new(),
-        );
+        let syntax_styles = SyntaxTagStyles::new(BTreeMap::new());
 
         Theme::new(
             "demo",
@@ -273,6 +262,7 @@ mod tests {
         Config {
             theme: theme.to_string(),
             insert_escape: None,
+            syntax: true,
         }
     }
 

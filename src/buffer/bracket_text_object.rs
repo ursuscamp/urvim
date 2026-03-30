@@ -154,13 +154,13 @@ impl Buffer {
                 let cursor = Cursor::new(line_idx, col);
                 if kind.matches_opening(ch) {
                     stack.push(cursor);
-                } else if kind.matches_closing(ch) {
-                    if let Some(open) = stack.pop() {
-                        pairs.push(BracketPair {
-                            open,
-                            close: cursor,
-                        });
-                    }
+                } else if kind.matches_closing(ch)
+                    && let Some(open) = stack.pop()
+                {
+                    pairs.push(BracketPair {
+                        open,
+                        close: cursor,
+                    });
                 }
             }
         }

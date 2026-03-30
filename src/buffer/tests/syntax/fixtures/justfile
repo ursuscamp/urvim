@@ -1,0 +1,5 @@
+# Justfile syntax fixture
+default:
+    echo "hello {{name}}"
+name := "urvim"
+version := 42

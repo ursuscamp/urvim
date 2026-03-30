@@ -1,18 +1,21 @@
+use super::syntax::SyntaxCache;
 use super::*;
+use smol_str::SmolStr;
 
 impl Buffer {
     /// Creates a new empty buffer.
     pub fn new() -> Self {
         let lines: Vector<Arc<str>> = Vector::unit(Arc::from(""));
-        let filetype = Filetype::detect(None, lines.get(0).map(|line| line.as_ref()));
+        let syntax_name = SmolStr::new(crate::syntax::fallback_syntax_name());
         let saved_lines = lines.clone();
         let undo_lines = lines.clone();
         Self {
             lines,
             saved_lines,
             path: None,
-            filetype,
+            syntax_name: syntax_name.clone(),
             undo_state: UndoState::new(undo_lines, Cursor::new(0, 0)),
+            syntax_cache: SyntaxCache::new(syntax_name),
         }
     }
 
@@ -23,15 +26,18 @@ impl Buffer {
         } else {
             text.lines().map(Arc::from).collect::<Vector<_>>()
         };
-        let filetype = Filetype::detect(None, lines.get(0).map(|line| line.as_ref()));
+        let syntax_name =
+            crate::syntax::resolve_builtin_syntax(None, lines.get(0).map(|line| line.as_ref()))
+                .unwrap_or_else(|| SmolStr::new(crate::syntax::fallback_syntax_name()));
         let saved_lines = lines.clone();
         let undo_lines = lines.clone();
         Self {
             lines,
             saved_lines,
             path: None,
-            filetype,
+            syntax_name: syntax_name.clone(),
             undo_state: UndoState::new(undo_lines, Cursor::new(0, 0)),
+            syntax_cache: SyntaxCache::new(syntax_name),
         }
     }
 
@@ -43,16 +49,20 @@ impl Buffer {
 
     pub fn with_path(path: AbsolutePath) -> Self {
         let lines: Vector<Arc<str>> = Vector::unit(Arc::from(""));
-        let filetype =
-            Filetype::detect(Some(path.as_path()), lines.get(0).map(|line| line.as_ref()));
+        let syntax_name = crate::syntax::resolve_builtin_syntax(
+            Some(path.as_path()),
+            lines.get(0).map(|line| line.as_ref()),
+        )
+        .unwrap_or_else(|| SmolStr::new(crate::syntax::fallback_syntax_name()));
         let saved_lines = lines.clone();
         let undo_lines = lines.clone();
         Self {
             lines,
             saved_lines,
             path: Some(path),
-            filetype,
+            syntax_name: syntax_name.clone(),
             undo_state: UndoState::new(undo_lines, Cursor::new(0, 0)),
+            syntax_cache: SyntaxCache::new(syntax_name),
         }
     }
 

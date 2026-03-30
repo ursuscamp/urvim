@@ -1,0 +1,146 @@
+[metadata]
+name = "perl"
+display_name = "Perl"
+alias = ["pl"]
+filename = ["\\.(pl|pm)$"]
+shebang = ["^#!.*\\bperl(?:[0-9.]+)?(?:\\s|$)"]
+
+[[rules]]
+kind = "regex"
+pattern = "#.*$"
+tag = "comment"
+
+[[rules]]
+kind = "regex"
+pattern = "<<-?\\s*['\"]?(\\w+)['\"]?[ \\t]*;?"
+tag = "string.escape"
+context = { push = [{ name = "perl_heredoc", capture = 1 }, "perl_heredoc_body"] }
+
+[[rules]]
+kind = "regex"
+pattern = "^[ \\t]*([A-Za-z_][A-Za-z0-9_]*)[ \\t]*$"
+tag = "string.escape"
+context = { requires = ["perl_heredoc"], payload_match = { name = "perl_heredoc", capture = 1 }, pop = ["perl_heredoc", "perl_heredoc_body"] }
+
+[[rules]]
+kind = "regex"
+pattern = ".+"
+tag = "string.heredoc"
+context = { requires = ["perl_heredoc_body"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\""
+tag = "string"
+context = { push = ["perl_double_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\""
+tag = "string"
+context = { requires = ["perl_double_string"], pop = ["perl_double_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "[^\"\\\\\\n]+"
+tag = "string"
+context = { requires = ["perl_double_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\\\\."
+tag = "string"
+context = { requires = ["perl_double_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "'"
+tag = "string"
+context = { push = ["perl_single_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "'"
+tag = "string"
+context = { requires = ["perl_single_string"], pop = ["perl_single_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "[^'\\\\\\n]+"
+tag = "string"
+context = { requires = ["perl_single_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\\\\."
+tag = "string"
+context = { requires = ["perl_single_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "m/"
+tag = "string"
+context = { push = ["perl_regex"] }
+
+[[rules]]
+kind = "regex"
+pattern = "/"
+tag = "string"
+context = { requires = ["perl_regex"], pop = ["perl_regex"] }
+
+[[rules]]
+kind = "regex"
+pattern = "[^/\\n]+"
+tag = "string"
+context = { requires = ["perl_regex"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\\\\."
+tag = "string"
+context = { requires = ["perl_regex"] }
+
+[[rules]]
+kind = "regex"
+pattern = "q[wxr]?\\{[^\\n}]*\\}|q[wxr]?\\([^\\n)]*\\)|q[wxr]?\\[[^\\n\\]]*\\]|q[wxr]?\\<[^\\n>]*\\>"
+tag = "string"
+
+[[rules]]
+kind = "regex"
+pattern = "(?:m|s|tr|y)/(?:\\\\.|[^/\\\\\\n])*/(?:[a-z]*)"
+tag = "string"
+
+[[rules]]
+kind = "regex"
+pattern = "[\\$@%][A-Za-z_][A-Za-z0-9_]*"
+tag = "variable"
+
+[[rules]]
+kind = "regex"
+pattern = "\\b(?:sub|my|our|local|if|elsif|else|unless|while|until|for|foreach|continue|last|next|redo|goto|return|package|use|require|do|given|when|default|state|say)\\b"
+tag = "keyword"
+
+[[rules]]
+kind = "regex"
+pattern = "\\b(?:undef|__FILE__|__LINE__|__PACKAGE__)\\b"
+tag = "constant"
+
+[[rules]]
+kind = "regex"
+pattern = "\\b\\d+(?:\\.\\d+)?\\b"
+tag = "number"
+
+[[rules]]
+kind = "regex"
+pattern = "\\b[A-Z][A-Za-z0-9_]*\\b"
+tag = "type"
+
+[[rules]]
+kind = "regex"
+pattern = "[(){}\\[\\],.;:]"
+tag = "punctuation"
+
+[[rules]]
+kind = "regex"
+pattern = "(?:===|==|!=|<=|>=|=>|=~|!~|\\+\\+|--|[+\\-*/%=&|!<>^~?:])"
+tag = "operator"

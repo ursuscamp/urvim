@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 
 use super::error::ThemeLoadError;
 use super::loader::resolve_theme_from_str;
+use super::tag::Tag;
 
 /// Indicates whether a theme is ANSI 256-color or true color.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -132,58 +133,40 @@ impl UiStyles {
     }
 }
 
-/// Fully resolved syntax styles for the closed urvim schema.
+/// Fully resolved syntax styles keyed by hierarchical syntax tags.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct SyntaxStyles {
-    /// Style used for comments.
-    pub comment: Style,
-    /// Style used for constants.
-    pub constant: Style,
-    /// Style used for function names.
-    pub function: Style,
-    /// Style used for keywords.
-    pub keyword: Style,
-    /// Style used for numbers.
-    pub number: Style,
-    /// Style used for operators.
-    pub operator: Style,
-    /// Style used for punctuation.
-    pub punctuation: Style,
-    /// Style used for strings.
-    pub string: Style,
-    /// Style used for types.
-    pub type_: Style,
-    /// Style used for variables.
-    pub variable: Style,
+pub struct SyntaxTagStyles {
+    styles: BTreeMap<Tag, Style>,
 }
 
-impl SyntaxStyles {
-    /// Creates a new set of fully resolved syntax styles.
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        comment: Style,
-        constant: Style,
-        function: Style,
-        keyword: Style,
-        number: Style,
-        operator: Style,
-        punctuation: Style,
-        string: Style,
-        type_: Style,
-        variable: Style,
-    ) -> Self {
-        Self {
-            comment,
-            constant,
-            function,
-            keyword,
-            number,
-            operator,
-            punctuation,
-            string,
-            type_,
-            variable,
+impl SyntaxTagStyles {
+    /// Creates a new syntax tag style map.
+    pub fn new(styles: BTreeMap<Tag, Style>) -> Self {
+        Self { styles }
+    }
+
+    /// Returns the resolved style for a tag after specificity fallback.
+    pub fn style_for_tag(&self, tag: &Tag, default_style: Style) -> Style {
+        for candidate in tag.parent_chain() {
+            if let Some(style) = self
+                .styles
+                .get(&Tag::parse(candidate).expect("parent chain must yield valid tags"))
+            {
+                return *style;
+            }
         }
+
+        default_style
+    }
+
+    /// Inserts a resolved style for a tag.
+    pub fn insert(&mut self, tag: Tag, style: Style) {
+        self.styles.insert(tag, style);
+    }
+
+    /// Returns an iterator over the stored tag styles.
+    pub fn iter(&self) -> impl Iterator<Item = (&Tag, &Style)> {
+        self.styles.iter()
     }
 }
 
@@ -193,7 +176,7 @@ pub struct Theme {
     /// Resolved UI styles used by rendering code.
     pub ui: UiStyles,
     /// Resolved syntax styles used by highlighting code.
-    pub syntax: SyntaxStyles,
+    pub syntax: SyntaxTagStyles,
     name: String,
     kind: ThemeKind,
     default_style: Style,
@@ -206,7 +189,7 @@ impl Theme {
         kind: ThemeKind,
         default_style: Style,
         ui: UiStyles,
-        syntax: SyntaxStyles,
+        syntax: SyntaxTagStyles,
     ) -> Self {
         Self {
             name: name.into(),
@@ -230,6 +213,11 @@ impl Theme {
     /// Returns the theme default style.
     pub fn default_style(&self) -> Style {
         self.default_style
+    }
+
+    /// Returns the resolved syntax style for a tag.
+    pub fn syntax_style_for_tag(&self, tag: &Tag) -> Style {
+        self.syntax.style_for_tag(tag, self.default_style)
     }
 }
 
@@ -347,6 +335,10 @@ fn builtin_theme_sources() -> [(&'static str, &'static str, &'static str); 6] {
 mod tests {
     use super::*;
 
+    fn tag(value: &str) -> Tag {
+        Tag::parse(value).expect("valid tag")
+    }
+
     fn theme(name: &str) -> Theme {
         let default_style = Style::new().bold();
         let ui_styles = UiStyles::new(
@@ -358,17 +350,24 @@ mod tests {
             Style::new().fg(Color::ansi(6)),
             Style::new().fg(Color::ansi(7)),
         );
-        let syntax_styles = SyntaxStyles::new(
-            Style::new().fg(Color::ansi(10)),
-            Style::new().fg(Color::ansi(11)),
-            Style::new().fg(Color::ansi(12)),
-            Style::new().fg(Color::ansi(13)),
-            Style::new().fg(Color::ansi(14)),
-            Style::new().fg(Color::ansi(15)),
-            Style::new().fg(Color::ansi(16)),
-            Style::new().fg(Color::ansi(17)),
-            Style::new().fg(Color::ansi(18)),
-            Style::new().fg(Color::ansi(19)),
+        let mut syntax_styles = SyntaxTagStyles::default();
+        syntax_styles.insert(tag("comment"), Style::new().bold().fg(Color::ansi(10)));
+        syntax_styles.insert(tag("constant"), Style::new().bold().fg(Color::ansi(11)));
+        syntax_styles.insert(tag("function"), Style::new().bold().fg(Color::ansi(12)));
+        syntax_styles.insert(tag("keyword"), Style::new().bold().fg(Color::ansi(13)));
+        syntax_styles.insert(tag("markup.code"), Style::new().bold().fg(Color::ansi(20)));
+        syntax_styles.insert(tag("operator"), Style::new().bold().fg(Color::ansi(15)));
+        syntax_styles.insert(tag("punctuation"), Style::new().bold().fg(Color::ansi(16)));
+        syntax_styles.insert(tag("string"), Style::new().bold().fg(Color::ansi(17)));
+        syntax_styles.insert(
+            tag("string.interpolation"),
+            Style::new().bold().fg(Color::ansi(21)),
+        );
+        syntax_styles.insert(tag("type"), Style::new().bold().fg(Color::ansi(18)));
+        syntax_styles.insert(tag("variable"), Style::new().bold().fg(Color::ansi(19)));
+        syntax_styles.insert(
+            tag("constant.integer"),
+            Style::new().bold().fg(Color::ansi(14)),
         );
 
         Theme::new(
@@ -390,11 +389,29 @@ mod tests {
     }
 
     #[test]
-    fn theme_returns_predefined_syntax_styles() {
+    fn theme_returns_tag_styles() {
         let theme = theme("demo");
 
-        assert_eq!(theme.syntax.comment, Style::new().fg(Color::ansi(10)));
-        assert_eq!(theme.syntax.variable, Style::new().fg(Color::ansi(19)));
+        assert_eq!(
+            theme.syntax_style_for_tag(&tag("comment")),
+            Style::new().bold().fg(Color::ansi(10))
+        );
+        assert_eq!(
+            theme.syntax_style_for_tag(&tag("constant.integer")),
+            Style::new().bold().fg(Color::ansi(14))
+        );
+        assert_eq!(
+            theme.syntax_style_for_tag(&tag("constant.float")),
+            Style::new().bold().fg(Color::ansi(11))
+        );
+        assert_eq!(
+            theme.syntax_style_for_tag(&tag("markup.code.inline")),
+            Style::new().bold().fg(Color::ansi(20))
+        );
+        assert_eq!(
+            theme.syntax_style_for_tag(&tag("string.interpolation")),
+            Style::new().bold().fg(Color::ansi(21))
+        );
     }
 
     #[test]

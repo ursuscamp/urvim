@@ -1,4 +1,4 @@
-//! Closed sets of UI and syntax style keys.
+//! Closed sets of UI keys.
 
 /// Predefined UI style keys supported by urvim.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -15,29 +15,4 @@ pub enum UiStyleKey {
     Gutter,
     /// The main buffer viewport.
     Window,
-}
-
-/// Predefined syntax style keys supported by urvim.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum SyntaxStyleKey {
-    /// Comments and documentation strings.
-    Comment,
-    /// Constants and immutable symbols.
-    Constant,
-    /// Function names.
-    Function,
-    /// Keywords and control flow.
-    Keyword,
-    /// Numeric literals.
-    Number,
-    /// Operators such as `+` and `=`.
-    Operator,
-    /// Punctuation such as commas and braces.
-    Punctuation,
-    /// String literals.
-    String,
-    /// Type names and declarations.
-    Type,
-    /// General variable names.
-    Variable,
 }

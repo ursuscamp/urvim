@@ -23,6 +23,8 @@ pub struct Config {
     pub theme: String,
     /// The optional insert-mode escape binding loaded from config.
     pub insert_escape: Option<String>,
+    /// Whether syntax highlighting is enabled for rendered buffers.
+    pub syntax: bool,
 }
 
 /// The TOML-backed config file schema.
@@ -33,6 +35,8 @@ pub struct PartialConfig {
     pub theme: Option<String>,
     /// The optional insert-mode escape binding stored in the config file.
     pub insert_escape: Option<String>,
+    /// Whether syntax highlighting is enabled in the config file.
+    pub syntax: Option<bool>,
 }
 
 /// Errors that can occur while loading or resolving startup configuration.
@@ -56,10 +60,13 @@ pub enum ConfigLoadError {
 
 impl Config {
     /// Loads, merges, and resolves startup configuration from the environment.
-    pub fn load(cli_theme: Option<&str>) -> Result<Self, ConfigLoadError> {
+    pub fn load(
+        cli_theme: Option<&str>,
+        cli_syntax: Option<bool>,
+    ) -> Result<Self, ConfigLoadError> {
         let config_home = xdg_config_home()?;
         let config_dirs = xdg_config_dirs();
-        Self::load_from_locations(config_home, config_dirs, cli_theme)
+        Self::load_from_locations(config_home, config_dirs, cli_theme, cli_syntax)
     }
 
     /// Loads, merges, and resolves startup configuration from explicit XDG paths.
@@ -67,22 +74,31 @@ impl Config {
         config_home: PathBuf,
         config_dirs: Vec<PathBuf>,
         cli_theme: Option<&str>,
+        cli_syntax: Option<bool>,
     ) -> Result<Self, ConfigLoadError> {
         let file = load_config_file(config_home, config_dirs)?;
-        Ok(Self::resolve(file.as_ref(), cli_theme))
+        Ok(Self::resolve(file.as_ref(), cli_theme, cli_syntax))
     }
 
     /// Resolves the final config by applying CLI overrides on top of file values.
-    pub fn resolve(file: Option<&PartialConfig>, cli_theme: Option<&str>) -> Self {
+    pub fn resolve(
+        file: Option<&PartialConfig>,
+        cli_theme: Option<&str>,
+        cli_syntax: Option<bool>,
+    ) -> Self {
         let theme = cli_theme
             .map(ToOwned::to_owned)
             .or_else(|| file.and_then(|config| config.theme.clone()))
             .unwrap_or_else(|| DEFAULT_THEME.to_string());
         let insert_escape = file.and_then(|config| config.insert_escape.clone());
+        let syntax = cli_syntax
+            .or_else(|| file.and_then(|config| config.syntax))
+            .unwrap_or(true);
 
         Self {
             theme,
             insert_escape,
+            syntax,
         }
     }
 }
@@ -157,12 +173,12 @@ fn config_paths(config_home: PathBuf, config_dirs: Vec<PathBuf>) -> Vec<PathBuf>
 }
 
 fn validate_partial_config(config: &PartialConfig) -> Result<(), ConfigLoadError> {
-    if let Some(theme) = config.theme.as_ref() {
-        if theme.trim().is_empty() {
-            return Err(ConfigLoadError::invalid(
-                "config theme must not be empty or whitespace",
-            ));
-        }
+    if let Some(theme) = config.theme.as_ref()
+        && theme.trim().is_empty()
+    {
+        return Err(ConfigLoadError::invalid(
+            "config theme must not be empty or whitespace",
+        ));
     }
 
     if let Some(insert_escape) = config.insert_escape.as_ref() {
@@ -177,10 +193,10 @@ fn validate_partial_config(config: &PartialConfig) -> Result<(), ConfigLoadError
 }
 
 fn xdg_config_home() -> Result<PathBuf, ConfigLoadError> {
-    if let Some(config_home) = env::var_os("XDG_CONFIG_HOME") {
-        if !config_home.is_empty() {
-            return Ok(PathBuf::from(config_home));
-        }
+    if let Some(config_home) = env::var_os("XDG_CONFIG_HOME")
+        && !config_home.is_empty()
+    {
+        return Ok(PathBuf::from(config_home));
     }
 
     let home = env::var_os("HOME").ok_or(ConfigLoadError::MissingHomeDir)?;
@@ -222,19 +238,24 @@ mod tests {
         let file = PartialConfig {
             theme: Some("file-theme".to_string()),
             insert_escape: Some("jk".to_string()),
+            syntax: Some(false),
         };
 
         assert_eq!(
-            Config::resolve(Some(&file), Some("cli-theme")).theme,
+            Config::resolve(Some(&file), Some("cli-theme"), Some(true)).theme,
             "cli-theme"
         );
-        assert_eq!(Config::resolve(Some(&file), None).theme, "file-theme");
+        assert_eq!(Config::resolve(Some(&file), None, None).theme, "file-theme");
         assert_eq!(
-            Config::resolve(Some(&file), None).insert_escape.as_deref(),
+            Config::resolve(Some(&file), None, None)
+                .insert_escape
+                .as_deref(),
             Some("jk")
         );
-        assert_eq!(Config::resolve(None, None).theme, DEFAULT_THEME);
-        assert_eq!(Config::resolve(None, None).insert_escape, None);
+        assert!(!Config::resolve(Some(&file), None, None).syntax);
+        assert!(Config::resolve(None, None, None).syntax);
+        assert_eq!(Config::resolve(None, None, None).theme, DEFAULT_THEME);
+        assert_eq!(Config::resolve(None, None, None).insert_escape, None);
     }
 
     #[test]
@@ -246,7 +267,7 @@ mod tests {
         write_config(&dir1, "theme = \"dir1-theme\"");
         write_config(&dir2, "theme = \"dir2-theme\"");
 
-        let config = Config::load_from_locations(home.clone(), vec![dir1, dir2], None)
+        let config = Config::load_from_locations(home.clone(), vec![dir1, dir2], None, None)
             .expect("config should load");
 
         assert_eq!(config.theme, "home-theme");
@@ -255,11 +276,16 @@ mod tests {
     #[test]
     fn load_from_locations_skips_missing_files() {
         let home = unique_temp_dir("missing-home");
-        let config =
-            Config::load_from_locations(home.clone(), vec![unique_temp_dir("missing-dir")], None)
-                .expect("missing config should fall back to defaults");
+        let config = Config::load_from_locations(
+            home.clone(),
+            vec![unique_temp_dir("missing-dir")],
+            None,
+            None,
+        )
+        .expect("missing config should fall back to defaults");
 
         assert_eq!(config.theme, DEFAULT_THEME);
+        assert!(config.syntax);
     }
 
     #[test]
@@ -267,7 +293,7 @@ mod tests {
         let home = unique_temp_dir("unknown-field-home");
         write_config(&home, "theme = \"demo\"\nextra = true");
 
-        let error = Config::load_from_locations(home, vec![], None).expect_err("should fail");
+        let error = Config::load_from_locations(home, vec![], None, None).expect_err("should fail");
 
         match error {
             ConfigLoadError::Parse { .. } => {}
@@ -280,7 +306,7 @@ mod tests {
         let home = unique_temp_dir("empty-theme-home");
         write_config(&home, "theme = \"   \"");
 
-        let error = Config::load_from_locations(home, vec![], None).expect_err("should fail");
+        let error = Config::load_from_locations(home, vec![], None, None).expect_err("should fail");
 
         match error {
             ConfigLoadError::Invalid { message } => {
@@ -295,7 +321,7 @@ mod tests {
         let home = unique_temp_dir("insert-escape-home");
         write_config(&home, "insert_escape = \"jk\"");
 
-        let config = Config::load_from_locations(home, vec![], None).expect("should load");
+        let config = Config::load_from_locations(home, vec![], None, None).expect("should load");
 
         assert_eq!(config.insert_escape.as_deref(), Some("jk"));
     }
@@ -305,7 +331,7 @@ mod tests {
         let home = unique_temp_dir("invalid-insert-escape-home");
         write_config(&home, "insert_escape = \"   \"");
 
-        let error = Config::load_from_locations(home, vec![], None).expect_err("should fail");
+        let error = Config::load_from_locations(home, vec![], None, None).expect_err("should fail");
 
         match error {
             ConfigLoadError::Invalid { message } => {
@@ -313,5 +339,26 @@ mod tests {
             }
             other => panic!("expected validation error, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn load_from_locations_loads_syntax_flag() {
+        let home = unique_temp_dir("syntax-home");
+        write_config(&home, "syntax = false");
+
+        let config = Config::load_from_locations(home, vec![], None, None).expect("should load");
+
+        assert!(!config.syntax);
+    }
+
+    #[test]
+    fn load_from_locations_cli_overrides_syntax_flag() {
+        let home = unique_temp_dir("syntax-cli-home");
+        write_config(&home, "syntax = false");
+
+        let config =
+            Config::load_from_locations(home, vec![], None, Some(true)).expect("should load");
+
+        assert!(config.syntax);
     }
 }

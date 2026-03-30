@@ -1,0 +1,102 @@
+[metadata]
+name = "csharp"
+display_name = "C#"
+alias = ["cs"]
+filename = ["\\.cs$"]
+shebang = []
+
+[[rules]]
+kind = "regex"
+pattern = "///.*$"
+tag = "comment.documentation"
+
+[[rules]]
+kind = "regex"
+pattern = "//.*$"
+tag = "comment.line"
+
+[[rules]]
+kind = "regex"
+pattern = "\\*/"
+tag = "comment.block"
+context = { requires = ["csharp_block_comment"], pop = ["csharp_block_comment"] }
+
+[[rules]]
+kind = "regex"
+pattern = "/\\*"
+tag = "comment.block"
+context = { push = ["csharp_block_comment"] }
+
+[[rules]]
+kind = "regex"
+pattern = "^\\s*\\[[A-Za-z_][A-Za-z0-9_,\\s]*\\]"
+tag = "keyword"
+
+[[rules]]
+kind = "regex"
+pattern = "@\"(?:[^\"]|\"\")*\""
+tag = "string"
+
+[[rules]]
+kind = "regex"
+pattern = "\""
+tag = "string"
+context = { requires = ["csharp_string"], pop = ["csharp_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\""
+tag = "string"
+context = { push = ["csharp_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "[^\"\\\\\\n]+"
+tag = "string"
+context = { requires = ["csharp_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\\\\."
+tag = "punctuation"
+context = { requires = ["csharp_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "'(?:[^'\\\\\\n]|\\\\.)'"
+tag = "constant"
+
+[[rules]]
+kind = "regex"
+pattern = "\\b(?:0x[0-9A-Fa-f_]+|0b[01_]+|\\d[\\d_]*(?:\\.\\d[\\d_]*)?(?:[eE][+-]?\\d[\\d_]*)?[fFdDmM]?)\\b"
+tag = "number"
+
+[[rules]]
+kind = "regex"
+pattern = "\\b(?:abstract|as|base|break|case|catch|checked|class|const|continue|default|delegate|do|else|enum|event|explicit|extern|false|finally|fixed|for|foreach|goto|if|implicit|in|interface|internal|is|lock|namespace|null|operator|out|override|params|private|protected|public|readonly|ref|return|sealed|sizeof|stackalloc|static|struct|switch|this|throw|true|try|typeof|unchecked|unsafe|using|var|virtual|void|while|with|yield)\\b"
+tag = "keyword"
+
+[[rules]]
+kind = "regex"
+pattern = "\\b(?:bool|byte|char|decimal|double|float|int|long|object|sbyte|short|string|uint|ulong|ushort|dynamic|nint|nuint|void|Task|ValueTask|I[A-Z][A-Za-z0-9_]*)\\b"
+tag = "type"
+
+[[rules]]
+kind = "regex"
+pattern = "\\b(?:false|null|true)\\b"
+tag = "constant"
+
+[[rules]]
+kind = "regex"
+pattern = "\\b[A-Z][A-Za-z0-9_]*\\b"
+tag = "type"
+
+[[rules]]
+kind = "regex"
+pattern = "[(){}\\[\\],.;:]"
+tag = "punctuation"
+
+[[rules]]
+kind = "regex"
+pattern = "(?:===|==|!=|<=|>=|=>|\\?\\?|\\?\\.|\\+\\+|--|[+\\-*/%=&|!<>^~?])"
+tag = "operator"

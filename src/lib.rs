@@ -9,6 +9,7 @@ pub mod motion;
 pub mod path;
 pub mod screen;
 pub mod status_bar;
+pub mod syntax;
 pub mod tab_group;
 pub mod terminal;
 pub mod theme;

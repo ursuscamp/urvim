@@ -1,0 +1,8 @@
+/* CSS syntax fixture */
+@media screen and (min-width: 600px) {
+  body, .card {
+    color: #112233;
+    margin: 1.5rem 0;
+    background-image: url("bg.png");
+  }
+}

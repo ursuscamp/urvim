@@ -1,0 +1,6 @@
+[metadata]
+name = "plaintext"
+display_name = "Plain Text"
+alias = ["text"]
+filename = []
+shebang = []

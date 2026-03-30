@@ -1,0 +1,110 @@
+[metadata]
+name = "scala"
+display_name = "Scala"
+alias = ["sc"]
+filename = ["\\.(scala|sc)$"]
+shebang = ["^#!.*\\bscala(?:\\s|$)"]
+
+[[rules]]
+kind = "regex"
+pattern = "//.*$"
+tag = "comment.line"
+
+[[rules]]
+kind = "regex"
+pattern = "\\*/"
+tag = "comment.block"
+context = { requires = ["scala_block_comment"], pop = ["scala_block_comment"] }
+
+[[rules]]
+kind = "regex"
+pattern = "/\\*"
+tag = "comment.block"
+context = { push = ["scala_block_comment"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\"\"\""
+tag = "string"
+context = { requires = ["scala_triple_string"], pop = ["scala_triple_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\"\"\""
+tag = "string"
+context = { push = ["scala_triple_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "[^\"\\\\]+"
+tag = "string"
+context = { requires = ["scala_triple_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\""
+tag = "string"
+context = { requires = ["scala_string"], pop = ["scala_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\""
+tag = "string"
+context = { push = ["scala_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "[^\"\\\\\\n]+"
+tag = "string"
+context = { requires = ["scala_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\\\\."
+tag = "punctuation"
+context = { requires = ["scala_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "'(?:[^'\\\\\\n]|\\\\.)'"
+tag = "constant"
+
+[[rules]]
+kind = "regex"
+pattern = "\\b(?:abstract|case|catch|class|def|do|else|extends|false|final|finally|for|forSome|if|implicit|import|lazy|match|null|object|override|package|private|protected|return|sealed|super|this|throw|trait|true|try|type|val|var|while|with|yield)\\b"
+tag = "keyword"
+
+[[rules]]
+kind = "regex"
+pattern = "^\\s*@[_A-Za-z][A-Za-z0-9_\\.]*"
+tag = "keyword"
+
+[[rules]]
+kind = "regex"
+pattern = "\\b(?:Boolean|Byte|Char|Double|Float|Int|Long|Short|String|Unit|Any|Option|Either|List|Map|Set|Seq|Array|Future|Try)\\b"
+tag = "type"
+
+[[rules]]
+kind = "regex"
+pattern = "\\b(?:false|null|true)\\b"
+tag = "constant"
+
+[[rules]]
+kind = "regex"
+pattern = "\\b\\d+(?:\\.\\d+)?\\b"
+tag = "number"
+
+[[rules]]
+kind = "regex"
+pattern = "\\b[A-Z][A-Za-z0-9_]*\\b"
+tag = "type"
+
+[[rules]]
+kind = "regex"
+pattern = "[(){}\\[\\],.;:]"
+tag = "punctuation"
+
+[[rules]]
+kind = "regex"
+pattern = "(?:=>|<-|->|:|=|\\|\\||&&|[+\\-*/%=&|!<>^~?])"
+tag = "operator"

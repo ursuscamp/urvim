@@ -33,9 +33,21 @@ comment = { fg = "comment" }
 constant = { fg = "orange" }
 function = { fg = "blue" }
 keyword = { fg = "magenta" }
+markup = { fg = "accent" }
+"markup.code" = { fg = "orange" }
+"markup.code.inline" = { fg = "orange" }
+"markup.emphasis" = { fg = "accent", italic = true }
+"markup.heading" = { fg = "blue", bold = true }
+"markup.link" = { fg = "cyan", underline = true }
+"markup.list" = { fg = "magenta" }
+"markup.quote" = { fg = "comment", italic = true }
+"markup.strong" = { fg = "accent", bold = true }
+"markup.thematic_break" = { fg = "muted" }
 number = { fg = "yellow" }
 operator = { fg = "fg" }
 punctuation = { fg = "muted" }
 string = { fg = "green" }
+"string.escape" = { fg = "muted" }
+"string.interpolation" = { fg = "accent" }
 type = { fg = "cyan" }
 variable = { fg = "fg" }

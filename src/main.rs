@@ -21,6 +21,8 @@ use urvim::window::{Position, Size};
 struct Cli {
     #[arg(long)]
     theme: Option<String>,
+    #[arg(long = "no-syntax")]
+    no_syntax: bool,
     files: Vec<std::path::PathBuf>,
 }
 
@@ -40,10 +42,11 @@ fn main() -> io::Result<()> {
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();
 
-    let config = Config::load(cli.theme.as_deref()).map_err(|error| {
-        eprintln!("Error: {}", error);
-        io::Error::new(io::ErrorKind::InvalidData, error.to_string())
-    })?;
+    let config =
+        Config::load(cli.theme.as_deref(), cli.no_syntax.then_some(false)).map_err(|error| {
+            eprintln!("Error: {}", error);
+            io::Error::new(io::ErrorKind::InvalidData, error.to_string())
+        })?;
     globals::set_config(config.clone());
 
     let registry = urvim::theme::ThemeRegistry::load_builtin().map_err(|error| {
@@ -133,13 +136,11 @@ fn main() -> io::Result<()> {
                                             terminal.set_cursor_style(mode.cursor_style())?;
                                             if let Some(repeat_text) =
                                                 repeat_text.filter(|text| !text.is_empty())
-                                            {
-                                                if let Some(mut repeat_state) =
+                                                && let Some(mut repeat_state) =
                                                     globals::get_last_repeat()
-                                                {
-                                                    repeat_state.insert_text = Some(repeat_text);
-                                                    globals::set_last_repeat(repeat_state);
-                                                }
+                                            {
+                                                repeat_state.insert_text = Some(repeat_text);
+                                                globals::set_last_repeat(repeat_state);
                                             }
                                             handled = true;
                                         }
@@ -271,7 +272,7 @@ fn select_active_theme(
 
 fn replay_repeat_action(layout: &mut Layout, replay: &RepeatReplay) -> bool {
     if matches!(replay.action, Action::SwitchToInsert)
-        && replay.insert_text.as_deref().map_or(true, str::is_empty)
+        && replay.insert_text.as_deref().is_none_or(str::is_empty)
     {
         return false;
     }

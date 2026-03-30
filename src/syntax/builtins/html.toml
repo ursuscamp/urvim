@@ -1,0 +1,141 @@
+[metadata]
+name = "html"
+display_name = "HTML"
+alias = ["htm"]
+filename = ["\\.(html|htm)$"]
+shebang = []
+
+[[rules]]
+kind = "regex"
+pattern = "<!--"
+tag = "comment"
+context = { push = ["html_comment"] }
+
+[[rules]]
+kind = "regex"
+pattern = "-->"
+tag = "comment"
+context = { requires = ["html_comment"], pop = ["html_comment"] }
+
+[[rules]]
+kind = "regex"
+pattern = "<!DOCTYPE[^>]*>"
+tag = "keyword"
+
+[[rules]]
+kind = "regex"
+pattern = "&[A-Za-z0-9#]+;"
+tag = "constant"
+
+[[rules]]
+kind = "regex"
+pattern = "<"
+tag = "punctuation"
+context = { push = ["inside_tag", "tag_name_expected"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\\bscript\\b"
+tag = "markup.tag"
+context = { requires = ["inside_tag", "tag_name_expected"], push = ["script_host"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\\bstyle\\b"
+tag = "markup.tag"
+context = { requires = ["inside_tag", "tag_name_expected"], push = ["style_host"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\\b[A-Za-z_:][A-Za-z0-9:._-]*="
+tag = "variable.property"
+context = { requires = ["inside_tag"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\""
+tag = "string"
+context = { requires = ["inside_tag"], push = ["html_double_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\""
+tag = "string"
+context = { requires = ["inside_tag", "html_double_string"], pop = ["html_double_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "&"
+tag = "string"
+context = { requires = ["inside_tag", "html_double_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "[^\"&]+"
+tag = "string"
+context = { requires = ["inside_tag", "html_double_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "'"
+tag = "string"
+context = { requires = ["inside_tag"], push = ["html_single_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "'"
+tag = "string"
+context = { requires = ["inside_tag", "html_single_string"], pop = ["html_single_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "&"
+tag = "string"
+context = { requires = ["inside_tag", "html_single_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "[^'&]+"
+tag = "string"
+context = { requires = ["inside_tag", "html_single_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\\b[A-Za-z][A-Za-z0-9:-]*"
+tag = "markup.tag"
+context = { requires = ["inside_tag", "tag_name_expected"] }
+
+[[rules]]
+kind = "regex"
+pattern = ">"
+tag = "punctuation"
+context = { requires = ["inside_tag"], pop = ["inside_tag", "tag_name_expected", "html_double_string", "html_single_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "</script>"
+tag = "markup.tag"
+context = { requires = ["script_host"], pop = ["script_host"] }
+
+[[rules]]
+kind = "regex"
+pattern = "</style>"
+tag = "markup.tag"
+context = { requires = ["style_host"], pop = ["style_host"] }
+
+[[rules]]
+kind = "injection"
+context = { requires = ["script_host"] }
+selector = { name = "javascript" }
+fallback = "unstyled"
+
+[[rules]]
+kind = "injection"
+context = { requires = ["style_host"] }
+selector = { name = "css" }
+fallback = "unstyled"
+
+[[rules]]
+kind = "regex"
+pattern = "[<>/=]"
+tag = "punctuation"

@@ -19,6 +19,7 @@ fn configured_test_config(insert_escape: Option<&str>) -> Config {
     Config {
         theme: "test-theme".to_string(),
         insert_escape: insert_escape.map(str::to_owned),
+        syntax: true,
     }
 }
 

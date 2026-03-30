@@ -1,0 +1,45 @@
+[metadata]
+name = "json"
+display_name = "JSON"
+alias = ["jsonc"]
+filename = ["\\.json$"]
+shebang = []
+
+[[rules]]
+kind = "regex"
+pattern = "\""
+tag = "string"
+context = { requires = ["json_string"], pop = ["json_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\\\\(?:[\"\\\\/bfnrt]|u[0-9A-Fa-f]{4})"
+tag = "punctuation"
+context = { requires = ["json_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "[^\"\\\\\\n]+"
+tag = "string"
+context = { requires = ["json_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\""
+tag = "string"
+context = { push = ["json_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "[{}\\[\\],:]"
+tag = "punctuation"
+
+[[rules]]
+kind = "regex"
+pattern = "-?(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?(?:[eE][+-]?[0-9]+)?"
+tag = "number"
+
+[[rules]]
+kind = "regex"
+pattern = "\\b(?:true|false|null)\\b"
+tag = "constant"

@@ -1,7 +1,9 @@
 use super::*;
 use crate::action::ActionResult;
 use crate::buffer::Buffer;
+use crate::config::Config;
 use crate::editor::{Action, ModeKind};
+use crate::globals;
 use crate::path::AbsolutePath;
 use crate::tab_group::TabGroup;
 use crate::window::{Position, Size};
@@ -96,5 +98,24 @@ fn test_layout_render_includes_filetype_label() {
 
     layout.render(&mut screen, Position::new(0, 0), Size::new(3, 40));
 
+    assert_eq!(screen.get_cell_mut(2, 9).unwrap().text, "R");
+}
+
+#[test]
+fn test_layout_render_keeps_syntax_label_when_syntax_disabled() {
+    let path = AbsolutePath::from_path(std::path::Path::new("/tmp/example.rs")).unwrap();
+    let buffer = Buffer::from_str_with_path("fn main() {}", path);
+    let mut layout = layout_with_buffers(vec![buffer]);
+    let mut screen = crate::screen::Screen::new(3, 40);
+    let _config_guard = globals::set_test_config(Config {
+        theme: "Friday Night".to_string(),
+        insert_escape: None,
+        syntax: false,
+    });
+
+    layout.render(&mut screen, Position::new(0, 0), Size::new(3, 40));
+
+    assert_eq!(screen.get_cell_mut(1, 3).unwrap().text, "f");
+    assert_eq!(screen.get_cell_mut(1, 3).unwrap().style, Default::default());
     assert_eq!(screen.get_cell_mut(2, 9).unwrap().text, "R");
 }

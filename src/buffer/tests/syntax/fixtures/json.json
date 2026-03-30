@@ -1,0 +1,14 @@
+{
+  "name": "Ada",
+  "greeting": "hello\\nworld",
+  "enabled": true,
+  "count": 3,
+  "items": [1, 2, 3],
+  "nested": {
+    "path": "C:\\tmp\\data",
+    "nothing": null
+  }
+}
+
+-12.5e+3
+identifier_like

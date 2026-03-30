@@ -1,0 +1,159 @@
+[metadata]
+name = "java"
+display_name = "Java"
+alias = ["jvm"]
+filename = ["\\.java$"]
+shebang = []
+
+[[rules]]
+kind = "regex"
+pattern = "//.*$"
+tag = "comment.line"
+
+[[rules]]
+kind = "regex"
+pattern = "\\*/"
+tag = "comment.documentation"
+context = { requires = ["java_doc_comment"], pop = ["java_doc_comment"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\\*/"
+tag = "comment.block"
+context = { requires = ["java_block_comment"], pop = ["java_block_comment"] }
+
+[[rules]]
+kind = "regex"
+pattern = "/\\*\\*"
+tag = "comment.documentation"
+context = { push = ["java_doc_comment"] }
+
+[[rules]]
+kind = "regex"
+pattern = "[^*\\n]+"
+tag = "comment.documentation"
+context = { requires = ["java_doc_comment"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\\*"
+tag = "comment.documentation"
+context = { requires = ["java_doc_comment"] }
+
+[[rules]]
+kind = "regex"
+pattern = "/\\*"
+tag = "comment.block"
+context = { push = ["java_block_comment"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\"\"\""
+tag = "string"
+context = { requires = ["java_triple_string"], pop = ["java_triple_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\"\"\""
+tag = "string"
+context = { push = ["java_triple_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "[^\"\\\\]+"
+tag = "string"
+context = { requires = ["java_triple_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\""
+tag = "string"
+context = { requires = ["java_string"], pop = ["java_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\""
+tag = "string"
+context = { push = ["java_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "[^\"\\\\\\n]+"
+tag = "string"
+context = { requires = ["java_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "'"
+tag = "constant"
+context = { requires = ["java_char"], pop = ["java_char"] }
+
+[[rules]]
+kind = "regex"
+pattern = "'"
+tag = "constant"
+context = { push = ["java_char"] }
+
+[[rules]]
+kind = "regex"
+pattern = "[^'\\\\\\n]+"
+tag = "constant"
+context = { requires = ["java_char"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\\\\."
+tag = "punctuation"
+context = { requires = ["java_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\\\\."
+tag = "punctuation"
+context = { requires = ["java_char"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\\\\."
+tag = "punctuation"
+context = { requires = ["java_triple_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\\b(?:0[xX][0-9A-Fa-f_]+[lL]?|0[bB][01_]+[lL]?|0[0-7_]+[lL]?|(?:\\d[\\d_]*(?:\\.\\d[\\d_]*)?(?:[eE][+-]?\\d[\\d_]*)?|\\.\\d[\\d_]*(?:[eE][+-]?\\d[\\d_]*)?)(?:[fFdDlL])?)\\b"
+tag = "number"
+
+[[rules]]
+kind = "regex"
+pattern = "^\\s*@[_A-Za-z][A-Za-z0-9_\\.]*\\b"
+tag = "keyword"
+
+[[rules]]
+kind = "regex"
+pattern = "\\b(?:abstract|assert|boolean|break|byte|case|catch|char|class|const|continue|default|do|double|else|enum|extends|final|finally|float|for|if|implements|import|instanceof|int|interface|long|native|new|package|private|protected|public|return|short|static|strictfp|super|switch|synchronized|this|throw|throws|transient|try|void|volatile|while)\\b"
+tag = "keyword"
+
+[[rules]]
+kind = "regex"
+pattern = "\\b(?:boolean|byte|char|double|float|int|long|short|String|void|BigDecimal|BigInteger)\\b"
+tag = "type"
+
+[[rules]]
+kind = "regex"
+pattern = "\\b(?:false|null|true)\\b"
+tag = "constant"
+
+[[rules]]
+kind = "regex"
+pattern = "\\b[A-Z][A-Za-z0-9_]*\\b"
+tag = "type"
+
+[[rules]]
+kind = "regex"
+pattern = "[(){}\\[\\],.;:]"
+tag = "punctuation"
+
+[[rules]]
+kind = "regex"
+pattern = "(?:==|!=|<=|>=|->|\\+\\+|--|::|[+\\-*/%=&|!<>^~?])"
+tag = "operator"

@@ -1,0 +1,173 @@
+[metadata]
+name = "c"
+display_name = "C"
+alias = ["c89"]
+filename = ["\\.(c|h)$"]
+shebang = []
+
+[[rules]]
+kind = "regex"
+pattern = "//.*$"
+tag = "comment.line"
+
+[[rules]]
+kind = "regex"
+pattern = "/\\*"
+tag = "comment.block"
+context = { push = ["c_comment"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\\*/"
+tag = "comment.block"
+context = { requires = ["c_comment"], pop = ["c_comment"] }
+
+[[rules]]
+kind = "regex"
+pattern = "[^*\\n]+"
+tag = "comment.block"
+context = { requires = ["c_comment"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\\*"
+tag = "comment.block"
+context = { requires = ["c_comment"] }
+
+[[rules]]
+kind = "regex"
+pattern = "^\\s*#.*$"
+tag = "keyword"
+
+[[rules]]
+kind = "regex"
+pattern = "\\b(?:printf|fprintf|sprintf|snprintf|vprintf|vfprintf|vsprintf|vsnprintf)\\b"
+tag = "function"
+context = { push = ["printf_call_head"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\\("
+tag = "punctuation"
+context = { requires = ["printf_call_head"], pop = ["printf_call_head"], push = ["printf_call"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\\)"
+tag = "punctuation"
+context = { requires = ["printf_call"], pop = ["printf_call"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\""
+tag = "string"
+context = { requires = ["printf_call"], pop = ["printf_call"], push = ["printf_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\""
+tag = "string"
+context = { push = ["c_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\""
+tag = "string"
+context = { requires = ["printf_string"], pop = ["printf_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "[^%\"\\\\\\n]+"
+tag = "string"
+context = { requires = ["printf_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "%%"
+tag = "string.escape"
+context = { requires = ["printf_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\\\\."
+tag = "string.escape"
+context = { requires = ["printf_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "%(?:\\d+\\$)?[-+ #0']*(?:\\*|\\d+)?(?:\\.(?:\\*|\\d+))?(?:hh|h|ll|l|j|z|t|L)?[diuoxXfFeEgGaAcspn]"
+tag = "string.interpolation"
+context = { requires = ["printf_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\""
+tag = "string"
+context = { push = ["c_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\""
+tag = "string"
+context = { requires = ["c_string"], pop = ["c_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "[^\"\\\\\\n]+"
+tag = "string"
+context = { requires = ["c_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\\\\."
+tag = "string.escape"
+context = { requires = ["c_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "'"
+tag = "constant"
+context = { push = ["c_char"] }
+
+[[rules]]
+kind = "regex"
+pattern = "'"
+tag = "constant"
+context = { requires = ["c_char"], pop = ["c_char"] }
+
+[[rules]]
+kind = "regex"
+pattern = "[^'\\\\\\n]+"
+tag = "constant"
+context = { requires = ["c_char"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\\\\."
+tag = "constant"
+context = { requires = ["c_char"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\\b(?:0[xX][0-9A-Fa-f](?:_?[0-9A-Fa-f])*(?:[uU](?:ll?|LL?)?|[uU]?[lL]{0,2})?|0[bB][01](?:_?[01])*(?:[uU]?[lL]{0,2})?|0[0-7](?:_?[0-7])*(?:[uU]?[lL]{0,2})?|(?:\\d(?:_?\\d)*(?:\\.\\d(?:_?\\d)*)?|\\.\\d(?:_?\\d)*)(?:[eE][+-]?\\d(?:_?\\d)*)?(?:[fFlLuU][lL]{0,2})?)\\b"
+tag = "number"
+
+[[rules]]
+kind = "regex"
+pattern = "\\b(?:_Bool|bool|char|double|float|int|long|short|signed|size_t|unsigned|void|wchar_t)\\b"
+tag = "type"
+
+[[rules]]
+kind = "regex"
+pattern = "\\b(?:auto|break|case|continue|default|do|else|enum|for|goto|if|return|sizeof|static|struct|switch|typedef|union|volatile|while)\\b"
+tag = "keyword"
+
+[[rules]]
+kind = "regex"
+pattern = "[(){}\\[\\],.;:]"
+tag = "punctuation"
+
+[[rules]]
+kind = "regex"
+pattern = "(?:==|!=|<=|>=|->|\\+\\+|--|[+\\-*/%=&|!<>^~?])"
+tag = "operator"

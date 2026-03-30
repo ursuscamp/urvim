@@ -192,7 +192,7 @@ pub fn validate_key_string(keys: &str) -> Result<Vec<String>, KeyStringParseErro
             let mut token = String::from("<");
             let mut found_closing = false;
 
-            while let Some(next) = chars.next() {
+            for next in chars.by_ref() {
                 token.push(next);
                 if next == '>' {
                     found_closing = true;

@@ -1,0 +1,201 @@
+[metadata]
+name = "cpp"
+display_name = "C++"
+alias = ["c++"]
+filename = ["\\.(cc|cpp|cxx|hh|hpp|hxx)$"]
+shebang = []
+
+[[rules]]
+kind = "regex"
+pattern = "//.*$"
+tag = "comment.line"
+
+[[rules]]
+kind = "regex"
+pattern = "/\\*"
+tag = "comment.block"
+context = { push = ["cpp_comment"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\\*/"
+tag = "comment.block"
+context = { requires = ["cpp_comment"], pop = ["cpp_comment"] }
+
+[[rules]]
+kind = "regex"
+pattern = "[^*\\n]+"
+tag = "comment.block"
+context = { requires = ["cpp_comment"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\\*"
+tag = "comment.block"
+context = { requires = ["cpp_comment"] }
+
+[[rules]]
+kind = "regex"
+pattern = "^\\s*#\\s*(?:include|define|ifn?def|if|elif|else|endif|pragma|error|line)\\b.*$"
+tag = "keyword"
+
+[[rules]]
+kind = "regex"
+pattern = "\\b(?:std::)?(?:printf|fprintf|sprintf|snprintf|vprintf|vfprintf|vsprintf|vsnprintf)\\b"
+tag = "function"
+context = { push = ["printf_call_head"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\\("
+tag = "punctuation"
+context = { requires = ["printf_call_head"], pop = ["printf_call_head"], push = ["printf_call"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\\)"
+tag = "punctuation"
+context = { requires = ["printf_call"], pop = ["printf_call"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\""
+tag = "string"
+context = { requires = ["printf_call"], pop = ["printf_call"], push = ["printf_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\""
+tag = "string"
+context = { requires = ["printf_string"], pop = ["printf_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "[^%\"\\\\\\n]+"
+tag = "string"
+context = { requires = ["printf_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "%%"
+tag = "string.escape"
+context = { requires = ["printf_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\\\\."
+tag = "string.escape"
+context = { requires = ["printf_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "%(?:\\d+\\$)?[-+ #0']*(?:\\*|\\d+)?(?:\\.(?:\\*|\\d+))?(?:hh|h|ll|l|j|z|t|L)?[diuoxXfFeEgGaAcspn]"
+tag = "string.interpolation"
+context = { requires = ["printf_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "R\"([A-Za-z0-9_]{0,16})\\("
+tag = "string"
+context = { push = [{ name = "cpp_raw_string", capture = 1 }, "cpp_raw_string_body"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\\)([A-Za-z0-9_]{0,16})\""
+tag = "string"
+context = { requires = ["cpp_raw_string"], payload_match = { name = "cpp_raw_string", capture = 1 }, pop = ["cpp_raw_string", "cpp_raw_string_body"] }
+
+[[rules]]
+kind = "regex"
+pattern = "[^)]+"
+tag = "string"
+context = { requires = ["cpp_raw_string_body"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\\)"
+tag = "string"
+context = { requires = ["cpp_raw_string_body"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\""
+tag = "string"
+context = { push = ["cpp_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\""
+tag = "string"
+context = { requires = ["cpp_string"], pop = ["cpp_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "[^\"\\\\\\n]+"
+tag = "string"
+context = { requires = ["cpp_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\\\\."
+tag = "string.escape"
+context = { requires = ["cpp_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "'"
+tag = "constant"
+context = { push = ["cpp_char"] }
+
+[[rules]]
+kind = "regex"
+pattern = "'"
+tag = "constant"
+context = { requires = ["cpp_char"], pop = ["cpp_char"] }
+
+[[rules]]
+kind = "regex"
+pattern = "[^'\\\\\\n]+"
+tag = "constant"
+context = { requires = ["cpp_char"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\\\\."
+tag = "constant"
+context = { requires = ["cpp_char"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\\b(?:0[xX][0-9A-Fa-f](?:_?[0-9A-Fa-f])*(?:[uU](?:ll?|LL?)?|[uU]?[lL]{0,2})?|0[bB][01](?:_?[01])*(?:[uU]?[lL]{0,2})?|0[0-7](?:_?[0-7])*(?:[uU]?[lL]{0,2})?|(?:\\d(?:_?\\d)*(?:\\.\\d(?:_?\\d)*)?|\\.\\d(?:_?\\d)*)(?:[eE][+-]?\\d(?:_?\\d)*)?(?:[fFlLuU][lL]{0,2})?)\\b"
+tag = "number"
+
+[[rules]]
+kind = "regex"
+pattern = "\\b(?:alignas|alignof|and|and_eq|asm|auto|bitand|bitor|bool|break|case|catch|char|class|concept|const|consteval|constexpr|constinit|const_cast|continue|co_await|co_return|co_yield|decltype|default|delete|do|double|dynamic_cast|else|enum|explicit|export|extern|float|for|friend|goto|if|inline|int|long|mutable|namespace|new|noexcept|not|not_eq|nullptr|operator|or|or_eq|private|protected|public|register|reinterpret_cast|return|short|signed|sizeof|static|static_assert|static_cast|struct|switch|template|this|thread_local|throw|try|typedef|typeid|typename|union|unsigned|using|virtual|void|volatile|wchar_t|while|xor|xor_eq)\\b"
+tag = "keyword"
+
+[[rules]]
+kind = "regex"
+pattern = "\\b(?:bool|char|char16_t|char32_t|double|float|int|long|short|signed|size_t|string|unsigned|void|wchar_t|auto|nullptr_t)\\b"
+tag = "type"
+
+[[rules]]
+kind = "regex"
+pattern = "\\b(?:true|false|nullptr)\\b"
+tag = "constant"
+
+[[rules]]
+kind = "regex"
+pattern = "\\b[A-Z][A-Za-z0-9_]*\\b"
+tag = "type"
+
+[[rules]]
+kind = "regex"
+pattern = "[(){}\\[\\],.;:]"
+tag = "punctuation"
+
+[[rules]]
+kind = "regex"
+pattern = "(?:==|!=|<=|>=|->|\\+\\+|--|::|<<|>>|[+\\-*/%=&|!<>^~?])"
+tag = "operator"

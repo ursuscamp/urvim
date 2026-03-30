@@ -1,0 +1,296 @@
+[metadata]
+name = "bash"
+display_name = "Bash"
+alias = ["rbash"]
+filename = ["\\.bash$"]
+shebang = ["^#!.*\\bbash(?:\\s|$)", "^#!.*\\brbash(?:\\s|$)"]
+
+[[rules]]
+kind = "regex"
+pattern = "#.*$"
+tag = "comment"
+
+[[rules]]
+kind = "regex"
+pattern = "<<-?\\s*['\"]?([A-Za-z_][A-Za-z0-9_]*)['\"]?"
+tag = "string.escape"
+context = { push = [{ name = "bash_heredoc", capture = 1 }, "bash_heredoc_body"] }
+
+[[rules]]
+kind = "regex"
+pattern = "^([A-Za-z_][A-Za-z0-9_]*)[ \\t]*$"
+tag = "string.escape"
+context = { requires = ["bash_heredoc"], payload_match = { name = "bash_heredoc", capture = 1 }, pop = ["bash_heredoc", "bash_heredoc_body"] }
+
+[[rules]]
+kind = "regex"
+pattern = ".+"
+tag = "string.heredoc"
+context = { requires = ["bash_heredoc_body"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\\$'"
+tag = "string"
+context = { push = ["bash_ansi_single_quoted"] }
+
+[[rules]]
+kind = "regex"
+pattern = "'"
+tag = "string"
+context = { requires = ["bash_ansi_single_quoted"], pop = ["bash_ansi_single_quoted"] }
+
+[[rules]]
+kind = "regex"
+pattern = "[^'\\\\]+"
+tag = "string"
+context = { requires = ["bash_ansi_single_quoted"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\\\\."
+tag = "punctuation"
+context = { requires = ["bash_ansi_single_quoted"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\\bprintf\\b"
+tag = "type"
+context = { push = ["bash_printf_call"] }
+
+[[rules]]
+kind = "regex"
+pattern = "'"
+tag = "string"
+context = { requires = ["bash_printf_call"], pop = ["bash_printf_call"], push = ["bash_printf_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "[^%'\\\\\\n]+"
+tag = "string"
+context = { requires = ["bash_printf_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "%%"
+tag = "string.escape"
+context = { requires = ["bash_printf_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "%(?:\\d+\\$)?[-+ #0']*(?:\\*|\\d+)?(?:\\.(?:\\*|\\d+))?(?:hh|h|ll|l|j|z|t|L)?[diuoxXfFeEgGaAcspn]"
+tag = "string.interpolation"
+context = { requires = ["bash_printf_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\\\\."
+tag = "string.escape"
+context = { requires = ["bash_printf_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "'"
+tag = "string"
+context = { requires = ["bash_printf_string"], pop = ["bash_printf_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "'"
+tag = "string"
+context = { requires = ["bash_single_quoted"], pop = ["bash_single_quoted"] }
+
+[[rules]]
+kind = "regex"
+pattern = "'"
+tag = "string"
+context = { push = ["bash_single_quoted"] }
+
+[[rules]]
+kind = "regex"
+pattern = "[^']+"
+tag = "string"
+context = { requires = ["bash_single_quoted"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\""
+tag = "string"
+context = { requires = ["bash_double_quoted"], pop = ["bash_double_quoted"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\""
+tag = "string"
+context = { push = ["bash_double_quoted"] }
+
+[[rules]]
+kind = "regex"
+pattern = "`"
+tag = "punctuation"
+context = { push = ["bash_backtick"] }
+
+[[rules]]
+kind = "regex"
+pattern = "`"
+tag = "punctuation"
+context = { requires = ["bash_backtick"], pop = ["bash_backtick"] }
+
+[[rules]]
+kind = "regex"
+pattern = "[^`\\\\]+"
+tag = "string"
+context = { requires = ["bash_backtick"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\\\\."
+tag = "string"
+context = { requires = ["bash_backtick"] }
+
+[[rules]]
+kind = "injection"
+context = { requires = ["bash_backtick"] }
+selector = { name = "bash" }
+fallback = "unstyled"
+
+[[rules]]
+kind = "regex"
+pattern = "\\$\\("
+tag = "punctuation"
+context = { push = ["bash_command_sub"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\\)"
+tag = "punctuation"
+context = { requires = ["bash_command_sub"], pop = ["bash_command_sub"] }
+
+[[rules]]
+kind = "regex"
+pattern = "[^\\)\\\\]+"
+tag = "string"
+context = { requires = ["bash_command_sub"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\\\\."
+tag = "string"
+context = { requires = ["bash_command_sub"] }
+
+[[rules]]
+kind = "injection"
+context = { requires = ["bash_command_sub"] }
+selector = { name = "bash" }
+fallback = "unstyled"
+
+[[rules]]
+kind = "regex"
+pattern = "\\$\\(\\("
+tag = "punctuation"
+context = { push = ["bash_arithmetic_sub"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\\)\\)"
+tag = "punctuation"
+context = { requires = ["bash_arithmetic_sub"], pop = ["bash_arithmetic_sub"] }
+
+[[rules]]
+kind = "regex"
+pattern = "[^\\)\\\\]+"
+tag = "string"
+context = { requires = ["bash_arithmetic_sub"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\\\\."
+tag = "string"
+context = { requires = ["bash_arithmetic_sub"] }
+
+[[rules]]
+kind = "injection"
+context = { requires = ["bash_arithmetic_sub"] }
+selector = { name = "bash" }
+fallback = "unstyled"
+
+[[rules]]
+kind = "regex"
+pattern = "\\$\\{[^}\\n]*\\}"
+tag = "variable"
+
+[[rules]]
+kind = "regex"
+pattern = "\\$[A-Za-z_][A-Za-z0-9_]*"
+tag = "variable"
+
+[[rules]]
+kind = "regex"
+pattern = "[^\"\\\\$]+"
+tag = "string"
+context = { requires = ["bash_double_quoted"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\\\\."
+tag = "punctuation"
+context = { requires = ["bash_double_quoted"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\\$\\{[^}\\n]*\\}"
+tag = "variable"
+context = { requires = ["bash_double_quoted"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\\$\\(\\([^)]+\\)\\)"
+tag = "punctuation"
+context = { requires = ["bash_double_quoted"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\\$\\([^)]+\\)"
+tag = "punctuation"
+context = { requires = ["bash_double_quoted"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\\$[A-Za-z_][A-Za-z0-9_]*"
+tag = "variable"
+context = { requires = ["bash_double_quoted"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\\b\\d+(?:\\.\\d+)?\\b"
+tag = "number"
+
+[[rules]]
+kind = "regex"
+pattern = "\\[\\[|\\]\\]|\\(\\(|\\)\\)"
+tag = "keyword"
+
+[[rules]]
+kind = "regex"
+pattern = "\\b(?:case|do|done|elif|else|esac|fi|for|function|if|in|select|then|until|while)\\b"
+tag = "keyword"
+
+[[rules]]
+kind = "regex"
+pattern = "\\b(?:alias|bind|builtin|declare|echo|export|local|readonly|source|typeset|unset)\\b"
+tag = "type"
+
+[[rules]]
+kind = "regex"
+pattern = "\\b(?:true|false)\\b"
+tag = "constant"
+
+[[rules]]
+kind = "regex"
+pattern = "[(){}\\[\\];]"
+tag = "punctuation"
+
+[[rules]]
+kind = "regex"
+pattern = "(?:===|==|!=|<=|>=|&&|\\|\\||=|[+\\-*/%=&|!<>^~?])"
+tag = "operator"

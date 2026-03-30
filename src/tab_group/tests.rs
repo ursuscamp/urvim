@@ -4,7 +4,8 @@ use crate::buffer::Cursor;
 use crate::editor::Action;
 use crate::globals;
 use crate::terminal::{Color, Style};
-use crate::theme::{SyntaxStyles, Theme, ThemeKind, UiStyles};
+use crate::theme::{SyntaxTagStyles, Tag, Theme, ThemeKind, UiStyles};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 fn abs_path(path: &Path) -> crate::AbsolutePath {
@@ -36,18 +37,21 @@ fn themed_group() -> Theme {
         Style::new().fg(Color::ansi(11)).bg(Color::ansi(12)),
         Style::new().fg(Color::ansi(13)).bg(Color::ansi(14)),
     );
-    let syntax_styles = SyntaxStyles::new(
-        Style::new(),
-        Style::new(),
-        Style::new(),
-        Style::new(),
-        Style::new(),
-        Style::new(),
-        Style::new(),
-        Style::new(),
-        Style::new(),
-        Style::new(),
-    );
+    let mut syntax_map = BTreeMap::new();
+    for tag_name in [
+        "comment",
+        "constant",
+        "function",
+        "keyword",
+        "operator",
+        "punctuation",
+        "string",
+        "type",
+        "variable",
+    ] {
+        syntax_map.insert(Tag::parse(tag_name).expect("valid tag"), Style::new());
+    }
+    let syntax_styles = SyntaxTagStyles::new(syntax_map);
 
     Theme::new(
         "demo",

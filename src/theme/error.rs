@@ -31,6 +31,12 @@ pub enum ThemeLoadError {
         key: String,
         reference: String,
     },
+    /// A syntax or theme tag was invalid.
+    InvalidTag {
+        theme: String,
+        section: &'static str,
+        tag: String,
+    },
 }
 
 impl fmt::Display for ThemeLoadError {
@@ -62,6 +68,11 @@ impl fmt::Display for ThemeLoadError {
                     "theme {theme} has unknown palette reference {reference:?} in {section}.{key}"
                 )
             }
+            Self::InvalidTag {
+                theme,
+                section,
+                tag,
+            } => write!(f, "theme {theme} has invalid tag {tag:?} in [{section}]"),
         }
     }
 }

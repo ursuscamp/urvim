@@ -1,0 +1,25 @@
+# TOML syntax fixture
+title = "Example"
+value = 42
+flag = true
+
+[owner]
+name = "Ada"
+dob = 1979-05-27T07:32:00Z
+quoted = "hello\nworld"
+
+[database]
+ports = [8000, 8001, 8002]
+enabled = false
+message = """hello
+world"""
+path = "C:\\tmp\\data"
+
+package.version = "1.0.0"
+
+[servers.alpha]
+ports = [0x10, 0o755, 0b1010, -3.5e+2]
+data = { enabled = true, retries = 3 }
+
+[[servers.backends]]
+name = "a"

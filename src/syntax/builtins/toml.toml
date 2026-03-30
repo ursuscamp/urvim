@@ -1,0 +1,138 @@
+[metadata]
+name = "toml"
+display_name = "TOML"
+alias = ["tml"]
+filename = ["\\.toml$"]
+shebang = []
+
+[[rules]]
+kind = "regex"
+pattern = "#.*$"
+tag = "comment"
+
+[[rules]]
+kind = "regex"
+pattern = "^\\s*\\[\\[[A-Za-z0-9_-]+(?:\\.[A-Za-z0-9_-]+)*\\]\\]\\s*$"
+tag = "keyword"
+
+[[rules]]
+kind = "regex"
+pattern = "^\\s*\\[[A-Za-z0-9_-]+(?:\\.[A-Za-z0-9_-]+)*\\]\\s*$"
+tag = "keyword"
+
+[[rules]]
+kind = "regex"
+pattern = "\"\"\""
+tag = "string"
+context = { requires = ["toml_triple_double_string"], pop = ["toml_triple_double_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\\\\."
+tag = "punctuation"
+context = { requires = ["toml_triple_double_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "[^\"]+"
+tag = "string"
+context = { requires = ["toml_triple_double_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\""
+tag = "string"
+context = { requires = ["toml_triple_double_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\"\"\""
+tag = "string"
+context = { push = ["toml_triple_double_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "'"
+tag = "string"
+context = { requires = ["toml_single_string"], pop = ["toml_single_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "[^']+"
+tag = "string"
+context = { requires = ["toml_single_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "'"
+tag = "string"
+context = { push = ["toml_single_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\""
+tag = "string"
+context = { requires = ["toml_double_string"], pop = ["toml_double_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\\\\."
+tag = "punctuation"
+context = { requires = ["toml_double_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "[^\"\\\\]+"
+tag = "string"
+context = { requires = ["toml_double_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\""
+tag = "string"
+context = { push = ["toml_double_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "(?:\\b\\d{4}-\\d{2}-\\d{2}(?:[T ]\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?(?:Z|[+-]\\d{2}:\\d{2})?)?\\b|\\b\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?\\b)"
+tag = "number"
+
+[[rules]]
+kind = "regex"
+pattern = "[-+]?0[xX][0-9A-Fa-f_]+"
+tag = "number"
+
+[[rules]]
+kind = "regex"
+pattern = "[-+]?0[oO][0-7_]+"
+tag = "number"
+
+[[rules]]
+kind = "regex"
+pattern = "[-+]?0[bB][01_]+"
+tag = "number"
+
+[[rules]]
+kind = "regex"
+pattern = "[-+]?(?:\\d[\\d_]*(?:\\.\\d[\\d_]*)?(?:[eE][+-]?\\d[\\d_]*)?|\\.\\d[\\d_]*(?:[eE][+-]?\\d[\\d_]*)?)"
+tag = "number"
+
+[[rules]]
+kind = "regex"
+pattern = "\\b(?:true|false|nan|inf)\\b"
+tag = "constant"
+
+[[rules]]
+kind = "regex"
+pattern = "\\b[A-Za-z_][A-Za-z0-9_-]*\\b"
+tag = "variable"
+
+[[rules]]
+kind = "regex"
+pattern = "="
+tag = "operator"
+
+[[rules]]
+kind = "regex"
+pattern = "[\\[\\],.]"
+tag = "punctuation"

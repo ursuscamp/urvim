@@ -1,0 +1,105 @@
+[metadata]
+name = "swift"
+display_name = "Swift"
+alias = ["swiftc"]
+filename = ["\\.swift$"]
+shebang = ["^#!.*\\bswift(?:\\s|$)"]
+
+[[rules]]
+kind = "regex"
+pattern = "//.*$"
+tag = "comment.line"
+
+[[rules]]
+kind = "regex"
+pattern = "\\*/"
+tag = "comment.block"
+context = { requires = ["swift_block_comment"], pop = ["swift_block_comment"] }
+
+[[rules]]
+kind = "regex"
+pattern = "/\\*"
+tag = "comment.block"
+context = { push = ["swift_block_comment"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\"\"\""
+tag = "string"
+context = { requires = ["swift_triple_string"], pop = ["swift_triple_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\"\"\""
+tag = "string"
+context = { push = ["swift_triple_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "[^\"\\\\]+"
+tag = "string"
+context = { requires = ["swift_triple_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\""
+tag = "string"
+context = { requires = ["swift_string"], pop = ["swift_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\""
+tag = "string"
+context = { push = ["swift_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "[^\"\\\\\\n]+"
+tag = "string"
+context = { requires = ["swift_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "\\\\."
+tag = "punctuation"
+context = { requires = ["swift_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "^\\s*@[_A-Za-z][A-Za-z0-9_\\.]*"
+tag = "keyword"
+
+[[rules]]
+kind = "regex"
+pattern = "\\b(?:as|associatedtype|break|case|catch|class|continue|default|defer|deinit|do|else|enum|extension|fallthrough|for|func|guard|if|in|import|init|inout|internal|is|let|operator|private|protocol|public|repeat|return|self|static|struct|subscript|super|switch|throw|try|typealias|var|where|while)\\b"
+tag = "keyword"
+
+[[rules]]
+kind = "regex"
+pattern = "\\b(?:Bool|Int|Int8|Int16|Int32|Int64|UInt|UInt8|UInt16|UInt32|UInt64|Float|Double|String|Character|Array|Dictionary|Set|Optional|Result|Any|Never)\\b"
+tag = "type"
+
+[[rules]]
+kind = "regex"
+pattern = "\\b(?:false|null|true|nil)\\b"
+tag = "constant"
+
+[[rules]]
+kind = "regex"
+pattern = "\\b\\d+(?:\\.\\d+)?\\b"
+tag = "number"
+
+[[rules]]
+kind = "regex"
+pattern = "\\b[A-Z][A-Za-z0-9_]*\\b"
+tag = "type"
+
+[[rules]]
+kind = "regex"
+pattern = "[(){}\\[\\],.;:]"
+tag = "punctuation"
+
+[[rules]]
+kind = "regex"
+pattern = "(?:===|!==|==|!=|<=|>=|=>|\\?\\?|\\?\\.|\\+\\+|--|[+\\-*/%=&|!<>^~?])"
+tag = "operator"

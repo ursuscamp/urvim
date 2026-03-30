@@ -1,0 +1,26 @@
+use super::*;
+
+#[test]
+fn test_csharp_fixture_uses_grammar_rules() {
+    let fixture = include_str!("fixtures/csharp.cs");
+    let mut buf = fixture_buffer("syntax-csharp-fixture", "cs", fixture);
+
+    let comment = buf
+        .syntax_spans_for_line(0)
+        .expect("comment line should exist");
+    let attribute = buf
+        .syntax_spans_for_line(1)
+        .expect("attribute line should exist");
+    let class_line = buf
+        .syntax_spans_for_line(2)
+        .expect("class line should exist");
+    let string_line = buf
+        .syntax_spans_for_line(5)
+        .expect("string line should exist");
+
+    assert_spans_include_comment_style(&comment);
+    assert_spans_include_style(&attribute, tag("keyword"));
+    assert_spans_include_style(&class_line, tag("keyword"));
+    assert_spans_include_style(&class_line, tag("type"));
+    assert_spans_include_style(&string_line, tag("string"));
+}

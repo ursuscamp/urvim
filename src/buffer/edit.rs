@@ -28,10 +28,12 @@ impl Buffer {
             left.append(new);
             left.append(right);
             self.lines = left;
+            self.invalidate_syntax_from(line_idx);
         } else if let Some(line) = self.lines.get(line_idx) {
             let mut new_line = line.to_string();
             new_line.insert(col, ch);
             self.lines = self.lines.update(line_idx, Arc::from(new_line));
+            self.invalidate_syntax_from(line_idx);
         }
     }
 
@@ -75,6 +77,7 @@ impl Buffer {
                 let mut new_line = line.to_string();
                 new_line.drain(start_col..end_col);
                 self.lines = self.lines.update(start_line, Arc::from(new_line));
+                self.invalidate_syntax_from(start_line);
             }
         } else {
             let before = if let Some(line) = self.lines.get(start_line) {
@@ -93,6 +96,7 @@ impl Buffer {
             left.push_back(merged);
             left.append(right);
             self.lines = left;
+            self.invalidate_syntax_from(start_line);
         }
     }
 
@@ -120,6 +124,7 @@ impl Buffer {
             left.push_back(merged);
             left.append(right);
             self.lines = left;
+            self.invalidate_syntax_from(prev_line);
             return Some(Cursor::new(prev_line, prev_content_len));
         }
 
@@ -168,6 +173,7 @@ impl Buffer {
             left.push_back(merged);
             left.append(right);
             self.lines = left;
+            self.invalidate_syntax_from(current_line);
             return Some(Cursor::new(current_line, current_content_len));
         }
 
@@ -181,6 +187,7 @@ impl Buffer {
                     Cursor::new(cursor.line, start),
                     Cursor::new(cursor.line, end),
                 );
+                self.invalidate_syntax_from(cursor.line);
                 return Some(Cursor::new(cursor.line, start));
             }
         }
@@ -221,6 +228,7 @@ impl Buffer {
         left.push_back(Arc::from(joined_content));
         left.append(right);
         self.lines = left;
+        self.invalidate_syntax_from(start_line);
         Some(Cursor::new(start_line, joined_len))
     }
 
@@ -249,6 +257,7 @@ impl Buffer {
             left.append(right);
             self.lines = left;
         }
+        self.invalidate_syntax_from(start_line);
         let new_line_count = self.lines.len();
         if new_line_count == 0 {
             Some(Cursor::new(0, 0))
@@ -263,6 +272,7 @@ impl Buffer {
         let total_lines = self.lines.len();
         if total_lines == 0 {
             self.lines.push_back(Arc::from(""));
+            self.invalidate_syntax_from(0);
             return Some(Cursor::new(0, 0));
         }
         if start_line >= total_lines {
@@ -284,6 +294,7 @@ impl Buffer {
             left.append(right);
             self.lines = left;
         }
+        self.invalidate_syntax_from(start_line);
         Some(Cursor::new(start_line, 0))
     }
 
@@ -312,6 +323,7 @@ impl Buffer {
             if count > 0 {
                 self.lines.push_back(Arc::from(""));
             }
+            self.invalidate_syntax_from(0);
             return Some(Cursor::new(0, 0));
         }
         let insert_after = line.min(total_lines);
@@ -322,6 +334,7 @@ impl Buffer {
             for _ in 0..count {
                 self.lines.push_back(Arc::from(""));
             }
+            self.invalidate_syntax_from(total_lines);
             Some(Cursor::new(total_lines, 0))
         } else {
             let mut left = self.lines.take(insert_after + 1);
@@ -331,6 +344,7 @@ impl Buffer {
             }
             left.append(right);
             self.lines = left;
+            self.invalidate_syntax_from(insert_after + 1);
             Some(Cursor::new(insert_after + 1, 0))
         }
     }
@@ -341,6 +355,7 @@ impl Buffer {
             if count > 0 {
                 self.lines.push_back(Arc::from(""));
             }
+            self.invalidate_syntax_from(0);
             return Some(Cursor::new(0, 0));
         }
         if count == 0 {
@@ -350,6 +365,7 @@ impl Buffer {
             for _ in 0..count {
                 self.lines.push_front(Arc::from(""));
             }
+            self.invalidate_syntax_from(0);
             Some(Cursor::new(0, 0))
         } else {
             let insert_before = line.saturating_sub(1);
@@ -357,6 +373,7 @@ impl Buffer {
                 for _ in 0..count {
                     self.lines.push_back(Arc::from(""));
                 }
+                self.invalidate_syntax_from(total_lines);
                 Some(Cursor::new(total_lines, 0))
             } else {
                 let mut left = self.lines.take(insert_before + 1);
@@ -366,6 +383,7 @@ impl Buffer {
                 }
                 left.append(right);
                 self.lines = left;
+                self.invalidate_syntax_from(line);
                 Some(Cursor::new(insert_before + 1, 0))
             }
         }

@@ -92,6 +92,85 @@ A resolved styling configuration that defines the editor's default style plus na
 
 **Related Terms:** Default Style, Window, Gutter, Status Bar, Layout
 
+### Tag
+A hierarchical syntax label emitted by a grammar rule and consumed by a theme during style resolution. Tags are dot-separated and can become more specific as additional segments are added, such as `constant.integer` beneath `constant`.
+
+**Context:** Syntax grammar definitions, syntax highlighting, theme style lookup
+
+**Example:** A grammar rule may emit `constant.float`, while a theme styles `constant` broadly and overrides only `constant.float` for floating-point literals.
+
+**Related Terms:** Syntax Highlighting, Syntax Definition, Theme
+
+### Syntax Highlighting
+A buffer-derived visual styling layer that classifies text spans by filetype-aware syntax categories such as comments, keywords, strings, numbers, and types. Syntax highlighting is expected to update when the underlying buffer text changes and to inherit colors from the active theme.
+
+**Context:** Buffer rendering, filetype-aware styling, theme syntax styles
+
+**Related Terms:** Buffer, Filetype, Theme, Default Style, Window, Syntax Definition
+
+### Syntax Definition
+A per-file TOML syntax configuration that describes how a filetype should be highlighted. Syntax definitions are loaded into memory and associated with one or more filetypes or language names. A syntax definition contains metadata plus one ordered `rules` list made of `regex` and `injection` rules.
+
+**Context:** Syntax config loading, highlight resolution, filetype lookup
+
+**Related Terms:** Syntax Highlighting, Regex Rule, Injection Rule, Filetype, Configuration File
+
+### Syntax Registry
+The in-memory catalog of builtin syntax definitions and metadata used to resolve syntax names, aliases, filename matches, and first-line matches. In urvim, the registry can keep a syntax in raw form until it is promoted for actual tokenization.
+
+**Context:** Syntax loading, filetype detection, nested syntax resolution
+
+**Related Terms:** Syntax Definition, Syntax Promotion, Filetype, Injected Syntax
+
+### Syntax Promotion
+The on-demand compilation of a raw syntax definition into its runtime form the first time that syntax is needed. Promotion preserves the same highlighting behavior while avoiding eager compilation of unused syntaxes.
+
+**Context:** Syntax registry resolution, tokenizer-driven injected syntax lookup
+
+**Related Terms:** Syntax Registry, Syntax Definition, Syntax Highlighting, Injected Syntax
+
+### String Interpolation
+A nested syntax inside a string literal that highlights embedded expressions or language fragments using the host language grammar or another declared injected syntax. String interpolation is used when the text inside a string should be tokenized as code instead of plain string content.
+
+**Context:** String literal highlighting, injected syntax bodies, host-language grammar definitions
+
+**Related Terms:** Injection Rule, Injected Syntax, Escape Sequence, Syntax Highlighting
+
+### Injected Syntax
+A nested syntax that is resolved from the text inside a surrounding syntax rule, such as a Markdown fenced code block that selects a language by its fence tag. Injected syntax reuses the same syntax registry and style categories as top-level syntax definitions.
+
+**Context:** Injected highlighting, Markdown fences, nested highlighting
+
+**Related Terms:** Injection Rule, Syntax Definition, Syntax Highlighting
+
+### Syntax Alias
+A secondary language name declared in syntax metadata that resolves to the same syntax definition as the canonical syntax name. Syntax alias labels are used for injected language names such as Markdown fence tags and other user-provided selectors.
+
+**Context:** Syntax metadata, injected syntax resolution, label lookup
+
+**Related Terms:** Syntax Definition, Injected Syntax, Filetype
+
+### Regex Rule
+A syntax rule that matches the current input with a regular expression, applies a tag, and can update context by pushing or popping markers or payload-bearing entries.
+
+**Context:** Syntax grammar definitions, syntax highlighting, context-driven tokenization
+
+**Related Terms:** Syntax Definition, Injection Rule, Syntax Highlighting, Context Entry
+
+### Injection Rule
+A syntax rule that delegates highlighting of the current body to another syntax when the active context permits it. Injection rules are how embedded languages such as HTML script bodies, Markdown fences, and template bodies choose a nested syntax.
+
+**Context:** Injected highlighting, nested bodies, syntax registry lookup
+
+**Related Terms:** Syntax Definition, Regex Rule, Injected Syntax, Context Entry
+
+### Context Entry
+An item stored on the active context stack. A context entry may be a plain marker or a payload-bearing value that carries opener-specific text forward so later rules can require a matching prefix or exact payload.
+
+**Context:** Context-driven tokenization, opener/closer matching, heredoc-style bodies
+
+**Related Terms:** Regex Rule, Injection Rule, Syntax Highlighting
+
 ### Default Style
 The base `Style` supplied by a theme before any UI- or syntax-specific overlay is applied. Unspecified style fields in a rendered region should inherit from this style.
 
@@ -101,12 +180,19 @@ The base `Style` supplied by a theme before any UI- or syntax-specific overlay i
 
 **Related Terms:** Theme, Window, Screen, Cell
 
+### Escape Sequence
+A grammar-defined literal sequence inside a string that represents a special character or encoded value, such as `\n` or `\t`. Escape sequences are highlighted as part of the host string grammar and do not require a separate syntax definition.
+
+**Context:** String literal highlighting, regex-driven tokenization
+
+**Related Terms:** String Interpolation, Regex Rule, Syntax Highlighting
+
 ### Filetype
-A lightweight enum that classifies a buffer as a common editor-friendly filetype such as Rust, Python, JavaScript, Shell, Markdown, or Plain Text. Filetypes are derived from filename patterns and shebang lines when available, and are used for user-facing labels such as the status bar.
+A syntax-defined buffer classification that provides a canonical `name`, a user-facing `display_name`, filename-matching regexes, and first-line-matching regexes. Filetypes are derived from syntax grammar metadata and are used for highlighting, lookup, and user-facing labels such as the status bar.
 
-**Context:** Buffer metadata, status bar rendering
+**Context:** Buffer metadata, syntax loading, status bar rendering
 
-**Related Terms:** Buffer, Status Bar
+**Related Terms:** Buffer, Status Bar, Syntax Definition
 
 ### Window
 A rendering component that owns a Buffer View and displays its buffer on screen. It handles cursor positioning, scrolling, and text rendering with gutter.

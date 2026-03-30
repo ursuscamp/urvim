@@ -26,8 +26,8 @@ pub struct RawTheme {
     pub default: RawStyle,
     /// Predefined UI styles.
     pub ui: RawUiStyles,
-    /// Predefined syntax styles.
-    pub syntax: RawSyntaxStyles,
+    /// Syntax tag styles.
+    pub syntax: BTreeMap<String, RawStyle>,
 }
 
 /// A raw style definition used by the default, UI, and syntax sections.
@@ -78,31 +78,4 @@ pub struct RawUiStyles {
     pub gutter: RawStyle,
     /// The main buffer viewport.
     pub window: RawStyle,
-}
-
-/// Closed raw syntax style definitions.
-#[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct RawSyntaxStyles {
-    /// Comments and documentation strings.
-    pub comment: RawStyle,
-    /// Constants and immutable symbols.
-    pub constant: RawStyle,
-    /// Function names.
-    pub function: RawStyle,
-    /// Keywords and control flow.
-    pub keyword: RawStyle,
-    /// Numeric literals.
-    pub number: RawStyle,
-    /// Operators such as `+` and `=`.
-    pub operator: RawStyle,
-    /// Punctuation such as commas and braces.
-    pub punctuation: RawStyle,
-    /// String literals.
-    pub string: RawStyle,
-    /// Type names and declarations.
-    #[serde(rename = "type")]
-    pub type_: RawStyle,
-    /// General variable names.
-    pub variable: RawStyle,
 }

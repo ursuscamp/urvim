@@ -38,22 +38,23 @@ mod boundary;
 mod bracket_text_object;
 mod cursor;
 mod edit;
-mod filetype;
 mod io;
 mod operator_target;
 mod pool;
 mod quote_text_object;
 mod search;
+mod syntax;
 mod text_object;
 mod undo;
 mod unicode;
 
-pub use filetype::Filetype;
 pub use pool::{BufferId, BufferPool};
+pub use syntax::SyntaxSpan;
 pub use unicode::{char_width, grapheme_width, str_width, to_byte_index};
 
 use crate::path::AbsolutePath;
 use imbl::Vector;
+use smol_str::SmolStr;
 use std::fs::File;
 use std::io::{Read, Write};
 use std::path::Path;
@@ -148,13 +149,27 @@ struct UndoState {
 /// buf.insert_text(Cursor::new(0, 7), "Beautiful ");
 /// assert_eq!(buf.as_str(), "Hello, Beautiful World!");
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Buffer {
     lines: Vector<Arc<str>>,
     saved_lines: Vector<Arc<str>>,
     path: Option<AbsolutePath>,
-    filetype: Filetype,
+    syntax_name: SmolStr,
     undo_state: UndoState,
+    syntax_cache: syntax::SyntaxCache,
+}
+
+impl Clone for Buffer {
+    fn clone(&self) -> Self {
+        Self {
+            lines: self.lines.clone(),
+            saved_lines: self.saved_lines.clone(),
+            path: self.path.clone(),
+            syntax_name: self.syntax_name.clone(),
+            undo_state: self.undo_state.clone(),
+            syntax_cache: self.syntax_cache.clone(),
+        }
+    }
 }
 
 impl Default for Buffer {
@@ -199,10 +214,10 @@ impl Buffer {
         self.path.as_ref()
     }
 
-    /// Sets the resolved path for this buffer and refreshes filetype detection.
+    /// Sets the resolved path for this buffer and refreshes syntax detection.
     pub fn set_path(&mut self, path: AbsolutePath) {
         self.path = Some(path);
-        self.refresh_filetype();
+        self.refresh_syntax();
     }
 
     /// Returns the buffer file name, if a path has been resolved.
@@ -210,9 +225,18 @@ impl Buffer {
         self.path.as_ref().and_then(|p| p.file_name())
     }
 
-    /// Returns the resolved filetype for this buffer.
-    pub fn filetype(&self) -> Filetype {
-        self.filetype
+    /// Returns the resolved canonical syntax name for this buffer.
+    pub fn syntax_name(&self) -> &str {
+        &self.syntax_name
+    }
+
+    /// Returns the user-facing syntax label for this buffer.
+    pub fn syntax_label(&self) -> String {
+        crate::syntax::builtin_syntax_registry()
+            .ok()
+            .and_then(|registry| registry.display_name(&self.syntax_name))
+            .unwrap_or_else(|| self.syntax_name.clone())
+            .to_string()
     }
 
     /// Returns true when the current buffer contents differ from the last saved baseline.
@@ -281,17 +305,24 @@ impl Buffer {
         result
     }
 
-    fn refresh_filetype(&mut self) {
-        self.filetype = Filetype::detect(
+    fn refresh_syntax(&mut self) {
+        let new_syntax_name = crate::syntax::resolve_builtin_syntax(
             self.path.as_ref().map(|path| path.as_path()),
             self.lines.get(0).map(|line| line.as_ref()),
-        );
+        )
+        .unwrap_or_else(|| smol_str::SmolStr::new(crate::syntax::fallback_syntax_name()));
+
+        if self.syntax_name != new_syntax_name {
+            self.syntax_name = new_syntax_name.clone();
+            self.syntax_cache.set_syntax_name(new_syntax_name);
+            self.syntax_cache.invalidate_from(0);
+        }
     }
 
-    /// Records the current text as the last saved baseline and refreshes filetype detection.
+    /// Records the current text as the last saved baseline and refreshes syntax detection.
     pub fn mark_saved(&mut self) {
         self.saved_lines = self.lines.clone();
-        self.refresh_filetype();
+        self.refresh_syntax();
     }
 }
 

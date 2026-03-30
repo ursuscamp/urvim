@@ -114,12 +114,12 @@ impl Layout {
         let buffer_name = buffer_view
             .file_name()
             .unwrap_or_else(|| "Untitled".to_string());
-        let filetype_label = buffer_view.filetype_label();
+        let syntax_label = buffer_view.syntax_label();
         let cursor = buffer_view.cursor();
         let context = StatusBarContext {
             mode_label: self.mode_label(),
             modified: buffer_view.is_modified(),
-            filetype_label,
+            syntax_label: syntax_label.as_str(),
             buffer_name: buffer_name.as_str(),
             cursor_line: cursor.line,
             cursor_byte_col: cursor.col,

@@ -1,0 +1,15 @@
+# YAML syntax fixture
+%YAML 1.2
+name: Ada
+title: "Engineer"
+bio: |
+  Builds tools
+  Likes syntax
+age: 42
+anchor: &home
+city: London
+alias: *home
+tagged: !person Ada
+list:
+  - one
+  - two
