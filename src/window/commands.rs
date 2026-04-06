@@ -1,4 +1,6 @@
 use super::*;
+use crate::editor::ActionKind;
+use crate::editor::pairs;
 
 impl Window {
     pub fn insert_char(&mut self, c: char) {
@@ -13,6 +15,17 @@ impl Window {
         self.buffer_view.set_cursor(new_cursor);
     }
 
+    /// Inserts a supported delimiter pair and places the cursor between the two characters.
+    pub fn insert_pair(&mut self, opening: char, closing: char) {
+        let cursor = self.buffer_view.cursor();
+        let pair = [opening, closing].into_iter().collect::<String>();
+        self.buffer_view
+            .with_buffer_mut(|buffer| buffer.insert_text(cursor, &pair))
+            .unwrap_or(());
+        let new_cursor = Cursor::new(cursor.line, cursor.col + opening.len_utf8());
+        self.buffer_view.set_cursor(new_cursor);
+    }
+
     pub fn delete_char_before_cursor(&mut self) {
         let cursor = self.buffer_view.cursor();
         if let Some(new_cursor) = self
@@ -22,6 +35,37 @@ impl Window {
         {
             self.buffer_view.set_cursor(new_cursor);
         }
+    }
+
+    /// Deletes the character before the cursor, or a matching auto-closed pair in insert mode.
+    pub fn delete_insert_char_before_cursor(&mut self) {
+        let cursor = self.buffer_view.cursor();
+        let should_delete_pair = crate::globals::with_config(|config| {
+            config.map(|config| config.auto_close_pairs).unwrap_or(true)
+        });
+        if should_delete_pair
+            && let Some((start, end)) = self
+                .buffer_view
+                .with_buffer(|buffer| {
+                    let opening = buffer.char_before_cursor(cursor)?;
+                    let closing = buffer.char_at_cursor(cursor)?;
+                    if pairs::closer_for(opening) != Some(closing) {
+                        return None;
+                    }
+                    let start = buffer.prev_cursor_line(cursor)?;
+                    let end = buffer.next_cursor(cursor)?;
+                    Some((start, end))
+                })
+                .flatten()
+        {
+            self.buffer_view
+                .with_buffer_mut(|buffer| buffer.remove(start, end))
+                .unwrap_or(());
+            self.buffer_view.set_cursor(start);
+            return;
+        }
+
+        self.delete_char_before_cursor();
     }
 
     pub fn delete_char_at_cursor(&mut self) {
@@ -58,29 +102,29 @@ impl Window {
     }
 
     pub(crate) fn handle_count(&mut self, count: usize, inner: &Action) -> ActionResult {
-        match inner {
-            Action::MoveToFirstLine | Action::MoveToLastLine => {
+        match inner.kind.as_ref() {
+            Some(ActionKind::MoveToFirstLine) | Some(ActionKind::MoveToLastLine) => {
                 self.handle_count_line_motion(count, inner)
             }
-            Action::MoveToScreenTop | Action::MoveToScreenBottom => {
+            Some(ActionKind::MoveToScreenTop) | Some(ActionKind::MoveToScreenBottom) => {
                 self.handle_count_screen_motion(count, inner)
             }
-            Action::JoinWithSpace | Action::JoinWithoutSpace => {
+            Some(ActionKind::JoinWithSpace) | Some(ActionKind::JoinWithoutSpace) => {
                 self.handle_count_join(count, inner)
             }
-            Action::DeleteLine => self.handle_count_delete_line(count),
-            Action::ChangeLine => self.handle_count_change_line(count),
-            Action::ChangeToLineEnd => self.handle_count_change_to_line_end(count),
-            Action::OpenLineBelow => self.handle_count_open_line_below(count),
-            Action::OpenLineAbove => self.handle_count_open_line_above(count),
-            Action::Operation(_, _) => self.handle_count_operation(count, inner),
+            Some(ActionKind::DeleteLine) => self.handle_count_delete_line(count),
+            Some(ActionKind::ChangeLine) => self.handle_count_change_line(count),
+            Some(ActionKind::ChangeToLineEnd) => self.handle_count_change_to_line_end(count),
+            Some(ActionKind::OpenLineBelow) => self.handle_count_open_line_below(count),
+            Some(ActionKind::OpenLineAbove) => self.handle_count_open_line_above(count),
+            Some(ActionKind::Operation(_, _)) => self.handle_count_operation(count, inner),
             _ if inner.is_line_action() => self.handle_count_line_action(count, inner),
             _ => self.handle_count_repeatable(count, inner),
         }
     }
 
     fn handle_count_operation(&mut self, count: usize, action: &Action) -> ActionResult {
-        if let Action::Operation(op, target) = action {
+        if let Some(ActionKind::Operation(op, target)) = action.kind.as_ref() {
             return self.handle_operation_with_count(*op, *target, count);
         }
         ActionResult::Handled
@@ -107,7 +151,7 @@ impl Window {
         if line_count == 0 {
             return ActionResult::Handled;
         }
-        let target_line = if matches!(action, Action::MoveToScreenTop) {
+        let target_line = if matches!(action.kind.as_ref(), Some(ActionKind::MoveToScreenTop)) {
             let offset = count.saturating_sub(1);
             (start_line + offset)
                 .min(start_line + viewport_rows - 1)
@@ -131,7 +175,7 @@ impl Window {
     }
 
     fn handle_count_join(&mut self, count: usize, action: &Action) -> ActionResult {
-        let with_space = matches!(action, Action::JoinWithSpace);
+        let with_space = matches!(action.kind.as_ref(), Some(ActionKind::JoinWithSpace));
         let cursor = self.buffer_view.cursor();
         let actual_count = count + 1;
         if let Some(new_cursor) = self

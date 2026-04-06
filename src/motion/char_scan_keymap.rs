@@ -12,8 +12,8 @@ use crate::editor::{Action, Keymap};
 /// - First key is a character scan trigger (f, F, t, T)
 /// - Second key is any character (the target)
 ///
-/// Returns `Action::FindForward(char)`, `Action::FindBackward(char)`,
-/// `Action::TillForward(char)`, or `Action::TillBackward(char)`.
+/// Returns `Action::find_forward(char)`, `Action::find_backward(char)`,
+/// `Action::till_forward(char)`, or `Action::till_backward(char)`.
 #[derive(Debug, Clone, Default)]
 pub struct CharScanKeymap;
 
@@ -38,10 +38,10 @@ impl Keymap for CharScanKeymap {
         let key_str = trigger.as_str();
 
         match key_str {
-            "f" => Some(Action::FindForward(target_char)),
-            "F" => Some(Action::FindBackward(target_char)),
-            "t" => Some(Action::TillForward(target_char)),
-            "T" => Some(Action::TillBackward(target_char)),
+            "f" => Some(Action::find_forward(target_char)),
+            "F" => Some(Action::find_backward(target_char)),
+            "t" => Some(Action::till_forward(target_char)),
+            "T" => Some(Action::till_backward(target_char)),
             _ => None,
         }
     }
@@ -64,28 +64,28 @@ mod tests {
     fn test_get_action_finds_forward() {
         let keymap = CharScanKeymap::new();
         let action = keymap.get_action(&["f".to_string(), "x".to_string()]);
-        assert_eq!(action, Some(Action::FindForward('x')));
+        assert_eq!(action, Some(Action::find_forward('x')));
     }
 
     #[test]
     fn test_get_action_finds_backward() {
         let keymap = CharScanKeymap::new();
         let action = keymap.get_action(&["F".to_string(), "y".to_string()]);
-        assert_eq!(action, Some(Action::FindBackward('y')));
+        assert_eq!(action, Some(Action::find_backward('y')));
     }
 
     #[test]
     fn test_get_action_till_forward() {
         let keymap = CharScanKeymap::new();
         let action = keymap.get_action(&["t".to_string(), "z".to_string()]);
-        assert_eq!(action, Some(Action::TillForward('z')));
+        assert_eq!(action, Some(Action::till_forward('z')));
     }
 
     #[test]
     fn test_get_action_till_backward() {
         let keymap = CharScanKeymap::new();
         let action = keymap.get_action(&["T".to_string(), "w".to_string()]);
-        assert_eq!(action, Some(Action::TillBackward('w')));
+        assert_eq!(action, Some(Action::till_backward('w')));
     }
 
     #[test]

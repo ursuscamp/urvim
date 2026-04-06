@@ -1,6 +1,21 @@
 use super::*;
 
 impl Buffer {
+    /// Returns the character at the cursor, if the cursor is positioned on a character.
+    pub fn char_at_cursor(&self, cursor: Cursor) -> Option<char> {
+        let line = self.line_at(cursor.line)?;
+        line.get(cursor.col..)?.chars().next()
+    }
+
+    /// Returns the character immediately before the cursor, if one exists.
+    pub fn char_before_cursor(&self, cursor: Cursor) -> Option<char> {
+        if cursor.col == 0 {
+            return None;
+        }
+        let line = self.line_at(cursor.line)?;
+        line.get(..cursor.col)?.chars().next_back()
+    }
+
     pub fn line_len(&self, line_idx: usize) -> usize {
         self.lines.get(line_idx).map_or(0, |s| s.len())
     }

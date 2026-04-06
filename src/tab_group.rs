@@ -381,21 +381,21 @@ impl TabGroup {
 
 impl Widget for TabGroup {
     fn process_action(&mut self, action: &Action) -> ActionResult {
-        match action {
-            Action::PreviousTab => {
+        match action.kind.as_ref() {
+            Some(crate::editor::ActionKind::PreviousTab) => {
                 self.handle_previous_tab(1);
                 ActionResult::Handled
             }
-            Action::NextTab => {
+            Some(crate::editor::ActionKind::NextTab) => {
                 self.handle_next_tab(1);
                 ActionResult::Handled
             }
-            Action::Count(count, inner) => match inner.as_ref() {
-                Action::PreviousTab => {
+            Some(crate::editor::ActionKind::Count(count, inner)) => match inner.kind.as_ref() {
+                Some(crate::editor::ActionKind::PreviousTab) => {
                     self.handle_previous_tab(*count);
                     ActionResult::Handled
                 }
-                Action::NextTab => {
+                Some(crate::editor::ActionKind::NextTab) => {
                     self.handle_next_tab(*count);
                     ActionResult::Handled
                 }

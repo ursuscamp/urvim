@@ -1,7 +1,7 @@
 use super::*;
 use crate::action::ActionResult;
 use crate::buffer::Cursor;
-use crate::editor::Action;
+use crate::editor::{Action, ActionKind};
 use crate::globals;
 use crate::terminal::{Color, Style};
 use crate::theme::{SyntaxTagStyles, Tag, Theme, ThemeKind, UiStyles};
@@ -148,19 +148,19 @@ fn test_tab_navigation_wraps_and_supports_counts() {
     let mut group = tab_group_with_labels(&["a", "b", "c", "d", "e"]);
 
     assert_eq!(
-        group.process_action(&Action::PreviousTab),
+        group.process_action(&Action::new(ActionKind::PreviousTab)),
         ActionResult::Handled
     );
     assert_eq!(group.active_tab_index(), 4);
 
     assert_eq!(
-        group.process_action(&Action::Count(2, Box::new(Action::NextTab))),
+        group.process_action(&Action::count(2, Box::new(Action::new(ActionKind::NextTab)))),
         ActionResult::Handled
     );
     assert_eq!(group.active_tab_index(), 1);
 
     assert_eq!(
-        group.process_action(&Action::Count(3, Box::new(Action::PreviousTab))),
+        group.process_action(&Action::count(3, Box::new(Action::new(ActionKind::PreviousTab)))),
         ActionResult::Handled
     );
     assert_eq!(group.active_tab_index(), 3);

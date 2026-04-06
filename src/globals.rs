@@ -263,6 +263,7 @@ mod tests {
             theme: theme.to_string(),
             insert_escape: None,
             syntax: true,
+            auto_close_pairs: true,
         }
     }
 
@@ -378,15 +379,20 @@ mod tests {
 
     #[test]
     fn test_repeat_state_round_trip() {
+        use crate::editor::ActionKind;
+
         set_last_repeat(RepeatState {
-            action: Action::DeleteLine,
+            action: Action::new(ActionKind::DeleteLine),
             count: 4,
             insert_text: Some("hello".to_string()),
         });
 
         let state = get_last_repeat().expect("repeat state should be available");
         assert_eq!(state.count, 4);
-        assert!(matches!(state.action, Action::DeleteLine));
+        assert!(matches!(
+            state.action.kind.as_ref(),
+            Some(ActionKind::DeleteLine)
+        ));
         assert_eq!(state.insert_text.as_deref(), Some("hello"));
     }
 }

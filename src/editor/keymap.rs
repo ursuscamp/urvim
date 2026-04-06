@@ -282,6 +282,7 @@ impl CountParser {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::editor::ActionKind;
 
     #[test]
     fn test_parse_key_string_single_key() {
@@ -318,11 +319,11 @@ mod tests {
     #[test]
     fn test_insert_str_matches_sequence_lookup() {
         let mut keymap = TrieKeymap::new();
-        keymap.insert_str("gg", Action::MoveUp);
+        keymap.insert_str("gg", Action::new(ActionKind::MoveUp));
 
         assert_eq!(
             keymap.get_action(&["g".to_string(), "g".to_string()]),
-            Some(Action::MoveUp)
+            Some(Action::new(ActionKind::MoveUp))
         );
     }
 

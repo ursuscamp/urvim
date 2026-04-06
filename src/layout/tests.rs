@@ -2,7 +2,7 @@ use super::*;
 use crate::action::ActionResult;
 use crate::buffer::Buffer;
 use crate::config::Config;
-use crate::editor::{Action, ModeKind};
+use crate::editor::{Action, ActionKind, ModeKind};
 use crate::globals;
 use crate::path::AbsolutePath;
 use crate::tab_group::TabGroup;
@@ -43,7 +43,7 @@ fn test_layout_process_action_delegates_to_tab_group() {
     ]);
 
     assert_eq!(
-        layout.process_action(&Action::NextTab),
+        layout.process_action(&Action::new(ActionKind::NextTab)),
         ActionResult::Handled
     );
     assert_eq!(layout.tab_group().active_tab_index(), 1);
@@ -111,6 +111,7 @@ fn test_layout_render_keeps_syntax_label_when_syntax_disabled() {
         theme: "Friday Night".to_string(),
         insert_escape: None,
         syntax: false,
+        auto_close_pairs: true,
     });
 
     layout.render(&mut screen, Position::new(0, 0), Size::new(3, 40));

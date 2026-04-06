@@ -25,6 +25,8 @@ pub struct Config {
     pub insert_escape: Option<String>,
     /// Whether syntax highlighting is enabled for rendered buffers.
     pub syntax: bool,
+    /// Whether insert mode should auto-close supported bracket and quote pairs.
+    pub auto_close_pairs: bool,
 }
 
 /// The TOML-backed config file schema.
@@ -37,6 +39,8 @@ pub struct PartialConfig {
     pub insert_escape: Option<String>,
     /// Whether syntax highlighting is enabled in the config file.
     pub syntax: Option<bool>,
+    /// Whether insert mode should auto-close supported bracket and quote pairs.
+    pub auto_close_pairs: Option<bool>,
 }
 
 /// Errors that can occur while loading or resolving startup configuration.
@@ -94,11 +98,15 @@ impl Config {
         let syntax = cli_syntax
             .or_else(|| file.and_then(|config| config.syntax))
             .unwrap_or(true);
+        let auto_close_pairs = file
+            .and_then(|config| config.auto_close_pairs)
+            .unwrap_or(true);
 
         Self {
             theme,
             insert_escape,
             syntax,
+            auto_close_pairs,
         }
     }
 }
@@ -239,6 +247,7 @@ mod tests {
             theme: Some("file-theme".to_string()),
             insert_escape: Some("jk".to_string()),
             syntax: Some(false),
+            auto_close_pairs: Some(false),
         };
 
         assert_eq!(
@@ -253,7 +262,9 @@ mod tests {
             Some("jk")
         );
         assert!(!Config::resolve(Some(&file), None, None).syntax);
+        assert!(!Config::resolve(Some(&file), None, None).auto_close_pairs);
         assert!(Config::resolve(None, None, None).syntax);
+        assert!(Config::resolve(None, None, None).auto_close_pairs);
         assert_eq!(Config::resolve(None, None, None).theme, DEFAULT_THEME);
         assert_eq!(Config::resolve(None, None, None).insert_escape, None);
     }
@@ -349,6 +360,25 @@ mod tests {
         let config = Config::load_from_locations(home, vec![], None, None).expect("should load");
 
         assert!(!config.syntax);
+    }
+
+    #[test]
+    fn load_from_locations_defaults_auto_close_pairs_to_true() {
+        let home = unique_temp_dir("auto-close-default-home");
+
+        let config = Config::load_from_locations(home, vec![], None, None).expect("should load");
+
+        assert!(config.auto_close_pairs);
+    }
+
+    #[test]
+    fn load_from_locations_loads_auto_close_pairs_flag() {
+        let home = unique_temp_dir("auto-close-home");
+        write_config(&home, "auto_close_pairs = false");
+
+        let config = Config::load_from_locations(home, vec![], None, None).expect("should load");
+
+        assert!(!config.auto_close_pairs);
     }
 
     #[test]

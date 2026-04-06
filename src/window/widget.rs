@@ -1,70 +1,129 @@
 use super::*;
+use crate::editor::pairs;
+use crate::editor::{ActionKind, ModeKind};
 
 impl Widget for Window {
     fn process_action(&mut self, action: &Action) -> ActionResult {
-        let result = match action {
-            Action::MoveLeft => {
+        let insert_mode = action.from_mode == Some(ModeKind::Insert);
+        let result = match action.kind.as_ref() {
+            Some(ActionKind::MoveLeft) => {
                 self.move_cursor_left();
                 ActionResult::Handled
             }
-            Action::MoveDown => {
+            Some(ActionKind::MoveDown) => {
                 let target_col = self.buffer_view.get_or_compute_target_col();
                 self.move_cursor_down(target_col);
                 self.buffer_view.set_remembered_visual_col(target_col);
                 ActionResult::Handled
             }
-            Action::MoveUp => {
+            Some(ActionKind::MoveUp) => {
                 let target_col = self.buffer_view.get_or_compute_target_col();
                 self.move_cursor_up(target_col);
                 self.buffer_view.set_remembered_visual_col(target_col);
                 ActionResult::Handled
             }
-            Action::MoveRight => {
+            Some(ActionKind::MoveRight) => {
                 self.move_cursor_right();
                 ActionResult::Handled
             }
-            Action::InsertChar(c) => {
-                self.insert_char(*c);
-                ActionResult::Handled
-            }
-            Action::InsertText(text) => {
-                for ch in text.chars() {
-                    self.insert_char(ch);
+            Some(ActionKind::InsertChar(c)) => {
+                let cursor = self.buffer_view.cursor();
+                let auto_close_pairs = insert_mode
+                    && globals::with_config(|config| {
+                        config.map(|config| config.auto_close_pairs).unwrap_or(true)
+                    });
+
+                if auto_close_pairs {
+                    if let Some(closer) = pairs::closer_for(*c) {
+                        if closer == *c
+                            && self
+                                .buffer_view
+                                .with_buffer(|buffer| buffer.char_at_cursor(cursor) == Some(*c))
+                                .unwrap_or(false)
+                        {
+                            if let Some(new_cursor) = self
+                                .buffer_view
+                                .with_buffer(|buffer| buffer.next_cursor(cursor))
+                                .flatten()
+                            {
+                                self.buffer_view.set_cursor(new_cursor);
+                            }
+                        } else {
+                            self.insert_pair(*c, closer);
+                        }
+                    } else if pairs::is_supported_closer(*c)
+                        && self
+                            .buffer_view
+                            .with_buffer(|buffer| buffer.char_at_cursor(cursor) == Some(*c))
+                            .unwrap_or(false)
+                    {
+                        if let Some(new_cursor) = self
+                            .buffer_view
+                            .with_buffer(|buffer| buffer.next_cursor(cursor))
+                            .flatten()
+                        {
+                            self.buffer_view.set_cursor(new_cursor);
+                        }
+                    } else {
+                        self.insert_char(*c);
+                    }
+                } else {
+                    self.insert_char(*c);
                 }
                 ActionResult::Handled
             }
-            Action::ForwardTo(boundary) => {
+            Some(ActionKind::InsertText(text)) => {
+                let auto_close_pairs = insert_mode
+                    && globals::with_config(|config| {
+                        config.map(|config| config.auto_close_pairs).unwrap_or(true)
+                    });
+                if auto_close_pairs {
+                    if let Some((opening, closing)) = pair_text(text) {
+                        self.insert_pair(opening, closing);
+                    } else {
+                        for ch in text.chars() {
+                            self.insert_char(ch);
+                        }
+                    }
+                } else {
+                    for ch in text.chars() {
+                        self.insert_char(ch);
+                    }
+                }
+                ActionResult::Handled
+            }
+            Some(ActionKind::ForwardTo(boundary)) => {
                 self.move_cursor_forward_to(*boundary);
                 ActionResult::Handled
             }
-            Action::BackTo(boundary) => {
+            Some(ActionKind::BackTo(boundary)) => {
                 self.move_cursor_back_to(*boundary);
                 ActionResult::Handled
             }
-            Action::MoveToLineEnd => {
+            Some(ActionKind::MoveToLineEnd) => {
                 self.move_cursor_to_line_end();
                 ActionResult::Handled
             }
-            Action::MoveToLineStart => {
+            Some(ActionKind::MoveToLineStart) => {
                 self.move_cursor_to_line_start();
                 ActionResult::Handled
             }
-            Action::MoveToLineContentStart => {
+            Some(ActionKind::MoveToLineContentStart) => {
                 self.move_cursor_to_line_content_start();
                 ActionResult::Handled
             }
-            Action::MoveToFirstLine => {
+            Some(ActionKind::MoveToFirstLine) => {
                 let target_col = self.buffer_view.get_or_compute_target_col();
                 self.set_cursor_to_visual_col_on_line(0, target_col);
                 ActionResult::Handled
             }
-            Action::MoveToLastLine => {
+            Some(ActionKind::MoveToLastLine) => {
                 let target_line = self.buffer_view.line_count().saturating_sub(1);
                 let target_col = self.buffer_view.get_or_compute_target_col();
                 self.set_cursor_to_visual_col_on_line(target_line, target_col);
                 ActionResult::Handled
             }
-            Action::MoveToScreenTop => {
+            Some(ActionKind::MoveToScreenTop) => {
                 let viewport_rows = self.size.rows as usize;
                 if viewport_rows == 0 {
                     return ActionResult::Handled;
@@ -75,7 +134,7 @@ impl Widget for Window {
                 self.set_cursor_to_visual_col_on_line(target_line, target_col);
                 ActionResult::Handled
             }
-            Action::MoveToScreenMiddle => {
+            Some(ActionKind::MoveToScreenMiddle) => {
                 let viewport_rows = self.size.rows as usize;
                 if viewport_rows == 0 {
                     return ActionResult::Handled;
@@ -90,7 +149,7 @@ impl Widget for Window {
                 self.set_cursor_to_visual_col_on_line(target_line, target_col);
                 ActionResult::Handled
             }
-            Action::MoveToScreenBottom => {
+            Some(ActionKind::MoveToScreenBottom) => {
                 let viewport_rows = self.size.rows as usize;
                 if viewport_rows == 0 {
                     return ActionResult::Handled;
@@ -105,38 +164,42 @@ impl Widget for Window {
                 self.set_cursor_to_visual_col_on_line(end_line, target_col);
                 ActionResult::Handled
             }
-            Action::DeleteBackward => {
-                self.delete_char_before_cursor();
+            Some(ActionKind::DeleteBackward) => {
+                if insert_mode {
+                    self.delete_insert_char_before_cursor();
+                } else {
+                    self.delete_char_before_cursor();
+                }
                 ActionResult::Handled
             }
-            Action::DeleteForward => {
+            Some(ActionKind::DeleteForward) => {
                 self.delete_char_at_cursor();
                 ActionResult::Handled
             }
-            Action::AppendAfterCursor => {
+            Some(ActionKind::AppendAfterCursor) => {
                 self.move_cursor_right();
                 ActionResult::Handled
             }
-            Action::AppendToLineEnd => {
+            Some(ActionKind::AppendToLineEnd) => {
                 let cursor = self.buffer_view.cursor();
                 let line_len = self.buffer_view.line_len(cursor.line);
                 self.buffer_view
                     .set_cursor(Cursor::new(cursor.line, line_len));
                 ActionResult::Handled
             }
-            Action::InsertAtLineStart => {
+            Some(ActionKind::InsertAtLineStart) => {
                 self.move_cursor_to_line_content_start();
                 ActionResult::Handled
             }
-            Action::JoinWithSpace => {
+            Some(ActionKind::JoinWithSpace) => {
                 self.join_lines_with_space();
                 ActionResult::Handled
             }
-            Action::JoinWithoutSpace => {
+            Some(ActionKind::JoinWithoutSpace) => {
                 self.join_lines_without_space();
                 ActionResult::Handled
             }
-            Action::DeleteLine => {
+            Some(ActionKind::DeleteLine) => {
                 let cursor = self.buffer_view.cursor();
                 if let Some(new_cursor) = self
                     .buffer_view
@@ -147,7 +210,7 @@ impl Widget for Window {
                 }
                 ActionResult::Handled
             }
-            Action::ChangeLine => {
+            Some(ActionKind::ChangeLine) => {
                 let cursor = self.buffer_view.cursor();
                 if let Some(new_cursor) = self
                     .buffer_view
@@ -158,11 +221,11 @@ impl Widget for Window {
                 }
                 ActionResult::Handled
             }
-            Action::ChangeToLineEnd => {
+            Some(ActionKind::ChangeToLineEnd) => {
                 self.handle_count_change_to_line_end(1);
                 ActionResult::Handled
             }
-            Action::OpenLineBelow => {
+            Some(ActionKind::OpenLineBelow) => {
                 let cursor = self.buffer_view.cursor();
                 if let Some(new_cursor) = self
                     .buffer_view
@@ -173,7 +236,7 @@ impl Widget for Window {
                 }
                 ActionResult::Handled
             }
-            Action::OpenLineAbove => {
+            Some(ActionKind::OpenLineAbove) => {
                 let cursor = self.buffer_view.cursor();
                 if let Some(new_cursor) = self
                     .buffer_view
@@ -184,7 +247,7 @@ impl Widget for Window {
                 }
                 ActionResult::Handled
             }
-            Action::MoveToMatchingBracket => {
+            Some(ActionKind::MoveToMatchingBracket) => {
                 use crate::motion::bracket_matcher::find_matching_bracket;
                 let cursor = self.buffer_view.cursor();
                 let new_cursor = self
@@ -196,15 +259,15 @@ impl Widget for Window {
                 }
                 ActionResult::Handled
             }
-            Action::MoveToPreviousParagraph => {
+            Some(ActionKind::MoveToPreviousParagraph) => {
                 self.move_cursor_to_previous_paragraph();
                 ActionResult::Handled
             }
-            Action::MoveToNextParagraph => {
+            Some(ActionKind::MoveToNextParagraph) => {
                 self.move_cursor_to_next_paragraph();
                 ActionResult::Handled
             }
-            Action::FindForward(target) => {
+            Some(ActionKind::FindForward(target)) => {
                 globals::set_last_find(globals::FindState {
                     target_char: *target,
                     kind: globals::FindKind::Find,
@@ -213,7 +276,7 @@ impl Widget for Window {
                 self.move_cursor_to_char_forward(*target, 1);
                 ActionResult::Handled
             }
-            Action::FindBackward(target) => {
+            Some(ActionKind::FindBackward(target)) => {
                 globals::set_last_find(globals::FindState {
                     target_char: *target,
                     kind: globals::FindKind::Find,
@@ -222,7 +285,7 @@ impl Widget for Window {
                 self.move_cursor_to_char_backward(*target, 1);
                 ActionResult::Handled
             }
-            Action::TillForward(target) => {
+            Some(ActionKind::TillForward(target)) => {
                 globals::set_last_find(globals::FindState {
                     target_char: *target,
                     kind: globals::FindKind::Till,
@@ -231,7 +294,7 @@ impl Widget for Window {
                 self.move_cursor_till_forward(*target, 1);
                 ActionResult::Handled
             }
-            Action::TillBackward(target) => {
+            Some(ActionKind::TillBackward(target)) => {
                 globals::set_last_find(globals::FindState {
                     target_char: *target,
                     kind: globals::FindKind::Till,
@@ -240,53 +303,79 @@ impl Widget for Window {
                 self.move_cursor_till_backward(*target, 1);
                 ActionResult::Handled
             }
-            Action::RepeatLastFind => {
-                if let Some(state) = globals::get_last_find() {
-                    match (state.kind, state.direction) {
-                        (globals::FindKind::Find, globals::Direction::Forward) => {
-                            self.move_cursor_to_char_forward(state.target_char, 1)
+            Some(ActionKind::RepeatLastFind) => {
+                if let Some(find) = globals::get_last_find() {
+                    match find.direction {
+                        globals::Direction::Forward => {
+                            if find.kind == globals::FindKind::Find {
+                                self.move_cursor_to_char_forward(find.target_char, 1);
+                            } else {
+                                self.move_cursor_till_forward(find.target_char, 1);
+                            }
                         }
-                        (globals::FindKind::Find, globals::Direction::Backward) => {
-                            self.move_cursor_to_char_backward(state.target_char, 1)
-                        }
-                        (globals::FindKind::Till, globals::Direction::Forward) => {
-                            self.move_cursor_till_forward(state.target_char, 1)
-                        }
-                        (globals::FindKind::Till, globals::Direction::Backward) => {
-                            self.move_cursor_till_backward(state.target_char, 1)
-                        }
-                    }
-                }
-                ActionResult::Handled
-            }
-            Action::RepeatLastFindReverse => {
-                if let Some(state) = globals::get_last_find() {
-                    match (state.kind, state.direction) {
-                        (globals::FindKind::Find, globals::Direction::Forward) => {
-                            self.move_cursor_to_char_backward(state.target_char, 1)
-                        }
-                        (globals::FindKind::Find, globals::Direction::Backward) => {
-                            self.move_cursor_to_char_forward(state.target_char, 1)
-                        }
-                        (globals::FindKind::Till, globals::Direction::Forward) => {
-                            self.move_cursor_till_backward(state.target_char, 1)
-                        }
-                        (globals::FindKind::Till, globals::Direction::Backward) => {
-                            self.move_cursor_till_forward(state.target_char, 1)
+                        globals::Direction::Backward => {
+                            if find.kind == globals::FindKind::Find {
+                                self.move_cursor_to_char_backward(find.target_char, 1);
+                            } else {
+                                self.move_cursor_till_backward(find.target_char, 1);
+                            }
                         }
                     }
                 }
                 ActionResult::Handled
             }
-            Action::Count(count, inner) => return self.handle_count(*count, inner),
-            Action::Operation(op, target) => return self.handle_operation(op, target),
-            _ => NotHandled,
+            Some(ActionKind::RepeatLastFindReverse) => {
+                if let Some(find) = globals::get_last_find() {
+                    match find.direction {
+                        globals::Direction::Forward => {
+                            if find.kind == globals::FindKind::Find {
+                                self.move_cursor_to_char_backward(find.target_char, 1);
+                            } else {
+                                self.move_cursor_till_backward(find.target_char, 1);
+                            }
+                        }
+                        globals::Direction::Backward => {
+                            if find.kind == globals::FindKind::Find {
+                                self.move_cursor_to_char_forward(find.target_char, 1);
+                            } else {
+                                self.move_cursor_till_forward(find.target_char, 1);
+                            }
+                        }
+                    }
+                }
+                ActionResult::Handled
+            }
+            Some(ActionKind::Count(count, inner)) => return self.handle_count(*count, inner),
+            Some(ActionKind::Operation(op, target)) => return self.handle_operation(op, target),
+            Some(ActionKind::Quit)
+            | Some(ActionKind::Undo)
+            | Some(ActionKind::Redo)
+            | Some(ActionKind::SaveBuffer(_))
+            | Some(ActionKind::RepeatLastChange)
+            | Some(ActionKind::PreviousTab)
+            | Some(ActionKind::NextTab)
+            | None => ActionResult::NotHandled,
         };
 
-        if action.resets_remembered_column() {
+        if result == ActionResult::Handled && action.resets_remembered_column() {
             self.buffer_view.update_remembered_to_current();
         }
 
         result
+    }
+}
+
+fn pair_text(text: &str) -> Option<(char, char)> {
+    let mut chars = text.chars();
+    let opening = chars.next()?;
+    let closing = chars.next()?;
+    if chars.next().is_some() {
+        return None;
+    }
+
+    if pairs::closer_for(opening) == Some(closing) {
+        Some((opening, closing))
+    } else {
+        None
     }
 }

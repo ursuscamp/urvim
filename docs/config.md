@@ -23,12 +23,13 @@ Command-line flags override config file values.
 
 ## Current Schema
 
-The canonical config values are `theme`, `insert_escape`, and `syntax`.
+The canonical config values are `theme`, `insert_escape`, `syntax`, and `auto_close_pairs`.
 
 ```toml
 theme = "Friday Night"
 insert_escape = "jk"
 syntax = true
+auto_close_pairs = true
 ```
 
 ### `theme`
@@ -57,6 +58,16 @@ Controls whether syntax highlighting is enabled for rendered buffers.
 - Default: `true`
 - Override: `--no-syntax`
 - Behavior: when `false`, buffers still detect filetypes and the status bar still shows the syntax label, but rendered text uses the base theme style only
+
+### `auto_close_pairs`
+
+Controls whether insert mode automatically pairs supported brackets and quotes.
+
+- Type: boolean
+- Default: `true`
+- Behavior: when `true`, insert mode auto-closes parentheses, square brackets, curly braces, double quotes, single quotes, and backticks; typing a supported closer next to an auto-inserted closer skips over it; pressing backspace between a supported opener and closer removes both characters
+- Behavior when `false`: opening and closing brackets and quotes insert as plain text, and backspace deletes only one character at a time
+- Scope: insert mode only
 
 ## Notes
 

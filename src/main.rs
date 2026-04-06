@@ -6,7 +6,9 @@ use urvim::Layout;
 use urvim::action::ActionResult;
 use urvim::buffer::Cursor;
 use urvim::config::Config;
-use urvim::editor::{Action, HandleKeyResult, InsertMode, Mode, NormalMode, RepeatReplay};
+use urvim::editor::{
+    Action, ActionKind, HandleKeyResult, InsertMode, Mode, ModeKind, NormalMode, RepeatReplay,
+};
 use urvim::globals;
 use urvim::screen::Screen;
 use urvim::terminal::{Event, Terminal, size::get_terminal_size};
@@ -95,14 +97,14 @@ fn main() -> io::Result<()> {
                         .map(|replay| replay.action.clone())
                         .unwrap_or_else(|| {
                             if action.is_repeat_command() {
-                                Action::None
+                                Action::none()
                             } else {
                                 action.clone()
                             }
                         });
 
-                    match action {
-                        Action::Undo => {
+                    match action.kind.as_ref() {
+                        Some(ActionKind::Undo) => {
                             if let Some(cursor) = layout
                                 .active_buffer_view()
                                 .with_buffer_mut(|buffer| buffer.undo())
@@ -111,7 +113,7 @@ fn main() -> io::Result<()> {
                                 layout.active_buffer_view_mut().set_cursor(cursor);
                             }
                         }
-                        Action::Redo => {
+                        Some(ActionKind::Redo) => {
                             if let Some(cursor) = layout
                                 .active_buffer_view()
                                 .with_buffer_mut(|buffer| buffer.redo())
@@ -130,7 +132,9 @@ fn main() -> io::Result<()> {
                                 if action_result == ActionResult::NotHandled {
                                     // Fall back to app-level handling
                                     match dispatch_action {
-                                        Action::SwitchToNormal => {
+                                        _ if dispatch_action.kind.is_none()
+                                            && dispatch_action.to_mode == Some(ModeKind::Normal) =>
+                                        {
                                             let repeat_text = mode.take_repeat_text();
                                             mode = Box::new(NormalMode::new());
                                             terminal.set_cursor_style(mode.cursor_style())?;
@@ -144,12 +148,21 @@ fn main() -> io::Result<()> {
                                             }
                                             handled = true;
                                         }
-                                        Action::SwitchToInsert => {
+                                        _ if dispatch_action.kind.is_none()
+                                            && dispatch_action.to_mode == Some(ModeKind::Insert) =>
+                                        {
                                             mode = Box::new(InsertMode::new());
                                             terminal.set_cursor_style(mode.cursor_style())?;
                                             handled = true;
                                         }
-                                        Action::SaveBuffer(target) => {
+                                        _ if matches!(
+                                            dispatch_action.kind.as_ref(),
+                                            Some(ActionKind::SaveBuffer(_))
+                                        ) => {
+                                            let target = match dispatch_action.kind.as_ref() {
+                                                Some(ActionKind::SaveBuffer(target)) => *target,
+                                                _ => None,
+                                            };
                                             let buffer_id = target.unwrap_or_else(|| {
                                                 layout.active_buffer_view().buffer_id()
                                             });
@@ -177,8 +190,16 @@ fn main() -> io::Result<()> {
                                             }
                                             handled = true;
                                         }
-                                        Action::Quit => break,
-                                        Action::None => {
+                                        _ if matches!(
+                                            dispatch_action.kind.as_ref(),
+                                            Some(ActionKind::Quit)
+                                        ) =>
+                                        {
+                                            break;
+                                        }
+                                        _ if dispatch_action.kind.is_none()
+                                            && dispatch_action.to_mode.is_none() =>
+                                        {
                                             handled = true;
                                         }
                                         _ => { /* Should have been handled by window */ }
@@ -271,21 +292,21 @@ fn select_active_theme(
 }
 
 fn replay_repeat_action(layout: &mut Layout, replay: &RepeatReplay) -> bool {
-    if matches!(replay.action, Action::SwitchToInsert)
+    if replay.action.kind.is_none() && replay.action.to_mode == Some(ModeKind::Insert)
         && replay.insert_text.as_deref().is_none_or(str::is_empty)
     {
         return false;
     }
 
     let structural_action = if replay.structural_count > 1 {
-        Action::Count(replay.structural_count, Box::new(replay.action.clone()))
+        Action::count(replay.structural_count, Box::new(replay.action.clone()))
     } else {
         replay.action.clone()
     };
 
     for _ in 0..replay.repeat_count {
         let handled = match replay.action {
-            Action::SwitchToInsert => true,
+            _ if replay.action.kind.is_none() && replay.action.to_mode == Some(ModeKind::Insert) => true,
             _ => layout.process_action(&structural_action) == ActionResult::Handled,
         };
 
@@ -431,17 +452,22 @@ mod tests {
 
     #[test]
     fn resolve_repeat_action_uses_stored_repeat_state() {
+        use urvim::editor::ActionKind;
+
         let _guard = repeat_state_lock();
         globals::set_last_repeat(globals::RepeatState {
-            action: Action::DeleteLine,
+            action: Action::new(ActionKind::DeleteLine),
             count: 3,
             insert_text: Some("hello".to_string()),
         });
 
-        let replay = Action::RepeatLastChange
+        let replay = Action::new(ActionKind::RepeatLastChange)
             .resolve_dot_repeat()
             .expect("repeat should resolve");
-        assert!(matches!(replay.action, Action::DeleteLine));
+        assert!(matches!(
+            replay.action.kind.as_ref(),
+            Some(ActionKind::DeleteLine)
+        ));
         assert_eq!(replay.structural_count, 3);
         assert_eq!(replay.repeat_count, 1);
         assert_eq!(replay.insert_text.as_deref(), Some("hello"));
@@ -449,17 +475,22 @@ mod tests {
 
     #[test]
     fn resolve_repeat_action_overrides_the_stored_count() {
+        use urvim::editor::ActionKind;
+
         let _guard = repeat_state_lock();
         globals::set_last_repeat(globals::RepeatState {
-            action: Action::DeleteLine,
+            action: Action::new(ActionKind::DeleteLine),
             count: 3,
             insert_text: None,
         });
 
-        let replay = Action::Count(2, Box::new(Action::RepeatLastChange))
+        let replay = Action::count(2, Box::new(Action::new(ActionKind::RepeatLastChange)))
             .resolve_dot_repeat()
             .expect("repeat should resolve");
-        assert!(matches!(replay.action, Action::DeleteLine));
+        assert!(matches!(
+            replay.action.kind.as_ref(),
+            Some(ActionKind::DeleteLine)
+        ));
         assert_eq!(replay.structural_count, 3);
         assert_eq!(replay.repeat_count, 2);
         assert_eq!(replay.insert_text, None);
@@ -472,7 +503,7 @@ mod tests {
             ModeKind::Normal,
         );
         let replay = RepeatReplay {
-            action: Action::ChangeLine,
+            action: Action::new(ActionKind::ChangeLine),
             structural_count: 2,
             repeat_count: 1,
             insert_text: Some("hello".to_string()),
@@ -494,7 +525,7 @@ mod tests {
             ModeKind::Normal,
         );
         let replay = RepeatReplay {
-            action: Action::SwitchToInsert,
+            action: Action::mode_transition(ModeKind::Insert),
             structural_count: 1,
             repeat_count: 1,
             insert_text: Some("hello ".to_string()),

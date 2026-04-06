@@ -1,5 +1,6 @@
 use crate::buffer::{Boundary, BufferId};
 use crate::globals;
+use crate::editor::ModeKind;
 
 /// Operators that wait for a motion or text object to define the target region.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -136,19 +137,23 @@ pub enum LinewiseMotion {
 }
 
 /// Actions that the main event loop processes.
-#[derive(Debug, Clone, PartialEq)]
-pub enum Action {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Action {
+    pub kind: Option<ActionKind>,
+    pub from_mode: Option<ModeKind>,
+    pub to_mode: Option<ModeKind>,
+}
+
+/// Intent payload for an action envelope.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ActionKind {
     MoveLeft,
     MoveDown,
     MoveUp,
     MoveRight,
     InsertChar(char),
-    /// Insert a batch of literal text characters.
     InsertText(String),
-    SwitchToNormal,
-    SwitchToInsert,
     Quit,
-    None,
     ForwardTo(Boundary),
     BackTo(Boundary),
     MoveToLineEnd,
@@ -192,235 +197,373 @@ pub enum Action {
 }
 
 impl Action {
+    /// Creates a plain action envelope carrying the given intent payload.
+    pub fn new(kind: ActionKind) -> Self {
+        Self {
+            kind: Some(kind),
+            from_mode: None,
+            to_mode: None,
+        }
+    }
+
+    /// Creates an action envelope that only carries mode metadata.
+    pub fn none() -> Self {
+        Self {
+            kind: None,
+            from_mode: None,
+            to_mode: None,
+        }
+    }
+
+    /// Creates an action that transitions to the provided mode after it succeeds.
+    pub fn mode_transition(to_mode: ModeKind) -> Self {
+        Self {
+            kind: None,
+            from_mode: None,
+            to_mode: Some(to_mode),
+        }
+    }
+
+    /// Creates an insert-char action.
+    pub fn insert_char(ch: char) -> Self {
+        Self::new(ActionKind::InsertChar(ch))
+    }
+
+    /// Creates an insert-text action.
+    pub fn insert_text(text: String) -> Self {
+        Self::new(ActionKind::InsertText(text))
+    }
+
+    /// Creates a motion that moves forward to the given boundary.
+    pub fn forward_to(boundary: Boundary) -> Self {
+        Self::new(ActionKind::ForwardTo(boundary))
+    }
+
+    /// Creates a motion that moves backward to the given boundary.
+    pub fn back_to(boundary: Boundary) -> Self {
+        Self::new(ActionKind::BackTo(boundary))
+    }
+
+    /// Creates a forward-finding motion.
+    pub fn find_forward(target: char) -> Self {
+        Self::new(ActionKind::FindForward(target))
+    }
+
+    /// Creates a backward-finding motion.
+    pub fn find_backward(target: char) -> Self {
+        Self::new(ActionKind::FindBackward(target))
+    }
+
+    /// Creates a forward till motion.
+    pub fn till_forward(target: char) -> Self {
+        Self::new(ActionKind::TillForward(target))
+    }
+
+    /// Creates a backward till motion.
+    pub fn till_backward(target: char) -> Self {
+        Self::new(ActionKind::TillBackward(target))
+    }
+
+    /// Creates a save-buffer action.
+    pub fn save_buffer(target: Option<BufferId>) -> Self {
+        Self::new(ActionKind::SaveBuffer(target))
+    }
+
+    /// Wraps an action in a repeat count.
+    pub fn count(count: usize, inner: Box<Action>) -> Self {
+        let from_mode = inner.from_mode;
+        let to_mode = inner.to_mode;
+        Self {
+            kind: Some(ActionKind::Count(count, inner)),
+            from_mode,
+            to_mode,
+        }
+    }
+
+    /// Creates an operator action.
+    pub fn operation(operator: Operator, target: OperatorTarget) -> Self {
+        Self::new(ActionKind::Operation(operator, target))
+    }
+
+    /// Overrides both the source and destination mode metadata.
+    pub fn with_mode(self, from_mode: Option<ModeKind>, to_mode: Option<ModeKind>) -> Self {
+        Self {
+            kind: self.kind,
+            from_mode,
+            to_mode,
+        }
+    }
+
+    /// Records the mode in which this action was created.
+    pub fn with_from_mode(self, from_mode: ModeKind) -> Self {
+        Self {
+            kind: self.kind,
+            from_mode: Some(from_mode),
+            to_mode: self.to_mode,
+        }
+    }
+
+    /// Records the mode this action should transition to after it succeeds.
+    pub fn with_to_mode(self, to_mode: ModeKind) -> Self {
+        Self {
+            kind: self.kind,
+            from_mode: self.from_mode,
+            to_mode: Some(to_mode),
+        }
+    }
+
+    /// Returns the action kind if one is present.
+    fn kind_ref(&self) -> Option<&ActionKind> {
+        self.kind.as_ref()
+    }
+
+    /// Returns true when the action should clear the remembered column.
     pub fn resets_remembered_column(&self) -> bool {
         matches!(
-            self,
-            Action::MoveLeft
-                | Action::MoveRight
-                | Action::ForwardTo(_)
-                | Action::BackTo(_)
-                | Action::MoveToLineEnd
-                | Action::MoveToLineStart
-                | Action::MoveToLineContentStart
-                | Action::InsertChar(_)
-                | Action::InsertText(_)
-                | Action::DeleteBackward
-                | Action::DeleteForward
-                | Action::DeleteLine
-                | Action::ChangeLine
-                | Action::ChangeToLineEnd
-                | Action::JoinWithSpace
-                | Action::JoinWithoutSpace
-                | Action::AppendAfterCursor
-                | Action::AppendToLineEnd
-                | Action::InsertAtLineStart
-                | Action::OpenLineBelow
-                | Action::OpenLineAbove
-                | Action::FindForward(_)
-                | Action::FindBackward(_)
-                | Action::TillForward(_)
-                | Action::TillBackward(_)
-                | Action::RepeatLastFind
-                | Action::RepeatLastFindReverse
+            self.kind_ref(),
+            Some(ActionKind::MoveLeft)
+                | Some(ActionKind::MoveRight)
+                | Some(ActionKind::ForwardTo(_))
+                | Some(ActionKind::BackTo(_))
+                | Some(ActionKind::MoveToLineEnd)
+                | Some(ActionKind::MoveToLineStart)
+                | Some(ActionKind::MoveToLineContentStart)
+                | Some(ActionKind::InsertChar(_))
+                | Some(ActionKind::InsertText(_))
+                | Some(ActionKind::DeleteBackward)
+                | Some(ActionKind::DeleteForward)
+                | Some(ActionKind::DeleteLine)
+                | Some(ActionKind::ChangeLine)
+                | Some(ActionKind::ChangeToLineEnd)
+                | Some(ActionKind::JoinWithSpace)
+                | Some(ActionKind::JoinWithoutSpace)
+                | Some(ActionKind::AppendAfterCursor)
+                | Some(ActionKind::AppendToLineEnd)
+                | Some(ActionKind::InsertAtLineStart)
+                | Some(ActionKind::OpenLineBelow)
+                | Some(ActionKind::OpenLineAbove)
+                | Some(ActionKind::FindForward(_))
+                | Some(ActionKind::FindBackward(_))
+                | Some(ActionKind::TillForward(_))
+                | Some(ActionKind::TillBackward(_))
+                | Some(ActionKind::RepeatLastFind)
+                | Some(ActionKind::RepeatLastFindReverse)
         )
     }
 
+    /// Returns true when the action should reuse the remembered column.
     pub fn uses_remembered_column(&self) -> bool {
         matches!(
-            self,
-            Action::MoveUp
-                | Action::MoveDown
-                | Action::MoveToFirstLine
-                | Action::MoveToLastLine
-                | Action::MoveToScreenTop
-                | Action::MoveToScreenMiddle
-                | Action::MoveToScreenBottom
-                | Action::MoveToPreviousParagraph
-                | Action::MoveToNextParagraph
+            self.kind_ref(),
+            Some(ActionKind::MoveUp)
+                | Some(ActionKind::MoveDown)
+                | Some(ActionKind::MoveToFirstLine)
+                | Some(ActionKind::MoveToLastLine)
+                | Some(ActionKind::MoveToScreenTop)
+                | Some(ActionKind::MoveToScreenMiddle)
+                | Some(ActionKind::MoveToScreenBottom)
+                | Some(ActionKind::MoveToPreviousParagraph)
+                | Some(ActionKind::MoveToNextParagraph)
         )
     }
 
+    /// Returns true when the action can be prefixed with a count.
     pub fn is_countable(&self) -> bool {
         matches!(
-            self,
-            Action::MoveLeft
-                | Action::MoveRight
-                | Action::MoveUp
-                | Action::MoveDown
-                | Action::ForwardTo(_)
-                | Action::BackTo(_)
-                | Action::MoveToFirstLine
-                | Action::MoveToLastLine
-                | Action::MoveToScreenTop
-                | Action::MoveToScreenBottom
-                | Action::JoinWithSpace
-                | Action::JoinWithoutSpace
-                | Action::DeleteLine
-                | Action::ChangeLine
-                | Action::ChangeToLineEnd
-                | Action::OpenLineBelow
-                | Action::OpenLineAbove
-                | Action::PreviousTab
-                | Action::NextTab
-                | Action::FindForward(_)
-                | Action::FindBackward(_)
-                | Action::TillForward(_)
-                | Action::TillBackward(_)
-                | Action::RepeatLastFind
-                | Action::RepeatLastChange
-                | Action::Operation(_, _)
-                | Action::RepeatLastFindReverse
-                | Action::MoveToPreviousParagraph
-                | Action::MoveToNextParagraph
+            self.kind_ref(),
+            Some(ActionKind::MoveLeft)
+                | Some(ActionKind::MoveRight)
+                | Some(ActionKind::MoveUp)
+                | Some(ActionKind::MoveDown)
+                | Some(ActionKind::ForwardTo(_))
+                | Some(ActionKind::BackTo(_))
+                | Some(ActionKind::MoveToFirstLine)
+                | Some(ActionKind::MoveToLastLine)
+                | Some(ActionKind::MoveToScreenTop)
+                | Some(ActionKind::MoveToScreenBottom)
+                | Some(ActionKind::JoinWithSpace)
+                | Some(ActionKind::JoinWithoutSpace)
+                | Some(ActionKind::DeleteLine)
+                | Some(ActionKind::ChangeLine)
+                | Some(ActionKind::ChangeToLineEnd)
+                | Some(ActionKind::OpenLineBelow)
+                | Some(ActionKind::OpenLineAbove)
+                | Some(ActionKind::PreviousTab)
+                | Some(ActionKind::NextTab)
+                | Some(ActionKind::FindForward(_))
+                | Some(ActionKind::FindBackward(_))
+                | Some(ActionKind::TillForward(_))
+                | Some(ActionKind::TillBackward(_))
+                | Some(ActionKind::RepeatLastFind)
+                | Some(ActionKind::RepeatLastChange)
+                | Some(ActionKind::Operation(_, _))
+                | Some(ActionKind::RepeatLastFindReverse)
+                | Some(ActionKind::MoveToPreviousParagraph)
+                | Some(ActionKind::MoveToNextParagraph)
         )
     }
 
+    /// Returns true when the action is line-oriented.
     pub fn is_line_action(&self) -> bool {
         matches!(
-            self,
-            Action::MoveToLineEnd
-                | Action::MoveToLineStart
-                | Action::MoveToLineContentStart
-                | Action::MoveToFirstLine
-                | Action::MoveToLastLine
-                | Action::AppendToLineEnd
-                | Action::InsertAtLineStart
-                | Action::PreviousTab
-                | Action::NextTab
+            self.kind_ref(),
+            Some(ActionKind::MoveToLineEnd)
+                | Some(ActionKind::MoveToLineStart)
+                | Some(ActionKind::MoveToLineContentStart)
+                | Some(ActionKind::MoveToFirstLine)
+                | Some(ActionKind::MoveToLastLine)
+                | Some(ActionKind::AppendToLineEnd)
+                | Some(ActionKind::InsertAtLineStart)
+                | Some(ActionKind::PreviousTab)
+                | Some(ActionKind::NextTab)
         )
     }
 
+    /// Wraps the action in a count when the action supports it.
     pub fn with_count(self, count: usize) -> Option<Action> {
         if (self.is_countable() || self.is_line_action()) && count > 0 && count < 10000 {
-            Some(Action::Count(count, Box::new(self)))
+            Some(Action::count(count, Box::new(self)))
         } else {
             None
         }
     }
 
+    /// Returns true when this action should leave insert mode afterward.
     pub fn switches_to_insert_mode(&self) -> bool {
-        match self {
-            Action::SwitchToInsert
-            | Action::AppendAfterCursor
-            | Action::AppendToLineEnd
-            | Action::InsertAtLineStart
-            | Action::ChangeLine
-            | Action::ChangeToLineEnd
-            | Action::OpenLineBelow
-            | Action::OpenLineAbove => true,
-            Action::Count(_, inner) => inner.switches_to_insert_mode(),
-            Action::Operation(Operator::Change, _) => true,
-            Action::Operation(Operator::Delete, _) => false,
+        if self.to_mode == Some(ModeKind::Insert) {
+            return true;
+        }
+
+        match self.kind_ref() {
+            Some(ActionKind::AppendAfterCursor)
+            | Some(ActionKind::AppendToLineEnd)
+            | Some(ActionKind::InsertAtLineStart)
+            | Some(ActionKind::ChangeLine)
+            | Some(ActionKind::ChangeToLineEnd)
+            | Some(ActionKind::OpenLineBelow)
+            | Some(ActionKind::OpenLineAbove) => true,
+            Some(ActionKind::Count(_, inner)) => inner.switches_to_insert_mode(),
+            Some(ActionKind::Operation(Operator::Change, _)) => true,
+            Some(ActionKind::Operation(Operator::Delete, _)) => false,
             _ => false,
         }
     }
 
     pub fn is_snapshottable(&self) -> bool {
-        match self {
-            Action::SwitchToNormal => true,
-            Action::DeleteBackward
-            | Action::DeleteForward
-            | Action::DeleteLine
-            | Action::ChangeLine
-            | Action::ChangeToLineEnd
-            | Action::JoinWithSpace
-            | Action::JoinWithoutSpace
-            | Action::AppendAfterCursor
-            | Action::AppendToLineEnd
-            | Action::InsertAtLineStart
-            | Action::OpenLineBelow
-            | Action::OpenLineAbove
-            | Action::InsertText(_) => true,
-            Action::InsertChar(_) => false,
-            Action::Undo | Action::Redo => false,
-            Action::Count(_, inner) => inner.is_snapshottable(),
-            Action::Operation(Operator::Delete, _) | Action::Operation(Operator::Change, _) => true,
+        match self.kind_ref() {
+            None => false,
+            Some(ActionKind::DeleteBackward)
+            | Some(ActionKind::DeleteForward)
+            | Some(ActionKind::DeleteLine)
+            | Some(ActionKind::ChangeLine)
+            | Some(ActionKind::ChangeToLineEnd)
+            | Some(ActionKind::JoinWithSpace)
+            | Some(ActionKind::JoinWithoutSpace)
+            | Some(ActionKind::AppendAfterCursor)
+            | Some(ActionKind::AppendToLineEnd)
+            | Some(ActionKind::InsertAtLineStart)
+            | Some(ActionKind::OpenLineBelow)
+            | Some(ActionKind::OpenLineAbove)
+            | Some(ActionKind::InsertText(_)) => true,
+            Some(ActionKind::InsertChar(_)) => false,
+            Some(ActionKind::Undo) | Some(ActionKind::Redo) => false,
+            Some(ActionKind::Count(_, inner)) => inner.is_snapshottable(),
+            Some(ActionKind::Operation(Operator::Delete, _))
+            | Some(ActionKind::Operation(Operator::Change, _)) => true,
             _ => false,
         }
     }
 
     pub fn updates_snapshot_cursor(&self) -> bool {
-        match self {
-            Action::MoveLeft
-            | Action::MoveDown
-            | Action::MoveUp
-            | Action::MoveRight
-            | Action::ForwardTo(_)
-            | Action::BackTo(_)
-            | Action::MoveToLineEnd
-            | Action::MoveToLineStart
-            | Action::MoveToLineContentStart
-            | Action::MoveToFirstLine
-            | Action::MoveToLastLine
-            | Action::MoveToScreenTop
-            | Action::MoveToScreenMiddle
-            | Action::MoveToScreenBottom
-            | Action::MoveToMatchingBracket
-            | Action::MoveToPreviousParagraph
-            | Action::MoveToNextParagraph
-            | Action::FindForward(_)
-            | Action::FindBackward(_)
-            | Action::TillForward(_)
-            | Action::TillBackward(_)
-            | Action::RepeatLastFind
-            | Action::RepeatLastFindReverse => true,
-            Action::Count(_, inner) => inner.updates_snapshot_cursor(),
-            Action::Operation(_, _) => false,
+        match self.kind_ref() {
+            Some(ActionKind::MoveLeft)
+            | Some(ActionKind::MoveDown)
+            | Some(ActionKind::MoveUp)
+            | Some(ActionKind::MoveRight)
+            | Some(ActionKind::ForwardTo(_))
+            | Some(ActionKind::BackTo(_))
+            | Some(ActionKind::MoveToLineEnd)
+            | Some(ActionKind::MoveToLineStart)
+            | Some(ActionKind::MoveToLineContentStart)
+            | Some(ActionKind::MoveToFirstLine)
+            | Some(ActionKind::MoveToLastLine)
+            | Some(ActionKind::MoveToScreenTop)
+            | Some(ActionKind::MoveToScreenMiddle)
+            | Some(ActionKind::MoveToScreenBottom)
+            | Some(ActionKind::MoveToMatchingBracket)
+            | Some(ActionKind::MoveToPreviousParagraph)
+            | Some(ActionKind::MoveToNextParagraph)
+            | Some(ActionKind::FindForward(_))
+            | Some(ActionKind::FindBackward(_))
+            | Some(ActionKind::TillForward(_))
+            | Some(ActionKind::TillBackward(_))
+            | Some(ActionKind::RepeatLastFind)
+            | Some(ActionKind::RepeatLastFindReverse) => true,
+            Some(ActionKind::Count(_, inner)) => inner.updates_snapshot_cursor(),
+            Some(ActionKind::Operation(_, _)) => false,
             _ => false,
         }
     }
 
     /// Returns true when this action should become the new dot-repeat source after it succeeds.
     pub fn is_dot_repeat_source(&self) -> bool {
-        match self {
-            Action::DeleteBackward
-            | Action::DeleteForward
-            | Action::JoinWithSpace
-            | Action::JoinWithoutSpace
-            | Action::DeleteLine
-            | Action::ChangeLine
-            | Action::ChangeToLineEnd
-            | Action::AppendAfterCursor
-            | Action::AppendToLineEnd
-            | Action::InsertAtLineStart
-            | Action::OpenLineBelow
-            | Action::OpenLineAbove
-            | Action::SwitchToInsert
-            | Action::Operation(Operator::Delete, _)
-            | Action::Operation(Operator::Change, _) => true,
-            Action::Count(_, inner) => inner.is_dot_repeat_source(),
+        match self.kind_ref() {
+            Some(ActionKind::DeleteBackward)
+            | Some(ActionKind::DeleteForward)
+            | Some(ActionKind::JoinWithSpace)
+            | Some(ActionKind::JoinWithoutSpace)
+            | Some(ActionKind::DeleteLine)
+            | Some(ActionKind::ChangeLine)
+            | Some(ActionKind::ChangeToLineEnd)
+            | Some(ActionKind::AppendAfterCursor)
+            | Some(ActionKind::AppendToLineEnd)
+            | Some(ActionKind::InsertAtLineStart)
+            | Some(ActionKind::OpenLineBelow)
+            | Some(ActionKind::OpenLineAbove)
+            | Some(ActionKind::Operation(Operator::Delete, _))
+            | Some(ActionKind::Operation(Operator::Change, _)) => true,
+            Some(ActionKind::Count(_, inner)) => inner.is_dot_repeat_source(),
             _ => false,
         }
     }
 
     /// Returns true when this action is the dot-repeat command itself.
     pub fn is_repeat_command(&self) -> bool {
-        matches!(self, Action::RepeatLastChange)
-            || matches!(self, Action::Count(_, inner) if matches!(**inner, Action::RepeatLastChange))
+        matches!(self.kind_ref(), Some(ActionKind::RepeatLastChange))
+            || matches!(self.kind_ref(), Some(ActionKind::Count(_, inner)) if matches!(inner.kind_ref(), Some(ActionKind::RepeatLastChange)))
     }
 
     /// Returns the repeat source and count recorded by this action, if it is repeatable.
     pub fn dot_repeat_source(&self) -> Option<(Action, usize)> {
-        match self {
-            Action::Count(count, inner) => {
+        match self.kind_ref() {
+            Some(ActionKind::Count(count, inner)) => {
                 let (action, source_count) = inner.dot_repeat_source()?;
                 Some((action, count.saturating_mul(source_count)))
             }
-            action if action.is_dot_repeat_source() => Some((action.clone(), 1)),
+            Some(kind) if self.is_dot_repeat_source() => Some((
+                Action {
+                    kind: Some(kind.clone()),
+                    from_mode: self.from_mode,
+                    to_mode: self.to_mode,
+                },
+                1,
+            )),
             _ => None,
         }
     }
 
     /// Resolves this action into the buffer edit that should be replayed for dot repeat.
     pub fn resolve_dot_repeat(&self) -> Option<RepeatReplay> {
-        match self {
-            Action::RepeatLastChange => globals::get_last_repeat().map(|state| RepeatReplay {
+        match self.kind_ref() {
+            Some(ActionKind::RepeatLastChange) => globals::get_last_repeat().map(|state| RepeatReplay {
                 action: state.action,
                 structural_count: state.count,
                 repeat_count: 1,
                 insert_text: state.insert_text,
             }),
-            Action::Count(count, inner) if matches!(**inner, Action::RepeatLastChange) => {
+            Some(ActionKind::Count(count, inner))
+                if matches!(inner.kind_ref(), Some(ActionKind::RepeatLastChange)) =>
+            {
                 globals::get_last_repeat().map(|state| RepeatReplay {
                     action: state.action,
                     structural_count: state.count,

@@ -71,12 +71,13 @@ impl Keymap for ChainedKeymap {
 mod tests {
     use super::*;
     use crate::editor::TrieKeymap;
+    use crate::editor::ActionKind;
     use crate::motion::char_scan_keymap::CharScanKeymap;
 
     #[test]
     fn test_chained_get_action_trie_first() {
         let mut trie = TrieKeymap::new();
-        trie.insert_str("gg", Action::MoveUp);
+        trie.insert_str("gg", Action::new(ActionKind::MoveUp));
 
         let mut chained = ChainedKeymap::new();
         chained.add(Box::new(trie));
@@ -84,7 +85,7 @@ mod tests {
 
         // gg should match trie first
         let action = chained.get_action(&["g".to_string(), "g".to_string()]);
-        assert_eq!(action, Some(Action::MoveUp));
+        assert_eq!(action, Some(Action::new(ActionKind::MoveUp)));
     }
 
     #[test]
@@ -97,13 +98,13 @@ mod tests {
 
         // fx should fall back to char scan
         let action = chained.get_action(&["f".to_string(), "x".to_string()]);
-        assert_eq!(action, Some(Action::FindForward('x')));
+        assert_eq!(action, Some(Action::find_forward('x')));
     }
 
     #[test]
     fn test_chained_is_prefix_trie() {
         let mut trie = TrieKeymap::new();
-        trie.insert_str("gg", Action::MoveUp);
+        trie.insert_str("gg", Action::new(ActionKind::MoveUp));
 
         let mut chained = ChainedKeymap::new();
         chained.add(Box::new(trie));
@@ -128,7 +129,7 @@ mod tests {
     #[test]
     fn test_chained_is_prefix_returns_true_if_any() {
         let mut trie = TrieKeymap::new();
-        trie.insert_str("gg", Action::MoveUp);
+        trie.insert_str("gg", Action::new(ActionKind::MoveUp));
 
         let mut chained = ChainedKeymap::new();
         chained.add(Box::new(trie));

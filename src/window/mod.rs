@@ -11,9 +11,9 @@ mod gutter;
 mod motions;
 mod render;
 mod view;
-mod widget_impl;
+mod widget;
 
-use crate::action::{ActionResult, ActionResult::NotHandled};
+use crate::action::ActionResult;
 use crate::buffer::{Boundary, Buffer, BufferId, Cursor};
 use crate::editor::{Action, LinewiseMotion, Operator, OperatorTarget};
 use crate::globals;

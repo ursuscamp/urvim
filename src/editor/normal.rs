@@ -4,6 +4,7 @@ use super::{
     Mode, ModeKind, Operator, OperatorTarget, QuoteKind, TextObject, TrieKeymap,
 };
 use crate::buffer::Boundary;
+use crate::editor::ActionKind;
 use crate::motion::chained_keymap::ChainedKeymap;
 use crate::motion::char_scan_keymap::CharScanKeymap;
 use crate::terminal::{CursorStyle, Key, KeyCode};
@@ -25,82 +26,82 @@ impl NormalMode {
     pub fn new() -> Self {
         let mut trie_keymap = TrieKeymap::new();
 
-        trie_keymap.insert_str("h", Action::MoveLeft);
-        trie_keymap.insert_str("j", Action::MoveDown);
-        trie_keymap.insert_str("k", Action::MoveUp);
-        trie_keymap.insert_str("l", Action::MoveRight);
+        trie_keymap.insert_str("h", Action::new(ActionKind::MoveLeft));
+        trie_keymap.insert_str("j", Action::new(ActionKind::MoveDown));
+        trie_keymap.insert_str("k", Action::new(ActionKind::MoveUp));
+        trie_keymap.insert_str("l", Action::new(ActionKind::MoveRight));
 
-        trie_keymap.insert_str("w", Action::ForwardTo(Boundary::Word));
-        trie_keymap.insert_str("b", Action::BackTo(Boundary::Word));
-        trie_keymap.insert_str("e", Action::ForwardTo(Boundary::WordEnd));
+        trie_keymap.insert_str("w", Action::forward_to(Boundary::Word));
+        trie_keymap.insert_str("b", Action::back_to(Boundary::Word));
+        trie_keymap.insert_str("e", Action::forward_to(Boundary::WordEnd));
 
-        trie_keymap.insert_str("W", Action::ForwardTo(Boundary::BigWord));
-        trie_keymap.insert_str("B", Action::BackTo(Boundary::BigWord));
-        trie_keymap.insert_str("E", Action::ForwardTo(Boundary::BigWordEnd));
+        trie_keymap.insert_str("W", Action::forward_to(Boundary::BigWord));
+        trie_keymap.insert_str("B", Action::back_to(Boundary::BigWord));
+        trie_keymap.insert_str("E", Action::forward_to(Boundary::BigWordEnd));
 
-        trie_keymap.insert_str("$", Action::MoveToLineEnd);
-        trie_keymap.insert_str("0", Action::MoveToLineStart);
-        trie_keymap.insert_str("^", Action::MoveToLineContentStart);
+        trie_keymap.insert_str("$", Action::new(ActionKind::MoveToLineEnd));
+        trie_keymap.insert_str("0", Action::new(ActionKind::MoveToLineStart));
+        trie_keymap.insert_str("^", Action::new(ActionKind::MoveToLineContentStart));
 
-        trie_keymap.insert_str("gg", Action::MoveToFirstLine);
-        trie_keymap.insert_str("G", Action::MoveToLastLine);
-        trie_keymap.insert_str("H", Action::MoveToScreenTop);
-        trie_keymap.insert_str("M", Action::MoveToScreenMiddle);
-        trie_keymap.insert_str("L", Action::MoveToScreenBottom);
-        trie_keymap.insert_str("{", Action::MoveToPreviousParagraph);
-        trie_keymap.insert_str("}", Action::MoveToNextParagraph);
-        trie_keymap.insert_str("J", Action::JoinWithSpace);
-        trie_keymap.insert_str("gJ", Action::JoinWithoutSpace);
-        trie_keymap.insert_str("i", Action::SwitchToInsert);
-        trie_keymap.insert_str("<C-s>", Action::SaveBuffer(None));
-        trie_keymap.insert_str("a", Action::AppendAfterCursor);
-        trie_keymap.insert_str("A", Action::AppendToLineEnd);
-        trie_keymap.insert_str("I", Action::InsertAtLineStart);
-        trie_keymap.insert_str("o", Action::OpenLineBelow);
-        trie_keymap.insert_str("O", Action::OpenLineAbove);
-        trie_keymap.insert_str("[b", Action::PreviousTab);
-        trie_keymap.insert_str("]b", Action::NextTab);
-        trie_keymap.insert_str("x", Action::DeleteForward);
-        trie_keymap.insert_str("X", Action::DeleteBackward);
-        trie_keymap.insert_str("dd", Action::DeleteLine);
+        trie_keymap.insert_str("gg", Action::new(ActionKind::MoveToFirstLine));
+        trie_keymap.insert_str("G", Action::new(ActionKind::MoveToLastLine));
+        trie_keymap.insert_str("H", Action::new(ActionKind::MoveToScreenTop));
+        trie_keymap.insert_str("M", Action::new(ActionKind::MoveToScreenMiddle));
+        trie_keymap.insert_str("L", Action::new(ActionKind::MoveToScreenBottom));
+        trie_keymap.insert_str("{", Action::new(ActionKind::MoveToPreviousParagraph));
+        trie_keymap.insert_str("}", Action::new(ActionKind::MoveToNextParagraph));
+        trie_keymap.insert_str("J", Action::new(ActionKind::JoinWithSpace));
+        trie_keymap.insert_str("gJ", Action::new(ActionKind::JoinWithoutSpace));
+        trie_keymap.insert_str("i", Action::mode_transition(ModeKind::Insert));
+        trie_keymap.insert_str("<C-s>", Action::save_buffer(None));
+        trie_keymap.insert_str("a", Action::new(ActionKind::AppendAfterCursor));
+        trie_keymap.insert_str("A", Action::new(ActionKind::AppendToLineEnd));
+        trie_keymap.insert_str("I", Action::new(ActionKind::InsertAtLineStart));
+        trie_keymap.insert_str("o", Action::new(ActionKind::OpenLineBelow));
+        trie_keymap.insert_str("O", Action::new(ActionKind::OpenLineAbove));
+        trie_keymap.insert_str("[b", Action::new(ActionKind::PreviousTab));
+        trie_keymap.insert_str("]b", Action::new(ActionKind::NextTab));
+        trie_keymap.insert_str("x", Action::new(ActionKind::DeleteForward));
+        trie_keymap.insert_str("X", Action::new(ActionKind::DeleteBackward));
+        trie_keymap.insert_str("dd", Action::new(ActionKind::DeleteLine));
         trie_keymap.insert_str(
             "diw",
-            Action::Operation(
+            Action::operation(
                 Operator::Delete,
                 OperatorTarget::TextObject(TextObject::InnerWord),
             ),
         );
         trie_keymap.insert_str(
             "daw",
-            Action::Operation(
+            Action::operation(
                 Operator::Delete,
                 OperatorTarget::TextObject(TextObject::AroundWord),
             ),
         );
         trie_keymap.insert_str(
             "diW",
-            Action::Operation(
+            Action::operation(
                 Operator::Delete,
                 OperatorTarget::TextObject(TextObject::InnerBigWord),
             ),
         );
         trie_keymap.insert_str(
             "daW",
-            Action::Operation(
+            Action::operation(
                 Operator::Delete,
                 OperatorTarget::TextObject(TextObject::AroundBigWord),
             ),
         );
         trie_keymap.insert_str(
             "ciW",
-            Action::Operation(
+            Action::operation(
                 Operator::Change,
                 OperatorTarget::TextObject(TextObject::InnerBigWord),
             ),
         );
         trie_keymap.insert_str(
             "caW",
-            Action::Operation(
+            Action::operation(
                 Operator::Change,
                 OperatorTarget::TextObject(TextObject::AroundBigWord),
             ),
@@ -112,28 +113,28 @@ impl NormalMode {
         ] {
             trie_keymap.insert_str(
                 &format!("di{key}"),
-                Action::Operation(
+                Action::operation(
                     Operator::Delete,
                     OperatorTarget::TextObject(TextObject::InnerQuote(kind)),
                 ),
             );
             trie_keymap.insert_str(
                 &format!("da{key}"),
-                Action::Operation(
+                Action::operation(
                     Operator::Delete,
                     OperatorTarget::TextObject(TextObject::AroundQuote(kind)),
                 ),
             );
             trie_keymap.insert_str(
                 &format!("ci{key}"),
-                Action::Operation(
+                Action::operation(
                     Operator::Change,
                     OperatorTarget::TextObject(TextObject::InnerQuote(kind)),
                 ),
             );
             trie_keymap.insert_str(
                 &format!("ca{key}"),
-                Action::Operation(
+                Action::operation(
                     Operator::Change,
                     OperatorTarget::TextObject(TextObject::AroundQuote(kind)),
                 ),
@@ -155,56 +156,56 @@ impl NormalMode {
             };
             trie_keymap.insert_str(
                 &format!("di{open_key}"),
-                Action::Operation(
+                Action::operation(
                     Operator::Delete,
                     OperatorTarget::TextObject(TextObject::InnerBracket(kind)),
                 ),
             );
             trie_keymap.insert_str(
                 &format!("di{close_key}"),
-                Action::Operation(
+                Action::operation(
                     Operator::Delete,
                     OperatorTarget::TextObject(TextObject::InnerBracket(kind)),
                 ),
             );
             trie_keymap.insert_str(
                 &format!("da{open_key}"),
-                Action::Operation(
+                Action::operation(
                     Operator::Delete,
                     OperatorTarget::TextObject(TextObject::AroundBracket(kind)),
                 ),
             );
             trie_keymap.insert_str(
                 &format!("da{close_key}"),
-                Action::Operation(
+                Action::operation(
                     Operator::Delete,
                     OperatorTarget::TextObject(TextObject::AroundBracket(kind)),
                 ),
             );
             trie_keymap.insert_str(
                 &format!("ci{open_key}"),
-                Action::Operation(
+                Action::operation(
                     Operator::Change,
                     OperatorTarget::TextObject(TextObject::InnerBracket(kind)),
                 ),
             );
             trie_keymap.insert_str(
                 &format!("ci{close_key}"),
-                Action::Operation(
+                Action::operation(
                     Operator::Change,
                     OperatorTarget::TextObject(TextObject::InnerBracket(kind)),
                 ),
             );
             trie_keymap.insert_str(
                 &format!("ca{open_key}"),
-                Action::Operation(
+                Action::operation(
                     Operator::Change,
                     OperatorTarget::TextObject(TextObject::AroundBracket(kind)),
                 ),
             );
             trie_keymap.insert_str(
                 &format!("ca{close_key}"),
-                Action::Operation(
+                Action::operation(
                     Operator::Change,
                     OperatorTarget::TextObject(TextObject::AroundBracket(kind)),
                 ),
@@ -212,185 +213,185 @@ impl NormalMode {
         }
         trie_keymap.insert_str(
             "dw",
-            Action::Operation(
+            Action::operation(
                 Operator::Delete,
                 OperatorTarget::BoundaryMotion(BoundaryMotion::WordForward),
             ),
         );
         trie_keymap.insert_str(
             "de",
-            Action::Operation(
+            Action::operation(
                 Operator::Delete,
                 OperatorTarget::BoundaryMotion(BoundaryMotion::WordEnd),
             ),
         );
         trie_keymap.insert_str(
             "db",
-            Action::Operation(
+            Action::operation(
                 Operator::Delete,
                 OperatorTarget::BoundaryMotion(BoundaryMotion::WordBackward),
             ),
         );
         trie_keymap.insert_str(
             "d$",
-            Action::Operation(
+            Action::operation(
                 Operator::Delete,
                 OperatorTarget::BoundaryMotion(BoundaryMotion::LineEnd),
             ),
         );
         trie_keymap.insert_str(
             "d0",
-            Action::Operation(
+            Action::operation(
                 Operator::Delete,
                 OperatorTarget::BoundaryMotion(BoundaryMotion::LineStart),
             ),
         );
         trie_keymap.insert_str(
             "d^",
-            Action::Operation(
+            Action::operation(
                 Operator::Delete,
                 OperatorTarget::BoundaryMotion(BoundaryMotion::LineContentStart),
             ),
         );
         trie_keymap.insert_str(
             "dW",
-            Action::Operation(
+            Action::operation(
                 Operator::Delete,
                 OperatorTarget::BoundaryMotion(BoundaryMotion::BigWordForward),
             ),
         );
         trie_keymap.insert_str(
             "dE",
-            Action::Operation(
+            Action::operation(
                 Operator::Delete,
                 OperatorTarget::BoundaryMotion(BoundaryMotion::BigWordEnd),
             ),
         );
         trie_keymap.insert_str(
             "dB",
-            Action::Operation(
+            Action::operation(
                 Operator::Delete,
                 OperatorTarget::BoundaryMotion(BoundaryMotion::BigWordBackward),
             ),
         );
         trie_keymap.insert_str(
             "dgg",
-            Action::Operation(
+            Action::operation(
                 Operator::Delete,
                 OperatorTarget::LinewiseMotion(LinewiseMotion::FirstLine),
             ),
         );
         trie_keymap.insert_str(
             "dG",
-            Action::Operation(
+            Action::operation(
                 Operator::Delete,
                 OperatorTarget::LinewiseMotion(LinewiseMotion::LastLine),
             ),
         );
         trie_keymap.insert_str(
             "cw",
-            Action::Operation(
+            Action::operation(
                 Operator::Change,
                 OperatorTarget::BoundaryMotion(BoundaryMotion::WordForward),
             ),
         );
         trie_keymap.insert_str(
             "ce",
-            Action::Operation(
+            Action::operation(
                 Operator::Change,
                 OperatorTarget::BoundaryMotion(BoundaryMotion::WordEnd),
             ),
         );
         trie_keymap.insert_str(
             "cb",
-            Action::Operation(
+            Action::operation(
                 Operator::Change,
                 OperatorTarget::BoundaryMotion(BoundaryMotion::WordBackward),
             ),
         );
         trie_keymap.insert_str(
             "cW",
-            Action::Operation(
+            Action::operation(
                 Operator::Change,
                 OperatorTarget::BoundaryMotion(BoundaryMotion::BigWordForward),
             ),
         );
         trie_keymap.insert_str(
             "cE",
-            Action::Operation(
+            Action::operation(
                 Operator::Change,
                 OperatorTarget::BoundaryMotion(BoundaryMotion::BigWordEnd),
             ),
         );
         trie_keymap.insert_str(
             "cB",
-            Action::Operation(
+            Action::operation(
                 Operator::Change,
                 OperatorTarget::BoundaryMotion(BoundaryMotion::BigWordBackward),
             ),
         );
         trie_keymap.insert_str(
             "ciw",
-            Action::Operation(
+            Action::operation(
                 Operator::Change,
                 OperatorTarget::TextObject(TextObject::InnerWord),
             ),
         );
         trie_keymap.insert_str(
             "caw",
-            Action::Operation(
+            Action::operation(
                 Operator::Change,
                 OperatorTarget::TextObject(TextObject::AroundWord),
             ),
         );
         trie_keymap.insert_str(
             "c$",
-            Action::Operation(
+            Action::operation(
                 Operator::Change,
                 OperatorTarget::BoundaryMotion(BoundaryMotion::LineEnd),
             ),
         );
         trie_keymap.insert_str(
             "c0",
-            Action::Operation(
+            Action::operation(
                 Operator::Change,
                 OperatorTarget::BoundaryMotion(BoundaryMotion::LineStart),
             ),
         );
         trie_keymap.insert_str(
             "c^",
-            Action::Operation(
+            Action::operation(
                 Operator::Change,
                 OperatorTarget::BoundaryMotion(BoundaryMotion::LineContentStart),
             ),
         );
         trie_keymap.insert_str(
             "cgg",
-            Action::Operation(
+            Action::operation(
                 Operator::Change,
                 OperatorTarget::LinewiseMotion(LinewiseMotion::FirstLine),
             ),
         );
         trie_keymap.insert_str(
             "cG",
-            Action::Operation(
+            Action::operation(
                 Operator::Change,
                 OperatorTarget::LinewiseMotion(LinewiseMotion::LastLine),
             ),
         );
-        trie_keymap.insert_str("cc", Action::ChangeLine);
-        trie_keymap.insert_str("C", Action::ChangeToLineEnd);
-        trie_keymap.insert_str("%", Action::MoveToMatchingBracket);
-        trie_keymap.insert_str(";", Action::RepeatLastFind);
-        trie_keymap.insert_str(",", Action::RepeatLastFindReverse);
-        trie_keymap.insert_str("<C-q>", Action::Quit);
-        trie_keymap.insert_str("u", Action::Undo);
-        trie_keymap.insert_str("U", Action::Redo);
-        trie_keymap.insert_str(".", Action::RepeatLastChange);
-        trie_keymap.insert_str("<Left>", Action::MoveLeft);
-        trie_keymap.insert_str("<Down>", Action::MoveDown);
-        trie_keymap.insert_str("<Up>", Action::MoveUp);
-        trie_keymap.insert_str("<Right>", Action::MoveRight);
+        trie_keymap.insert_str("cc", Action::new(ActionKind::ChangeLine));
+        trie_keymap.insert_str("C", Action::new(ActionKind::ChangeToLineEnd));
+        trie_keymap.insert_str("%", Action::new(ActionKind::MoveToMatchingBracket));
+        trie_keymap.insert_str(";", Action::new(ActionKind::RepeatLastFind));
+        trie_keymap.insert_str(",", Action::new(ActionKind::RepeatLastFindReverse));
+        trie_keymap.insert_str("<C-q>", Action::new(ActionKind::Quit));
+        trie_keymap.insert_str("u", Action::new(ActionKind::Undo));
+        trie_keymap.insert_str("U", Action::new(ActionKind::Redo));
+        trie_keymap.insert_str(".", Action::new(ActionKind::RepeatLastChange));
+        trie_keymap.insert_str("<Left>", Action::new(ActionKind::MoveLeft));
+        trie_keymap.insert_str("<Down>", Action::new(ActionKind::MoveDown));
+        trie_keymap.insert_str("<Up>", Action::new(ActionKind::MoveUp));
+        trie_keymap.insert_str("<Right>", Action::new(ActionKind::MoveRight));
 
         let mut keymap = ChainedKeymap::new();
         keymap.add(Box::new(trie_keymap));
@@ -446,9 +447,9 @@ impl Mode for NormalMode {
                 if total_count > 1
                     && let Some(counted_action) = action.clone().with_count(total_count)
                 {
-                    return HandleKeyResult::Complete(counted_action);
+                    return HandleKeyResult::Complete(counted_action.with_from_mode(ModeKind::Normal));
                 }
-                return HandleKeyResult::Complete(action);
+                return HandleKeyResult::Complete(action.with_from_mode(ModeKind::Normal));
             }
 
             if self.keymap.is_prefix(&action_keys) {
@@ -470,9 +471,9 @@ impl Mode for NormalMode {
             if count > 1
                 && let Some(counted_action) = action.clone().with_count(count)
             {
-                return HandleKeyResult::Complete(counted_action);
+                return HandleKeyResult::Complete(counted_action.with_from_mode(ModeKind::Normal));
             }
-            return HandleKeyResult::Complete(action);
+            return HandleKeyResult::Complete(action.with_from_mode(ModeKind::Normal));
         }
 
         if self.keymap.is_prefix(&action_keys) {

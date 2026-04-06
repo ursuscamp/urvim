@@ -6,12 +6,13 @@
 mod action;
 mod insert;
 mod keymap;
+pub mod pairs;
 mod mode;
 mod normal;
 
 pub use action::{
-    Action, BoundaryMotion, BracketKind, HandleKeyResult, LinewiseMotion, Operator, OperatorTarget,
-    QuoteKind, RepeatReplay, TextObject,
+    Action, ActionKind, BoundaryMotion, BracketKind, HandleKeyResult, LinewiseMotion, Operator,
+    OperatorTarget, QuoteKind, RepeatReplay, TextObject,
 };
 pub use insert::InsertMode;
 pub use keymap::{CountParser, KeyStringParseError, Keymap, TrieKeymap, validate_key_string};
