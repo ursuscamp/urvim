@@ -1,7 +1,7 @@
+use smol_str::SmolStr;
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::{Arc, OnceLock, RwLock};
-use smol_str::SmolStr;
 
 use super::builtin::builtin_syntax_sources;
 use super::definition::*;
@@ -332,11 +332,15 @@ mod tests {
         assert!(!entries.is_empty());
         assert!(entries.values().all(|entry| entry.compiled.is_none()));
         assert_eq!(
-            registry.resolve_for_input(Some(Path::new("src/main.rs")), None).as_deref(),
+            registry
+                .resolve_for_input(Some(Path::new("src/main.rs")), None)
+                .as_deref(),
             Some("rust")
         );
         assert_eq!(
-            registry.resolve_for_input(Some(Path::new("README.md")), None).as_deref(),
+            registry
+                .resolve_for_input(Some(Path::new("README.md")), None)
+                .as_deref(),
             Some("markdown")
         );
         assert_eq!(
@@ -345,6 +349,16 @@ mod tests {
         );
         assert_eq!(registry.resolve_label("js").as_deref(), Some("javascript"));
         assert_eq!(registry.display_name("rust").as_deref(), Some("Rust"));
+        assert_eq!(
+            entries
+                .get("rust")
+                .expect("rust syntax should exist")
+                .raw
+                .metadata
+                .comment_prefix
+                .as_deref(),
+            Some("//")
+        );
     }
 
     #[test]

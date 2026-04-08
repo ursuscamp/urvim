@@ -600,12 +600,19 @@ fn tokenize_nested_body(nested: &mut NestedState, body: &str, offset: usize) -> 
     }
 }
 
-fn tokenize_injection_body(injection_state: &mut RuleListInjectionState, body: &str, offset: usize) -> Vec<SyntaxSpan> {
+fn tokenize_injection_body(
+    injection_state: &mut RuleListInjectionState,
+    body: &str,
+    offset: usize,
+) -> Vec<SyntaxSpan> {
     if let Some(nested) = injection_state.nested.as_mut() {
         return tokenize_nested_body(nested, body, offset);
     }
 
-    if matches!(injection_state.fallback, InjectedSyntaxFallback::ParentStyle) {
+    if matches!(
+        injection_state.fallback,
+        InjectedSyntaxFallback::ParentStyle
+    ) {
         let Some(style) = injection_state.parent_style.clone() else {
             return Vec::new();
         };
@@ -716,6 +723,7 @@ mod tests {
                 name: SmolStr::new("example"),
                 display_name: SmolStr::new("Example"),
                 alias: Vec::new(),
+                comment_prefix: None,
                 filename: Vec::new(),
                 shebang: Vec::new(),
             },
@@ -760,7 +768,11 @@ mod tests {
 
         let (opener_spans, state) =
             tokenize_rule_list_line(&definition, "```example", SyntaxState::default());
-        assert!(opener_spans.iter().any(|span| span.style == tag("markup.code")));
+        assert!(
+            opener_spans
+                .iter()
+                .any(|span| span.style == tag("markup.code"))
+        );
 
         let (body_spans, state) = tokenize_rule_list_line(&definition, "body text", state);
         assert_eq!(body_spans.len(), 1);

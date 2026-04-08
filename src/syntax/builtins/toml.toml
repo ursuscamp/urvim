@@ -4,6 +4,7 @@ display_name = "TOML"
 alias = ["tml"]
 filename = ["\\.toml$"]
 shebang = []
+comment_prefix = "#"
 
 [[rules]]
 kind = "regex"

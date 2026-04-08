@@ -4,6 +4,7 @@ display_name = "Scala"
 alias = ["sc"]
 filename = ["\\.(scala|sc)$"]
 shebang = ["^#!.*\\bscala(?:\\s|$)"]
+comment_prefix = "//"
 
 [[rules]]
 kind = "regex"

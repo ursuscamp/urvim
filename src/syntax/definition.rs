@@ -128,6 +128,8 @@ pub struct SyntaxMetadata {
     pub display_name: SmolStr,
     /// Alternate labels that resolve to the same syntax.
     pub alias: Vec<SmolStr>,
+    /// The canonical line comment prefix used by comment toggle actions.
+    pub comment_prefix: Option<SmolStr>,
     /// Compiled filename regexes.
     pub filename: Vec<Regex>,
     /// Compiled shebang regexes.
@@ -149,6 +151,8 @@ pub(super) struct RawSyntaxMetadata {
     pub display_name: String,
     #[serde(default)]
     pub alias: Vec<String>,
+    #[serde(default)]
+    pub comment_prefix: Option<String>,
     #[serde(default)]
     pub filename: Vec<String>,
     #[serde(default)]

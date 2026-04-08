@@ -59,6 +59,7 @@ impl NormalMode {
         trie_keymap.insert_str("I", Action::new(ActionKind::InsertAtLineStart));
         trie_keymap.insert_str("o", Action::new(ActionKind::OpenLineBelow));
         trie_keymap.insert_str("O", Action::new(ActionKind::OpenLineAbove));
+        trie_keymap.insert_str("gcc", Action::toggle_line_comment());
         trie_keymap.insert_str("[b", Action::new(ActionKind::PreviousTab));
         trie_keymap.insert_str("]b", Action::new(ActionKind::NextTab));
         trie_keymap.insert_str("x", Action::new(ActionKind::DeleteForward));
@@ -447,7 +448,9 @@ impl Mode for NormalMode {
                 if total_count > 1
                     && let Some(counted_action) = action.clone().with_count(total_count)
                 {
-                    return HandleKeyResult::Complete(counted_action.with_from_mode(ModeKind::Normal));
+                    return HandleKeyResult::Complete(
+                        counted_action.with_from_mode(ModeKind::Normal),
+                    );
                 }
                 return HandleKeyResult::Complete(action.with_from_mode(ModeKind::Normal));
             }

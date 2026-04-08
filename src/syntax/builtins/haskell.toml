@@ -4,6 +4,7 @@ display_name = "Haskell"
 alias = ["hs"]
 filename = ["\\.hs$"]
 shebang = ["^#!.*\\b(?:ghci|runghc)(?:\\s|$)"]
+comment_prefix = "--"
 
 [[rules]]
 kind = "regex"

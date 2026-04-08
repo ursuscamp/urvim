@@ -4,6 +4,7 @@ display_name = "Bash"
 alias = ["rbash"]
 filename = ["\\.bash$"]
 shebang = ["^#!.*\\bbash(?:\\s|$)", "^#!.*\\brbash(?:\\s|$)"]
+comment_prefix = "#"
 
 [[rules]]
 kind = "regex"

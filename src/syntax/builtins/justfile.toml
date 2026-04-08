@@ -4,6 +4,7 @@ display_name = "Justfile"
 alias = ["just"]
 filename = ["^justfile$"]
 shebang = []
+comment_prefix = "#"
 
 [[rules]]
 kind = "regex"

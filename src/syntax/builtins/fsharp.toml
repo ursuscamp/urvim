@@ -4,6 +4,7 @@ display_name = "F#"
 alias = ["fs"]
 filename = ["\\.(fs|fsi|fsx)$"]
 shebang = ["^#!.*\\b(?:fsharpi|fsi)(?:\\s|$)"]
+comment_prefix = "//"
 
 [[rules]]
 kind = "regex"

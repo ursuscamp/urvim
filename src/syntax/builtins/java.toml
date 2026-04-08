@@ -4,6 +4,7 @@ display_name = "Java"
 alias = ["jvm"]
 filename = ["\\.java$"]
 shebang = []
+comment_prefix = "//"
 
 [[rules]]
 kind = "regex"

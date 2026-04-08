@@ -4,6 +4,7 @@ display_name = "PowerShell"
 alias = ["pwsh"]
 filename = ["\\.(ps1|psm1|psd1)$"]
 shebang = ["^#!.*\\b(?:pwsh|powershell)(?:\\s|$)"]
+comment_prefix = "#"
 
 [[rules]]
 kind = "regex"

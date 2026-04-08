@@ -4,6 +4,7 @@ display_name = "R"
 alias = ["rscript"]
 filename = ["\\.r$"]
 shebang = ["^#!.*\\brscript(?:\\s|$)"]
+comment_prefix = "#"
 
 [[rules]]
 kind = "regex"

@@ -4,6 +4,7 @@ display_name = "Julia"
 alias = ["jl"]
 filename = ["\\.jl$"]
 shebang = ["^#!.*\\bjulia(?:\\s|$)"]
+comment_prefix = "#"
 
 [[rules]]
 kind = "regex"

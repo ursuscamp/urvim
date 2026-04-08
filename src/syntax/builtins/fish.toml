@@ -4,6 +4,7 @@ display_name = "Fish"
 alias = ["fish-shell"]
 filename = ["\\.fish$"]
 shebang = ["^#!.*\\bfish(?:\\s|$)"]
+comment_prefix = "#"
 
 [[rules]]
 kind = "regex"

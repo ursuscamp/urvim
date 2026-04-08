@@ -4,6 +4,7 @@ display_name = "Go"
 alias = ["golang"]
 filename = ["\\.go$"]
 shebang = ["^#!.*\\bgo(?:\\s|$)"]
+comment_prefix = "//"
 
 [[rules]]
 kind = "regex"

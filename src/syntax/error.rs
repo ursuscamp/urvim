@@ -36,6 +36,11 @@ pub enum SyntaxLoadError {
     },
     /// A syntax region referenced an invalid context marker.
     InvalidContextMarker { syntax: String, marker: String },
+    /// A syntax declared an invalid comment prefix.
+    InvalidCommentPrefix {
+        syntax: String,
+        comment_prefix: String,
+    },
 }
 
 impl fmt::Display for SyntaxLoadError {
@@ -96,6 +101,15 @@ impl fmt::Display for SyntaxLoadError {
             }
             Self::InvalidContextMarker { syntax, marker } => {
                 write!(f, "syntax {syntax} has invalid context marker {marker}")
+            }
+            Self::InvalidCommentPrefix {
+                syntax,
+                comment_prefix,
+            } => {
+                write!(
+                    f,
+                    "syntax {syntax} has invalid comment prefix {comment_prefix:?}"
+                )
             }
         }
     }

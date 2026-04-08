@@ -1247,7 +1247,8 @@ fn test_delete_backward_removes_supported_pair_in_insert_mode() {
     let _config_guard = globals::set_test_config(pairing_test_config(true));
 
     window.buffer_view.set_cursor(Cursor::new(0, 1));
-    let result = window.process_action(&Action::new(ActionKind::DeleteBackward).with_from_mode(ModeKind::Insert));
+    let result = window
+        .process_action(&Action::new(ActionKind::DeleteBackward).with_from_mode(ModeKind::Insert));
 
     assert_eq!(result, ActionResult::Handled);
     assert_eq!(buffer_text(window.buffer_view()), "");
@@ -1261,13 +1262,15 @@ fn test_pairing_disabled_keeps_plain_insert_and_delete_behavior() {
     let _config_guard = globals::set_test_config(pairing_test_config(false));
 
     window.buffer_view.set_cursor(Cursor::new(0, 1));
-    let insert_result = window.process_action(&Action::insert_char(')').with_from_mode(ModeKind::Insert));
+    let insert_result =
+        window.process_action(&Action::insert_char(')').with_from_mode(ModeKind::Insert));
     assert_eq!(insert_result, ActionResult::Handled);
     assert_eq!(buffer_text(window.buffer_view()), "())");
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 2));
 
     window.buffer_view.set_cursor(Cursor::new(0, 1));
-    let delete_result = window.process_action(&Action::new(ActionKind::DeleteBackward).with_from_mode(ModeKind::Insert));
+    let delete_result = window
+        .process_action(&Action::new(ActionKind::DeleteBackward).with_from_mode(ModeKind::Insert));
 
     assert_eq!(delete_result, ActionResult::Handled);
     assert_eq!(buffer_text(window.buffer_view()), "))");
@@ -1320,7 +1323,8 @@ fn test_pair_delete_undo_and_redo_restore_exact_states() {
     let _config_guard = globals::set_test_config(pairing_test_config(true));
 
     window.buffer_view.set_cursor(Cursor::new(0, 1));
-    let result = window.process_action(&Action::new(ActionKind::DeleteBackward).with_from_mode(ModeKind::Insert));
+    let result = window
+        .process_action(&Action::new(ActionKind::DeleteBackward).with_from_mode(ModeKind::Insert));
     assert_eq!(result, ActionResult::Handled);
     let cursor = window.buffer_view.cursor();
     window
@@ -1695,7 +1699,10 @@ fn test_count_screen_top_preserves_visual_column() {
     window.size = Size::new(2, 10);
     window.buffer_view.set_scroll_offset(Position::new(1, 0));
     window.buffer_view.set_cursor(Cursor::new(0, 2));
-    window.process_action(&Action::count(1, Box::new(Action::new(ActionKind::MoveToScreenTop))));
+    window.process_action(&Action::count(
+        1,
+        Box::new(Action::new(ActionKind::MoveToScreenTop)),
+    ));
 
     assert_eq!(window.buffer_view.cursor(), Cursor::new(1, 1));
 }
@@ -1709,4 +1716,97 @@ fn test_next_paragraph_clamps_visual_column_on_blank_line() {
     window.process_action(&Action::new(ActionKind::MoveToNextParagraph));
 
     assert_eq!(window.buffer_view.cursor(), Cursor::new(1, 0));
+}
+
+#[test]
+fn test_toggle_line_comment_uses_active_syntax_prefix() {
+    let path = AbsolutePath::from_path(temp_path_with_ext("toggle-comment-window", "rs").as_path())
+        .unwrap();
+    let buffer = Buffer::from_str_with_path("fn main() {}", path);
+    let mut window = Window::new(buffer);
+
+    let result = window.process_action(&Action::toggle_line_comment());
+
+    assert_eq!(result, ActionResult::Handled);
+    assert_eq!(
+        window
+            .buffer_view()
+            .with_buffer(|buffer| buffer.line_at(0).map(|line| line.to_string()))
+            .unwrap(),
+        Some("// fn main() {}".to_string())
+    );
+}
+
+#[test]
+fn test_toggle_line_comment_count_applies_to_multiple_lines() {
+    let path = AbsolutePath::from_path(temp_path_with_ext("toggle-comment-count", "rs").as_path())
+        .unwrap();
+    let buffer = Buffer::from_str_with_path("fn a() {}\nfn b() {}\nfn c() {}", path);
+    let mut window = Window::new(buffer);
+
+    let result = window.process_action(&Action::count(3, Box::new(Action::toggle_line_comment())));
+
+    assert_eq!(result, ActionResult::Handled);
+    assert_eq!(
+        window
+            .buffer_view()
+            .with_buffer(|buffer| buffer.as_str().to_string())
+        .unwrap(),
+        "// fn a() {}\n// fn b() {}\n// fn c() {}".to_string()
+    );
+}
+
+#[test]
+fn test_toggle_line_comment_aligns_to_minimum_column_across_range() {
+    let path = AbsolutePath::from_path(temp_path_with_ext("toggle-comment-align", "rs").as_path())
+        .unwrap();
+    let buffer = Buffer::from_str_with_path("  fn a() {}\n    fn b() {}", path);
+    let mut window = Window::new(buffer);
+
+    let result = window.process_action(&Action::count(2, Box::new(Action::toggle_line_comment())));
+
+    assert_eq!(result, ActionResult::Handled);
+    assert_eq!(
+        window
+            .buffer_view()
+            .with_buffer(|buffer| buffer.as_str().to_string())
+            .unwrap(),
+        "  // fn a() {}\n  //   fn b() {}".to_string()
+    );
+}
+
+#[test]
+fn test_toggle_line_comment_skips_blank_lines() {
+    let path = AbsolutePath::from_path(temp_path_with_ext("toggle-comment-blank", "py").as_path())
+        .unwrap();
+    let buffer = Buffer::from_str_with_path("\n    print('hello')", path);
+    let mut window = Window::new(buffer);
+
+    let result = window.process_action(&Action::count(2, Box::new(Action::toggle_line_comment())));
+
+    assert_eq!(result, ActionResult::Handled);
+    assert_eq!(
+        window
+            .buffer_view()
+            .with_buffer(|buffer| buffer.as_str().to_string())
+            .unwrap(),
+        "\n    # print('hello')".to_string()
+    );
+}
+
+#[test]
+fn test_toggle_line_comment_returns_not_handled_without_prefix() {
+    let buffer = Buffer::from_str("plain text");
+    let mut window = Window::new(buffer);
+
+    let result = window.process_action(&Action::toggle_line_comment());
+
+    assert_eq!(result, ActionResult::NotHandled);
+    assert_eq!(
+        window
+            .buffer_view()
+            .with_buffer(|buffer| buffer.as_str().to_string())
+            .unwrap(),
+        "plain text".to_string()
+    );
 }

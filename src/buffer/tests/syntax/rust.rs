@@ -124,7 +124,12 @@ fn test_rust_fixture_format_strings_follow_std_fmt_rules() {
     assert_spans_include_style(&specifier, tag("punctuation"));
     assert_spans_include_style(&specifier, tag("variable"));
     assert_spans_include_style(&specifier, tag("number"));
-    assert_spans_include_exact_style(&specifier, specifier_line.as_str(), "value", tag("variable"));
+    assert_spans_include_exact_style(
+        &specifier,
+        specifier_line.as_str(),
+        "value",
+        tag("variable"),
+    );
 
     assert_spans_include_style(&escaped, tag("function.macro"));
     assert_spans_include_style(&escaped, tag("string"));

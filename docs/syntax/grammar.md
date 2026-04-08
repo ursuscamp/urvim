@@ -16,6 +16,7 @@ display_name = "Example"
 alias = ["ex"]
 filename = ["\\.ex$"]
 shebang = ["^#!.*\\bexample(?:\\s|$)"]
+comment_prefix = "#"
 
 [[rules]]
 kind = "regex"
@@ -35,6 +36,7 @@ urvim parses builtin grammar files into a raw registry first and promotes a synt
 | `name` | Canonical syntax name | Use a short, stable, lower-case identifier such as `javascript` or `markdown`. |
 | `display_name` | Human-readable label | Use the name you want in the status bar and any UI labels. |
 | `alias` | Alternate labels | Add common shorthand labels such as `js`, `md`, or `rb`. |
+| `comment_prefix` | Canonical line comment prefix | Use the token that should be inserted and removed by line-comment toggle actions, such as `//`, `#`, or `--`. Leave it unset for syntaxes without a line comment form. |
 | `filename` | Filename-matching regexes | Use these for extensions or fixed names. The loader matches against the lower-cased basename, so write the pattern as if the filename were lower-case. |
 | `shebang` | Shebang regexes | Use these for shebangs, magic comments, and other header markers. These are checked before filename matching. |
 
@@ -134,6 +136,7 @@ context = { requires = ["in_string"], pop = ["in_string"] }
 The loader validates:
 
 - metadata names and aliases
+- comment prefixes
 - tags
 - regexes
 - context markers
@@ -148,6 +151,7 @@ display_name = "Example"
 alias = ["ex"]
 filename = ["\\.ex$"]
 shebang = []
+comment_prefix = "#"
 
 [[rules]]
 kind = "regex"

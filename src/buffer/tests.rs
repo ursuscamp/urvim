@@ -111,6 +111,15 @@ fn test_syntax_name_from_filename() {
 }
 
 #[test]
+fn test_comment_prefix_from_syntax() {
+    let path =
+        AbsolutePath::from_path(temp_path_with_ext("comment-prefix", "rs").as_path()).unwrap();
+    let buf = Buffer::from_str_with_path("fn main() {}", path);
+
+    assert_eq!(buf.comment_prefix().as_deref(), Some("//"));
+}
+
+#[test]
 fn test_syntax_name_shebang_takes_precedence_over_filename() {
     let path = AbsolutePath::from_path(std::path::Path::new("/tmp/example.rs")).unwrap();
     let buf = Buffer::from_str_with_path("#!/usr/bin/env python3\nprint('hello')", path);
@@ -142,6 +151,97 @@ fn test_modified_state_tracks_edits_and_undo() {
     assert!(buf.is_modified());
     buf.mark_saved();
     assert!(!buf.is_modified());
+}
+
+#[test]
+fn test_toggle_line_comment_comments_and_uncomments() {
+    let path =
+        AbsolutePath::from_path(temp_path_with_ext("toggle-comment", "rs").as_path()).unwrap();
+    let mut buf = Buffer::from_str_with_path("fn main() {}", path);
+    let prefix = buf
+        .comment_prefix()
+        .expect("rust should define a comment prefix");
+
+    let cursor = buf
+        .toggle_line_comment(Cursor::new(0, 0), &prefix)
+        .expect("toggle should comment the line");
+    assert_eq!(
+        buf.line_at(0).map(|line| line.as_ref()),
+        Some("// fn main() {}")
+    );
+    assert_eq!(cursor, Cursor::new(0, 3));
+
+    let cursor = buf
+        .toggle_line_comment(cursor, &prefix)
+        .expect("toggle should uncomment the line");
+    assert_eq!(
+        buf.line_at(0).map(|line| line.as_ref()),
+        Some("fn main() {}")
+    );
+    assert_eq!(cursor, Cursor::new(0, 0));
+}
+
+#[test]
+fn test_toggle_line_comment_preserves_indentation() {
+    let path = AbsolutePath::from_path(temp_path_with_ext("toggle-comment-indent", "py").as_path())
+        .unwrap();
+    let mut buf = Buffer::from_str_with_path("    print('hello')", path);
+    let prefix = buf
+        .comment_prefix()
+        .expect("python should define a comment prefix");
+
+    let cursor = buf
+        .toggle_line_comment(Cursor::new(0, 4), &prefix)
+        .expect("toggle should comment the indented line");
+    assert_eq!(
+        buf.line_at(0).map(|line| line.as_ref()),
+        Some("    # print('hello')")
+    );
+    assert_eq!(cursor, Cursor::new(0, 6));
+}
+
+#[test]
+fn test_toggle_line_comment_aligns_to_minimum_column_across_range() {
+    let path = AbsolutePath::from_path(temp_path_with_ext("toggle-comment-align", "rs").as_path())
+        .unwrap();
+    let mut buf = Buffer::from_str_with_path("  fn a() {}\n    fn b() {}", path);
+    let prefix = buf
+        .comment_prefix()
+        .expect("rust should define a comment prefix");
+
+    let cursor = buf
+        .toggle_line_comments(Cursor::new(0, 0), 2, &prefix)
+        .expect("toggle should comment the range");
+    assert_eq!(
+        buf.line_at(0).map(|line| line.as_ref()),
+        Some("  // fn a() {}")
+    );
+    assert_eq!(
+        buf.line_at(1).map(|line| line.as_ref()),
+        Some("  //   fn b() {}")
+    );
+    assert_eq!(cursor, Cursor::new(0, 0));
+}
+
+#[test]
+fn test_toggle_line_comment_skips_blank_lines() {
+    let path =
+        AbsolutePath::from_path(temp_path_with_ext("toggle-comment-blank", "py").as_path())
+            .unwrap();
+    let mut buf = Buffer::from_str_with_path("\n    print('hello')", path);
+    let prefix = buf
+        .comment_prefix()
+        .expect("python should define a comment prefix");
+
+    let cursor = buf
+        .toggle_line_comments(Cursor::new(0, 0), 2, &prefix)
+        .expect("toggle should succeed");
+    assert_eq!(buf.line_at(0).map(|line| line.as_ref()), Some(""));
+    assert_eq!(
+        buf.line_at(1).map(|line| line.as_ref()),
+        Some("    # print('hello')")
+    );
+    assert_eq!(cursor, Cursor::new(0, 0));
 }
 
 #[test]

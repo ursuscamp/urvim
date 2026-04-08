@@ -4,6 +4,7 @@ display_name = "Shell"
 alias = ["sh"]
 filename = ["\\.sh$", "^procfile$"]
 shebang = ["^#!.*\\bsh(?:\\s|$)"]
+comment_prefix = "#"
 
 [[rules]]
 kind = "regex"

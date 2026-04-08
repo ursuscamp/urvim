@@ -4,6 +4,7 @@ display_name = "Rust"
 alias = ["rs"]
 filename = ["\\.rs$"]
 shebang = []
+comment_prefix = "//"
 
 [[rules]]
 kind = "regex"

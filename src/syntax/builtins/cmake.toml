@@ -4,6 +4,7 @@ display_name = "CMake"
 alias = ["cmakelists"]
 filename = ["^(?:cmakelists\\.txt|cmake)$"]
 shebang = []
+comment_prefix = "#"
 
 [[rules]]
 kind = "regex"

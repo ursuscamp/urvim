@@ -31,6 +31,7 @@ This document describes the motions implemented in urvim and how they differ fro
 | `I` | Insert at line start (enter insert mode) |
 | `J` | Join lines with space |
 | `gJ` | Join lines without space |
+| `gcc` | Toggle line comment on the current line (or N consecutive lines with a count) |
 | `dd` | Delete line (or N lines with count) |
 | `cc` | Change line: delete line(s) and enter insert mode, leaving one blank line |
 | `C` | Change to end of line: delete from cursor to EOL and enter insert mode |
@@ -72,7 +73,7 @@ This document describes the motions implemented in urvim and how they differ fro
 
 urvim supports count prefixes for most motions. There are two types of count behaviors:
 
-1. **Repeatable motions** (h, j, k, l, w, b, e, W, B, E, dd, cc, o, O): The motion is executed `count` times from the current position.
+1. **Repeatable motions** (h, j, k, l, w, b, e, W, B, E, dd, cc, gcc, o, O): The motion is executed `count` times from the current position.
 
 2. **Line actions** (0, $, ^): The count specifies an absolute 1-indexed line number to jump to, then performs the action on that line.
 
@@ -92,6 +93,10 @@ urvim supports count prefixes for most motions. There are two types of count beh
    - `dgg` and `dG` delete linewise and treat counts as destination line numbers
    - `d5gg` deletes linewise to line 5
    - `d5G` deletes linewise to line 5
+
+7. **Line comment toggles**:
+   - `gcc` toggles the current line's comment state using the active syntax's `comment_prefix`
+   - `3gcc` toggles the current line and the next two lines
 
 > Note: urvim limits counts to values 1-9999 to prevent excessive operations.
 

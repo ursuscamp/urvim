@@ -4,6 +4,7 @@ display_name = "PHP"
 alias = ["php8"]
 filename = ["\\.php$"]
 shebang = ["^#!.*\\bphp(?:[0-9.]+)?(?:\\s|$)"]
+comment_prefix = "//"
 
 [[rules]]
 kind = "regex"

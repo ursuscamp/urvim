@@ -4,6 +4,7 @@ display_name = "TypeScript"
 alias = ["ts"]
 filename = ["\\.(ts|tsx)$"]
 shebang = []
+comment_prefix = "//"
 
 [[rules]]
 kind = "regex"

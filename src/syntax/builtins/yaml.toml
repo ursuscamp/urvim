@@ -4,6 +4,7 @@ display_name = "YAML"
 alias = ["yml"]
 filename = ["\\.(yaml|yml)$"]
 shebang = []
+comment_prefix = "#"
 
 [[rules]]
 kind = "regex"

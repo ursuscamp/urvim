@@ -54,6 +54,15 @@ The `c` operator in operator-pending mode. It removes the resolved text range an
 
 **Related Terms:** Operator, Operator-Pending Mode, Operation Action, Delete Line, Change Line
 
+### Comment Prefix
+The syntax metadata value named `comment_prefix` that identifies the token inserted and removed by the line-comment toggle action. It is the canonical line-comment marker for a filetype and is used to determine whether a line should be commented or uncommented.
+
+**Context:** Syntax metadata, line-comment toggle action, filetype-specific editing behavior
+
+**Example:** `//` for C and Java, `#` for Python and shell-family syntaxes
+
+**Related Terms:** Action, Filetype, Syntax Definition
+
 ### Repeat Record
 A stored description of the last successful dot-repeatable edit. It records the originating normal-mode action, the count used for that edit, and any committed insert-mode text so `.` can replay the completed change.
 

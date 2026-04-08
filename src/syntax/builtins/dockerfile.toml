@@ -4,6 +4,7 @@ display_name = "Dockerfile"
 alias = ["docker"]
 filename = ["^dockerfile$"]
 shebang = []
+comment_prefix = "#"
 
 [[rules]]
 kind = "regex"

@@ -32,7 +32,12 @@ fn test_typescript_fixture_uses_grammar_rules() {
     assert_spans_include_style(&function_line, tag("type"));
     assert_spans_include_style(&template_line, tag("string"));
     assert_spans_include_style(&template_line, tag("punctuation"));
-    assert_spans_include_exact_style(&template_line, template_text.as_str(), "value", tag("variable"));
+    assert_spans_include_exact_style(
+        &template_line,
+        template_text.as_str(),
+        "value",
+        tag("variable"),
+    );
     assert_spans_include_style(&jsx_line, tag("markup.tag"));
     assert_spans_include_style(&jsx_line, tag("variable.property"));
     assert_spans_include_style(&jsx_line, tag("string"));

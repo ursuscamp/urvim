@@ -247,6 +247,7 @@ impl Widget for Window {
                 }
                 ActionResult::Handled
             }
+            Some(ActionKind::ToggleLineComment) => self.handle_count_toggle_line_comment(1),
             Some(ActionKind::MoveToMatchingBracket) => {
                 use crate::motion::bracket_matcher::find_matching_bracket;
                 let cursor = self.buffer_view.cursor();

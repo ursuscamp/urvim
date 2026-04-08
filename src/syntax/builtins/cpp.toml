@@ -4,6 +4,7 @@ display_name = "C++"
 alias = ["c++"]
 filename = ["\\.(cc|cpp|cxx|hh|hpp|hxx)$"]
 shebang = []
+comment_prefix = "//"
 
 [[rules]]
 kind = "regex"

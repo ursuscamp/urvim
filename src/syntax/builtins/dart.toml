@@ -4,6 +4,7 @@ display_name = "Dart"
 alias = ["dartlang"]
 filename = ["\\.dart$"]
 shebang = ["^#!.*\\bdart(?:\\s|$)"]
+comment_prefix = "//"
 
 [[rules]]
 kind = "regex"

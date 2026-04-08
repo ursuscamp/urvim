@@ -1,7 +1,7 @@
 use super::*;
 use crate::config::Config;
-use crate::globals::set_test_config;
 use crate::editor::ActionKind;
+use crate::globals::set_test_config;
 use crate::terminal::Key;
 
 fn key(c: char) -> Key {
@@ -51,7 +51,29 @@ fn configured_test_config_with_pairs(
 #[test]
 fn test_normal_mode_move_left() {
     let mut mode = NormalMode::new();
-    assert_eq!(handle_and_unwrap(&mut mode, &key('h')), Action::new(ActionKind::MoveLeft));
+    assert_eq!(
+        handle_and_unwrap(&mut mode, &key('h')),
+        Action::new(ActionKind::MoveLeft)
+    );
+}
+
+#[test]
+fn test_normal_mode_comment_toggle_binding() {
+    let mut mode = NormalMode::new();
+    assert_eq!(handle_and_unwrap(&mut mode, &key('g')), Action::none());
+    assert!(matches!(
+        mode.handle_key(&key('c')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert_eq!(
+        handle_and_unwrap(&mut mode, &key('c')),
+        Action::toggle_line_comment()
+    );
+}
+
+#[test]
+fn test_comment_toggle_does_not_switch_to_insert_mode() {
+    assert!(!Action::toggle_line_comment().switches_to_insert_mode());
 }
 
 #[test]
@@ -113,7 +135,10 @@ fn test_configured_escape_binding_does_not_affect_normal_mode() {
     let _guard = set_test_config(configured_test_config(Some("jk")));
     let mut mode = NormalMode::new();
 
-    assert_eq!(handle_and_unwrap(&mut mode, &key('j')), Action::new(ActionKind::MoveDown));
+    assert_eq!(
+        handle_and_unwrap(&mut mode, &key('j')),
+        Action::new(ActionKind::MoveDown)
+    );
 }
 
 #[test]
@@ -186,7 +211,10 @@ fn test_insert_mode_disabled_auto_close_keeps_plain_insertion() {
     let _guard = set_test_config(configured_test_config_with_pairs(None, false));
     let mut mode = InsertMode::new();
 
-    assert_eq!(handle_and_unwrap(&mut mode, &key('(')), Action::insert_char('('));
+    assert_eq!(
+        handle_and_unwrap(&mut mode, &key('(')),
+        Action::insert_char('(')
+    );
 }
 
 #[test]
@@ -260,7 +288,10 @@ fn test_count_diw() {
         HandleKeyResult::WaitForMore
     ));
     let result = mode.handle_key(&key('w'));
-    assert!(matches!(complete_action_kind(result), ActionKind::Count(3, _)));
+    assert!(matches!(
+        complete_action_kind(result),
+        ActionKind::Count(3, _)
+    ));
 }
 
 #[test]
@@ -775,7 +806,10 @@ fn test_d_counted_word_sequence() {
         HandleKeyResult::WaitForMore
     ));
     let result = mode.handle_key(&key('w'));
-    assert!(matches!(complete_action_kind(result), ActionKind::Count(2, _)));
+    assert!(matches!(
+        complete_action_kind(result),
+        ActionKind::Count(2, _)
+    ));
 }
 
 #[test]

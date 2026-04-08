@@ -4,6 +4,7 @@ display_name = "Makefile"
 alias = ["make"]
 filename = ["^(?:makefile|gnumakefile|mk)$"]
 shebang = []
+comment_prefix = "#"
 
 [[rules]]
 kind = "regex"

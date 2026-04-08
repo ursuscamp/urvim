@@ -4,6 +4,7 @@ display_name = "Nim"
 alias = ["nimlang"]
 filename = ["\\.nim$"]
 shebang = ["^#!.*\\bnim(?:\\s|$)"]
+comment_prefix = "#"
 
 [[rules]]
 kind = "regex"

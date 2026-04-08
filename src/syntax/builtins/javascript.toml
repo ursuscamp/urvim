@@ -4,6 +4,7 @@ display_name = "JavaScript"
 alias = ["js"]
 filename = ["\\.(js|mjs|cjs|jsx)$"]
 shebang = ["^#!.*\\b(?:node(?:js)?|bun|deno)(?:\\s|$)"]
+comment_prefix = "//"
 
 [[rules]]
 kind = "regex"

@@ -4,6 +4,7 @@ display_name = "C#"
 alias = ["cs"]
 filename = ["\\.cs$"]
 shebang = []
+comment_prefix = "//"
 
 [[rules]]
 kind = "regex"

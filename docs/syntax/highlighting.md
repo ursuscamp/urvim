@@ -24,6 +24,7 @@ urvim does not parse source code into an AST. Instead, it chooses a syntax defin
 A syntax definition contains:
 
 - metadata such as `name`, `display_name`, `alias`, `filename`, and `shebang`
+- metadata such as `name`, `display_name`, `alias`, `filename`, `shebang`, and `comment_prefix`
 - one ordered `rules` list
 
 ### Rule

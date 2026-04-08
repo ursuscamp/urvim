@@ -4,6 +4,7 @@ display_name = "Kotlin"
 alias = ["kt"]
 filename = ["\\.(kt|kts)$"]
 shebang = []
+comment_prefix = "//"
 
 [[rules]]
 kind = "regex"

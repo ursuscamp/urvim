@@ -43,6 +43,22 @@ pub(super) fn resolve_metadata(raw: &RawSyntaxMetadata) -> Result<SyntaxMetadata
         aliases.push(alias);
     }
 
+    let comment_prefix = raw
+        .comment_prefix
+        .as_ref()
+        .map(|prefix| {
+            let prefix = prefix.trim();
+            if prefix.is_empty() {
+                Err(SyntaxLoadError::InvalidCommentPrefix {
+                    syntax: name.to_string(),
+                    comment_prefix: prefix.to_string(),
+                })
+            } else {
+                Ok(SmolStr::new(prefix))
+            }
+        })
+        .transpose()?;
+
     let mut filename = Vec::with_capacity(raw.filename.len());
     for pattern in &raw.filename {
         let pattern = pattern.trim();
@@ -75,6 +91,7 @@ pub(super) fn resolve_metadata(raw: &RawSyntaxMetadata) -> Result<SyntaxMetadata
         name,
         display_name,
         alias: aliases,
+        comment_prefix,
         filename,
         shebang,
     })
@@ -239,6 +256,7 @@ mod tests {
                 name: "example".to_string(),
                 display_name: "Example".to_string(),
                 alias: Vec::new(),
+                comment_prefix: Some("//".to_string()),
                 filename: Vec::new(),
                 shebang: Vec::new(),
             },
@@ -269,6 +287,7 @@ mod tests {
                 name: "example".to_string(),
                 display_name: "Example".to_string(),
                 alias: Vec::new(),
+                comment_prefix: None,
                 filename: Vec::new(),
                 shebang: Vec::new(),
             },
@@ -307,6 +326,7 @@ mod tests {
                 name: "example".to_string(),
                 display_name: "Example".to_string(),
                 alias: Vec::new(),
+                comment_prefix: None,
                 filename: Vec::new(),
                 shebang: Vec::new(),
             },
@@ -346,5 +366,44 @@ mod tests {
             .expect("expected payload match");
         assert_eq!(payload_match.name, "heredoc");
         assert_eq!(payload_match.capture, Some(1));
+    }
+
+    #[test]
+    fn metadata_compiles_comment_prefix() {
+        let raw = RawSyntaxDefinition {
+            metadata: RawSyntaxMetadata {
+                name: "example".to_string(),
+                display_name: "Example".to_string(),
+                alias: Vec::new(),
+                comment_prefix: Some(" // ".to_string()),
+                filename: Vec::new(),
+                shebang: Vec::new(),
+            },
+            rules: Vec::new(),
+        };
+
+        let definition = resolve_syntax(raw, "example.toml").expect("metadata should compile");
+        assert_eq!(definition.metadata.comment_prefix.as_deref(), Some("//"));
+    }
+
+    #[test]
+    fn metadata_rejects_empty_comment_prefix() {
+        let raw = RawSyntaxDefinition {
+            metadata: RawSyntaxMetadata {
+                name: "example".to_string(),
+                display_name: "Example".to_string(),
+                alias: Vec::new(),
+                comment_prefix: Some("   ".to_string()),
+                filename: Vec::new(),
+                shebang: Vec::new(),
+            },
+            rules: Vec::new(),
+        };
+
+        let error = resolve_syntax(raw, "example.toml").expect_err("empty prefix should fail");
+        assert!(matches!(
+            error,
+            SyntaxLoadError::InvalidCommentPrefix { .. }
+        ));
     }
 }

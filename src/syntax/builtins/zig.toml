@@ -4,6 +4,7 @@ display_name = "Zig"
 alias = ["ziglang"]
 filename = ["\\.zig$"]
 shebang = ["^#!.*\\bzig(?:\\s|$)"]
+comment_prefix = "//"
 
 [[rules]]
 kind = "regex"

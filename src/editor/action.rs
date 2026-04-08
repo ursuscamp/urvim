@@ -1,6 +1,6 @@
 use crate::buffer::{Boundary, BufferId};
-use crate::globals;
 use crate::editor::ModeKind;
+use crate::globals;
 
 /// Operators that wait for a motion or text object to define the target region.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -176,6 +176,8 @@ pub enum ActionKind {
     InsertAtLineStart,
     OpenLineBelow,
     OpenLineAbove,
+    /// Toggle the current line's comment prefix.
+    ToggleLineComment,
     PreviousTab,
     NextTab,
     MoveToMatchingBracket,
@@ -269,6 +271,11 @@ impl Action {
         Self::new(ActionKind::SaveBuffer(target))
     }
 
+    /// Creates a line-comment toggle action.
+    pub fn toggle_line_comment() -> Self {
+        Self::new(ActionKind::ToggleLineComment)
+    }
+
     /// Wraps an action in a repeat count.
     pub fn count(count: usize, inner: Box<Action>) -> Self {
         let from_mode = inner.from_mode;
@@ -342,6 +349,7 @@ impl Action {
                 | Some(ActionKind::InsertAtLineStart)
                 | Some(ActionKind::OpenLineBelow)
                 | Some(ActionKind::OpenLineAbove)
+                | Some(ActionKind::ToggleLineComment)
                 | Some(ActionKind::FindForward(_))
                 | Some(ActionKind::FindBackward(_))
                 | Some(ActionKind::TillForward(_))
@@ -388,6 +396,7 @@ impl Action {
                 | Some(ActionKind::ChangeToLineEnd)
                 | Some(ActionKind::OpenLineBelow)
                 | Some(ActionKind::OpenLineAbove)
+                | Some(ActionKind::ToggleLineComment)
                 | Some(ActionKind::PreviousTab)
                 | Some(ActionKind::NextTab)
                 | Some(ActionKind::FindForward(_))
@@ -414,6 +423,7 @@ impl Action {
                 | Some(ActionKind::MoveToLastLine)
                 | Some(ActionKind::AppendToLineEnd)
                 | Some(ActionKind::InsertAtLineStart)
+                | Some(ActionKind::ToggleLineComment)
                 | Some(ActionKind::PreviousTab)
                 | Some(ActionKind::NextTab)
         )
@@ -464,6 +474,7 @@ impl Action {
             | Some(ActionKind::InsertAtLineStart)
             | Some(ActionKind::OpenLineBelow)
             | Some(ActionKind::OpenLineAbove)
+            | Some(ActionKind::ToggleLineComment)
             | Some(ActionKind::InsertText(_)) => true,
             Some(ActionKind::InsertChar(_)) => false,
             Some(ActionKind::Undo) | Some(ActionKind::Redo) => false,
@@ -520,6 +531,7 @@ impl Action {
             | Some(ActionKind::InsertAtLineStart)
             | Some(ActionKind::OpenLineBelow)
             | Some(ActionKind::OpenLineAbove)
+            | Some(ActionKind::ToggleLineComment)
             | Some(ActionKind::Operation(Operator::Delete, _))
             | Some(ActionKind::Operation(Operator::Change, _)) => true,
             Some(ActionKind::Count(_, inner)) => inner.is_dot_repeat_source(),
@@ -555,12 +567,14 @@ impl Action {
     /// Resolves this action into the buffer edit that should be replayed for dot repeat.
     pub fn resolve_dot_repeat(&self) -> Option<RepeatReplay> {
         match self.kind_ref() {
-            Some(ActionKind::RepeatLastChange) => globals::get_last_repeat().map(|state| RepeatReplay {
-                action: state.action,
-                structural_count: state.count,
-                repeat_count: 1,
-                insert_text: state.insert_text,
-            }),
+            Some(ActionKind::RepeatLastChange) => {
+                globals::get_last_repeat().map(|state| RepeatReplay {
+                    action: state.action,
+                    structural_count: state.count,
+                    repeat_count: 1,
+                    insert_text: state.insert_text,
+                })
+            }
             Some(ActionKind::Count(count, inner))
                 if matches!(inner.kind_ref(), Some(ActionKind::RepeatLastChange)) =>
             {

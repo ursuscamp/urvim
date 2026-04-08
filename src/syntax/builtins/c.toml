@@ -4,6 +4,7 @@ display_name = "C"
 alias = ["c89"]
 filename = ["\\.(c|h)$"]
 shebang = []
+comment_prefix = "//"
 
 [[rules]]
 kind = "regex"

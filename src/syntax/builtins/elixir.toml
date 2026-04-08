@@ -4,6 +4,7 @@ display_name = "Elixir"
 alias = ["ex"]
 filename = ["\\.(ex|exs)$"]
 shebang = ["^#!.*\\b(?:elixir|iex)(?:\\s|$)"]
+comment_prefix = "#"
 
 [[rules]]
 kind = "regex"

@@ -4,6 +4,7 @@ display_name = "Swift"
 alias = ["swiftc"]
 filename = ["\\.swift$"]
 shebang = ["^#!.*\\bswift(?:\\s|$)"]
+comment_prefix = "//"
 
 [[rules]]
 kind = "regex"

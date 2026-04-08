@@ -4,6 +4,7 @@ display_name = "Perl"
 alias = ["pl"]
 filename = ["\\.(pl|pm)$"]
 shebang = ["^#!.*\\bperl(?:[0-9.]+)?(?:\\s|$)"]
+comment_prefix = "#"
 
 [[rules]]
 kind = "regex"

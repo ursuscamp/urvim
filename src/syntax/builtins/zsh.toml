@@ -4,6 +4,7 @@ display_name = "Zsh"
 alias = ["zshell"]
 filename = ["\\.zsh$"]
 shebang = ["^#!.*\\bzsh(?:\\s|$)"]
+comment_prefix = "#"
 
 [[rules]]
 kind = "regex"

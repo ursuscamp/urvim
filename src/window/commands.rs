@@ -117,6 +117,7 @@ impl Window {
             Some(ActionKind::ChangeToLineEnd) => self.handle_count_change_to_line_end(count),
             Some(ActionKind::OpenLineBelow) => self.handle_count_open_line_below(count),
             Some(ActionKind::OpenLineAbove) => self.handle_count_open_line_above(count),
+            Some(ActionKind::ToggleLineComment) => self.handle_count_toggle_line_comment(count),
             Some(ActionKind::Operation(_, _)) => self.handle_count_operation(count, inner),
             _ if inner.is_line_action() => self.handle_count_line_action(count, inner),
             _ => self.handle_count_repeatable(count, inner),
@@ -219,6 +220,39 @@ impl Window {
             .with_buffer_mut(|buffer| buffer.change_to_line_end(cursor, count))
             .flatten()
         {
+            self.buffer_view.set_cursor(new_cursor);
+        }
+        ActionResult::Handled
+    }
+
+    pub(super) fn handle_count_toggle_line_comment(&mut self, count: usize) -> ActionResult {
+        let cursor = self.buffer_view.cursor();
+        let Some(comment_prefix) = self
+            .buffer_view
+            .with_buffer(|buffer| buffer.comment_prefix())
+            .flatten()
+        else {
+            return ActionResult::NotHandled;
+        };
+
+        let line_count = self.buffer_view.line_count();
+        if cursor.line >= line_count {
+            return ActionResult::NotHandled;
+        }
+
+        let actual_count = count.min(line_count.saturating_sub(cursor.line));
+        if actual_count == 0 {
+            return ActionResult::Handled;
+        }
+
+        let new_cursor = self
+            .buffer_view
+            .with_buffer_mut(|buffer| {
+                buffer.toggle_line_comments(cursor, actual_count, &comment_prefix)
+            })
+            .flatten();
+
+        if let Some(new_cursor) = new_cursor {
             self.buffer_view.set_cursor(new_cursor);
         }
         ActionResult::Handled
