@@ -6,9 +6,9 @@
 mod action;
 mod insert;
 mod keymap;
-pub mod pairs;
 mod mode;
 mod normal;
+pub mod pairs;
 
 pub use action::{
     Action, ActionKind, BoundaryMotion, BracketKind, HandleKeyResult, LinewiseMotion, Operator,

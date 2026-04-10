@@ -54,11 +54,26 @@ impl NormalMode {
         trie_keymap.insert_str("gJ", Action::new(ActionKind::JoinWithoutSpace));
         trie_keymap.insert_str("i", Action::mode_transition(ModeKind::Insert));
         trie_keymap.insert_str("<C-s>", Action::save_buffer(None));
-        trie_keymap.insert_str("a", Action::new(ActionKind::AppendAfterCursor));
-        trie_keymap.insert_str("A", Action::new(ActionKind::AppendToLineEnd));
-        trie_keymap.insert_str("I", Action::new(ActionKind::InsertAtLineStart));
-        trie_keymap.insert_str("o", Action::new(ActionKind::OpenLineBelow));
-        trie_keymap.insert_str("O", Action::new(ActionKind::OpenLineAbove));
+        trie_keymap.insert_str(
+            "a",
+            Action::new(ActionKind::AppendAfterCursor).with_to_mode(ModeKind::Insert),
+        );
+        trie_keymap.insert_str(
+            "A",
+            Action::new(ActionKind::AppendToLineEnd).with_to_mode(ModeKind::Insert),
+        );
+        trie_keymap.insert_str(
+            "I",
+            Action::new(ActionKind::InsertAtLineStart).with_to_mode(ModeKind::Insert),
+        );
+        trie_keymap.insert_str(
+            "o",
+            Action::new(ActionKind::OpenLineBelow).with_to_mode(ModeKind::Insert),
+        );
+        trie_keymap.insert_str(
+            "O",
+            Action::new(ActionKind::OpenLineAbove).with_to_mode(ModeKind::Insert),
+        );
         trie_keymap.insert_str("gcc", Action::toggle_line_comment());
         trie_keymap.insert_str("[b", Action::new(ActionKind::PreviousTab));
         trie_keymap.insert_str("]b", Action::new(ActionKind::NextTab));
@@ -98,14 +113,16 @@ impl NormalMode {
             Action::operation(
                 Operator::Change,
                 OperatorTarget::TextObject(TextObject::InnerBigWord),
-            ),
+            )
+            .with_to_mode(ModeKind::Insert),
         );
         trie_keymap.insert_str(
             "caW",
             Action::operation(
                 Operator::Change,
                 OperatorTarget::TextObject(TextObject::AroundBigWord),
-            ),
+            )
+            .with_to_mode(ModeKind::Insert),
         );
         for (kind, key) in [
             (QuoteKind::Single, "'"),
@@ -131,14 +148,16 @@ impl NormalMode {
                 Action::operation(
                     Operator::Change,
                     OperatorTarget::TextObject(TextObject::InnerQuote(kind)),
-                ),
+                )
+                .with_to_mode(ModeKind::Insert),
             );
             trie_keymap.insert_str(
                 &format!("ca{key}"),
                 Action::operation(
                     Operator::Change,
                     OperatorTarget::TextObject(TextObject::AroundQuote(kind)),
-                ),
+                )
+                .with_to_mode(ModeKind::Insert),
             );
         }
         for (kind, open, close) in [
@@ -188,28 +207,32 @@ impl NormalMode {
                 Action::operation(
                     Operator::Change,
                     OperatorTarget::TextObject(TextObject::InnerBracket(kind)),
-                ),
+                )
+                .with_to_mode(ModeKind::Insert),
             );
             trie_keymap.insert_str(
                 &format!("ci{close_key}"),
                 Action::operation(
                     Operator::Change,
                     OperatorTarget::TextObject(TextObject::InnerBracket(kind)),
-                ),
+                )
+                .with_to_mode(ModeKind::Insert),
             );
             trie_keymap.insert_str(
                 &format!("ca{open_key}"),
                 Action::operation(
                     Operator::Change,
                     OperatorTarget::TextObject(TextObject::AroundBracket(kind)),
-                ),
+                )
+                .with_to_mode(ModeKind::Insert),
             );
             trie_keymap.insert_str(
                 &format!("ca{close_key}"),
                 Action::operation(
                     Operator::Change,
                     OperatorTarget::TextObject(TextObject::AroundBracket(kind)),
-                ),
+                )
+                .with_to_mode(ModeKind::Insert),
             );
         }
         trie_keymap.insert_str(
@@ -294,94 +317,113 @@ impl NormalMode {
             Action::operation(
                 Operator::Change,
                 OperatorTarget::BoundaryMotion(BoundaryMotion::WordForward),
-            ),
+            )
+            .with_to_mode(ModeKind::Insert),
         );
         trie_keymap.insert_str(
             "ce",
             Action::operation(
                 Operator::Change,
                 OperatorTarget::BoundaryMotion(BoundaryMotion::WordEnd),
-            ),
+            )
+            .with_to_mode(ModeKind::Insert),
         );
         trie_keymap.insert_str(
             "cb",
             Action::operation(
                 Operator::Change,
                 OperatorTarget::BoundaryMotion(BoundaryMotion::WordBackward),
-            ),
+            )
+            .with_to_mode(ModeKind::Insert),
         );
         trie_keymap.insert_str(
             "cW",
             Action::operation(
                 Operator::Change,
                 OperatorTarget::BoundaryMotion(BoundaryMotion::BigWordForward),
-            ),
+            )
+            .with_to_mode(ModeKind::Insert),
         );
         trie_keymap.insert_str(
             "cE",
             Action::operation(
                 Operator::Change,
                 OperatorTarget::BoundaryMotion(BoundaryMotion::BigWordEnd),
-            ),
+            )
+            .with_to_mode(ModeKind::Insert),
         );
         trie_keymap.insert_str(
             "cB",
             Action::operation(
                 Operator::Change,
                 OperatorTarget::BoundaryMotion(BoundaryMotion::BigWordBackward),
-            ),
+            )
+            .with_to_mode(ModeKind::Insert),
         );
         trie_keymap.insert_str(
             "ciw",
             Action::operation(
                 Operator::Change,
                 OperatorTarget::TextObject(TextObject::InnerWord),
-            ),
+            )
+            .with_to_mode(ModeKind::Insert),
         );
         trie_keymap.insert_str(
             "caw",
             Action::operation(
                 Operator::Change,
                 OperatorTarget::TextObject(TextObject::AroundWord),
-            ),
+            )
+            .with_to_mode(ModeKind::Insert),
         );
         trie_keymap.insert_str(
             "c$",
             Action::operation(
                 Operator::Change,
                 OperatorTarget::BoundaryMotion(BoundaryMotion::LineEnd),
-            ),
+            )
+            .with_to_mode(ModeKind::Insert),
         );
         trie_keymap.insert_str(
             "c0",
             Action::operation(
                 Operator::Change,
                 OperatorTarget::BoundaryMotion(BoundaryMotion::LineStart),
-            ),
+            )
+            .with_to_mode(ModeKind::Insert),
         );
         trie_keymap.insert_str(
             "c^",
             Action::operation(
                 Operator::Change,
                 OperatorTarget::BoundaryMotion(BoundaryMotion::LineContentStart),
-            ),
+            )
+            .with_to_mode(ModeKind::Insert),
         );
         trie_keymap.insert_str(
             "cgg",
             Action::operation(
                 Operator::Change,
                 OperatorTarget::LinewiseMotion(LinewiseMotion::FirstLine),
-            ),
+            )
+            .with_to_mode(ModeKind::Insert),
         );
         trie_keymap.insert_str(
             "cG",
             Action::operation(
                 Operator::Change,
                 OperatorTarget::LinewiseMotion(LinewiseMotion::LastLine),
-            ),
+            )
+            .with_to_mode(ModeKind::Insert),
         );
-        trie_keymap.insert_str("cc", Action::new(ActionKind::ChangeLine));
-        trie_keymap.insert_str("C", Action::new(ActionKind::ChangeToLineEnd));
+        trie_keymap.insert_str(
+            "cc",
+            Action::new(ActionKind::ChangeLine).with_to_mode(ModeKind::Insert),
+        );
+        trie_keymap.insert_str(
+            "C",
+            Action::new(ActionKind::ChangeToLineEnd).with_to_mode(ModeKind::Insert),
+        );
         trie_keymap.insert_str("%", Action::new(ActionKind::MoveToMatchingBracket));
         trie_keymap.insert_str(";", Action::new(ActionKind::RepeatLastFind));
         trie_keymap.insert_str(",", Action::new(ActionKind::RepeatLastFindReverse));

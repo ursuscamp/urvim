@@ -438,25 +438,9 @@ impl Action {
         }
     }
 
-    /// Returns true when this action should leave insert mode afterward.
+    /// Returns true when this action transitions to insert mode after it succeeds.
     pub fn switches_to_insert_mode(&self) -> bool {
-        if self.to_mode == Some(ModeKind::Insert) {
-            return true;
-        }
-
-        match self.kind_ref() {
-            Some(ActionKind::AppendAfterCursor)
-            | Some(ActionKind::AppendToLineEnd)
-            | Some(ActionKind::InsertAtLineStart)
-            | Some(ActionKind::ChangeLine)
-            | Some(ActionKind::ChangeToLineEnd)
-            | Some(ActionKind::OpenLineBelow)
-            | Some(ActionKind::OpenLineAbove) => true,
-            Some(ActionKind::Count(_, inner)) => inner.switches_to_insert_mode(),
-            Some(ActionKind::Operation(Operator::Change, _)) => true,
-            Some(ActionKind::Operation(Operator::Delete, _)) => false,
-            _ => false,
-        }
+        self.to_mode == Some(ModeKind::Insert)
     }
 
     pub fn is_snapshottable(&self) -> bool {

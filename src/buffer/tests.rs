@@ -225,9 +225,8 @@ fn test_toggle_line_comment_aligns_to_minimum_column_across_range() {
 
 #[test]
 fn test_toggle_line_comment_skips_blank_lines() {
-    let path =
-        AbsolutePath::from_path(temp_path_with_ext("toggle-comment-blank", "py").as_path())
-            .unwrap();
+    let path = AbsolutePath::from_path(temp_path_with_ext("toggle-comment-blank", "py").as_path())
+        .unwrap();
     let mut buf = Buffer::from_str_with_path("\n    print('hello')", path);
     let prefix = buf
         .comment_prefix()

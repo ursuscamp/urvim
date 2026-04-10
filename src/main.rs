@@ -133,7 +133,8 @@ fn main() -> io::Result<()> {
                                     // Fall back to app-level handling
                                     match dispatch_action {
                                         _ if dispatch_action.kind.is_none()
-                                            && dispatch_action.to_mode == Some(ModeKind::Normal) =>
+                                            && dispatch_action.to_mode
+                                                == Some(ModeKind::Normal) =>
                                         {
                                             let repeat_text = mode.take_repeat_text();
                                             mode = Box::new(NormalMode::new());
@@ -149,7 +150,8 @@ fn main() -> io::Result<()> {
                                             handled = true;
                                         }
                                         _ if dispatch_action.kind.is_none()
-                                            && dispatch_action.to_mode == Some(ModeKind::Insert) =>
+                                            && dispatch_action.to_mode
+                                                == Some(ModeKind::Insert) =>
                                         {
                                             mode = Box::new(InsertMode::new());
                                             terminal.set_cursor_style(mode.cursor_style())?;
@@ -158,7 +160,8 @@ fn main() -> io::Result<()> {
                                         _ if matches!(
                                             dispatch_action.kind.as_ref(),
                                             Some(ActionKind::SaveBuffer(_))
-                                        ) => {
+                                        ) =>
+                                        {
                                             let target = match dispatch_action.kind.as_ref() {
                                                 Some(ActionKind::SaveBuffer(target)) => *target,
                                                 _ => None,
@@ -292,7 +295,8 @@ fn select_active_theme(
 }
 
 fn replay_repeat_action(layout: &mut Layout, replay: &RepeatReplay) -> bool {
-    if replay.action.kind.is_none() && replay.action.to_mode == Some(ModeKind::Insert)
+    if replay.action.kind.is_none()
+        && replay.action.to_mode == Some(ModeKind::Insert)
         && replay.insert_text.as_deref().is_none_or(str::is_empty)
     {
         return false;
@@ -306,7 +310,11 @@ fn replay_repeat_action(layout: &mut Layout, replay: &RepeatReplay) -> bool {
 
     for _ in 0..replay.repeat_count {
         let handled = match replay.action {
-            _ if replay.action.kind.is_none() && replay.action.to_mode == Some(ModeKind::Insert) => true,
+            _ if replay.action.kind.is_none()
+                && replay.action.to_mode == Some(ModeKind::Insert) =>
+            {
+                true
+            }
             _ => layout.process_action(&structural_action) == ActionResult::Handled,
         };
 

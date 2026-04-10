@@ -6,7 +6,6 @@ This is a list, in no particular order, of things that need to be addressed whic
 
 - operations + text objects
 - registers
-- add support for commenting/uncommenting keys
 - add auto-indent
 - todo highlighting
 - tab handling
@@ -14,7 +13,6 @@ This is a list, in no particular order, of things that need to be addressed whic
 - page up/page down keys
 - jump list
 - support raw text insertion by paste
-- we shouldn't hardcode any actions in switches_to_insert_mode
 
 # Bugs
 

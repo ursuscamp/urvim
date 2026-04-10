@@ -77,6 +77,15 @@ fn test_comment_toggle_does_not_switch_to_insert_mode() {
 }
 
 #[test]
+fn test_normal_mode_append_after_cursor_sets_insert_mode() {
+    let mut mode = NormalMode::new();
+    assert_eq!(
+        handle_and_unwrap(&mut mode, &key('a')),
+        Action::new(ActionKind::AppendAfterCursor).with_to_mode(ModeKind::Insert)
+    );
+}
+
+#[test]
 fn test_normal_mode_dot_repeat_action() {
     let mut mode = NormalMode::new();
     assert_eq!(
@@ -842,10 +851,18 @@ fn test_change_operation_traits() {
         Operator::Change,
         OperatorTarget::BoundaryMotion(BoundaryMotion::WordForward),
     );
+    let insert_action = action.clone().with_to_mode(ModeKind::Insert);
+    let counted_insert_action = Action::count(2, Box::new(insert_action.clone()));
 
     assert!(action.is_snapshottable());
-    assert!(action.switches_to_insert_mode());
     assert!(action.is_countable());
+    assert!(!action.switches_to_insert_mode());
+    assert!(insert_action.switches_to_insert_mode());
+    assert!(counted_insert_action.switches_to_insert_mode());
+    assert!(matches!(
+        counted_insert_action.kind.as_ref(),
+        Some(ActionKind::Count(2, inner)) if inner.to_mode == Some(ModeKind::Insert)
+    ));
 }
 
 #[test]

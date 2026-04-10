@@ -1,7 +1,7 @@
 use super::{Action, ActionKind, HandleKeyResult, Mode, ModeKind, TrieKeymap};
 use crate::buffer::{Buffer, Cursor};
-use crate::editor::validate_key_string;
 use crate::editor::pairs;
+use crate::editor::validate_key_string;
 use crate::globals;
 use crate::terminal::{CursorStyle, Key, KeyCode};
 
@@ -129,7 +129,10 @@ impl InsertMode {
             return;
         }
 
-        if let Some(new_cursor) = self.repeat_capture.delete_char_before_cursor(self.repeat_cursor) {
+        if let Some(new_cursor) = self
+            .repeat_capture
+            .delete_char_before_cursor(self.repeat_cursor)
+        {
             self.repeat_cursor = new_cursor;
         }
     }
@@ -201,7 +204,9 @@ impl Mode for InsertMode {
         if key.code == KeyCode::Esc {
             self.buffer.clear();
             self.waiting = false;
-            return HandleKeyResult::Complete(Action::mode_transition(ModeKind::Normal).with_from_mode(ModeKind::Insert));
+            return HandleKeyResult::Complete(
+                Action::mode_transition(ModeKind::Normal).with_from_mode(ModeKind::Insert),
+            );
         }
 
         let key_str = key.canonical_string();

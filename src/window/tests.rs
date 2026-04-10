@@ -1066,6 +1066,7 @@ fn test_cw_changes_through_next_word_start() {
             Operator::Change,
             OperatorTarget::BoundaryMotion(BoundaryMotion::WordForward)
         )
+        .with_to_mode(ModeKind::Insert)
         .switches_to_insert_mode()
     );
 }
@@ -1751,7 +1752,7 @@ fn test_toggle_line_comment_count_applies_to_multiple_lines() {
         window
             .buffer_view()
             .with_buffer(|buffer| buffer.as_str().to_string())
-        .unwrap(),
+            .unwrap(),
         "// fn a() {}\n// fn b() {}\n// fn c() {}".to_string()
     );
 }

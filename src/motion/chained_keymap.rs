@@ -70,8 +70,8 @@ impl Keymap for ChainedKeymap {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::editor::TrieKeymap;
     use crate::editor::ActionKind;
+    use crate::editor::TrieKeymap;
     use crate::motion::char_scan_keymap::CharScanKeymap;
 
     #[test]

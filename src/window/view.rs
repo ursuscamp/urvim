@@ -66,7 +66,9 @@ impl BufferView {
             .unwrap_or_else(|| {
                 crate::syntax::builtin_syntax_registry()
                     .ok()
-                    .and_then(|registry| registry.display_name(crate::syntax::fallback_syntax_name()))
+                    .and_then(|registry| {
+                        registry.display_name(crate::syntax::fallback_syntax_name())
+                    })
                     .map(|label| label.to_string())
                     .unwrap_or_else(|| "Plain Text".to_string())
             })

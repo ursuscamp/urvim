@@ -154,13 +154,19 @@ fn test_tab_navigation_wraps_and_supports_counts() {
     assert_eq!(group.active_tab_index(), 4);
 
     assert_eq!(
-        group.process_action(&Action::count(2, Box::new(Action::new(ActionKind::NextTab)))),
+        group.process_action(&Action::count(
+            2,
+            Box::new(Action::new(ActionKind::NextTab))
+        )),
         ActionResult::Handled
     );
     assert_eq!(group.active_tab_index(), 1);
 
     assert_eq!(
-        group.process_action(&Action::count(3, Box::new(Action::new(ActionKind::PreviousTab)))),
+        group.process_action(&Action::count(
+            3,
+            Box::new(Action::new(ActionKind::PreviousTab))
+        )),
         ActionResult::Handled
     );
     assert_eq!(group.active_tab_index(), 3);
