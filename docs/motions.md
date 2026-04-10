@@ -24,6 +24,10 @@ This document describes the motions implemented in urvim and how they differ fro
 | `H` | Move to top of viewport |
 | `M` | Move to middle of viewport |
 | `L` | Move to bottom of viewport |
+| `PageUp` | Move up one page |
+| `PageDown` | Move down one page |
+| `Ctrl-U` | Move up half a page |
+| `Ctrl-D` | Move down half a page |
 | `{` | Move to blank line before the previous paragraph |
 | `}` | Move to blank line before the next paragraph |
 | `a` | Append after cursor (enter insert mode) |
@@ -329,6 +333,38 @@ Examples:
 H, M, and L behave like vertical motions (`j`/`k`) for column preservation:
 - They use the remembered column when moving (like j/k)
 - They update the remembered column after moving
+
+## Paging Motions
+
+Paging motions move the cursor relative to the viewport height and preserve the current column when possible. They are available in both normal mode and insert mode, and they do not leave insert mode.
+
+### PageUp - Move Up One Page
+
+Moves the cursor upward by one viewport height.
+
+- **Count**: No
+- **Vim difference**: urvim binds the terminal `PageUp` key directly as a paging motion
+
+### PageDown - Move Down One Page
+
+Moves the cursor downward by one viewport height.
+
+- **Count**: No
+- **Vim difference**: urvim binds the terminal `PageDown` key directly as a paging motion
+
+### Ctrl-U - Move Up Half a Page
+
+Moves the cursor upward by half of the viewport height, rounded down but never less than one line.
+
+- **Count**: No
+- **Vim difference**: Matches the conventional Vim half-page up motion
+
+### Ctrl-D - Move Down Half a Page
+
+Moves the cursor downward by half of the viewport height, rounded down but never less than one line.
+
+- **Count**: No
+- **Vim difference**: Matches the conventional Vim half-page down motion
 
 ## Join Line Motions
 

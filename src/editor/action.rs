@@ -161,6 +161,14 @@ pub enum ActionKind {
     MoveToLineContentStart,
     MoveToFirstLine,
     MoveToLastLine,
+    /// Move up by one viewport height.
+    MovePageUp,
+    /// Move down by one viewport height.
+    MovePageDown,
+    /// Move up by half of the viewport height.
+    MoveHalfPageUp,
+    /// Move down by half of the viewport height.
+    MoveHalfPageDown,
     MoveToScreenTop,
     MoveToScreenMiddle,
     MoveToScreenBottom,
@@ -367,6 +375,10 @@ impl Action {
                 | Some(ActionKind::MoveDown)
                 | Some(ActionKind::MoveToFirstLine)
                 | Some(ActionKind::MoveToLastLine)
+                | Some(ActionKind::MovePageUp)
+                | Some(ActionKind::MovePageDown)
+                | Some(ActionKind::MoveHalfPageUp)
+                | Some(ActionKind::MoveHalfPageDown)
                 | Some(ActionKind::MoveToScreenTop)
                 | Some(ActionKind::MoveToScreenMiddle)
                 | Some(ActionKind::MoveToScreenBottom)
@@ -482,6 +494,10 @@ impl Action {
             | Some(ActionKind::MoveToLineContentStart)
             | Some(ActionKind::MoveToFirstLine)
             | Some(ActionKind::MoveToLastLine)
+            | Some(ActionKind::MovePageUp)
+            | Some(ActionKind::MovePageDown)
+            | Some(ActionKind::MoveHalfPageUp)
+            | Some(ActionKind::MoveHalfPageDown)
             | Some(ActionKind::MoveToScreenTop)
             | Some(ActionKind::MoveToScreenMiddle)
             | Some(ActionKind::MoveToScreenBottom)

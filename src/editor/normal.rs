@@ -435,6 +435,10 @@ impl NormalMode {
         trie_keymap.insert_str("<Down>", Action::new(ActionKind::MoveDown));
         trie_keymap.insert_str("<Up>", Action::new(ActionKind::MoveUp));
         trie_keymap.insert_str("<Right>", Action::new(ActionKind::MoveRight));
+        trie_keymap.insert_str("<PageUp>", Action::new(ActionKind::MovePageUp));
+        trie_keymap.insert_str("<PageDown>", Action::new(ActionKind::MovePageDown));
+        trie_keymap.insert_str("<C-u>", Action::new(ActionKind::MoveHalfPageUp));
+        trie_keymap.insert_str("<C-d>", Action::new(ActionKind::MoveHalfPageDown));
 
         let mut keymap = ChainedKeymap::new();
         keymap.add(Box::new(trie_keymap));

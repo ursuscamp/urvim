@@ -15,6 +15,45 @@ impl Window {
         self.buffer_view.set_remembered_visual_col(visual_col);
     }
 
+    fn move_cursor_by_lines(&mut self, line_delta: usize, upwards: bool) {
+        let line_count = self.buffer_view.line_count();
+        if line_count == 0 || line_delta == 0 {
+            return;
+        }
+
+        let cursor = self.buffer_view.cursor();
+        let current_line = cursor.line.min(line_count - 1);
+        let target_line = if upwards {
+            current_line.saturating_sub(line_delta)
+        } else {
+            current_line.saturating_add(line_delta).min(line_count - 1)
+        };
+        let target_col = self.buffer_view.get_or_compute_target_col();
+        self.set_cursor_to_visual_col_on_line(target_line, target_col);
+    }
+
+    /// Moves the cursor up by one viewport height.
+    pub fn move_cursor_page_up(&mut self, viewport_rows: usize) {
+        self.move_cursor_by_lines(viewport_rows, true);
+    }
+
+    /// Moves the cursor down by one viewport height.
+    pub fn move_cursor_page_down(&mut self, viewport_rows: usize) {
+        self.move_cursor_by_lines(viewport_rows, false);
+    }
+
+    /// Moves the cursor up by half of the viewport height.
+    pub fn move_cursor_half_page_up(&mut self, viewport_rows: usize) {
+        let delta = (viewport_rows / 2).max(1);
+        self.move_cursor_by_lines(delta, true);
+    }
+
+    /// Moves the cursor down by half of the viewport height.
+    pub fn move_cursor_half_page_down(&mut self, viewport_rows: usize) {
+        let delta = (viewport_rows / 2).max(1);
+        self.move_cursor_by_lines(delta, false);
+    }
+
     pub fn move_cursor_left(&mut self) {
         let cursor = self.buffer_view.cursor();
         if let Some(new_cursor) = self

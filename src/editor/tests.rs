@@ -2,10 +2,14 @@ use super::*;
 use crate::config::Config;
 use crate::editor::ActionKind;
 use crate::globals::set_test_config;
-use crate::terminal::Key;
+use crate::terminal::{Key, KeyCode, Modifiers};
 
 fn key(c: char) -> Key {
     Key::new(crate::terminal::KeyCode::Char(c))
+}
+
+fn ctrl_key(c: char) -> Key {
+    Key::with_modifiers(KeyCode::Char(c), Modifiers::CTRL)
 }
 
 fn handle_and_unwrap(mode: &mut impl Mode, k: &Key) -> Action {
@@ -54,6 +58,28 @@ fn test_normal_mode_move_left() {
     assert_eq!(
         handle_and_unwrap(&mut mode, &key('h')),
         Action::new(ActionKind::MoveLeft)
+    );
+}
+
+#[test]
+fn test_normal_mode_page_keys() {
+    let mut mode = NormalMode::new();
+
+    assert_eq!(
+        handle_and_unwrap(&mut mode, &Key::new(KeyCode::PageUp)),
+        Action::new(ActionKind::MovePageUp)
+    );
+    assert_eq!(
+        handle_and_unwrap(&mut mode, &Key::new(KeyCode::PageDown)),
+        Action::new(ActionKind::MovePageDown)
+    );
+    assert_eq!(
+        handle_and_unwrap(&mut mode, &ctrl_key('u')),
+        Action::new(ActionKind::MoveHalfPageUp)
+    );
+    assert_eq!(
+        handle_and_unwrap(&mut mode, &ctrl_key('d')),
+        Action::new(ActionKind::MoveHalfPageDown)
     );
 }
 
@@ -147,6 +173,28 @@ fn test_configured_escape_binding_does_not_affect_normal_mode() {
     assert_eq!(
         handle_and_unwrap(&mut mode, &key('j')),
         Action::new(ActionKind::MoveDown)
+    );
+}
+
+#[test]
+fn test_insert_mode_page_keys() {
+    let mut mode = InsertMode::new();
+
+    assert_eq!(
+        handle_and_unwrap(&mut mode, &Key::new(KeyCode::PageUp)),
+        Action::new(ActionKind::MovePageUp)
+    );
+    assert_eq!(
+        handle_and_unwrap(&mut mode, &Key::new(KeyCode::PageDown)),
+        Action::new(ActionKind::MovePageDown)
+    );
+    assert_eq!(
+        handle_and_unwrap(&mut mode, &ctrl_key('u')),
+        Action::new(ActionKind::MoveHalfPageUp)
+    );
+    assert_eq!(
+        handle_and_unwrap(&mut mode, &ctrl_key('d')),
+        Action::new(ActionKind::MoveHalfPageDown)
     );
 }
 

@@ -856,10 +856,75 @@ fn test_action_uses_remembered_column() {
     // Vertical movements should use remembered column
     assert!(Action::new(ActionKind::MoveUp).uses_remembered_column());
     assert!(Action::new(ActionKind::MoveDown).uses_remembered_column());
+    assert!(Action::new(ActionKind::MovePageUp).uses_remembered_column());
+    assert!(Action::new(ActionKind::MovePageDown).uses_remembered_column());
+    assert!(Action::new(ActionKind::MoveHalfPageUp).uses_remembered_column());
+    assert!(Action::new(ActionKind::MoveHalfPageDown).uses_remembered_column());
 
     // Other movements should NOT
     assert!(!Action::new(ActionKind::MoveLeft).uses_remembered_column());
     assert!(!Action::new(ActionKind::MoveRight).uses_remembered_column());
+}
+
+#[test]
+fn test_action_page_motions_do_not_reset_remembered_column() {
+    assert!(!Action::new(ActionKind::MovePageUp).resets_remembered_column());
+    assert!(!Action::new(ActionKind::MovePageDown).resets_remembered_column());
+    assert!(!Action::new(ActionKind::MoveHalfPageUp).resets_remembered_column());
+    assert!(!Action::new(ActionKind::MoveHalfPageDown).resets_remembered_column());
+}
+
+#[test]
+fn test_action_page_motions_update_snapshot_cursor() {
+    assert!(Action::new(ActionKind::MovePageUp).updates_snapshot_cursor());
+    assert!(Action::new(ActionKind::MovePageDown).updates_snapshot_cursor());
+    assert!(Action::new(ActionKind::MoveHalfPageUp).updates_snapshot_cursor());
+    assert!(Action::new(ActionKind::MoveHalfPageDown).updates_snapshot_cursor());
+}
+
+#[test]
+fn test_page_motions_move_by_viewport_height() {
+    let buffer = Buffer::from_str("0123456789\nabcdefghij\nklmnopqrst\nuvwxyz0123");
+    let mut window = Window::new(buffer);
+    window.buffer_view.set_cursor(Cursor::new(0, 8));
+
+    let mut screen = crate::screen::Screen::new(3, 40);
+    window.render(&mut screen, Position::new(0, 0), Size::new(3, 40));
+
+    window.process_action(&Action::new(ActionKind::MovePageDown));
+    assert_eq!(window.buffer_view.cursor(), Cursor::new(3, 8));
+
+    window.process_action(&Action::new(ActionKind::MovePageUp));
+    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 8));
+}
+
+#[test]
+fn test_page_motions_clamp_on_short_line() {
+    let buffer = Buffer::from_str("0123456789\nabcdefghij\nklmnopqrst\nuv");
+    let mut window = Window::new(buffer);
+    window.buffer_view.set_cursor(Cursor::new(0, 8));
+
+    let mut screen = crate::screen::Screen::new(3, 40);
+    window.render(&mut screen, Position::new(0, 0), Size::new(3, 40));
+
+    window.process_action(&Action::new(ActionKind::MovePageDown));
+    assert_eq!(window.buffer_view.cursor(), Cursor::new(3, 2));
+}
+
+#[test]
+fn test_half_page_motions_move_by_half_viewport_height() {
+    let buffer = Buffer::from_str("0123456789\nabcdefghij\nklmnopqrst\nuvwxyz0123");
+    let mut window = Window::new(buffer);
+    window.buffer_view.set_cursor(Cursor::new(0, 8));
+
+    let mut screen = crate::screen::Screen::new(3, 40);
+    window.render(&mut screen, Position::new(0, 0), Size::new(3, 40));
+
+    window.process_action(&Action::new(ActionKind::MoveHalfPageDown));
+    assert_eq!(window.buffer_view.cursor(), Cursor::new(1, 8));
+
+    window.process_action(&Action::new(ActionKind::MoveHalfPageUp));
+    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 8));
 }
 
 // Character Scan Motion Tests

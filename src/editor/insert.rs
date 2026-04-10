@@ -26,6 +26,10 @@ impl InsertMode {
         keymap.insert_str("<Down>", Action::new(ActionKind::MoveDown));
         keymap.insert_str("<Up>", Action::new(ActionKind::MoveUp));
         keymap.insert_str("<Right>", Action::new(ActionKind::MoveRight));
+        keymap.insert_str("<PageUp>", Action::new(ActionKind::MovePageUp));
+        keymap.insert_str("<PageDown>", Action::new(ActionKind::MovePageDown));
+        keymap.insert_str("<C-u>", Action::new(ActionKind::MoveHalfPageUp));
+        keymap.insert_str("<C-d>", Action::new(ActionKind::MoveHalfPageDown));
         keymap.insert_str("<Enter>", Action::insert_char('\n'));
         keymap.insert_str("<Backspace>", Action::new(ActionKind::DeleteBackward));
         keymap.insert_str("<Delete>", Action::new(ActionKind::DeleteForward));

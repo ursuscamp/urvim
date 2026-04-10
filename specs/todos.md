@@ -10,7 +10,6 @@ This is a list, in no particular order, of things that need to be addressed whic
 - todo highlighting
 - tab handling
 - file icon types
-- page up/page down keys
 - jump list
 - support raw text insertion by paste
 

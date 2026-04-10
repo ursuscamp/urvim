@@ -22,6 +22,22 @@ impl Widget for Window {
                 self.buffer_view.set_remembered_visual_col(target_col);
                 ActionResult::Handled
             }
+            Some(ActionKind::MovePageUp) => {
+                self.move_cursor_page_up(self.size.rows as usize);
+                ActionResult::Handled
+            }
+            Some(ActionKind::MovePageDown) => {
+                self.move_cursor_page_down(self.size.rows as usize);
+                ActionResult::Handled
+            }
+            Some(ActionKind::MoveHalfPageUp) => {
+                self.move_cursor_half_page_up(self.size.rows as usize);
+                ActionResult::Handled
+            }
+            Some(ActionKind::MoveHalfPageDown) => {
+                self.move_cursor_half_page_down(self.size.rows as usize);
+                ActionResult::Handled
+            }
             Some(ActionKind::MoveRight) => {
                 self.move_cursor_right();
                 ActionResult::Handled
