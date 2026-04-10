@@ -899,6 +899,32 @@ fn test_page_motions_move_by_viewport_height() {
 }
 
 #[test]
+fn test_page_motions_render_updated_gutter_line_numbers() {
+    let buffer = Buffer::from_str("line 1\nline 2\nline 3\nline 4\nline 5\nline 6");
+    let mut window = Window::new(buffer);
+    let size = Size::new(3, 40);
+    let gutter_col = 1;
+
+    let mut screen = crate::screen::Screen::new(3, 40);
+    window.render(&mut screen, Position::new(0, 0), size);
+    assert_eq!(screen.get_cell_mut(0, gutter_col).unwrap().text, "1");
+
+    window.process_action(&Action::new(ActionKind::MovePageDown));
+    window.render(&mut screen, Position::new(0, 0), size);
+    assert_eq!(window.buffer_view.scroll_offset(), Position::new(1, 0));
+    assert_eq!(screen.get_cell_mut(0, gutter_col).unwrap().text, "2");
+    assert_eq!(screen.get_cell_mut(1, gutter_col).unwrap().text, "3");
+    assert_eq!(screen.get_cell_mut(2, gutter_col).unwrap().text, "4");
+
+    window.process_action(&Action::new(ActionKind::MovePageUp));
+    window.render(&mut screen, Position::new(0, 0), size);
+    assert_eq!(window.buffer_view.scroll_offset(), Position::new(0, 0));
+    assert_eq!(screen.get_cell_mut(0, gutter_col).unwrap().text, "1");
+    assert_eq!(screen.get_cell_mut(1, gutter_col).unwrap().text, "2");
+    assert_eq!(screen.get_cell_mut(2, gutter_col).unwrap().text, "3");
+}
+
+#[test]
 fn test_page_motions_clamp_on_short_line() {
     let buffer = Buffer::from_str("0123456789\nabcdefghij\nklmnopqrst\nuv");
     let mut window = Window::new(buffer);

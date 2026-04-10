@@ -143,16 +143,17 @@ impl Window {
                     )
                 })
         });
-        // Get buffer info for gutter
         let total_lines = self.buffer_view.line_count();
+        let gutter_width =
+            Gutter::new_with_style(0, size.rows, total_lines, gutter_style).calculate_width();
+
+        // Resolve scrolling before building the gutter so line numbers and
+        // visible content are derived from the same viewport.
+        self.buffer_view.scroll_to_cursor(size, gutter_width);
         let start_line = self.buffer_view.scroll_offset().row as usize;
 
-        // Create gutter with needed info (no buffer reference)
+        // Create gutter with the finalized viewport state.
         let mut gutter = Gutter::new_with_style(start_line, size.rows, total_lines, gutter_style);
-        let gutter_width = gutter.calculate_width();
-
-        // Scroll to make cursor visible before rendering
-        self.buffer_view.scroll_to_cursor(size, gutter_width);
 
         // Render gutter at origin position
         gutter.render(screen, origin);
