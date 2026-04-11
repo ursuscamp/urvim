@@ -5,6 +5,8 @@ alias = ["jl"]
 filename = ["\\.jl$"]
 shebang = ["^#!.*\\bjulia(?:\\s|$)"]
 comment_prefix = "#"
+glyph = ""
+glyph_color = "#9558b2"
 
 [[rules]]
 kind = "regex"

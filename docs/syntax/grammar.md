@@ -14,6 +14,8 @@ Tag names are described in [docs/syntax/tags.md](docs/syntax/tags.md).
 name = "example"
 display_name = "Example"
 alias = ["ex"]
+glyph = ""
+glyph_color = "#dea584"
 filename = ["\\.ex$"]
 shebang = ["^#!.*\\bexample(?:\\s|$)"]
 comment_prefix = "#"
@@ -37,6 +39,8 @@ urvim parses builtin grammar files into a raw registry first and promotes a synt
 | `display_name` | Human-readable label | Use the name you want in the status bar and any UI labels. |
 | `alias` | Alternate labels | Add common shorthand labels such as `js`, `md`, or `rb`. |
 | `comment_prefix` | Canonical line comment prefix | Use the token that should be inserted and removed by line-comment toggle actions, such as `//`, `#`, or `--`. Leave it unset for syntaxes without a line comment form. |
+| `glyph` | Optional filetype icon | Use a nerdfont glyph when the language should appear with an icon in the tab bar and status bar. Leave it unset for languages without a good icon. |
+| `glyph_color` | Optional glyph foreground color | Use a default foreground color associated with the language icon. The value can be an ANSI index or an RGB hex color, matching the editor's other color literals. |
 | `filename` | Filename-matching regexes | Use these for extensions or fixed names. The loader matches against the lower-cased basename, so write the pattern as if the filename were lower-case. |
 | `shebang` | Shebang regexes | Use these for shebangs, magic comments, and other header markers. These are checked before filename matching. |
 
@@ -137,6 +141,7 @@ The loader validates:
 
 - metadata names and aliases
 - comment prefixes
+- glyphs and glyph colors
 - tags
 - regexes
 - context markers
@@ -149,6 +154,8 @@ The loader validates:
 name = "example"
 display_name = "Example"
 alias = ["ex"]
+glyph = ""
+glyph_color = "#dea584"
 filename = ["\\.ex$"]
 shebang = []
 comment_prefix = "#"

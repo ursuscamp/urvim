@@ -5,6 +5,8 @@ alias = ["dartlang"]
 filename = ["\\.dart$"]
 shebang = ["^#!.*\\bdart(?:\\s|$)"]
 comment_prefix = "//"
+glyph = ""
+glyph_color = "#00B4AB"
 
 [[rules]]
 kind = "regex"

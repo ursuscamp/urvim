@@ -5,6 +5,8 @@ alias = ["rscript"]
 filename = ["\\.r$"]
 shebang = ["^#!.*\\brscript(?:\\s|$)"]
 comment_prefix = "#"
+glyph = "󰟔"
+glyph_color = "#198CE7"
 
 [[rules]]
 kind = "regex"

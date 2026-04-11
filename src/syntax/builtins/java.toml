@@ -5,6 +5,8 @@ alias = ["jvm"]
 filename = ["\\.java$"]
 shebang = []
 comment_prefix = "//"
+glyph = ""
+glyph_color = "#b07219"
 
 [[rules]]
 kind = "regex"

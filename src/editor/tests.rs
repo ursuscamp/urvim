@@ -3,6 +3,7 @@ use crate::config::Config;
 use crate::editor::ActionKind;
 use crate::globals::set_test_config;
 use crate::terminal::{Key, KeyCode, Modifiers};
+use std::collections::BTreeSet;
 
 fn key(c: char) -> Key {
     Key::new(crate::terminal::KeyCode::Char(c))
@@ -37,6 +38,7 @@ fn configured_test_config(insert_escape: Option<&str>) -> Config {
         insert_escape: insert_escape.map(str::to_owned),
         syntax: true,
         auto_close_pairs: true,
+        advanced_glyphs: BTreeSet::new(),
     }
 }
 
@@ -49,6 +51,7 @@ fn configured_test_config_with_pairs(
         insert_escape: insert_escape.map(str::to_owned),
         syntax: true,
         auto_close_pairs,
+        advanced_glyphs: BTreeSet::new(),
     }
 }
 

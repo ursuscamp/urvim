@@ -5,6 +5,8 @@ alias = ["just"]
 filename = ["^justfile$"]
 shebang = []
 comment_prefix = "#"
+glyph = ""
+glyph_color = "#c92c2c"
 
 [[rules]]
 kind = "regex"

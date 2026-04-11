@@ -5,6 +5,8 @@ alias = ["docker"]
 filename = ["^dockerfile$"]
 shebang = []
 comment_prefix = "#"
+glyph = ""
+glyph_color = "#2496ED"
 
 [[rules]]
 kind = "regex"

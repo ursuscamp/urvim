@@ -5,6 +5,8 @@ alias = ["pwsh"]
 filename = ["\\.(ps1|psm1|psd1)$"]
 shebang = ["^#!.*\\b(?:pwsh|powershell)(?:\\s|$)"]
 comment_prefix = "#"
+glyph = ""
+glyph_color = "#5391fe"
 
 [[rules]]
 kind = "regex"

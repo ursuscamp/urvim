@@ -264,6 +264,7 @@ mod tests {
             insert_escape: None,
             syntax: true,
             auto_close_pairs: true,
+            advanced_glyphs: std::collections::BTreeSet::new(),
         }
     }
 

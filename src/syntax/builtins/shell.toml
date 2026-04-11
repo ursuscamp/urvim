@@ -5,6 +5,8 @@ alias = ["sh"]
 filename = ["\\.sh$", "^procfile$"]
 shebang = ["^#!.*\\bsh(?:\\s|$)"]
 comment_prefix = "#"
+glyph = ""
+glyph_color = "#89e051"
 
 [[rules]]
 kind = "regex"

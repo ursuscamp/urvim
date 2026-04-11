@@ -5,6 +5,8 @@ alias = ["js"]
 filename = ["\\.(js|mjs|cjs|jsx)$"]
 shebang = ["^#!.*\\b(?:node(?:js)?|bun|deno)(?:\\s|$)"]
 comment_prefix = "//"
+glyph = ""
+glyph_color = "#f1e05a"
 
 [[rules]]
 kind = "regex"

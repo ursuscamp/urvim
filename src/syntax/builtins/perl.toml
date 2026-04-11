@@ -5,6 +5,8 @@ alias = ["pl"]
 filename = ["\\.(pl|pm)$"]
 shebang = ["^#!.*\\bperl(?:[0-9.]+)?(?:\\s|$)"]
 comment_prefix = "#"
+glyph = ""
+glyph_color = "#0298c3"
 
 [[rules]]
 kind = "regex"

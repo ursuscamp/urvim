@@ -4,6 +4,8 @@ display_name = "OCaml"
 alias = ["ml"]
 filename = ["\\.(ml|mli)$"]
 shebang = ["^#!.*\\b(?:ocaml|utop)(?:\\s|$)"]
+glyph = ""
+glyph_color = "#ef7a08"
 
 [[rules]]
 kind = "regex"

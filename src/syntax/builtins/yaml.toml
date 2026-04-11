@@ -5,6 +5,8 @@ alias = ["yml"]
 filename = ["\\.(yaml|yml)$"]
 shebang = []
 comment_prefix = "#"
+glyph = ""
+glyph_color = "#cb171e"
 
 [[rules]]
 kind = "regex"

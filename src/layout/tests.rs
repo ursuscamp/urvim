@@ -7,6 +7,7 @@ use crate::globals;
 use crate::path::AbsolutePath;
 use crate::tab_group::TabGroup;
 use crate::window::{Position, Size};
+use std::collections::BTreeSet;
 
 fn layout_with_buffers(buffers: Vec<Buffer>) -> Layout {
     Layout::new(TabGroup::from_buffers(buffers), ModeKind::Normal)
@@ -112,6 +113,7 @@ fn test_layout_render_keeps_syntax_label_when_syntax_disabled() {
         insert_escape: None,
         syntax: false,
         auto_close_pairs: true,
+        advanced_glyphs: BTreeSet::new(),
     });
 
     layout.render(&mut screen, Position::new(0, 0), Size::new(3, 40));

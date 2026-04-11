@@ -41,6 +41,10 @@ pub enum SyntaxLoadError {
         syntax: String,
         comment_prefix: String,
     },
+    /// A syntax declared an invalid glyph.
+    InvalidGlyph { syntax: String, glyph: String },
+    /// A syntax declared an invalid glyph color.
+    InvalidGlyphColor { syntax: String, color: String },
 }
 
 impl fmt::Display for SyntaxLoadError {
@@ -110,6 +114,12 @@ impl fmt::Display for SyntaxLoadError {
                     f,
                     "syntax {syntax} has invalid comment prefix {comment_prefix:?}"
                 )
+            }
+            Self::InvalidGlyph { syntax, glyph } => {
+                write!(f, "syntax {syntax} has invalid glyph {glyph:?}")
+            }
+            Self::InvalidGlyphColor { syntax, color } => {
+                write!(f, "syntax {syntax} has invalid glyph color {color:?}")
             }
         }
     }

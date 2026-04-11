@@ -4,6 +4,8 @@ display_name = "CSS"
 alias = ["css3"]
 filename = ["\\.css$"]
 shebang = []
+glyph = ""
+glyph_color = "#563d7c"
 
 [[rules]]
 kind = "regex"

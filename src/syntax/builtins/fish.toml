@@ -5,6 +5,8 @@ alias = ["fish-shell"]
 filename = ["\\.fish$"]
 shebang = ["^#!.*\\bfish(?:\\s|$)"]
 comment_prefix = "#"
+glyph = ""
+glyph_color = "#89e051"
 
 [[rules]]
 kind = "regex"

@@ -5,6 +5,8 @@ alias = ["c89"]
 filename = ["\\.(c|h)$"]
 shebang = []
 comment_prefix = "//"
+glyph = ""
+glyph_color = "#555555"
 
 [[rules]]
 kind = "regex"

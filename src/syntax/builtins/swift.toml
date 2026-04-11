@@ -5,6 +5,8 @@ alias = ["swiftc"]
 filename = ["\\.swift$"]
 shebang = ["^#!.*\\bswift(?:\\s|$)"]
 comment_prefix = "//"
+glyph = ""
+glyph_color = "#f05138"
 
 [[rules]]
 kind = "regex"

@@ -5,6 +5,8 @@ alias = ["c++"]
 filename = ["\\.(cc|cpp|cxx|hh|hpp|hxx)$"]
 shebang = []
 comment_prefix = "//"
+glyph = ""
+glyph_color = "#f34b7d"
 
 [[rules]]
 kind = "regex"

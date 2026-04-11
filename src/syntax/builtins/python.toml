@@ -5,6 +5,8 @@ alias = ["py"]
 filename = ["\\.py$", "\\.pyw$"]
 shebang = ["^#!.*\\bpython(?:[0-9.]+)?(?:\\s|$)"]
 comment_prefix = "#"
+glyph = ""
+glyph_color = "#3572A5"
 
 [[rules]]
 kind = "regex"

@@ -1,11 +1,13 @@
 use super::*;
 use crate::action::ActionResult;
 use crate::buffer::Cursor;
+use crate::config::{AdvancedGlyphCapability, Config};
 use crate::editor::{Action, ActionKind};
 use crate::globals;
 use crate::terminal::{Color, Style};
 use crate::theme::{SyntaxTagStyles, Tag, Theme, ThemeKind, UiStyles};
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 fn abs_path(path: &Path) -> crate::AbsolutePath {
@@ -261,6 +263,35 @@ fn test_tab_bar_uses_theme_styles() {
     group.render(&mut screen, Position::new(0, 0), Size::new(2, 16));
 
     assert_eq!(screen.get_cell_mut(0, 0).unwrap().style, expected_style);
+}
+
+#[test]
+fn test_tab_bar_renders_glyph_when_enabled() {
+    let path = PathBuf::from("/tmp/rust-icon.rs");
+    let buffer = Buffer::from_str_with_path("fn main() {}", abs_path(&path));
+    let mut group = TabGroup::from_buffers(vec![buffer]);
+    let theme = themed_group();
+    let expected_tab_style = theme.ui.tab_active;
+    let expected_glyph_style = expected_tab_style.fg(Color::rgb(222, 165, 132));
+    let _theme_guard = globals::set_test_active_theme(theme);
+    let _config_guard = globals::set_test_config(Config {
+        theme: "demo".to_string(),
+        insert_escape: None,
+        syntax: true,
+        auto_close_pairs: true,
+        advanced_glyphs: BTreeSet::from([AdvancedGlyphCapability::Nerdfont]),
+    });
+
+    let mut screen = crate::screen::Screen::new(2, 24);
+    group.render(&mut screen, Position::new(0, 0), Size::new(2, 24));
+
+    assert_eq!(screen.get_cell_mut(0, 1).unwrap().text, "");
+    assert_eq!(
+        screen.get_cell_mut(0, 1).unwrap().style,
+        expected_glyph_style
+    );
+    assert_eq!(screen.get_cell_mut(0, 3).unwrap().text, "r");
+    assert_eq!(screen.get_cell_mut(0, 3).unwrap().style, expected_tab_style);
 }
 
 #[test]

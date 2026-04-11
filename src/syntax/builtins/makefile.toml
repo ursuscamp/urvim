@@ -5,6 +5,8 @@ alias = ["make"]
 filename = ["^(?:makefile|gnumakefile|mk)$"]
 shebang = []
 comment_prefix = "#"
+glyph = ""
+glyph_color = "#427819"
 
 [[rules]]
 kind = "regex"

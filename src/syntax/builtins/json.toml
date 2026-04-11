@@ -4,6 +4,8 @@ display_name = "JSON"
 alias = ["jsonc"]
 filename = ["\\.json$"]
 shebang = []
+glyph = ""
+glyph_color = "#cbcb41"
 
 [[rules]]
 kind = "regex"

@@ -5,6 +5,8 @@ alias = ["nimlang"]
 filename = ["\\.nim$"]
 shebang = ["^#!.*\\bnim(?:\\s|$)"]
 comment_prefix = "#"
+glyph = ""
+glyph_color = "#ffc200"
 
 [[rules]]
 kind = "regex"

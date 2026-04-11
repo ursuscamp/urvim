@@ -49,6 +49,13 @@ In normal mode, the block cursor visually covers a character, indicating the cur
 ### Action
 An enum representing operations that the editor can perform in response to keypresses. Examples include `MoveLeft`, `MoveDown`, `InsertChar`, `SwitchToNormal`, etc.
 
+### Advanced Glyphs
+An optional set of editor configuration capabilities that request special glyph rendering behavior beyond plain text labels. The initial supported value is `nerdfont`.
+
+**Context:** Configuration, tab bar rendering, status bar rendering
+
+**Related Terms:** Filetype Glyph, Filetype, Tab Group, Status Bar, Configuration
+
 ### Change Operator
 The `c` operator in operator-pending mode. It removes the resolved text range and then places the editor in insert mode when the operation succeeds. Examples include `cw`, `ciw`, `c$`, and `cG`.
 
@@ -202,6 +209,20 @@ A syntax-defined buffer classification that provides a canonical `name`, a user-
 **Context:** Buffer metadata, syntax loading, status bar rendering
 
 **Related Terms:** Buffer, Status Bar, Syntax Definition
+
+### Filetype Glyph
+A syntax metadata value that stores the icon used to represent a filetype in compact UI surfaces such as the tab bar and status bar.
+
+**Context:** Syntax metadata, tab bar rendering, status bar rendering
+
+**Related Terms:** Advanced Glyphs, Filetype, Tab Group, Status Bar
+
+### Filetype Glyph Color
+The default foreground color associated with a filetype glyph when the editor renders that icon.
+
+**Context:** Syntax metadata, tab bar rendering, status bar rendering
+
+**Related Terms:** Filetype Glyph, Theme, Tab Group, Status Bar
 
 ### Window
 A rendering component that owns a Buffer View and displays its buffer on screen. It handles cursor positioning, scrolling, and text rendering with gutter.

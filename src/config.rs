@@ -5,6 +5,7 @@
 //! configuration object that can be stored globally.
 
 use serde::Deserialize;
+use std::collections::BTreeSet;
 use std::env;
 use std::fmt;
 use std::fs;
@@ -15,6 +16,14 @@ use crate::editor::validate_key_string;
 const DEFAULT_THEME: &str = "Friday Night";
 const CONFIG_RELATIVE_PATH: &str = "urvim/config.toml";
 const DEFAULT_XDG_CONFIG_DIRS: &str = "/etc/xdg";
+
+/// Advanced glyph capabilities that can be enabled through configuration.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AdvancedGlyphCapability {
+    /// Enable nerdfont glyph rendering.
+    Nerdfont,
+}
 
 /// The resolved startup configuration used by the editor.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -27,6 +36,8 @@ pub struct Config {
     pub syntax: bool,
     /// Whether insert mode should auto-close supported bracket and quote pairs.
     pub auto_close_pairs: bool,
+    /// Enabled advanced glyph capabilities.
+    pub advanced_glyphs: BTreeSet<AdvancedGlyphCapability>,
 }
 
 /// The TOML-backed config file schema.
@@ -41,6 +52,8 @@ pub struct PartialConfig {
     pub syntax: Option<bool>,
     /// Whether insert mode should auto-close supported bracket and quote pairs.
     pub auto_close_pairs: Option<bool>,
+    /// Enabled advanced glyph capabilities in the config file.
+    pub advanced_glyphs: Option<Vec<AdvancedGlyphCapability>>,
 }
 
 /// Errors that can occur while loading or resolving startup configuration.
@@ -101,13 +114,24 @@ impl Config {
         let auto_close_pairs = file
             .and_then(|config| config.auto_close_pairs)
             .unwrap_or(true);
+        let advanced_glyphs = file
+            .and_then(|config| config.advanced_glyphs.as_ref())
+            .map(|glyphs| glyphs.iter().cloned().collect::<BTreeSet<_>>())
+            .unwrap_or_default();
 
         Self {
             theme,
             insert_escape,
             syntax,
             auto_close_pairs,
+            advanced_glyphs,
         }
+    }
+
+    /// Returns whether nerdfont glyph rendering is enabled.
+    pub fn nerdfont_enabled(&self) -> bool {
+        self.advanced_glyphs
+            .contains(&AdvancedGlyphCapability::Nerdfont)
     }
 }
 
@@ -221,6 +245,7 @@ fn xdg_config_dirs() -> Vec<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeSet;
     use std::fs;
     use std::path::Path;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -241,6 +266,10 @@ mod tests {
         fs::write(path, contents).expect("should write config file");
     }
 
+    fn glyph_caps(values: &[AdvancedGlyphCapability]) -> BTreeSet<AdvancedGlyphCapability> {
+        values.iter().cloned().collect()
+    }
+
     #[test]
     fn resolve_prefers_cli_then_file_then_default() {
         let file = PartialConfig {
@@ -248,6 +277,7 @@ mod tests {
             insert_escape: Some("jk".to_string()),
             syntax: Some(false),
             auto_close_pairs: Some(false),
+            advanced_glyphs: Some(vec![AdvancedGlyphCapability::Nerdfont]),
         };
 
         assert_eq!(
@@ -267,6 +297,23 @@ mod tests {
         assert!(Config::resolve(None, None, None).auto_close_pairs);
         assert_eq!(Config::resolve(None, None, None).theme, DEFAULT_THEME);
         assert_eq!(Config::resolve(None, None, None).insert_escape, None);
+        assert!(Config::resolve(None, None, None).advanced_glyphs.is_empty());
+        assert_eq!(
+            Config::resolve(Some(&file), None, None).advanced_glyphs,
+            glyph_caps(&[AdvancedGlyphCapability::Nerdfont])
+        );
+    }
+
+    #[test]
+    fn nerdfont_enabled_checks_resolved_advanced_glyphs() {
+        assert!(!Config::resolve(None, None, None).nerdfont_enabled());
+
+        let file = PartialConfig {
+            advanced_glyphs: Some(vec![AdvancedGlyphCapability::Nerdfont]),
+            ..Default::default()
+        };
+
+        assert!(Config::resolve(Some(&file), None, None).nerdfont_enabled());
     }
 
     #[test]
@@ -379,6 +426,32 @@ mod tests {
         let config = Config::load_from_locations(home, vec![], None, None).expect("should load");
 
         assert!(!config.auto_close_pairs);
+    }
+
+    #[test]
+    fn load_from_locations_loads_advanced_glyph_caps() {
+        let home = unique_temp_dir("glyph-home");
+        write_config(&home, "advanced_glyphs = [\"nerdfont\", \"nerdfont\"]");
+
+        let config = Config::load_from_locations(home, vec![], None, None).expect("should load");
+
+        assert_eq!(
+            config.advanced_glyphs,
+            glyph_caps(&[AdvancedGlyphCapability::Nerdfont])
+        );
+    }
+
+    #[test]
+    fn load_from_locations_rejects_unknown_advanced_glyph_caps() {
+        let home = unique_temp_dir("glyph-unknown-home");
+        write_config(&home, "advanced_glyphs = [\"unknown\"]");
+
+        let error = Config::load_from_locations(home, vec![], None, None).expect_err("should fail");
+
+        match error {
+            ConfigLoadError::Parse { .. } => {}
+            other => panic!("expected parse error, got {other:?}"),
+        }
     }
 
     #[test]

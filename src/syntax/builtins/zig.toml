@@ -5,6 +5,8 @@ alias = ["ziglang"]
 filename = ["\\.zig$"]
 shebang = ["^#!.*\\bzig(?:\\s|$)"]
 comment_prefix = "//"
+glyph = ""
+glyph_color = "#f7a41d"
 
 [[rules]]
 kind = "regex"

@@ -4,6 +4,8 @@ display_name = "HTML"
 alias = ["htm"]
 filename = ["\\.(html|htm)$"]
 shebang = []
+glyph = ""
+glyph_color = "#e34c26"
 
 [[rules]]
 kind = "regex"

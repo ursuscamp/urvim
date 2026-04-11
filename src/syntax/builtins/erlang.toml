@@ -4,6 +4,8 @@ display_name = "Erlang"
 alias = ["erl"]
 filename = ["\\.erl$"]
 shebang = ["^#!.*\\b(?:erl|escript)(?:\\s|$)"]
+glyph = ""
+glyph_color = "#b83998"
 
 [[rules]]
 kind = "regex"

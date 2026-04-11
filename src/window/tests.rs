@@ -9,6 +9,7 @@ use crate::path::AbsolutePath;
 use crate::terminal::{Color, Style};
 use crate::theme::{SyntaxTagStyles, Tag, Theme, ThemeKind, UiStyles};
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 
 fn process_action_and_snapshot(window: &mut Window, action: &Action) {
     assert_eq!(window.process_action(action), ActionResult::Handled);
@@ -132,6 +133,7 @@ fn pairing_test_config(auto_close_pairs: bool) -> Config {
         insert_escape: None,
         syntax: true,
         auto_close_pairs,
+        advanced_glyphs: BTreeSet::new(),
     }
 }
 
@@ -371,6 +373,7 @@ fn test_window_render_omits_syntax_styles_when_disabled() {
         insert_escape: None,
         syntax: false,
         auto_close_pairs: true,
+        advanced_glyphs: BTreeSet::new(),
     });
 
     let mut screen = crate::screen::Screen::new(1, 80);

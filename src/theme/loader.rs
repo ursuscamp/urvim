@@ -74,42 +74,13 @@ fn resolve_palette(
 }
 
 fn parse_rgb(theme_name: &str, key: &str, value: &str) -> Result<Color, ThemeLoadError> {
-    let Some(hex) = value.strip_prefix('#') else {
-        return Err(ThemeLoadError::InvalidPaletteValue {
+    Rgb::parse_hex(value)
+        .map(Color::Rgb)
+        .map_err(|_| ThemeLoadError::InvalidPaletteValue {
             theme: theme_name.to_string(),
             key: key.to_string(),
             value: value.to_string(),
-        });
-    };
-
-    if hex.len() != 6 {
-        return Err(ThemeLoadError::InvalidPaletteValue {
-            theme: theme_name.to_string(),
-            key: key.to_string(),
-            value: value.to_string(),
-        });
-    }
-
-    let red =
-        u8::from_str_radix(&hex[0..2], 16).map_err(|_| ThemeLoadError::InvalidPaletteValue {
-            theme: theme_name.to_string(),
-            key: key.to_string(),
-            value: value.to_string(),
-        })?;
-    let green =
-        u8::from_str_radix(&hex[2..4], 16).map_err(|_| ThemeLoadError::InvalidPaletteValue {
-            theme: theme_name.to_string(),
-            key: key.to_string(),
-            value: value.to_string(),
-        })?;
-    let blue =
-        u8::from_str_radix(&hex[4..6], 16).map_err(|_| ThemeLoadError::InvalidPaletteValue {
-            theme: theme_name.to_string(),
-            key: key.to_string(),
-            value: value.to_string(),
-        })?;
-
-    Ok(Color::Rgb(Rgb::new(red, green, blue)))
+        })
 }
 
 fn resolve_ui_styles(

@@ -18,6 +18,7 @@
 //! ```
 
 use crate::terminal::utils::write_decimal;
+use std::fmt;
 use std::io::Write;
 
 /// RGB color representation.
@@ -39,7 +40,48 @@ impl Rgb {
     pub fn new(r: u8, g: u8, b: u8) -> Self {
         Self { r, g, b }
     }
+
+    /// Parses a hex RGB color in `#rrggbb` format.
+    pub fn parse_hex(value: &str) -> Result<Self, HexColorParseError> {
+        let Some(hex) = value.strip_prefix('#') else {
+            return Err(HexColorParseError::new(value));
+        };
+
+        if hex.len() != 6 {
+            return Err(HexColorParseError::new(value));
+        }
+
+        let red = u8::from_str_radix(&hex[0..2], 16).map_err(|_| HexColorParseError::new(value))?;
+        let green =
+            u8::from_str_radix(&hex[2..4], 16).map_err(|_| HexColorParseError::new(value))?;
+        let blue =
+            u8::from_str_radix(&hex[4..6], 16).map_err(|_| HexColorParseError::new(value))?;
+
+        Ok(Self::new(red, green, blue))
+    }
 }
+
+/// Error returned when parsing a hex RGB color fails.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HexColorParseError {
+    value: String,
+}
+
+impl HexColorParseError {
+    fn new(value: impl Into<String>) -> Self {
+        Self {
+            value: value.into(),
+        }
+    }
+}
+
+impl fmt::Display for HexColorParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "invalid hex color: {}", self.value)
+    }
+}
+
+impl std::error::Error for HexColorParseError {}
 
 /// Terminal color representation.
 ///
@@ -733,6 +775,19 @@ mod tests {
         assert_eq!(rgb.r, 255);
         assert_eq!(rgb.g, 128);
         assert_eq!(rgb.b, 0);
+    }
+
+    #[test]
+    fn test_rgb_parse_hex() {
+        let rgb = Rgb::parse_hex("#ff8000").expect("hex color should parse");
+        assert_eq!(rgb, Rgb::new(255, 128, 0));
+    }
+
+    #[test]
+    fn test_rgb_parse_hex_rejects_invalid_values() {
+        assert!(Rgb::parse_hex("ff8000").is_err());
+        assert!(Rgb::parse_hex("#ff80").is_err());
+        assert!(Rgb::parse_hex("#zz8000").is_err());
     }
 
     #[test]

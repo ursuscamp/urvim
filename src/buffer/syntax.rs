@@ -724,6 +724,8 @@ mod tests {
                 display_name: SmolStr::new("Example"),
                 alias: Vec::new(),
                 comment_prefix: None,
+                glyph: None,
+                glyph_color: None,
                 filename: Vec::new(),
                 shebang: Vec::new(),
             },

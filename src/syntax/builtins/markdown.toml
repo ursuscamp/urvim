@@ -4,6 +4,8 @@ display_name = "Markdown"
 alias = ["md"]
 filename = ["\\.(md|markdown)$"]
 shebang = []
+glyph = ""
+glyph_color = "#083fa1"
 
 [[rules]]
 kind = "regex"

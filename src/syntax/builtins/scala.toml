@@ -5,6 +5,8 @@ alias = ["sc"]
 filename = ["\\.(scala|sc)$"]
 shebang = ["^#!.*\\bscala(?:\\s|$)"]
 comment_prefix = "//"
+glyph = ""
+glyph_color = "#c22d40"
 
 [[rules]]
 kind = "regex"

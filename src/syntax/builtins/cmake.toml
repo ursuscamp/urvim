@@ -5,6 +5,8 @@ alias = ["cmakelists"]
 filename = ["^(?:cmakelists\\.txt|cmake)$"]
 shebang = []
 comment_prefix = "#"
+glyph = ""
+glyph_color = "#064F8C"
 
 [[rules]]
 kind = "regex"

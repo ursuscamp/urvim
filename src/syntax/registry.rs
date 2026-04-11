@@ -117,6 +117,15 @@ impl SyntaxRegistry {
             .map(|entry| entry.metadata.display_name.clone())
     }
 
+    /// Returns the compiled metadata for a resolved syntax name or alias.
+    pub fn metadata(&self, name: &str) -> Option<SyntaxMetadata> {
+        let canonical = self.resolve_label(name)?;
+        let entries = self.entries.read().expect("syntax registry lock poisoned");
+        entries
+            .get(canonical.as_str())
+            .map(|entry| entry.metadata.clone())
+    }
+
     /// Promotes a raw syntax definition to its compiled form.
     pub fn promote(&self, name: &str) -> Result<Arc<SyntaxDefinition>, SyntaxLoadError> {
         let canonical = self

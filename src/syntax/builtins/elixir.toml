@@ -5,6 +5,8 @@ alias = ["ex"]
 filename = ["\\.(ex|exs)$"]
 shebang = ["^#!.*\\b(?:elixir|iex)(?:\\s|$)"]
 comment_prefix = "#"
+glyph = ""
+glyph_color = "#6e4a7e"
 
 [[rules]]
 kind = "regex"

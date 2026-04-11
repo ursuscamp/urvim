@@ -1,3 +1,4 @@
+use crate::terminal::Color;
 use crate::theme::Tag;
 use regex::Regex;
 use serde::Deserialize;
@@ -117,6 +118,16 @@ impl SyntaxDefinition {
     pub fn rules(&self) -> &[SyntaxRule] {
         &self.rules
     }
+
+    /// Returns the syntax glyph, if one is configured.
+    pub fn glyph(&self) -> Option<&str> {
+        self.metadata.glyph.as_deref()
+    }
+
+    /// Returns the syntax glyph color, if one is configured.
+    pub fn glyph_color(&self) -> Option<Color> {
+        self.metadata.glyph_color
+    }
 }
 
 /// Compiled syntax metadata used for matching and display.
@@ -130,6 +141,10 @@ pub struct SyntaxMetadata {
     pub alias: Vec<SmolStr>,
     /// The canonical line comment prefix used by comment toggle actions.
     pub comment_prefix: Option<SmolStr>,
+    /// The optional filetype glyph used in compact UI surfaces.
+    pub glyph: Option<SmolStr>,
+    /// The optional default color for the filetype glyph.
+    pub glyph_color: Option<Color>,
     /// Compiled filename regexes.
     pub filename: Vec<Regex>,
     /// Compiled shebang regexes.
@@ -154,9 +169,20 @@ pub(super) struct RawSyntaxMetadata {
     #[serde(default)]
     pub comment_prefix: Option<String>,
     #[serde(default)]
+    pub glyph: Option<String>,
+    #[serde(default)]
+    pub glyph_color: Option<RawGlyphColor>,
+    #[serde(default)]
     pub filename: Vec<String>,
     #[serde(default)]
     pub shebang: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(untagged)]
+pub(super) enum RawGlyphColor {
+    Ansi(u8),
+    Rgb(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]

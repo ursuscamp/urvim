@@ -5,6 +5,8 @@ alias = ["ts"]
 filename = ["\\.(ts|tsx)$"]
 shebang = []
 comment_prefix = "//"
+glyph = ""
+glyph_color = "#3178c6"
 
 [[rules]]
 kind = "regex"

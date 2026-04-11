@@ -5,6 +5,8 @@ alias = ["kt"]
 filename = ["\\.(kt|kts)$"]
 shebang = []
 comment_prefix = "//"
+glyph = ""
+glyph_color = "#A97BFF"
 
 [[rules]]
 kind = "regex"

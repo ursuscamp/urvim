@@ -1,3 +1,4 @@
+use crate::terminal::{Color, Rgb};
 use crate::theme::Tag;
 use regex::Regex;
 use smol_str::SmolStr;
@@ -59,6 +60,28 @@ pub(super) fn resolve_metadata(raw: &RawSyntaxMetadata) -> Result<SyntaxMetadata
         })
         .transpose()?;
 
+    let glyph = raw
+        .glyph
+        .as_ref()
+        .map(|glyph| {
+            let glyph = glyph.trim();
+            if glyph.is_empty() {
+                Err(SyntaxLoadError::InvalidGlyph {
+                    syntax: name.to_string(),
+                    glyph: glyph.to_string(),
+                })
+            } else {
+                Ok(SmolStr::new(glyph))
+            }
+        })
+        .transpose()?;
+
+    let glyph_color = raw
+        .glyph_color
+        .as_ref()
+        .map(|color| resolve_glyph_color(name.as_str(), color))
+        .transpose()?;
+
     let mut filename = Vec::with_capacity(raw.filename.len());
     for pattern in &raw.filename {
         let pattern = pattern.trim();
@@ -92,6 +115,8 @@ pub(super) fn resolve_metadata(raw: &RawSyntaxMetadata) -> Result<SyntaxMetadata
         display_name,
         alias: aliases,
         comment_prefix,
+        glyph,
+        glyph_color,
         filename,
         shebang,
     })
@@ -245,6 +270,22 @@ fn parse_tag(syntax: &str, tag: &str) -> Result<Tag, SyntaxLoadError> {
     })
 }
 
+fn resolve_glyph_color(syntax: &str, color: &RawGlyphColor) -> Result<Color, SyntaxLoadError> {
+    match color {
+        RawGlyphColor::Ansi(ansi) => Ok(Color::ansi(*ansi)),
+        RawGlyphColor::Rgb(value) => parse_rgb_color(syntax, value),
+    }
+}
+
+fn parse_rgb_color(syntax: &str, value: &str) -> Result<Color, SyntaxLoadError> {
+    Rgb::parse_hex(value.trim())
+        .map(Color::Rgb)
+        .map_err(|_| SyntaxLoadError::InvalidGlyphColor {
+            syntax: syntax.to_string(),
+            color: value.to_string(),
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -257,6 +298,8 @@ mod tests {
                 display_name: "Example".to_string(),
                 alias: Vec::new(),
                 comment_prefix: Some("//".to_string()),
+                glyph: None,
+                glyph_color: None,
                 filename: Vec::new(),
                 shebang: Vec::new(),
             },
@@ -288,6 +331,8 @@ mod tests {
                 display_name: "Example".to_string(),
                 alias: Vec::new(),
                 comment_prefix: None,
+                glyph: None,
+                glyph_color: None,
                 filename: Vec::new(),
                 shebang: Vec::new(),
             },
@@ -327,6 +372,8 @@ mod tests {
                 display_name: "Example".to_string(),
                 alias: Vec::new(),
                 comment_prefix: None,
+                glyph: None,
+                glyph_color: None,
                 filename: Vec::new(),
                 shebang: Vec::new(),
             },
@@ -376,6 +423,8 @@ mod tests {
                 display_name: "Example".to_string(),
                 alias: Vec::new(),
                 comment_prefix: Some(" // ".to_string()),
+                glyph: Some("".to_string()),
+                glyph_color: Some(RawGlyphColor::Rgb("#dea584".to_string())),
                 filename: Vec::new(),
                 shebang: Vec::new(),
             },
@@ -384,6 +433,11 @@ mod tests {
 
         let definition = resolve_syntax(raw, "example.toml").expect("metadata should compile");
         assert_eq!(definition.metadata.comment_prefix.as_deref(), Some("//"));
+        assert_eq!(definition.metadata.glyph.as_deref(), Some(""));
+        assert_eq!(
+            definition.metadata.glyph_color,
+            Some(Color::rgb(222, 165, 132))
+        );
     }
 
     #[test]
@@ -394,6 +448,8 @@ mod tests {
                 display_name: "Example".to_string(),
                 alias: Vec::new(),
                 comment_prefix: Some("   ".to_string()),
+                glyph: None,
+                glyph_color: None,
                 filename: Vec::new(),
                 shebang: Vec::new(),
             },
@@ -405,5 +461,46 @@ mod tests {
             error,
             SyntaxLoadError::InvalidCommentPrefix { .. }
         ));
+    }
+
+    #[test]
+    fn metadata_rejects_empty_glyph() {
+        let raw = RawSyntaxDefinition {
+            metadata: RawSyntaxMetadata {
+                name: "example".to_string(),
+                display_name: "Example".to_string(),
+                alias: Vec::new(),
+                comment_prefix: None,
+                glyph: Some("   ".to_string()),
+                glyph_color: None,
+                filename: Vec::new(),
+                shebang: Vec::new(),
+            },
+            rules: Vec::new(),
+        };
+
+        let error = resolve_syntax(raw, "example.toml").expect_err("empty glyph should fail");
+        assert!(matches!(error, SyntaxLoadError::InvalidGlyph { .. }));
+    }
+
+    #[test]
+    fn metadata_rejects_invalid_glyph_color() {
+        let raw = RawSyntaxDefinition {
+            metadata: RawSyntaxMetadata {
+                name: "example".to_string(),
+                display_name: "Example".to_string(),
+                alias: Vec::new(),
+                comment_prefix: None,
+                glyph: Some("".to_string()),
+                glyph_color: Some(RawGlyphColor::Rgb("not-a-color".to_string())),
+                filename: Vec::new(),
+                shebang: Vec::new(),
+            },
+            rules: Vec::new(),
+        };
+
+        let error =
+            resolve_syntax(raw, "example.toml").expect_err("invalid glyph color should fail");
+        assert!(matches!(error, SyntaxLoadError::InvalidGlyphColor { .. }));
     }
 }

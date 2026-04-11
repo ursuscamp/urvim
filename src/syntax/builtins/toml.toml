@@ -5,6 +5,8 @@ alias = ["tml"]
 filename = ["\\.toml$"]
 shebang = []
 comment_prefix = "#"
+glyph = ""
+glyph_color = "#9c4221"
 
 [[rules]]
 kind = "regex"

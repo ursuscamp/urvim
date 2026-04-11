@@ -5,6 +5,8 @@ alias = ["rs"]
 filename = ["\\.rs$"]
 shebang = []
 comment_prefix = "//"
+glyph = ""
+glyph_color = "#dea584"
 
 [[rules]]
 kind = "regex"

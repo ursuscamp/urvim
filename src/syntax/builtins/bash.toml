@@ -5,6 +5,8 @@ alias = ["rbash"]
 filename = ["\\.bash$"]
 shebang = ["^#!.*\\bbash(?:\\s|$)", "^#!.*\\brbash(?:\\s|$)"]
 comment_prefix = "#"
+glyph = ""
+glyph_color = "#89e051"
 
 [[rules]]
 kind = "regex"

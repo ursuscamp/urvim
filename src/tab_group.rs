@@ -8,6 +8,7 @@ use crate::buffer::Buffer;
 use crate::editor::Action;
 use crate::globals;
 use crate::screen::Screen;
+use crate::syntax::builtin_syntax_registry;
 use crate::terminal::Style;
 use crate::widget::Widget;
 use crate::window::{BufferView, Position, Size, Window};
@@ -111,10 +112,15 @@ impl TabGroup {
             return;
         }
 
-        self.ensure_active_visible(size.cols as usize);
+        let nerdfont_enabled = globals::with_config(|config| {
+            config
+                .map(|config| config.nerdfont_enabled())
+                .unwrap_or(false)
+        });
+        self.ensure_active_visible(size.cols as usize, nerdfont_enabled);
         let active_index = self.active_tab_index();
 
-        self.render_tab_bar(screen, origin, size.cols, active_index);
+        self.render_tab_bar(screen, origin, size.cols, active_index, nerdfont_enabled);
 
         let content_origin = Position::new(origin.row + 1, origin.col);
         let content_rows = size.rows.saturating_sub(1);
@@ -150,13 +156,14 @@ impl TabGroup {
         origin: Position,
         cols: u16,
         active_index: usize,
+        nerdfont_enabled: bool,
     ) {
         let cols = cols as usize;
         if cols == 0 {
             return;
         }
 
-        let layout = self.compute_layout(self.tab_bar_start, cols, active_index);
+        let layout = self.compute_layout(self.tab_bar_start, cols, active_index, nerdfont_enabled);
         let (base_style, active_style, indicator_style, modified_style) =
             globals::with_active_theme(|theme| {
                 theme
@@ -190,18 +197,17 @@ impl TabGroup {
 
         if layout.start == active_index && layout.end == layout.start {
             let available = content_limit.saturating_sub(current_col);
-            if available >= 2 {
-                let label = self.tab_label(active_index);
-                let clipped = self.clip_to_width(&label, available.saturating_sub(2) as usize);
-                let entry = format!(" {} ", clipped);
-                screen.write_string(origin.row, current_col, active_style, &entry);
-                if self.tabs[active_index].buffer_view().is_modified() {
-                    let marker_col =
-                        current_col + 1 + UnicodeWidthStr::width(clipped.as_str()) as u16;
-                    let marker_style = active_style.accent(modified_style);
-                    screen.write_string(origin.row, marker_col, marker_style, "*");
-                }
-            }
+            self.render_tab_entry(
+                screen,
+                origin.row,
+                current_col,
+                active_style,
+                modified_style,
+                active_index,
+                available,
+                nerdfont_enabled,
+                true,
+            );
         } else {
             for index in layout.start..layout.end {
                 if current_col >= content_limit {
@@ -211,21 +217,22 @@ impl TabGroup {
                 let is_active = index == active_index;
                 let style = if is_active { active_style } else { base_style };
                 let available = content_limit.saturating_sub(current_col);
-                if available < 2 {
+                if usize::from(available) < self.tab_entry_width(index, nerdfont_enabled) {
                     break;
                 }
 
-                let label = self.tab_label(index);
-                let clipped = self.clip_to_width(&label, available.saturating_sub(2) as usize);
-                let entry = format!(" {} ", clipped);
-                screen.write_string(origin.row, current_col, style, &entry);
-                if self.tabs[index].buffer_view().is_modified() {
-                    let marker_col =
-                        current_col + 1 + UnicodeWidthStr::width(clipped.as_str()) as u16;
-                    let marker_style = style.accent(modified_style);
-                    screen.write_string(origin.row, marker_col, marker_style, "*");
-                }
-                current_col += UnicodeWidthStr::width(entry.as_str()) as u16;
+                let width = self.render_tab_entry(
+                    screen,
+                    origin.row,
+                    current_col,
+                    style,
+                    modified_style,
+                    index,
+                    available,
+                    nerdfont_enabled,
+                    false,
+                );
+                current_col += width;
             }
         }
 
@@ -239,7 +246,13 @@ impl TabGroup {
         }
     }
 
-    fn compute_layout(&self, start: usize, cols: usize, active_index: usize) -> TabBarLayout {
+    fn compute_layout(
+        &self,
+        start: usize,
+        cols: usize,
+        active_index: usize,
+        nerdfont_enabled: bool,
+    ) -> TabBarLayout {
         let left_arrow = start > 0;
         let mut right_arrow = false;
 
@@ -255,7 +268,7 @@ impl TabGroup {
             let mut used = 0usize;
             let mut end = start;
             while end < self.tabs.len() {
-                let width = self.tab_entry_width(end);
+                let width = self.tab_entry_width(end, nerdfont_enabled);
                 if used + width > available {
                     break;
                 }
@@ -296,7 +309,7 @@ impl TabGroup {
         }
     }
 
-    fn ensure_active_visible(&mut self, cols: usize) {
+    fn ensure_active_visible(&mut self, cols: usize, nerdfont_enabled: bool) {
         if self.tabs.len() <= 1 {
             self.tab_bar_start = 0;
             return;
@@ -311,7 +324,8 @@ impl TabGroup {
                 continue;
             }
 
-            let layout = self.compute_layout(self.tab_bar_start, cols, active_index);
+            let layout =
+                self.compute_layout(self.tab_bar_start, cols, active_index, nerdfont_enabled);
             if active_index >= layout.end && self.tab_bar_start < active_index {
                 self.tab_bar_start += 1;
                 continue;
@@ -346,9 +360,92 @@ impl TabGroup {
             .unwrap_or_else(|| "Untitled".to_string())
     }
 
-    fn tab_entry_width(&self, index: usize) -> usize {
+    fn tab_entry_width(&self, index: usize, nerdfont_enabled: bool) -> usize {
         let label = self.tab_label(index);
-        UnicodeWidthStr::width(label.as_str()) + 2
+        let base_width = UnicodeWidthStr::width(label.as_str()) + 2;
+        let metadata = self.tab_metadata(index);
+        let glyph_width = metadata
+            .as_ref()
+            .and_then(|metadata| metadata.glyph.as_deref())
+            .map(UnicodeWidthStr::width)
+            .unwrap_or(0);
+
+        if nerdfont_enabled && glyph_width > 0 {
+            base_width + glyph_width + 1
+        } else {
+            base_width
+        }
+    }
+
+    fn tab_metadata(&self, index: usize) -> Option<crate::syntax::SyntaxMetadata> {
+        let syntax_name = self.tabs[index].buffer_view().syntax_name();
+        builtin_syntax_registry()
+            .ok()
+            .and_then(|registry| registry.metadata(&syntax_name))
+    }
+
+    fn render_tab_entry(
+        &self,
+        screen: &mut Screen,
+        row: u16,
+        col: u16,
+        style: Style,
+        modified_style: Style,
+        index: usize,
+        available: u16,
+        nerdfont_enabled: bool,
+        clip_label: bool,
+    ) -> u16 {
+        if available == 0 {
+            return 0;
+        }
+
+        let label = self.tab_label(index);
+        let metadata = self.tab_metadata(index);
+        let glyph = if nerdfont_enabled {
+            metadata
+                .as_ref()
+                .and_then(|metadata| metadata.glyph.as_deref())
+        } else {
+            None
+        };
+        let glyph_color = metadata.as_ref().and_then(|metadata| metadata.glyph_color);
+        let glyph_width = glyph.map(UnicodeWidthStr::width).unwrap_or(0);
+        let prefix_width = if glyph.is_some() { glyph_width + 2 } else { 1 };
+        let label_width_budget = if glyph.is_some() {
+            usize::from(available).saturating_sub(glyph_width + 3)
+        } else {
+            usize::from(available).saturating_sub(2)
+        };
+        let rendered_label = if clip_label {
+            self.clip_to_width(&label, label_width_budget)
+        } else {
+            label.clone()
+        };
+        let rendered_label_width = UnicodeWidthStr::width(rendered_label.as_str());
+
+        screen.write_string(row, col, style, " ");
+        let mut current_col = col + 1;
+
+        if let Some(glyph) = glyph {
+            let glyph_style = glyph_color.map(|color| style.fg(color)).unwrap_or(style);
+            screen.write_string(row, current_col, glyph_style, glyph);
+            current_col += glyph_width as u16;
+            screen.write_string(row, current_col, style, " ");
+            current_col += 1;
+        }
+
+        screen.write_string(row, current_col, style, rendered_label.as_str());
+        current_col += rendered_label_width as u16;
+        screen.write_string(row, current_col, style, " ");
+
+        if self.tabs[index].buffer_view().is_modified() {
+            let marker_col = col + prefix_width as u16 + rendered_label_width as u16;
+            let marker_style = style.accent(modified_style);
+            screen.write_string(row, marker_col, marker_style, "*");
+        }
+
+        prefix_width as u16 + rendered_label_width as u16 + 1
     }
 
     fn clip_to_width(&self, text: &str, max_width: usize) -> String {

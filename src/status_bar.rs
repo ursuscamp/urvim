@@ -5,6 +5,8 @@
 
 use crate::globals;
 use crate::screen::Screen;
+use crate::syntax::builtin_syntax_registry;
+use crate::terminal::Style;
 use crate::window::{Position, Size};
 use unicode_width::UnicodeWidthStr;
 
@@ -14,6 +16,8 @@ pub struct StatusBarContext<'a> {
     pub mode_label: &'a str,
     /// Whether the active buffer is modified.
     pub modified: bool,
+    /// Canonical syntax name used to resolve glyph metadata.
+    pub syntax_name: &'a str,
     /// Human-readable syntax label.
     pub syntax_label: &'a str,
     /// Active buffer display name.
@@ -82,22 +86,60 @@ impl StatusBar {
                 })
                 .unwrap_or_else(|| (Default::default(), Default::default()))
         });
+        let syntax_metadata = self.syntax_metadata(context.syntax_name);
+        let nerdfont_enabled = globals::with_config(|config| {
+            config
+                .map(|config| config.nerdfont_enabled())
+                .unwrap_or(false)
+        });
 
         let width = size.cols as usize;
-        let text = self.text(context);
         screen.write_string(origin.row, origin.col, style, &" ".repeat(width));
-        screen.write_string(origin.row, origin.col, style, &text);
+        let mut current_col = origin.col;
+
+        current_col =
+            self.write_segment(screen, origin.row, current_col, style, context.mode_label);
+        current_col = self.write_segment(screen, origin.row, current_col, style, " | ");
+        current_col = self.write_syntax_segment(
+            screen,
+            origin.row,
+            current_col,
+            style,
+            syntax_metadata.as_ref(),
+            nerdfont_enabled,
+            context.syntax_label,
+        );
+        current_col = self.write_segment(screen, origin.row, current_col, style, " | ");
+
+        current_col =
+            self.write_segment(screen, origin.row, current_col, style, context.buffer_name);
 
         if context.modified {
-            let prefix_width = UnicodeWidthStr::width(context.mode_label)
-                + 3
-                + UnicodeWidthStr::width(context.syntax_label)
-                + 3;
-            let marker_col = origin.col
-                + prefix_width as u16
-                + UnicodeWidthStr::width(context.buffer_name) as u16;
-            screen.write_string(origin.row, marker_col, modified_style, "*");
+            screen.write_string(origin.row, current_col, modified_style, "*");
+            current_col += 1;
         }
+        current_col = self.write_segment(screen, origin.row, current_col, style, " | ");
+
+        let line_number = context
+            .cursor_line
+            .min(context.line_count.saturating_sub(1))
+            + 1;
+        current_col = self.write_segment(
+            screen,
+            origin.row,
+            current_col,
+            style,
+            &format!("{}:{}", line_number, context.cursor_byte_col),
+        );
+        current_col = self.write_segment(screen, origin.row, current_col, style, " | ");
+        let percent = self.progress_percent(context.cursor_line, context.line_count);
+        self.write_segment(
+            screen,
+            origin.row,
+            current_col,
+            style,
+            &format!("{percent}%"),
+        );
     }
 
     fn progress_percent(&self, cursor_line: usize, line_count: usize) -> usize {
@@ -112,20 +154,69 @@ impl StatusBar {
 
         cursor_line.saturating_mul(100) / last_line
     }
+
+    fn syntax_metadata(&self, syntax_name: &str) -> Option<crate::syntax::SyntaxMetadata> {
+        builtin_syntax_registry()
+            .ok()
+            .and_then(|registry| registry.metadata(syntax_name))
+    }
+
+    fn write_segment(
+        &self,
+        screen: &mut Screen,
+        row: u16,
+        col: u16,
+        style: Style,
+        text: &str,
+    ) -> u16 {
+        screen.write_string(row, col, style, text);
+        col + UnicodeWidthStr::width(text) as u16
+    }
+
+    fn write_syntax_segment(
+        &self,
+        screen: &mut Screen,
+        row: u16,
+        col: u16,
+        style: Style,
+        metadata: Option<&crate::syntax::SyntaxMetadata>,
+        nerdfont_enabled: bool,
+        syntax_label: &str,
+    ) -> u16 {
+        if let Some(metadata) = metadata
+            && nerdfont_enabled
+            && let Some(glyph) = metadata.glyph.as_deref()
+        {
+            let glyph_style = metadata
+                .glyph_color
+                .map(|color| style.fg(color))
+                .unwrap_or(style);
+            screen.write_string(row, col, glyph_style, glyph);
+            let mut next_col = col + UnicodeWidthStr::width(glyph) as u16;
+            screen.write_string(row, next_col, style, " ");
+            next_col += 1;
+            screen.write_string(row, next_col, style, syntax_label);
+            return next_col + UnicodeWidthStr::width(syntax_label) as u16;
+        }
+
+        self.write_segment(screen, row, col, style, syntax_label)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::{AdvancedGlyphCapability, Config};
     use crate::globals;
     use crate::terminal::Color;
     use crate::terminal::Style;
     use crate::theme::{SyntaxTagStyles, Theme, ThemeKind, UiStyles};
-    use std::collections::BTreeMap;
+    use std::collections::{BTreeMap, BTreeSet};
 
     fn context<'a>(
         mode_label: &'a str,
         modified: bool,
+        syntax_name: &'a str,
         syntax_label: &'a str,
         buffer_name: &'a str,
         cursor_line: usize,
@@ -135,6 +226,7 @@ mod tests {
         StatusBarContext {
             mode_label,
             modified,
+            syntax_name,
             syntax_label,
             buffer_name,
             cursor_line,
@@ -169,7 +261,16 @@ mod tests {
     #[test]
     fn test_text_formats_footer_fields() {
         let status_bar = StatusBar::new();
-        let text = status_bar.text(&context("NORMAL", false, "Rust", "notes.txt", 2, 7, 10));
+        let text = status_bar.text(&context(
+            "NORMAL",
+            false,
+            "rust",
+            "Rust",
+            "notes.txt",
+            2,
+            7,
+            10,
+        ));
 
         assert_eq!(text, "NORMAL | Rust | notes.txt | 3:7 | 22%");
     }
@@ -177,7 +278,16 @@ mod tests {
     #[test]
     fn test_text_formats_modified_footer_fields() {
         let status_bar = StatusBar::new();
-        let text = status_bar.text(&context("NORMAL", true, "Rust", "notes.txt", 2, 7, 10));
+        let text = status_bar.text(&context(
+            "NORMAL",
+            true,
+            "rust",
+            "Rust",
+            "notes.txt",
+            2,
+            7,
+            10,
+        ));
 
         assert_eq!(text, "NORMAL | Rust | notes.txt* | 3:7 | 22%");
     }
@@ -185,7 +295,16 @@ mod tests {
     #[test]
     fn test_text_reports_hundred_percent_on_last_line() {
         let status_bar = StatusBar::new();
-        let text = status_bar.text(&context("INSERT", false, "Python", "notes.txt", 4, 0, 5));
+        let text = status_bar.text(&context(
+            "INSERT",
+            false,
+            "python",
+            "Python",
+            "notes.txt",
+            4,
+            0,
+            5,
+        ));
 
         assert!(text.ends_with("100%"));
     }
@@ -193,7 +312,16 @@ mod tests {
     #[test]
     fn test_text_reports_hundred_percent_for_single_line() {
         let status_bar = StatusBar::new();
-        let text = status_bar.text(&context("NORMAL", false, "Plain Text", "Untitled", 0, 0, 1));
+        let text = status_bar.text(&context(
+            "NORMAL",
+            false,
+            "plaintext",
+            "Plain Text",
+            "Untitled",
+            0,
+            0,
+            1,
+        ));
 
         assert!(text.ends_with("100%"));
     }
@@ -207,7 +335,7 @@ mod tests {
             &mut screen,
             Position::new(0, 0),
             Size::new(1, 8),
-            &context("NORMAL", false, "Rust", "notes.txt", 0, 0, 10),
+            &context("NORMAL", false, "rust", "Rust", "notes.txt", 0, 0, 10),
         );
 
         let cell = screen.get_cell_mut(0, 0).unwrap();
@@ -226,7 +354,7 @@ mod tests {
             &mut screen,
             Position::new(0, 0),
             Size::new(1, 12),
-            &context("NORMAL", false, "Rust", "notes.txt", 0, 0, 10),
+            &context("NORMAL", false, "rust", "Rust", "notes.txt", 0, 0, 10),
         );
 
         assert_eq!(screen.get_cell_mut(0, 0).unwrap().style, expected_style);
@@ -245,7 +373,7 @@ mod tests {
             &mut screen,
             Position::new(0, 0),
             Size::new(1, 32),
-            &context("NORMAL", true, "Rust", "a", 0, 0, 10),
+            &context("NORMAL", true, "rust", "Rust", "a", 0, 0, 10),
         );
 
         assert_eq!(screen.get_cell_mut(0, 17).unwrap().text, "*");
@@ -253,5 +381,27 @@ mod tests {
             screen.get_cell_mut(0, 17).unwrap().style,
             expected_marker_style
         );
+    }
+
+    #[test]
+    fn test_render_uses_glyph_when_enabled() {
+        let status_bar = StatusBar::new();
+        let mut screen = Screen::new(1, 32);
+        let _config_guard = globals::set_test_config(Config {
+            theme: "demo".to_string(),
+            insert_escape: None,
+            syntax: true,
+            auto_close_pairs: true,
+            advanced_glyphs: BTreeSet::from([AdvancedGlyphCapability::Nerdfont]),
+        });
+
+        status_bar.render(
+            &mut screen,
+            Position::new(0, 0),
+            Size::new(1, 32),
+            &context("NORMAL", false, "rust", "Rust", "notes.txt", 0, 0, 10),
+        );
+
+        assert_eq!(screen.get_cell_mut(0, 9).unwrap().text, "");
     }
 }

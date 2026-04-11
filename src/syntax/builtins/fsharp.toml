@@ -5,6 +5,8 @@ alias = ["fs"]
 filename = ["\\.(fs|fsi|fsx)$"]
 shebang = ["^#!.*\\b(?:fsharpi|fsi)(?:\\s|$)"]
 comment_prefix = "//"
+glyph = ""
+glyph_color = "#b845fc"
 
 [[rules]]
 kind = "regex"

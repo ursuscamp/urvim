@@ -5,6 +5,8 @@ alias = ["hs"]
 filename = ["\\.hs$"]
 shebang = ["^#!.*\\b(?:ghci|runghc)(?:\\s|$)"]
 comment_prefix = "--"
+glyph = ""
+glyph_color = "#5e5086"
 
 [[rules]]
 kind = "regex"

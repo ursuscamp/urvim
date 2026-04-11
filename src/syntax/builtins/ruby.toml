@@ -5,6 +5,8 @@ alias = ["rb"]
 filename = ["\\.rb$"]
 shebang = ["^#!.*\\bruby(?:[0-9.]+)?(?:\\s|$)"]
 comment_prefix = "#"
+glyph = ""
+glyph_color = "#701516"
 
 [[rules]]
 kind = "regex"

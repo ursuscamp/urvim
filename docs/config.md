@@ -23,13 +23,14 @@ Command-line flags override config file values.
 
 ## Current Schema
 
-The canonical config values are `theme`, `insert_escape`, `syntax`, and `auto_close_pairs`.
+The canonical config values are `theme`, `insert_escape`, `syntax`, `auto_close_pairs`, and `advanced_glyphs`.
 
 ```toml
 theme = "Friday Night"
 insert_escape = "jk"
 syntax = true
 auto_close_pairs = true
+advanced_glyphs = ["nerdfont"]
 ```
 
 ### `theme`
@@ -68,6 +69,16 @@ Controls whether insert mode automatically pairs supported brackets and quotes.
 - Behavior: when `true`, insert mode auto-closes parentheses, square brackets, curly braces, double quotes, single quotes, and backticks; typing a supported closer next to an auto-inserted closer skips over it; pressing backspace between a supported opener and closer removes both characters
 - Behavior when `false`: opening and closing brackets and quotes insert as plain text, and backspace deletes only one character at a time
 - Scope: insert mode only
+
+### `advanced_glyphs`
+
+Controls optional glyph rendering capabilities used by the editor UI.
+
+- Type: array of strings
+- Default: empty
+- Supported values: `nerdfont`
+- Behavior: when `nerdfont` is enabled, filetypes with glyph metadata can render icons in the tab bar and status bar; when it is not enabled, the UI stays text-only
+- Validation: unknown capability names are rejected at startup
 
 ## Notes
 
