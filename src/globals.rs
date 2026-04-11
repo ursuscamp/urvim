@@ -134,8 +134,11 @@ pub fn set_config(config: Config) {
     *stored = Some(config);
 }
 
-/// Runs a closure with access to the resolved startup configuration if one has been configured.
-pub fn with_config<R>(f: impl FnOnce(Option<&Config>) -> R) -> R {
+/// Runs a closure with optional access to the resolved startup configuration.
+///
+/// The closure receives `Some(&Config)` when startup configuration is available
+/// and `None` otherwise.
+pub fn with_opt_config<R>(f: impl FnOnce(Option<&Config>) -> R) -> R {
     #[cfg(test)]
     {
         let test_config = TEST_CONFIG.with(|slot| slot.borrow().clone());
@@ -149,6 +152,24 @@ pub fn with_config<R>(f: impl FnOnce(Option<&Config>) -> R) -> R {
     {
         let config = config_slot().read().unwrap();
         f(config.as_ref())
+    }
+}
+
+/// Runs a closure with access to the resolved startup configuration.
+///
+/// The closure is only called when configuration exists, and the return value
+/// is wrapped in `Some`. If no configuration has been set, this returns `None`.
+pub fn with_config<R>(f: impl FnOnce(&Config) -> R) -> Option<R> {
+    #[cfg(test)]
+    {
+        let test_config = TEST_CONFIG.with(|slot| slot.borrow().clone());
+        return test_config.as_ref().map(f);
+    }
+
+    #[cfg(not(test))]
+    {
+        let config = config_slot().read().unwrap();
+        config.as_ref().map(f)
     }
 }
 
@@ -350,7 +371,7 @@ mod tests {
         let config = themed_config("demo");
         {
             let _guard = set_test_config(config);
-            with_config(|active_config| {
+            with_opt_config(|active_config| {
                 assert_eq!(
                     active_config.map(|config| config.theme.as_str()),
                     Some("demo")
@@ -358,9 +379,7 @@ mod tests {
             });
         }
 
-        with_config(|active_config| {
-            assert!(active_config.is_none());
-        });
+        assert!(with_config(|active_config| active_config.theme.clone()).is_none());
     }
 
     #[test]
@@ -376,6 +395,39 @@ mod tests {
         with_active_theme(|active_theme| {
             assert!(active_theme.is_none());
         });
+    }
+
+    #[test]
+    fn test_with_config_returns_value_when_config_present() {
+        let config = themed_config("demo");
+        let expected_theme = config.theme.clone();
+        let _guard = set_test_config(config);
+
+        let theme_name = with_config(|active_config| active_config.theme.clone());
+
+        assert_eq!(theme_name, Some(expected_theme));
+    }
+
+    #[test]
+    fn test_with_config_returns_none_when_config_missing() {
+        TEST_CONFIG.with(|slot| {
+            *slot.borrow_mut() = None;
+        });
+
+        let theme_name = with_config(|active_config| active_config.theme.clone());
+
+        assert_eq!(theme_name, None);
+    }
+
+    #[test]
+    fn test_with_opt_config_preserves_optional_behavior() {
+        let config = themed_config("demo");
+        let expected_theme = config.theme.clone();
+        let _guard = set_test_config(config);
+
+        let theme_name = with_opt_config(|active_config| active_config.map(|config| config.theme.clone()));
+
+        assert_eq!(theme_name, Some(expected_theme));
     }
 
     #[test]

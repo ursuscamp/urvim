@@ -24,3 +24,4 @@ urvim is a terminal based text editor.
 - when adding or modifying syntaxes
   - create regression tests
   - create or update appropriate fixture file for in syntax/fixtures folder
+- completed specs are a historical document, not a living one. do not update them after later changes invalidate them

@@ -33,16 +33,15 @@ impl InsertMode {
         keymap.insert_str("<Enter>", Action::insert_char('\n'));
         keymap.insert_str("<Backspace>", Action::new(ActionKind::DeleteBackward));
         keymap.insert_str("<Delete>", Action::new(ActionKind::DeleteForward));
-        globals::with_config(|config| {
+        globals::with_opt_config(|config| {
             if let Some(insert_escape) = config.and_then(|config| config.insert_escape.as_deref()) {
                 let parsed = validate_key_string(insert_escape)
                     .expect("invalid canonical insert escape binding in resolved config");
                 keymap.insert_sequence(parsed, Action::mode_transition(ModeKind::Normal));
             }
         });
-        let auto_close_pairs = globals::with_config(|config| {
-            config.map(|config| config.auto_close_pairs).unwrap_or(true)
-        });
+        let auto_close_pairs =
+            globals::with_config(|config| config.auto_close_pairs).unwrap_or(true);
 
         InsertMode {
             keymap,

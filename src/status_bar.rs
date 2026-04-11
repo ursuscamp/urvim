@@ -87,11 +87,8 @@ impl StatusBar {
                 .unwrap_or_else(|| (Default::default(), Default::default()))
         });
         let syntax_metadata = self.syntax_metadata(context.syntax_name);
-        let nerdfont_enabled = globals::with_config(|config| {
-            config
-                .map(|config| config.nerdfont_enabled())
-                .unwrap_or(false)
-        });
+        let nerdfont_enabled =
+            globals::with_config(|config| config.nerdfont_enabled()).unwrap_or(false);
 
         let width = size.cols as usize;
         screen.write_string(origin.row, origin.col, style, &" ".repeat(width));

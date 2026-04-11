@@ -40,9 +40,8 @@ impl Window {
     /// Deletes the character before the cursor, or a matching auto-closed pair in insert mode.
     pub fn delete_insert_char_before_cursor(&mut self) {
         let cursor = self.buffer_view.cursor();
-        let should_delete_pair = crate::globals::with_config(|config| {
-            config.map(|config| config.auto_close_pairs).unwrap_or(true)
-        });
+        let should_delete_pair =
+            crate::globals::with_config(|config| config.auto_close_pairs).unwrap_or(true);
         if should_delete_pair
             && let Some((start, end)) = self
                 .buffer_view

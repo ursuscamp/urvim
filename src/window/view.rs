@@ -173,8 +173,7 @@ impl BufferView {
         let mut render_data = RenderData::new(size.rows);
         let syntax_styles =
             globals::with_active_theme(|theme| theme.map(|theme| theme.syntax.clone()));
-        let syntax_enabled =
-            globals::with_config(|config| config.map(|config| config.syntax)).unwrap_or(true);
+        let syntax_enabled = globals::with_config(|config| config.syntax).unwrap_or(true);
         let _ = self.with_buffer_mut(|buffer| {
             let start_line = self.scroll_offset.row as usize;
             let total_lines_needed = size.rows as usize + 10;

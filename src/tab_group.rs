@@ -112,11 +112,8 @@ impl TabGroup {
             return;
         }
 
-        let nerdfont_enabled = globals::with_config(|config| {
-            config
-                .map(|config| config.nerdfont_enabled())
-                .unwrap_or(false)
-        });
+        let nerdfont_enabled =
+            globals::with_config(|config| config.nerdfont_enabled()).unwrap_or(false);
         self.ensure_active_visible(size.cols as usize, nerdfont_enabled);
         let active_index = self.active_tab_index();
 

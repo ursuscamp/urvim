@@ -45,9 +45,7 @@ impl Widget for Window {
             Some(ActionKind::InsertChar(c)) => {
                 let cursor = self.buffer_view.cursor();
                 let auto_close_pairs = insert_mode
-                    && globals::with_config(|config| {
-                        config.map(|config| config.auto_close_pairs).unwrap_or(true)
-                    });
+                    && globals::with_config(|config| config.auto_close_pairs).unwrap_or(true);
 
                 if auto_close_pairs {
                     if let Some(closer) = pairs::closer_for(*c) {
@@ -90,9 +88,7 @@ impl Widget for Window {
             }
             Some(ActionKind::InsertText(text)) => {
                 let auto_close_pairs = insert_mode
-                    && globals::with_config(|config| {
-                        config.map(|config| config.auto_close_pairs).unwrap_or(true)
-                    });
+                    && globals::with_config(|config| config.auto_close_pairs).unwrap_or(true);
                 if auto_close_pairs {
                     if let Some((opening, closing)) = pair_text(text) {
                         self.insert_pair(opening, closing);
