@@ -25,6 +25,41 @@ pub enum AdvancedGlyphCapability {
     Nerdfont,
 }
 
+/// How insert-mode tab presses should insert text.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TabInsertion {
+    /// Insert literal tab characters.
+    Tabs,
+    /// Insert spaces instead of literal tab characters.
+    Spaces,
+}
+
+impl Default for TabInsertion {
+    fn default() -> Self {
+        Self::Spaces
+    }
+}
+
+/// How insert-mode tab presses should resolve the insertion style.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TabBehavior {
+    /// Always use the configured tab insertion setting.
+    Simple,
+    /// Infer indentation style from the active buffer when possible.
+    Smart,
+}
+
+impl Default for TabBehavior {
+    fn default() -> Self {
+        Self::Simple
+    }
+}
+
+/// Default visual width for tab characters when no config is available.
+pub const DEFAULT_TAB_WIDTH: usize = 4;
+
 /// The resolved startup configuration used by the editor.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Config {
@@ -38,6 +73,12 @@ pub struct Config {
     pub auto_close_pairs: bool,
     /// Enabled advanced glyph capabilities.
     pub advanced_glyphs: BTreeSet<AdvancedGlyphCapability>,
+    /// The configured insert-mode tab insertion setting.
+    pub tab_insertion: TabInsertion,
+    /// The configured insert-mode tab behavior setting.
+    pub tab_behavior: TabBehavior,
+    /// The number of visual columns a tab occupies.
+    pub tab_width: usize,
 }
 
 /// The TOML-backed config file schema.
@@ -54,6 +95,12 @@ pub struct PartialConfig {
     pub auto_close_pairs: Option<bool>,
     /// Enabled advanced glyph capabilities in the config file.
     pub advanced_glyphs: Option<Vec<AdvancedGlyphCapability>>,
+    /// The tab insertion setting stored in the config file.
+    pub tab_insertion: Option<TabInsertion>,
+    /// The tab behavior setting stored in the config file.
+    pub tab_behavior: Option<TabBehavior>,
+    /// The tab width stored in the config file.
+    pub tab_width: Option<usize>,
 }
 
 /// Errors that can occur while loading or resolving startup configuration.
@@ -118,6 +165,15 @@ impl Config {
             .and_then(|config| config.advanced_glyphs.as_ref())
             .map(|glyphs| glyphs.iter().cloned().collect::<BTreeSet<_>>())
             .unwrap_or_default();
+        let tab_insertion = file
+            .and_then(|config| config.tab_insertion)
+            .unwrap_or_default();
+        let tab_behavior = file
+            .and_then(|config| config.tab_behavior)
+            .unwrap_or_default();
+        let tab_width = file
+            .and_then(|config| config.tab_width)
+            .unwrap_or(DEFAULT_TAB_WIDTH);
 
         Self {
             theme,
@@ -125,6 +181,9 @@ impl Config {
             syntax,
             auto_close_pairs,
             advanced_glyphs,
+            tab_insertion,
+            tab_behavior,
+            tab_width,
         }
     }
 
@@ -139,6 +198,21 @@ impl ConfigLoadError {
     fn invalid(message: impl Into<String>) -> Self {
         Self::Invalid {
             message: message.into(),
+        }
+    }
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            theme: DEFAULT_THEME.to_string(),
+            insert_escape: None,
+            syntax: true,
+            auto_close_pairs: true,
+            advanced_glyphs: BTreeSet::new(),
+            tab_insertion: TabInsertion::default(),
+            tab_behavior: TabBehavior::default(),
+            tab_width: DEFAULT_TAB_WIDTH,
         }
     }
 }
@@ -221,6 +295,14 @@ fn validate_partial_config(config: &PartialConfig) -> Result<(), ConfigLoadError
         })?;
     }
 
+    if let Some(tab_width) = config.tab_width
+        && tab_width == 0
+    {
+        return Err(ConfigLoadError::invalid(
+            "config tab_width must be greater than zero",
+        ));
+    }
+
     Ok(())
 }
 
@@ -278,6 +360,7 @@ mod tests {
             syntax: Some(false),
             auto_close_pairs: Some(false),
             advanced_glyphs: Some(vec![AdvancedGlyphCapability::Nerdfont]),
+            ..Default::default()
         };
 
         assert_eq!(
@@ -298,6 +381,18 @@ mod tests {
         assert_eq!(Config::resolve(None, None, None).theme, DEFAULT_THEME);
         assert_eq!(Config::resolve(None, None, None).insert_escape, None);
         assert!(Config::resolve(None, None, None).advanced_glyphs.is_empty());
+        assert_eq!(
+            Config::resolve(None, None, None).tab_insertion,
+            TabInsertion::Spaces
+        );
+        assert_eq!(
+            Config::resolve(None, None, None).tab_behavior,
+            TabBehavior::Simple
+        );
+        assert_eq!(
+            Config::resolve(None, None, None).tab_width,
+            DEFAULT_TAB_WIDTH
+        );
         assert_eq!(
             Config::resolve(Some(&file), None, None).advanced_glyphs,
             glyph_caps(&[AdvancedGlyphCapability::Nerdfont])
@@ -385,6 +480,21 @@ mod tests {
     }
 
     #[test]
+    fn load_from_locations_loads_tab_settings() {
+        let home = unique_temp_dir("tab-settings-home");
+        write_config(
+            &home,
+            "tab_insertion = \"tabs\"\ntab_behavior = \"smart\"\ntab_width = 8",
+        );
+
+        let config = Config::load_from_locations(home, vec![], None, None).expect("should load");
+
+        assert_eq!(config.tab_insertion, TabInsertion::Tabs);
+        assert_eq!(config.tab_behavior, TabBehavior::Smart);
+        assert_eq!(config.tab_width, 8);
+    }
+
+    #[test]
     fn load_from_locations_rejects_invalid_insert_escape_binding() {
         let home = unique_temp_dir("invalid-insert-escape-home");
         write_config(&home, "insert_escape = \"   \"");
@@ -394,6 +504,21 @@ mod tests {
         match error {
             ConfigLoadError::Invalid { message } => {
                 assert!(message.contains("insert_escape"));
+            }
+            other => panic!("expected validation error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn load_from_locations_rejects_zero_tab_width() {
+        let home = unique_temp_dir("zero-tab-width-home");
+        write_config(&home, "tab_width = 0");
+
+        let error = Config::load_from_locations(home, vec![], None, None).expect_err("should fail");
+
+        match error {
+            ConfigLoadError::Invalid { message } => {
+                assert!(message.contains("tab_width"));
             }
             other => panic!("expected validation error, got {other:?}"),
         }

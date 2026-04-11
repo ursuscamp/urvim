@@ -1,4 +1,5 @@
 use super::*;
+use crate::buffer::{configured_tab_width, display_grapheme_width, display_width_at, expand_tabs};
 
 impl RenderChunk {
     pub fn new(text: &str, style: Style) -> Self {
@@ -44,22 +45,23 @@ impl RenderData {
 
     /// Renders the buffer content using a supplied base style.
     pub fn render_with_base_style(&self, screen: &mut Screen, origin: Position, base_style: Style) {
+        let tab_width = configured_tab_width();
         for (row_offset, line_data) in self.line_data.iter().enumerate() {
+            let mut line_visual_col = line_data.width_offset;
             let mut col_offset = origin.col;
             for chunk in &line_data.chunks {
                 let style = base_style.overlay(chunk.style);
-                screen.write_string(
-                    origin.row + row_offset as u16,
-                    col_offset,
-                    style,
-                    &chunk.text,
-                );
-                col_offset += UnicodeWidthStr::width(chunk.text.as_str()) as u16;
+                let rendered = expand_tabs(&chunk.text, line_visual_col, tab_width);
+                screen.write_string(origin.row + row_offset as u16, col_offset, style, &rendered);
+                let chunk_width = display_width_at(&chunk.text, line_visual_col, tab_width);
+                line_visual_col += chunk_width;
+                col_offset += chunk_width as u16;
             }
         }
     }
 
     pub fn cursor_screen_position(&self, cursor: Cursor) -> Option<Position> {
+        let tab_width = configured_tab_width();
         for (screen_row, line_data) in self.line_data.iter().enumerate() {
             if line_data.buffer_line == cursor.line {
                 let mut visual_col = 0;
@@ -71,7 +73,7 @@ impl RenderData {
                         if byte_pos + chunk_byte_pos >= cursor.col {
                             break;
                         }
-                        visual_col += UnicodeWidthStr::width(grapheme);
+                        visual_col += display_grapheme_width(grapheme, visual_col, tab_width);
                         chunk_byte_pos += grapheme.len();
                     }
                     byte_pos += chunk.text.len();

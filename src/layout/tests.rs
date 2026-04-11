@@ -114,6 +114,7 @@ fn test_layout_render_keeps_syntax_label_when_syntax_disabled() {
         syntax: false,
         auto_close_pairs: true,
         advanced_glyphs: BTreeSet::new(),
+        ..Default::default()
     });
 
     layout.render(&mut screen, Position::new(0, 0), Size::new(3, 40));

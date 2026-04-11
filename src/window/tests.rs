@@ -134,6 +134,7 @@ fn pairing_test_config(auto_close_pairs: bool) -> Config {
         syntax: true,
         auto_close_pairs,
         advanced_glyphs: BTreeSet::new(),
+        ..Default::default()
     }
 }
 
@@ -270,6 +271,48 @@ fn test_window_render_uses_theme_styles() {
 }
 
 #[test]
+fn test_window_render_expands_tabs_using_configured_width() {
+    let buffer = Buffer::from_str("a\tb");
+    let window = Window::new(buffer);
+    let _config_guard = globals::set_test_config(Config {
+        tab_width: 4,
+        ..Default::default()
+    });
+
+    let render_data = window
+        .buffer_view()
+        .build_render_data_with_style(Size::new(1, 8), Style::default());
+    let mut screen = crate::screen::Screen::new(1, 8);
+    render_data.render(&mut screen, Position::new(0, 0));
+
+    assert_eq!(screen.get_cell_mut(0, 0).unwrap().text, "a");
+    assert_eq!(screen.get_cell_mut(0, 1).unwrap().text, " ");
+    assert_eq!(screen.get_cell_mut(0, 2).unwrap().text, " ");
+    assert_eq!(screen.get_cell_mut(0, 3).unwrap().text, " ");
+    assert_eq!(screen.get_cell_mut(0, 4).unwrap().text, " ");
+    assert_eq!(screen.get_cell_mut(0, 5).unwrap().text, "b");
+}
+
+#[test]
+fn test_window_render_expands_leading_tabs_after_gutter() {
+    let buffer = Buffer::from_str("\tX\n\n\n\n\n\n\n\n\n");
+    let mut window = Window::new(buffer);
+    let _config_guard = globals::set_test_config(Config {
+        tab_width: 4,
+        ..Default::default()
+    });
+
+    let mut screen = crate::screen::Screen::new(2, 12);
+    window.render(&mut screen, Position::new(0, 0), Size::new(2, 12));
+
+    assert_eq!(screen.get_cell_mut(0, 3).unwrap().text, " ");
+    assert_eq!(screen.get_cell_mut(0, 4).unwrap().text, " ");
+    assert_eq!(screen.get_cell_mut(0, 5).unwrap().text, " ");
+    assert_eq!(screen.get_cell_mut(0, 6).unwrap().text, " ");
+    assert_eq!(screen.get_cell_mut(0, 7).unwrap().text, "X");
+}
+
+#[test]
 fn test_window_render_fills_empty_content_rows_with_theme_default() {
     let buffer = Buffer::from_str("line1");
     let mut window = Window::new(buffer);
@@ -374,6 +417,7 @@ fn test_window_render_omits_syntax_styles_when_disabled() {
         syntax: false,
         auto_close_pairs: true,
         advanced_glyphs: BTreeSet::new(),
+        ..Default::default()
     });
 
     let mut screen = crate::screen::Screen::new(1, 80);

@@ -69,6 +69,7 @@ fn main() -> io::Result<()> {
     let mut screen = Screen::new(rows, cols);
 
     let mut layout = Layout::from_paths(&cli.files);
+    globals::set_active_buffer_id(layout.active_buffer_view().buffer_id());
 
     // Initialize with Normal mode and set cursor style
     let mut mode: Box<dyn Mode> = Box::new(NormalMode::new());
@@ -76,6 +77,7 @@ fn main() -> io::Result<()> {
     layout.set_mode_kind(mode.kind());
 
     loop {
+        globals::set_active_buffer_id(layout.active_buffer_view().buffer_id());
         screen.clear();
         layout.render(&mut screen, Position::new(0, 0), Size::new(rows, cols));
         screen.render(&mut terminal)?;

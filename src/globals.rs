@@ -49,6 +49,7 @@ static LAST_FIND: Mutex<Option<FindState>> = Mutex::new(None);
 #[cfg(not(test))]
 static LAST_REPEAT: Mutex<Option<RepeatState>> = Mutex::new(None);
 static BUFFER_POOL: OnceLock<RwLock<BufferPool>> = OnceLock::new();
+static ACTIVE_BUFFER_ID: OnceLock<RwLock<Option<BufferId>>> = OnceLock::new();
 static CONFIG: OnceLock<RwLock<Option<Config>>> = OnceLock::new();
 static ACTIVE_THEME: OnceLock<RwLock<Option<Theme>>> = OnceLock::new();
 
@@ -128,10 +129,26 @@ fn config_slot() -> &'static RwLock<Option<Config>> {
     CONFIG.get_or_init(|| RwLock::new(None))
 }
 
+fn active_buffer_slot() -> &'static RwLock<Option<BufferId>> {
+    ACTIVE_BUFFER_ID.get_or_init(|| RwLock::new(None))
+}
+
 /// Sets the resolved startup configuration used by the editor.
 pub fn set_config(config: Config) {
     let mut stored = config_slot().write().unwrap();
     *stored = Some(config);
+}
+
+/// Sets the currently active buffer ID used by global editor helpers.
+pub fn set_active_buffer_id(buffer_id: BufferId) {
+    let mut stored = active_buffer_slot().write().unwrap();
+    *stored = Some(buffer_id);
+}
+
+/// Runs a closure with access to the currently active buffer ID, if one has been set.
+pub fn with_active_buffer_id<R>(f: impl FnOnce(Option<BufferId>) -> R) -> R {
+    let stored = active_buffer_slot().read().unwrap();
+    f(*stored)
 }
 
 /// Runs a closure with optional access to the resolved startup configuration.
@@ -286,6 +303,7 @@ mod tests {
             syntax: true,
             auto_close_pairs: true,
             advanced_glyphs: std::collections::BTreeSet::new(),
+            ..Default::default()
         }
     }
 
@@ -425,7 +443,8 @@ mod tests {
         let expected_theme = config.theme.clone();
         let _guard = set_test_config(config);
 
-        let theme_name = with_opt_config(|active_config| active_config.map(|config| config.theme.clone()));
+        let theme_name =
+            with_opt_config(|active_config| active_config.map(|config| config.theme.clone()));
 
         assert_eq!(theme_name, Some(expected_theme));
     }

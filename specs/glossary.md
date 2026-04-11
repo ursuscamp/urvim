@@ -328,6 +328,20 @@ A user-configurable canonical key string that exits insert mode and switches bac
 
 **Related Terms:** Insert Mode, Keymap, Canonical String, Configuration
 
+### Tab Behavior
+The user-facing insert-mode tab handling setting that chooses between simple and smart behavior. Simple behavior always uses the configured tab insertion setting, while smart behavior infers indentation style from existing buffer contents and falls back to the configured insertion setting when no clear style exists.
+
+**Context:** Configuration, insert mode key handling, buffer indentation inference
+
+**Related Terms:** Tab Insertion, Insert Mode, Configuration, Buffer
+
+### Tab Insertion
+The user-facing setting that chooses whether insert-mode `Tab` inserts literal tab characters or space-based indentation. It is the concrete insertion style used by simple tab behavior and by smart tab behavior when inference is unavailable.
+
+**Context:** Configuration, insert mode key handling
+
+**Related Terms:** Tab Behavior, Insert Mode, Configuration
+
 ### Key String Parser
 A helper that turns a canonical key string into an ordered list of trie key tokens. Every non-`<...>` character is treated as one key, and every bracketed canonical special key is treated as one token.
 

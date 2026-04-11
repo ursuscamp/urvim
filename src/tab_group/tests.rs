@@ -280,6 +280,7 @@ fn test_tab_bar_renders_glyph_when_enabled() {
         syntax: true,
         auto_close_pairs: true,
         advanced_glyphs: BTreeSet::from([AdvancedGlyphCapability::Nerdfont]),
+        ..Default::default()
     });
 
     let mut screen = crate::screen::Screen::new(2, 24);

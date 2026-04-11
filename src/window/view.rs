@@ -1,5 +1,6 @@
 use super::*;
 use crate::buffer::BufferId;
+use crate::buffer::{configured_tab_width, display_grapheme_width, display_width_at};
 
 impl BufferView {
     /// Creates a new view and registers the buffer in the global pool.
@@ -119,14 +120,10 @@ impl BufferView {
     pub fn scroll_to_cursor(&mut self, viewport_size: Size, gutter_width: u16) {
         let cursor = self.cursor;
         let Some((buffer_line_count, cursor_visual_col, line_width)) = self.with_buffer(|buffer| {
-            let line_width = buffer
-                .line_at(cursor.line)
-                .map(|line| UnicodeWidthStr::width(line.as_ref()))
-                .unwrap_or(0);
             (
                 buffer.line_count(),
                 buffer.visual_col_at(cursor),
-                line_width,
+                buffer.visual_line_width(cursor.line),
             )
         }) else {
             self.scroll_offset = Position::new(0, 0);
@@ -294,6 +291,7 @@ impl BufferView {
         line_text: &str,
         visual_width_offset: usize,
     ) -> (usize, usize, String) {
+        let tab_width = configured_tab_width();
         if visual_width_offset == 0 {
             return (0, 0, line_text.to_string());
         }
@@ -302,7 +300,7 @@ impl BufferView {
         let mut byte_offset = 0;
 
         for grapheme in line_text.graphemes(true) {
-            let grapheme_width = UnicodeWidthStr::width(grapheme);
+            let grapheme_width = display_grapheme_width(grapheme, current_width, tab_width);
             if current_width + grapheme_width > visual_width_offset {
                 break;
             }
@@ -310,7 +308,7 @@ impl BufferView {
             byte_offset += grapheme.len();
         }
 
-        let actual_line_width = UnicodeWidthStr::width(line_text);
+        let actual_line_width = display_width_at(line_text, 0, tab_width);
         if byte_offset >= line_text.len() {
             return (line_text.len(), actual_line_width, String::new());
         }

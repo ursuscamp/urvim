@@ -1,5 +1,6 @@
 use super::{Action, ActionKind, HandleKeyResult, Mode, ModeKind, TrieKeymap};
 use crate::buffer::{Buffer, Cursor};
+use crate::config::{DEFAULT_TAB_WIDTH, TabBehavior, TabInsertion};
 use crate::editor::pairs;
 use crate::editor::validate_key_string;
 use crate::globals;
@@ -13,6 +14,9 @@ pub struct InsertMode {
     repeat_capture: Buffer,
     repeat_cursor: Cursor,
     auto_close_pairs: bool,
+    tab_insertion: TabInsertion,
+    tab_behavior: TabBehavior,
+    tab_width: usize,
 }
 
 impl InsertMode {
@@ -42,6 +46,10 @@ impl InsertMode {
         });
         let auto_close_pairs =
             globals::with_config(|config| config.auto_close_pairs).unwrap_or(true);
+        let tab_insertion = globals::with_config(|config| config.tab_insertion).unwrap_or_default();
+        let tab_behavior = globals::with_config(|config| config.tab_behavior).unwrap_or_default();
+        let tab_width =
+            globals::with_config(|config| config.tab_width).unwrap_or(DEFAULT_TAB_WIDTH);
 
         InsertMode {
             keymap,
@@ -50,6 +58,9 @@ impl InsertMode {
             repeat_capture: Buffer::new(),
             repeat_cursor: Cursor::new(0, 0),
             auto_close_pairs,
+            tab_insertion,
+            tab_behavior,
+            tab_width,
         }
     }
 
@@ -186,6 +197,9 @@ impl InsertMode {
     }
 
     fn insert_text_for_char(&self, ch: char) -> String {
+        if ch == '\t' {
+            return self.insert_tab_text();
+        }
         if self.auto_close_pairs
             && let Some(closer) = pairs::closer_for(ch)
         {
@@ -193,6 +207,25 @@ impl InsertMode {
         }
 
         ch.to_string()
+    }
+
+    fn insert_tab_text(&self) -> String {
+        let resolved = match self.tab_behavior {
+            TabBehavior::Simple => self.tab_insertion,
+            TabBehavior::Smart => globals::with_active_buffer_id(|buffer_id| {
+                buffer_id
+                    .and_then(|buffer_id| {
+                        globals::with_buffer(buffer_id, |buffer| buffer.inferred_tab_insertion())
+                    })
+                    .flatten()
+                    .unwrap_or(self.tab_insertion)
+            }),
+        };
+
+        match resolved {
+            TabInsertion::Tabs => "\t".to_string(),
+            TabInsertion::Spaces => " ".repeat(self.tab_width.max(1)),
+        }
     }
 }
 
@@ -210,6 +243,15 @@ impl Mode for InsertMode {
             return HandleKeyResult::Complete(
                 Action::mode_transition(ModeKind::Normal).with_from_mode(ModeKind::Insert),
             );
+        }
+
+        if key.code == KeyCode::Tab {
+            self.buffer.clear();
+            self.waiting = false;
+            let action =
+                Action::insert_text(self.insert_tab_text()).with_from_mode(ModeKind::Insert);
+            self.record_action(&action);
+            return HandleKeyResult::Complete(action);
         }
 
         let key_str = key.canonical_string();

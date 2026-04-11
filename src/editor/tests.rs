@@ -1,6 +1,9 @@
 use super::*;
+use crate::buffer::Buffer;
 use crate::config::Config;
+use crate::config::{TabBehavior, TabInsertion};
 use crate::editor::ActionKind;
+use crate::globals;
 use crate::globals::set_test_config;
 use crate::terminal::{Key, KeyCode, Modifiers};
 use std::collections::BTreeSet;
@@ -39,6 +42,7 @@ fn configured_test_config(insert_escape: Option<&str>) -> Config {
         syntax: true,
         auto_close_pairs: true,
         advanced_glyphs: BTreeSet::new(),
+        ..Default::default()
     }
 }
 
@@ -52,7 +56,13 @@ fn configured_test_config_with_pairs(
         syntax: true,
         auto_close_pairs,
         advanced_glyphs: BTreeSet::new(),
+        ..Default::default()
     }
+}
+
+fn set_active_buffer(text: &str) {
+    let buffer_id = globals::with_buffer_pool(|pool| pool.register_buffer(Buffer::from_str(text)));
+    globals::set_active_buffer_id(buffer_id);
 }
 
 #[test]
@@ -275,6 +285,62 @@ fn test_insert_mode_disabled_auto_close_keeps_plain_insertion() {
         handle_and_unwrap(&mut mode, &key('(')),
         Action::insert_char('(')
     );
+}
+
+#[test]
+fn test_insert_mode_tab_simple_uses_configured_insertion_setting() {
+    let mut config = configured_test_config(None);
+    config.tab_insertion = TabInsertion::Spaces;
+    config.tab_behavior = TabBehavior::Simple;
+    config.tab_width = 4;
+    let _guard = set_test_config(config);
+    let mut mode = InsertMode::new();
+
+    match mode.handle_key(&Key::new(KeyCode::Tab)) {
+        HandleKeyResult::Complete(action) => {
+            assert_eq!(
+                action.kind,
+                Some(ActionKind::InsertText("    ".to_string()))
+            );
+        }
+        other => panic!("expected complete action, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_insert_mode_tab_smart_infers_tabs_from_buffer_contents() {
+    let mut config = configured_test_config(None);
+    config.tab_insertion = TabInsertion::Spaces;
+    config.tab_behavior = TabBehavior::Smart;
+    config.tab_width = 4;
+    let _guard = set_test_config(config);
+    set_active_buffer("fn main() {\n\tprintln!(\"hi\");\n}");
+    let mut mode = InsertMode::new();
+
+    match mode.handle_key(&Key::new(KeyCode::Tab)) {
+        HandleKeyResult::Complete(action) => {
+            assert_eq!(action.kind, Some(ActionKind::InsertText("\t".to_string())));
+        }
+        other => panic!("expected complete action, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_insert_mode_tab_smart_falls_back_to_configured_insertion_setting() {
+    let mut config = configured_test_config(None);
+    config.tab_insertion = TabInsertion::Tabs;
+    config.tab_behavior = TabBehavior::Smart;
+    config.tab_width = 4;
+    let _guard = set_test_config(config);
+    set_active_buffer("fn main() {\nprintln!(\"hi\");\n}");
+    let mut mode = InsertMode::new();
+
+    match mode.handle_key(&Key::new(KeyCode::Tab)) {
+        HandleKeyResult::Complete(action) => {
+            assert_eq!(action.kind, Some(ActionKind::InsertText("\t".to_string())));
+        }
+        other => panic!("expected complete action, got {other:?}"),
+    }
 }
 
 #[test]

@@ -45,13 +45,17 @@ mod pool;
 mod quote_text_object;
 mod search;
 mod syntax;
+mod tab;
 mod text_object;
 mod undo;
 mod unicode;
 
 pub use pool::{BufferId, BufferPool};
 pub use syntax::SyntaxSpan;
-pub use unicode::{char_width, grapheme_width, str_width, to_byte_index};
+pub use unicode::{
+    char_width, configured_tab_width, display_char_width, display_grapheme_width, display_width_at,
+    expand_tabs, grapheme_width, str_width, to_byte_index,
+};
 
 use crate::path::AbsolutePath;
 use imbl::Vector;

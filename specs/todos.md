@@ -8,7 +8,6 @@ This is a list, in no particular order, of things that need to be addressed whic
 - registers
 - add auto-indent
 - todo highlighting
-- tab handling
 - jump list
 - support raw text insertion by paste
 

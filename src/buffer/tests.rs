@@ -1,8 +1,10 @@
 use super::*;
 use crate::buffer::operator_target::LinewiseDeleteRange;
+use crate::config::Config;
 use crate::editor::{
     BoundaryMotion, BracketKind, LinewiseMotion, OperatorTarget, QuoteKind, TextObject,
 };
+use crate::globals;
 use crate::path::AbsolutePath;
 use crate::theme::Tag;
 use std::fs;
@@ -1349,6 +1351,26 @@ fn test_line_with_tab() {
 }
 
 #[test]
+fn test_inferred_tab_insertion_uses_first_clear_indent_style() {
+    let tabs = Buffer::from_str("fn main() {\n\tprintln!(\"hi\");\n}");
+    let spaces = Buffer::from_str("fn main() {\n    println!(\"hi\");\n}");
+    let mixed = Buffer::from_str("fn main() {\n  \tprintln!(\"hi\");\n\tprintln!(\"bye\");\n}");
+
+    assert_eq!(
+        tabs.inferred_tab_insertion(),
+        Some(crate::config::TabInsertion::Tabs)
+    );
+    assert_eq!(
+        spaces.inferred_tab_insertion(),
+        Some(crate::config::TabInsertion::Spaces)
+    );
+    assert_eq!(
+        mixed.inferred_tab_insertion(),
+        Some(crate::config::TabInsertion::Tabs)
+    );
+}
+
+#[test]
 fn test_char_width_ascii() {
     assert_eq!(char_width('a'), 1);
     assert_eq!(char_width('z'), 1);
@@ -1363,6 +1385,19 @@ fn test_char_width_cjk() {
 #[test]
 fn test_char_width_narrow() {
     assert_eq!(char_width('\t'), 0);
+}
+
+#[test]
+fn test_tab_display_width_and_expansion() {
+    let _config_guard = globals::set_test_config(Config {
+        tab_width: 4,
+        ..Default::default()
+    });
+
+    assert_eq!(display_char_width('\t', 0, 4), 4);
+    assert_eq!(display_char_width('\t', 1, 4), 4);
+    assert_eq!(display_width_at("a\tb", 0, 4), 6);
+    assert_eq!(expand_tabs("a\tb", 0, 4), "a    b");
 }
 
 #[test]

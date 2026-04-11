@@ -23,7 +23,7 @@ Command-line flags override config file values.
 
 ## Current Schema
 
-The canonical config values are `theme`, `insert_escape`, `syntax`, `auto_close_pairs`, and `advanced_glyphs`.
+The canonical config values are `theme`, `insert_escape`, `syntax`, `auto_close_pairs`, `advanced_glyphs`, `tab_insertion`, `tab_behavior`, and `tab_width`.
 
 ```toml
 theme = "Friday Night"
@@ -31,6 +31,9 @@ insert_escape = "jk"
 syntax = true
 auto_close_pairs = true
 advanced_glyphs = ["nerdfont"]
+tab_insertion = "spaces"
+tab_behavior = "simple"
+tab_width = 4
 ```
 
 ### `theme`
@@ -79,6 +82,32 @@ Controls optional glyph rendering capabilities used by the editor UI.
 - Supported values: `nerdfont`
 - Behavior: when `nerdfont` is enabled, filetypes with glyph metadata can render icons in the tab bar and status bar; when it is not enabled, the UI stays text-only
 - Validation: unknown capability names are rejected at startup
+
+### `tab_insertion`
+
+Sets how insert-mode `Tab` behaves when it uses the configured insertion style directly.
+
+- Type: string
+- Default: `"spaces"`
+- Supported values: `tabs`, `spaces`
+- Behavior: `tabs` inserts a literal tab character; `spaces` inserts a run of spaces sized to the configured `tab_width`
+
+### `tab_behavior`
+
+Sets whether insert-mode `Tab` uses the configured insertion style directly or infers a style from the active buffer.
+
+- Type: string
+- Default: `"simple"`
+- Supported values: `simple`, `smart`
+- Behavior: `simple` always uses `tab_insertion`; `smart` inspects existing indentation in the active buffer and falls back to `tab_insertion` when no clear style exists
+
+### `tab_width`
+
+Sets the visual width of tab characters in buffer rendering and the number of spaces inserted when `tab_insertion = "spaces"`.
+
+- Type: positive integer
+- Default: `4`
+- Behavior: tab characters render as a fixed-width block using the configured width, so the visible tab expansion does not depend on the current cursor column; space-based tab insertion uses that same width
 
 ## Notes
 

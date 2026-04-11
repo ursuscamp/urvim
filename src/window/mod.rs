@@ -22,7 +22,6 @@ use crate::terminal::Color;
 use crate::terminal::Style;
 use crate::widget::Widget;
 use unicode_segmentation::UnicodeSegmentation;
-use unicode_width::UnicodeWidthStr;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct Position {

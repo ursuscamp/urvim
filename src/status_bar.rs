@@ -390,6 +390,7 @@ mod tests {
             syntax: true,
             auto_close_pairs: true,
             advanced_glyphs: BTreeSet::from([AdvancedGlyphCapability::Nerdfont]),
+            ..Default::default()
         });
 
         status_bar.render(

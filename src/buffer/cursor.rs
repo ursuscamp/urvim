@@ -277,13 +277,14 @@ impl Buffer {
             Some(l) => l.as_ref(),
             None => return 0,
         };
+        let tab_width = configured_tab_width();
         let mut visual_col = 0;
         let mut byte_offset = 0;
         for grapheme in line.graphemes(true) {
             if byte_offset >= cursor.col {
                 break;
             }
-            visual_col += grapheme_width(grapheme);
+            visual_col += display_grapheme_width(grapheme, visual_col, tab_width);
             byte_offset += grapheme.len();
         }
         visual_col
@@ -294,10 +295,11 @@ impl Buffer {
             Some(l) => l.as_ref(),
             None => return 0,
         };
+        let tab_width = configured_tab_width();
         let mut current_visual = 0;
         let mut byte_offset = 0;
         for grapheme in line.graphemes(true) {
-            let gwidth = grapheme_width(grapheme);
+            let gwidth = display_grapheme_width(grapheme, current_visual, tab_width);
             if current_visual + gwidth > visual_col {
                 return byte_offset;
             }
@@ -305,6 +307,16 @@ impl Buffer {
             byte_offset += grapheme.len();
         }
         line.len()
+    }
+
+    /// Returns the visual width of the specified line using the configured tab width.
+    pub fn visual_line_width(&self, line_idx: usize) -> usize {
+        let line = match self.lines.get(line_idx) {
+            Some(l) => l.as_ref(),
+            None => return 0,
+        };
+
+        display_width_at(line, 0, configured_tab_width())
     }
 
     pub(super) fn grapheme_at_byte(&self, line_idx: usize, byte_pos: usize) -> Option<&str> {
