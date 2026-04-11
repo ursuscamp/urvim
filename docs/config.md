@@ -23,13 +23,14 @@ Command-line flags override config file values.
 
 ## Current Schema
 
-The canonical config values are `theme`, `insert_escape`, `syntax`, `auto_close_pairs`, `advanced_glyphs`, `tab_insertion`, `tab_behavior`, and `tab_width`.
+The canonical config values are `theme`, `insert_escape`, `syntax`, `auto_close_pairs`, `auto_indent`, `advanced_glyphs`, `tab_insertion`, `tab_behavior`, and `tab_width`.
 
 ```toml
 theme = "Friday Night"
 insert_escape = "jk"
 syntax = true
 auto_close_pairs = true
+auto_indent = "off"
 advanced_glyphs = ["nerdfont"]
 tab_insertion = "spaces"
 tab_behavior = "simple"
@@ -72,6 +73,17 @@ Controls whether insert mode automatically pairs supported brackets and quotes.
 - Behavior: when `true`, insert mode auto-closes parentheses, square brackets, curly braces, double quotes, single quotes, and backticks; typing a supported closer next to an auto-inserted closer skips over it; pressing backspace between a supported opener and closer removes both characters
 - Behavior when `false`: opening and closing brackets and quotes insert as plain text, and backspace deletes only one character at a time
 - Scope: insert mode only
+
+### `auto_indent`
+
+Controls how insert mode chooses indentation when creating a new line.
+
+- Type: string enum
+- Default: `"off"`
+- Supported values: `off`, `neighbor`
+- Behavior: `off` preserves plain newline insertion; `neighbor` looks at nearby non-blank buffer lines and reuses the most-indented relevant leading whitespace prefix when creating a new line
+- Extensibility: the setting is intentionally enum-based so additional auto-indent styles can be added later without changing the config field shape
+- Scope: insert-mode newline creation and normal-mode open-line commands
 
 ### `advanced_glyphs`
 

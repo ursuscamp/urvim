@@ -3573,6 +3573,33 @@ fn test_insert_lines_before_count_exceeds() {
     assert_eq!(buf.as_str(), "line1\nline2\n\n");
 }
 
+#[test]
+fn test_inferred_auto_indent_prefix_prefers_more_indented_neighbor() {
+    let buf = Buffer::from_str("  first\n\n    second");
+
+    assert_eq!(
+        buf.inferred_auto_indent_prefix(Cursor::new(1, 0)),
+        Some("    ".to_string())
+    );
+}
+
+#[test]
+fn test_inferred_auto_indent_prefix_preserves_exact_prefix() {
+    let buf = Buffer::from_str("\t  first\n  second");
+
+    assert_eq!(
+        buf.inferred_auto_indent_prefix(Cursor::new(0, 0)),
+        Some("\t  ".to_string())
+    );
+}
+
+#[test]
+fn test_inferred_auto_indent_prefix_ignores_blank_lines() {
+    let buf = Buffer::from_str("first\n\nsecond");
+
+    assert_eq!(buf.inferred_auto_indent_prefix(Cursor::new(1, 0)), None);
+}
+
 // Paragraph motion tests
 
 #[test]

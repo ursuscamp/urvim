@@ -1,7 +1,7 @@
 use super::*;
 use crate::buffer::Buffer;
 use crate::config::Config;
-use crate::config::{TabBehavior, TabInsertion};
+use crate::config::{AutoIndentMode, TabBehavior, TabInsertion};
 use crate::editor::ActionKind;
 use crate::globals;
 use crate::globals::set_test_config;
@@ -41,6 +41,7 @@ fn configured_test_config(insert_escape: Option<&str>) -> Config {
         insert_escape: insert_escape.map(str::to_owned),
         syntax: true,
         auto_close_pairs: true,
+        auto_indent: AutoIndentMode::Off,
         advanced_glyphs: BTreeSet::new(),
         ..Default::default()
     }
@@ -55,6 +56,19 @@ fn configured_test_config_with_pairs(
         insert_escape: insert_escape.map(str::to_owned),
         syntax: true,
         auto_close_pairs,
+        auto_indent: AutoIndentMode::Off,
+        advanced_glyphs: BTreeSet::new(),
+        ..Default::default()
+    }
+}
+
+fn configured_test_config_with_auto_indent(auto_indent: AutoIndentMode) -> Config {
+    Config {
+        theme: "test-theme".to_string(),
+        insert_escape: None,
+        syntax: true,
+        auto_close_pairs: true,
+        auto_indent,
         advanced_glyphs: BTreeSet::new(),
         ..Default::default()
     }
@@ -209,6 +223,30 @@ fn test_insert_mode_page_keys() {
         handle_and_unwrap(&mut mode, &ctrl_key('d')),
         Action::new(ActionKind::MoveHalfPageDown)
     );
+}
+
+#[test]
+fn test_insert_mode_enter_emits_plain_newline() {
+    let _guard = set_test_config(configured_test_config_with_auto_indent(AutoIndentMode::Neighbor));
+    let mut mode = InsertMode::new();
+
+    assert_eq!(
+        handle_and_unwrap(&mut mode, &Key::new(crate::terminal::KeyCode::Enter)),
+        Action::insert_newline()
+    );
+    assert_eq!(mode.take_repeat_text().as_deref(), Some("\n"));
+}
+
+#[test]
+fn test_insert_mode_enter_emits_plain_newline_when_disabled() {
+    let _guard = set_test_config(configured_test_config_with_auto_indent(AutoIndentMode::Off));
+    let mut mode = InsertMode::new();
+
+    assert_eq!(
+        handle_and_unwrap(&mut mode, &Key::new(crate::terminal::KeyCode::Enter)),
+        Action::insert_newline()
+    );
+    assert_eq!(mode.take_repeat_text().as_deref(), Some("\n"));
 }
 
 #[test]

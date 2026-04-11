@@ -88,6 +88,11 @@ impl Layout {
         self.tab_group.active_buffer_view_mut()
     }
 
+    /// Returns and clears any repeat-text suffix produced by the active child window.
+    pub fn take_pending_repeat_suffix(&mut self) -> Option<String> {
+        self.tab_group.take_pending_repeat_suffix()
+    }
+
     /// Returns the visual cursor for the active child.
     pub fn visual_cursor(&self) -> Option<Position> {
         if self.size.rows <= 2 {

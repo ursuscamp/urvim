@@ -104,7 +104,6 @@ fn main() -> io::Result<()> {
                                 action.clone()
                             }
                         });
-
                     match action.kind.as_ref() {
                         Some(ActionKind::Undo) => {
                             if let Some(cursor) = layout
@@ -210,11 +209,16 @@ fn main() -> io::Result<()> {
                                         _ => { /* Should have been handled by window */ }
                                     }
                                 } else if action_result == ActionResult::Handled {
-                                    // Check if this action switches to insert mode (handles Count actions recursively)
+                                    let pending_repeat_suffix =
+                                        layout.take_pending_repeat_suffix();
                                     if dispatch_action.switches_to_insert_mode() {
                                         mode = Box::new(InsertMode::new());
                                         terminal.set_cursor_style(mode.cursor_style())?;
                                     }
+                                    if let Some(suffix) = pending_repeat_suffix.as_deref() {
+                                        mode.append_repeat_text(suffix);
+                                    }
+                                    // Check if this action switches to insert mode (handles Count actions recursively)
                                     handled = true;
                                 }
                             }
@@ -549,4 +553,5 @@ mod tests {
         assert_eq!(text, "hello world");
         assert_eq!(layout.active_buffer_view().cursor(), Cursor::new(0, 6));
     }
+
 }

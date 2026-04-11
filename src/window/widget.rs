@@ -4,6 +4,7 @@ use crate::editor::{ActionKind, ModeKind};
 
 impl Widget for Window {
     fn process_action(&mut self, action: &Action) -> ActionResult {
+        self.pending_repeat_suffix = None;
         let insert_mode = action.from_mode == Some(ModeKind::Insert);
         let result = match action.kind.as_ref() {
             Some(ActionKind::MoveLeft) => {
@@ -102,6 +103,10 @@ impl Widget for Window {
                         self.insert_char(ch);
                     }
                 }
+                ActionResult::Handled
+            }
+            Some(ActionKind::InsertNewline) => {
+                self.pending_repeat_suffix = self.insert_newline();
                 ActionResult::Handled
             }
             Some(ActionKind::ForwardTo(boundary)) => {
@@ -223,15 +228,7 @@ impl Widget for Window {
                 ActionResult::Handled
             }
             Some(ActionKind::ChangeLine) => {
-                let cursor = self.buffer_view.cursor();
-                if let Some(new_cursor) = self
-                    .buffer_view
-                    .with_buffer_mut(|buffer| buffer.change_lines(cursor.line, 1))
-                    .flatten()
-                {
-                    self.buffer_view.set_cursor(new_cursor);
-                }
-                ActionResult::Handled
+                self.change_lines_with_auto_indent(1)
             }
             Some(ActionKind::ChangeToLineEnd) => {
                 self.handle_count_change_to_line_end(1);
@@ -239,10 +236,9 @@ impl Widget for Window {
             }
             Some(ActionKind::OpenLineBelow) => {
                 let cursor = self.buffer_view.cursor();
-                if let Some(new_cursor) = self
-                    .buffer_view
-                    .with_buffer_mut(|buffer| buffer.insert_lines_after(cursor.line, 1))
-                    .flatten()
+                let prefix = self.inferred_newline_prefix(cursor);
+                if let Some(new_cursor) =
+                    self.insert_auto_indented_lines_after(cursor.line, 1, prefix)
                 {
                     self.buffer_view.set_cursor(new_cursor);
                 }
@@ -250,10 +246,9 @@ impl Widget for Window {
             }
             Some(ActionKind::OpenLineAbove) => {
                 let cursor = self.buffer_view.cursor();
-                if let Some(new_cursor) = self
-                    .buffer_view
-                    .with_buffer_mut(|buffer| buffer.insert_lines_before(cursor.line, 1))
-                    .flatten()
+                let prefix = self.inferred_newline_prefix(cursor);
+                if let Some(new_cursor) =
+                    self.insert_auto_indented_lines_before(cursor.line, 1, prefix)
                 {
                     self.buffer_view.set_cursor(new_cursor);
                 }

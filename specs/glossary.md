@@ -56,6 +56,13 @@ An optional set of editor configuration capabilities that request special glyph 
 
 **Related Terms:** Filetype Glyph, Filetype, Tab Group, Status Bar, Configuration
 
+### Auto-Indent
+A user-facing insert-mode setting that selects how new lines should inherit indentation. The initial supported style is a neighbor mode that reuses nearby leading whitespace, and the setting is intentionally extensible so additional indentation strategies can be added later.
+
+**Context:** Configuration, insert mode key handling, newline creation, buffer indentation inference
+
+**Related Terms:** Insert Mode, Configuration, Buffer, Tab Behavior
+
 ### Change Operator
 The `c` operator in operator-pending mode. It removes the resolved text range and then places the editor in insert mode when the operation succeeds. Examples include `cw`, `ciw`, `c$`, and `cG`.
 

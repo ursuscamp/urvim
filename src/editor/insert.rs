@@ -34,7 +34,7 @@ impl InsertMode {
         keymap.insert_str("<PageDown>", Action::new(ActionKind::MovePageDown));
         keymap.insert_str("<C-u>", Action::new(ActionKind::MoveHalfPageUp));
         keymap.insert_str("<C-d>", Action::new(ActionKind::MoveHalfPageDown));
-        keymap.insert_str("<Enter>", Action::insert_char('\n'));
+        keymap.insert_str("<Enter>", Action::insert_newline());
         keymap.insert_str("<Backspace>", Action::new(ActionKind::DeleteBackward));
         keymap.insert_str("<Delete>", Action::new(ActionKind::DeleteForward));
         globals::with_opt_config(|config| {
@@ -68,6 +68,7 @@ impl InsertMode {
         match action.kind.as_ref() {
             Some(ActionKind::InsertChar(ch)) => self.record_insert_char(*ch),
             Some(ActionKind::InsertText(text)) => self.record_insert_text(text),
+            Some(ActionKind::InsertNewline) => self.record_insert_char('\n'),
             Some(ActionKind::DeleteBackward) => self.record_delete_backward(),
             Some(ActionKind::DeleteForward) => self.record_delete_forward(),
             Some(ActionKind::MoveLeft) => self.record_move_left(),
@@ -245,6 +246,14 @@ impl Mode for InsertMode {
             );
         }
 
+        if key.code == KeyCode::Enter {
+            self.buffer.clear();
+            self.waiting = false;
+            let action = Action::insert_newline().with_from_mode(ModeKind::Insert);
+            self.record_action(&action);
+            return HandleKeyResult::Complete(action);
+        }
+
         if key.code == KeyCode::Tab {
             self.buffer.clear();
             self.waiting = false;
@@ -311,6 +320,12 @@ impl Mode for InsertMode {
     fn clear_buffer(&mut self) {
         self.buffer.clear();
         self.waiting = false;
+    }
+
+    fn append_repeat_text(&mut self, text: &str) {
+        if !text.is_empty() {
+            self.record_insert_text(text);
+        }
     }
 
     fn take_repeat_text(&mut self) -> Option<String> {

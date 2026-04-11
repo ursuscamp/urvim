@@ -26,6 +26,128 @@ impl Window {
         self.buffer_view.set_cursor(new_cursor);
     }
 
+    pub(super) fn auto_indent_enabled(&self) -> bool {
+        globals::with_config(|config| config.auto_indent)
+            .unwrap_or_default()
+            != crate::config::AutoIndentMode::Off
+    }
+
+    pub(super) fn inferred_newline_prefix(&self, cursor: Cursor) -> Option<String> {
+        if !self.auto_indent_enabled() {
+            return None;
+        }
+
+        self.buffer_view
+            .with_buffer(|buffer| buffer.inferred_auto_indent_prefix(cursor))
+            .flatten()
+    }
+
+    pub(super) fn insert_newline(&mut self) -> Option<String> {
+        let cursor = self.buffer_view.cursor();
+        let prefix = self.inferred_newline_prefix(cursor);
+        self.insert_char('\n');
+
+        if let Some(prefix) = prefix.as_deref() {
+            if let Some(new_cursor) =
+                self.insert_prefix_on_line_range(cursor.line + 1, 1, prefix)
+            {
+                self.buffer_view.set_cursor(new_cursor);
+            }
+        }
+
+        prefix
+    }
+
+    pub(super) fn current_line_indentation(&self) -> Option<String> {
+        let cursor = self.buffer_view.cursor();
+        self.buffer_view
+            .with_buffer(|buffer| buffer.line_leading_whitespace_prefix(cursor.line))
+            .flatten()
+    }
+
+    pub(super) fn change_lines_with_auto_indent(&mut self, count: usize) -> ActionResult {
+        let cursor = self.buffer_view.cursor();
+        let line_indentation = if self.auto_indent_enabled() {
+            self.current_line_indentation()
+        } else {
+            None
+        };
+
+        if let Some(new_cursor) = self
+            .buffer_view
+            .with_buffer_mut(|buffer| buffer.change_lines(cursor.line, count))
+            .flatten()
+        {
+            self.buffer_view.set_cursor(new_cursor);
+        }
+
+        if let Some(indentation) = line_indentation.filter(|indentation| !indentation.is_empty())
+        {
+            self.pending_repeat_suffix = Some(indentation.clone());
+            if let Some(new_cursor) =
+                self.insert_prefix_on_line_range(cursor.line, 1, &indentation)
+            {
+                self.buffer_view.set_cursor(new_cursor);
+            }
+        }
+
+        ActionResult::Handled
+    }
+
+    pub(super) fn insert_prefix_on_line_range(
+        &mut self,
+        start_line: usize,
+        count: usize,
+        prefix: &str,
+    ) -> Option<Cursor> {
+        if prefix.is_empty() {
+            return Some(Cursor::new(start_line, 0));
+        }
+
+        let end_line = start_line.saturating_add(count);
+        self.buffer_view.with_buffer_mut(|buffer| {
+            for line_idx in start_line..end_line {
+                buffer.insert_text(Cursor::new(line_idx, 0), prefix);
+            }
+        })?;
+
+        Some(Cursor::new(start_line, prefix.len()))
+    }
+
+    pub(super) fn insert_auto_indented_lines_after(
+        &mut self,
+        line: usize,
+        count: usize,
+        prefix: Option<String>,
+    ) -> Option<Cursor> {
+        let new_cursor = self
+            .buffer_view
+            .with_buffer_mut(|buffer| buffer.insert_lines_after(line, count))
+            .flatten()?;
+
+        match prefix.as_deref() {
+            Some(prefix) => self.insert_prefix_on_line_range(new_cursor.line, count, prefix),
+            None => Some(new_cursor),
+        }
+    }
+
+    pub(super) fn insert_auto_indented_lines_before(
+        &mut self,
+        line: usize,
+        count: usize,
+        prefix: Option<String>,
+    ) -> Option<Cursor> {
+        let new_cursor = self
+            .buffer_view
+            .with_buffer_mut(|buffer| buffer.insert_lines_before(line, count))
+            .flatten()?;
+
+        match prefix.as_deref() {
+            Some(prefix) => self.insert_prefix_on_line_range(new_cursor.line, count, prefix),
+            None => Some(new_cursor),
+        }
+    }
+
     pub fn delete_char_before_cursor(&mut self) {
         let cursor = self.buffer_view.cursor();
         if let Some(new_cursor) = self
@@ -201,15 +323,7 @@ impl Window {
     }
 
     fn handle_count_change_line(&mut self, count: usize) -> ActionResult {
-        let cursor = self.buffer_view.cursor();
-        if let Some(new_cursor) = self
-            .buffer_view
-            .with_buffer_mut(|buffer| buffer.change_lines(cursor.line, count))
-            .flatten()
-        {
-            self.buffer_view.set_cursor(new_cursor);
-        }
-        ActionResult::Handled
+        self.change_lines_with_auto_indent(count)
     }
 
     pub(super) fn handle_count_change_to_line_end(&mut self, count: usize) -> ActionResult {
@@ -259,10 +373,9 @@ impl Window {
 
     fn handle_count_open_line_below(&mut self, count: usize) -> ActionResult {
         let cursor = self.buffer_view.cursor();
-        if let Some(new_cursor) = self
-            .buffer_view
-            .with_buffer_mut(|buffer| buffer.insert_lines_after(cursor.line, count))
-            .flatten()
+        let prefix = self.inferred_newline_prefix(cursor);
+        if let Some(new_cursor) =
+            self.insert_auto_indented_lines_after(cursor.line, count, prefix)
         {
             self.buffer_view.set_cursor(new_cursor);
         }
@@ -271,10 +384,9 @@ impl Window {
 
     fn handle_count_open_line_above(&mut self, count: usize) -> ActionResult {
         let cursor = self.buffer_view.cursor();
-        if let Some(new_cursor) = self
-            .buffer_view
-            .with_buffer_mut(|buffer| buffer.insert_lines_before(cursor.line, count))
-            .flatten()
+        let prefix = self.inferred_newline_prefix(cursor);
+        if let Some(new_cursor) =
+            self.insert_auto_indented_lines_before(cursor.line, count, prefix)
         {
             self.buffer_view.set_cursor(new_cursor);
         }

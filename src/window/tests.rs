@@ -1,7 +1,7 @@
 use super::*;
 use crate::action::ActionResult;
 use crate::buffer::{BufferId, Cursor};
-use crate::config::Config;
+use crate::config::{AutoIndentMode, Config};
 use crate::editor::{Action, ActionKind, BoundaryMotion, BracketKind, LinewiseMotion, ModeKind};
 use crate::editor::{Operator, OperatorTarget, QuoteKind, TextObject};
 use crate::globals;
@@ -133,6 +133,19 @@ fn pairing_test_config(auto_close_pairs: bool) -> Config {
         insert_escape: None,
         syntax: true,
         auto_close_pairs,
+        auto_indent: AutoIndentMode::Off,
+        advanced_glyphs: BTreeSet::new(),
+        ..Default::default()
+    }
+}
+
+fn auto_indent_test_config(auto_indent: AutoIndentMode) -> Config {
+    Config {
+        theme: "demo-syntax".to_string(),
+        insert_escape: None,
+        syntax: true,
+        auto_close_pairs: true,
+        auto_indent,
         advanced_glyphs: BTreeSet::new(),
         ..Default::default()
     }
@@ -470,6 +483,112 @@ fn test_window_render_distinguishes_rust_format_string_escapes() {
         line.iter()
             .any(|chunk| chunk.text == "}}" && chunk.style == expected_escape_style)
     );
+}
+
+#[test]
+fn test_open_line_below_uses_neighbor_indent() {
+    let mut window = Window::new(Buffer::from_str("    fn main() {\n  println!(\"hi\");\n    }"));
+    let _config_guard = globals::set_test_config(auto_indent_test_config(AutoIndentMode::Neighbor));
+    window.set_cursor(Cursor::new(0, 4));
+
+    assert_eq!(
+        window.handle_count(1, &Action::new(ActionKind::OpenLineBelow)),
+        ActionResult::Handled
+    );
+    assert_eq!(
+        buffer_text(window.buffer_view()),
+        "    fn main() {\n    \n  println!(\"hi\");\n    }"
+    );
+    assert_eq!(window.buffer_view().cursor(), Cursor::new(1, 4));
+}
+
+#[test]
+fn test_open_line_above_uses_neighbor_indent() {
+    let mut window = Window::new(Buffer::from_str("  fn main() {\n    println!(\"hi\");\n  }"));
+    let _config_guard = globals::set_test_config(auto_indent_test_config(AutoIndentMode::Neighbor));
+    window.set_cursor(Cursor::new(1, 4));
+
+    assert_eq!(
+        window.process_action(&Action::new(ActionKind::OpenLineAbove)),
+        ActionResult::Handled
+    );
+    assert_eq!(
+        buffer_text(window.buffer_view()),
+        "  fn main() {\n    \n    println!(\"hi\");\n  }"
+    );
+    assert_eq!(window.buffer_view().cursor(), Cursor::new(1, 4));
+}
+
+#[test]
+fn test_insert_newline_uses_neighbor_indent_and_reports_suffix() {
+    let mut window = Window::new(Buffer::from_str("    fn main() {\n  println!(\"hi\");\n    }"));
+    let _config_guard = globals::set_test_config(auto_indent_test_config(AutoIndentMode::Neighbor));
+    let line_end = window.buffer_view().line_len(0);
+    window.set_cursor(Cursor::new(0, line_end));
+
+    assert_eq!(
+        window.process_action(&Action::insert_newline().with_from_mode(ModeKind::Insert)),
+        ActionResult::Handled
+    );
+    assert_eq!(
+        buffer_text(window.buffer_view()),
+        "    fn main() {\n    \n  println!(\"hi\");\n    }"
+    );
+    assert_eq!(window.buffer_view().cursor(), Cursor::new(1, 4));
+    assert_eq!(window.take_pending_repeat_suffix().as_deref(), Some("    "));
+}
+
+#[test]
+fn test_change_line_preserves_current_indentation_when_auto_indent_is_enabled() {
+    let mut window = Window::new(Buffer::from_str("    fn main() {\n  println!(\"hi\");"));
+    let _config_guard = globals::set_test_config(auto_indent_test_config(AutoIndentMode::Neighbor));
+    window.set_cursor(Cursor::new(0, 4));
+
+    assert_eq!(
+        window.process_action(&Action::new(ActionKind::ChangeLine).with_to_mode(ModeKind::Insert)),
+        ActionResult::Handled
+    );
+    assert_eq!(buffer_text(window.buffer_view()), "    \n  println!(\"hi\");");
+    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 4));
+    assert_eq!(window.take_pending_repeat_suffix().as_deref(), Some("    "));
+}
+
+#[test]
+fn test_insert_newline_reports_no_suffix_when_disabled() {
+    let mut window = Window::new(Buffer::from_str("    fn main() {\n  println!(\"hi\");\n    }"));
+    let _config_guard = globals::set_test_config(auto_indent_test_config(AutoIndentMode::Off));
+    let line_end = window.buffer_view().line_len(0);
+    window.set_cursor(Cursor::new(0, line_end));
+
+    assert_eq!(
+        window.process_action(&Action::insert_newline().with_from_mode(ModeKind::Insert)),
+        ActionResult::Handled
+    );
+    assert_eq!(
+        buffer_text(window.buffer_view()),
+        "    fn main() {\n\n  println!(\"hi\");\n    }"
+    );
+    assert_eq!(window.buffer_view().cursor(), Cursor::new(1, 0));
+    assert_eq!(window.take_pending_repeat_suffix(), None);
+}
+
+#[test]
+fn test_insert_newline_prefers_next_line_indent_when_it_is_more_indented() {
+    let mut window = Window::new(Buffer::from_str("  if ready {\n    println!(\"hi\");"));
+    let _config_guard = globals::set_test_config(auto_indent_test_config(AutoIndentMode::Neighbor));
+    let line_end = window.buffer_view().line_len(0);
+    window.set_cursor(Cursor::new(0, line_end));
+
+    assert_eq!(
+        window.process_action(&Action::insert_newline().with_from_mode(ModeKind::Insert)),
+        ActionResult::Handled
+    );
+    assert_eq!(
+        buffer_text(window.buffer_view()),
+        "  if ready {\n    \n    println!(\"hi\");"
+    );
+    assert_eq!(window.buffer_view().cursor(), Cursor::new(1, 4));
+    assert_eq!(window.take_pending_repeat_suffix().as_deref(), Some("    "));
 }
 
 #[test]

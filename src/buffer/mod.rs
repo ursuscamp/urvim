@@ -37,6 +37,7 @@
 mod boundary;
 mod bracket_text_object;
 mod comment;
+mod indent;
 mod cursor;
 mod edit;
 mod io;

@@ -57,6 +57,22 @@ impl Default for TabBehavior {
     }
 }
 
+/// How insert-mode newline creation should resolve indentation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AutoIndentMode {
+    /// Do not add automatic indentation to new lines.
+    Off,
+    /// Reuse nearby indentation from the active buffer when possible.
+    Neighbor,
+}
+
+impl Default for AutoIndentMode {
+    fn default() -> Self {
+        Self::Off
+    }
+}
+
 /// Default visual width for tab characters when no config is available.
 pub const DEFAULT_TAB_WIDTH: usize = 4;
 
@@ -71,6 +87,8 @@ pub struct Config {
     pub syntax: bool,
     /// Whether insert mode should auto-close supported bracket and quote pairs.
     pub auto_close_pairs: bool,
+    /// How insert mode should resolve indentation for newly created lines.
+    pub auto_indent: AutoIndentMode,
     /// Enabled advanced glyph capabilities.
     pub advanced_glyphs: BTreeSet<AdvancedGlyphCapability>,
     /// The configured insert-mode tab insertion setting.
@@ -93,6 +111,8 @@ pub struct PartialConfig {
     pub syntax: Option<bool>,
     /// Whether insert mode should auto-close supported bracket and quote pairs.
     pub auto_close_pairs: Option<bool>,
+    /// How insert mode should resolve indentation for newly created lines.
+    pub auto_indent: Option<AutoIndentMode>,
     /// Enabled advanced glyph capabilities in the config file.
     pub advanced_glyphs: Option<Vec<AdvancedGlyphCapability>>,
     /// The tab insertion setting stored in the config file.
@@ -161,6 +181,9 @@ impl Config {
         let auto_close_pairs = file
             .and_then(|config| config.auto_close_pairs)
             .unwrap_or(true);
+        let auto_indent = file
+            .and_then(|config| config.auto_indent)
+            .unwrap_or_default();
         let advanced_glyphs = file
             .and_then(|config| config.advanced_glyphs.as_ref())
             .map(|glyphs| glyphs.iter().cloned().collect::<BTreeSet<_>>())
@@ -180,6 +203,7 @@ impl Config {
             insert_escape,
             syntax,
             auto_close_pairs,
+            auto_indent,
             advanced_glyphs,
             tab_insertion,
             tab_behavior,
@@ -209,6 +233,7 @@ impl Default for Config {
             insert_escape: None,
             syntax: true,
             auto_close_pairs: true,
+            auto_indent: AutoIndentMode::default(),
             advanced_glyphs: BTreeSet::new(),
             tab_insertion: TabInsertion::default(),
             tab_behavior: TabBehavior::default(),
@@ -359,6 +384,7 @@ mod tests {
             insert_escape: Some("jk".to_string()),
             syntax: Some(false),
             auto_close_pairs: Some(false),
+            auto_indent: Some(AutoIndentMode::Neighbor),
             advanced_glyphs: Some(vec![AdvancedGlyphCapability::Nerdfont]),
             ..Default::default()
         };
@@ -376,8 +402,16 @@ mod tests {
         );
         assert!(!Config::resolve(Some(&file), None, None).syntax);
         assert!(!Config::resolve(Some(&file), None, None).auto_close_pairs);
+        assert_eq!(
+            Config::resolve(Some(&file), None, None).auto_indent,
+            AutoIndentMode::Neighbor
+        );
         assert!(Config::resolve(None, None, None).syntax);
         assert!(Config::resolve(None, None, None).auto_close_pairs);
+        assert_eq!(
+            Config::resolve(None, None, None).auto_indent,
+            AutoIndentMode::Off
+        );
         assert_eq!(Config::resolve(None, None, None).theme, DEFAULT_THEME);
         assert_eq!(Config::resolve(None, None, None).insert_escape, None);
         assert!(Config::resolve(None, None, None).advanced_glyphs.is_empty());
@@ -492,6 +526,38 @@ mod tests {
         assert_eq!(config.tab_insertion, TabInsertion::Tabs);
         assert_eq!(config.tab_behavior, TabBehavior::Smart);
         assert_eq!(config.tab_width, 8);
+    }
+
+    #[test]
+    fn load_from_locations_loads_auto_indent_mode() {
+        let home = unique_temp_dir("auto-indent-home");
+        write_config(&home, "auto_indent = \"neighbor\"");
+
+        let config = Config::load_from_locations(home, vec![], None, None).expect("should load");
+
+        assert_eq!(config.auto_indent, AutoIndentMode::Neighbor);
+    }
+
+    #[test]
+    fn load_from_locations_rejects_invalid_auto_indent_mode() {
+        let home = unique_temp_dir("auto-indent-invalid-home");
+        write_config(&home, "auto_indent = \"sideways\"");
+
+        let error = Config::load_from_locations(home, vec![], None, None).expect_err("should fail");
+
+        match error {
+            ConfigLoadError::Parse { .. } => {}
+            other => panic!("expected parse error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn load_from_locations_defaults_auto_indent_to_off() {
+        let home = unique_temp_dir("auto-indent-default-home");
+
+        let config = Config::load_from_locations(home, vec![], None, None).expect("should load");
+
+        assert_eq!(config.auto_indent, AutoIndentMode::Off);
     }
 
     #[test]

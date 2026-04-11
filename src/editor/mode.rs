@@ -30,6 +30,8 @@ pub trait Mode {
     fn is_waiting(&self) -> bool;
     /// Clears any buffered partial key sequence.
     fn clear_buffer(&mut self);
+    /// Appends additional committed insert text to the repeat capture, if supported.
+    fn append_repeat_text(&mut self, _text: &str) {}
     /// Returns committed insert text for the current mode, if it captured any.
     fn take_repeat_text(&mut self) -> Option<String> {
         None

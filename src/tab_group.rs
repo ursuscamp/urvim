@@ -104,6 +104,11 @@ impl TabGroup {
         self.active_window_mut().buffer_view_mut()
     }
 
+    /// Returns and clears any repeat-text suffix produced by the active window.
+    pub fn take_pending_repeat_suffix(&mut self) -> Option<String> {
+        self.active_window_mut().take_pending_repeat_suffix()
+    }
+
     /// Renders the tab group.
     pub fn render(&mut self, screen: &mut Screen, origin: Position, size: Size) {
         self.normalize_state();

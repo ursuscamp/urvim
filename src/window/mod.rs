@@ -91,6 +91,7 @@ pub struct Window {
     buffer_view: BufferView,
     render_data: RenderData,
     size: Size,
+    pending_repeat_suffix: Option<String>,
 }
 
 impl Window {
@@ -102,6 +103,7 @@ impl Window {
             buffer_view,
             render_data: RenderData::new(0),
             size: Size::default(),
+            pending_repeat_suffix: None,
         }
     }
 
@@ -111,6 +113,7 @@ impl Window {
             buffer_view: BufferView::from_buffer_id(buffer_id),
             render_data: RenderData::new(0),
             size: Size::default(),
+            pending_repeat_suffix: None,
         }
     }
 
@@ -128,6 +131,11 @@ impl Window {
 
     pub fn render_data(&self) -> &RenderData {
         &self.render_data
+    }
+
+    /// Returns and clears the repeat-text suffix produced by the last handled action.
+    pub fn take_pending_repeat_suffix(&mut self) -> Option<String> {
+        self.pending_repeat_suffix.take()
     }
 
     pub fn render(&mut self, screen: &mut Screen, origin: Position, size: Size) {

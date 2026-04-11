@@ -153,6 +153,8 @@ pub enum ActionKind {
     MoveRight,
     InsertChar(char),
     InsertText(String),
+    /// Insert a newline, letting the window decide whether to auto-indent it.
+    InsertNewline,
     Quit,
     ForwardTo(Boundary),
     BackTo(Boundary),
@@ -242,6 +244,11 @@ impl Action {
     /// Creates an insert-text action.
     pub fn insert_text(text: String) -> Self {
         Self::new(ActionKind::InsertText(text))
+    }
+
+    /// Creates an insert-newline action.
+    pub fn insert_newline() -> Self {
+        Self::new(ActionKind::InsertNewline)
     }
 
     /// Creates a motion that moves forward to the given boundary.
@@ -345,6 +352,7 @@ impl Action {
                 | Some(ActionKind::MoveToLineContentStart)
                 | Some(ActionKind::InsertChar(_))
                 | Some(ActionKind::InsertText(_))
+                | Some(ActionKind::InsertNewline)
                 | Some(ActionKind::DeleteBackward)
                 | Some(ActionKind::DeleteForward)
                 | Some(ActionKind::DeleteLine)
@@ -471,7 +479,8 @@ impl Action {
             | Some(ActionKind::OpenLineBelow)
             | Some(ActionKind::OpenLineAbove)
             | Some(ActionKind::ToggleLineComment)
-            | Some(ActionKind::InsertText(_)) => true,
+            | Some(ActionKind::InsertText(_))
+            | Some(ActionKind::InsertNewline) => true,
             Some(ActionKind::InsertChar(_)) => false,
             Some(ActionKind::Undo) | Some(ActionKind::Redo) => false,
             Some(ActionKind::Count(_, inner)) => inner.is_snapshottable(),
