@@ -251,7 +251,7 @@ mod tests {
 
     fn marker_style(theme: &str, marker: &str) -> Style {
         let fg = match theme {
-            "Friday Night" => Color::ansi(252),
+            "Friday Night" => Color::ansi(16),
             "Saturday Morning" => Color::ansi(231),
             "Rose Pine" => Color::Rgb(Rgb::new(25, 23, 36)),
             "Dracula" => Color::Rgb(Rgb::new(40, 42, 54)),
