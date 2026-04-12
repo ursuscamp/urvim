@@ -1474,6 +1474,22 @@ fn test_is_valid_cursor_multiline() {
     assert!(!buf.is_valid_cursor(Cursor::new(2, 0)));
 }
 
+#[test]
+fn test_sync_cursor_clamps_to_valid_grapheme_boundary() {
+    let buf = Buffer::from_str("a😀b");
+
+    assert_eq!(buf.sync_cursor(Cursor::new(0, 2)), Cursor::new(0, 1));
+    assert_eq!(buf.sync_cursor(Cursor::new(0, 4)), Cursor::new(0, 5));
+}
+
+#[test]
+fn test_sync_cursor_clamps_line_and_column_bounds() {
+    let buf = Buffer::from_str("hello\nworld");
+
+    assert_eq!(buf.sync_cursor(Cursor::new(3, 99)), Cursor::new(1, 5));
+    assert_eq!(buf.sync_cursor(Cursor::new(0, 99)), Cursor::new(0, 5));
+}
+
 // next_cursor tests
 
 #[test]

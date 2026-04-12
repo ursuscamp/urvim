@@ -28,8 +28,7 @@ impl Window {
     }
 
     pub(super) fn auto_indent_enabled(&self) -> bool {
-        globals::with_config(|config| config.auto_indent)
-            .unwrap_or_default()
+        globals::with_config(|config| config.auto_indent).unwrap_or_default()
             != crate::config::AutoIndentMode::Off
     }
 
@@ -49,9 +48,7 @@ impl Window {
         self.insert_char('\n');
 
         if let Some(prefix) = prefix.as_deref() {
-            if let Some(new_cursor) =
-                self.insert_prefix_on_line_range(cursor.line + 1, 1, prefix)
-            {
+            if let Some(new_cursor) = self.insert_prefix_on_line_range(cursor.line + 1, 1, prefix) {
                 self.buffer_view.set_cursor(new_cursor);
             }
         }
@@ -82,11 +79,9 @@ impl Window {
             self.buffer_view.set_cursor(new_cursor);
         }
 
-        if let Some(indentation) = line_indentation.filter(|indentation| !indentation.is_empty())
-        {
+        if let Some(indentation) = line_indentation.filter(|indentation| !indentation.is_empty()) {
             self.pending_repeat_suffix = Some(indentation.clone());
-            if let Some(new_cursor) =
-                self.insert_prefix_on_line_range(cursor.line, 1, &indentation)
+            if let Some(new_cursor) = self.insert_prefix_on_line_range(cursor.line, 1, &indentation)
             {
                 self.buffer_view.set_cursor(new_cursor);
             }
@@ -152,8 +147,8 @@ impl Window {
             return false;
         }
 
-        if let Some(new_cursor) = self
-            .shift_lines_indentation(cursor.line, 1, IndentDirection::Decrease)
+        if let Some(new_cursor) =
+            self.shift_lines_indentation(cursor.line, 1, IndentDirection::Decrease)
         {
             self.buffer_view.set_cursor(new_cursor);
         }
@@ -450,8 +445,7 @@ impl Window {
     fn handle_count_open_line_below(&mut self, count: usize) -> ActionResult {
         let cursor = self.buffer_view.cursor();
         let prefix = self.inferred_newline_prefix(cursor);
-        if let Some(new_cursor) =
-            self.insert_auto_indented_lines_after(cursor.line, count, prefix)
+        if let Some(new_cursor) = self.insert_auto_indented_lines_after(cursor.line, count, prefix)
         {
             self.buffer_view.set_cursor(new_cursor);
         }
@@ -461,8 +455,7 @@ impl Window {
     fn handle_count_open_line_above(&mut self, count: usize) -> ActionResult {
         let cursor = self.buffer_view.cursor();
         let prefix = self.inferred_newline_prefix(cursor);
-        if let Some(new_cursor) =
-            self.insert_auto_indented_lines_before(cursor.line, count, prefix)
+        if let Some(new_cursor) = self.insert_auto_indented_lines_before(cursor.line, count, prefix)
         {
             self.buffer_view.set_cursor(new_cursor);
         }

@@ -38,6 +38,48 @@ impl Buffer {
         }
     }
 
+    /// Normalizes a cursor so it lands on a valid grapheme boundary in the current buffer.
+    pub fn sync_cursor(&self, cursor: Cursor) -> Cursor {
+        let total_lines = self.line_count();
+        if total_lines == 0 {
+            return Cursor::new(0, 0);
+        }
+
+        let line_idx = cursor.line.min(total_lines - 1);
+        let line_len = self.line_len(line_idx);
+        let col = cursor.col.min(line_len);
+        let cursor = Cursor::new(line_idx, col);
+        if self.is_valid_cursor(cursor) {
+            return cursor;
+        }
+
+        let Some(line) = self.line_at(line_idx) else {
+            return cursor;
+        };
+        let mut previous_boundary = 0usize;
+
+        for (byte_offset, grapheme) in line.grapheme_indices(true) {
+            let next_boundary = byte_offset + grapheme.len();
+            if col <= byte_offset {
+                return Cursor::new(line_idx, byte_offset);
+            }
+            if col < next_boundary {
+                let left_distance = col - byte_offset;
+                let right_distance = next_boundary - col;
+                let synced_col = if right_distance < left_distance {
+                    next_boundary
+                } else {
+                    byte_offset
+                };
+                return Cursor::new(line_idx, synced_col);
+            }
+
+            previous_boundary = next_boundary;
+        }
+
+        Cursor::new(line_idx, previous_boundary.min(line_len))
+    }
+
     pub fn next_cursor(&self, cursor: Cursor) -> Option<Cursor> {
         let line_len = self.line_len(cursor.line);
         if cursor.col < line_len {

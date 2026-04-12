@@ -105,6 +105,15 @@ impl BufferView {
         self.cursor = cursor;
     }
 
+    /// Sets the cursor from stored state after syncing it against the current buffer.
+    pub fn set_cursor_synced(&mut self, cursor: Cursor) {
+        let synced_cursor = self
+            .with_buffer(|buffer| buffer.sync_cursor(cursor))
+            .unwrap_or(cursor);
+        self.cursor = synced_cursor;
+        self.remembered_visual_col = Some(self.current_visual_col());
+    }
+
     pub fn get_or_compute_target_col(&self) -> usize {
         if let Some(col) = self.remembered_visual_col {
             return col;
@@ -498,7 +507,8 @@ fn is_comment_tag(tag: &Tag) -> bool {
 fn is_standalone_word(text: &str, start_byte: usize, end_byte: usize) -> bool {
     let before = text[..start_byte].chars().next_back();
     let after = text[end_byte..].chars().next();
-    !matches!(before, Some(ch) if is_word_char(ch)) && !matches!(after, Some(ch) if is_word_char(ch))
+    !matches!(before, Some(ch) if is_word_char(ch))
+        && !matches!(after, Some(ch) if is_word_char(ch))
 }
 
 fn is_word_char(ch: char) -> bool {
@@ -603,7 +613,9 @@ mod tests {
     #[test]
     fn find_todo_matches_requires_standalone_case_sensitive_markers() {
         let markers = imbl::Vector::from_iter(
-            ["TODO", "FIXME", "BUG", "NOTE"].into_iter().map(SmolStr::new),
+            ["TODO", "FIXME", "BUG", "NOTE"]
+                .into_iter()
+                .map(SmolStr::new),
         );
         let matches = BufferView::find_todo_matches(
             "todo TODO FIXME FIXME123 BUG BUG123 NOTE NOTE123",
@@ -646,9 +658,7 @@ mod tests {
         });
 
         let render_data = view.build_render_data_with_style(Size::new(1, 80), theme_default_style);
-        let line = render_data
-            .get_line(0)
-            .expect("rendered line should exist");
+        let line = render_data.get_line(0).expect("rendered line should exist");
         assert!(
             line.iter()
                 .any(|chunk| chunk.text == "TODO" && chunk.style == expected_comment_style)
@@ -677,6 +687,9 @@ mod tests {
         let line = render_data.get_line(0).expect("rendered line should exist");
 
         assert!(line.iter().any(|chunk| chunk.text.contains("TODO")));
-        assert!(line.iter().all(|chunk| chunk.style == expected_default_style));
+        assert!(
+            line.iter()
+                .all(|chunk| chunk.style == expected_default_style)
+        );
     }
 }

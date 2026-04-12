@@ -82,6 +82,8 @@ impl NormalMode {
             "<GreaterThan><GreaterThan>",
             Action::new(ActionKind::IndentIncrease),
         );
+        trie_keymap.insert_str("<C-o>", Action::jump_backward());
+        trie_keymap.insert_str("<C-i>", Action::jump_forward());
         trie_keymap.insert_str("gcc", Action::toggle_line_comment());
         trie_keymap.insert_str("[b", Action::new(ActionKind::PreviousTab));
         trie_keymap.insert_str("]b", Action::new(ActionKind::NextTab));

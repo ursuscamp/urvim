@@ -425,8 +425,11 @@ mod tests {
     #[test]
     fn theme_returns_marker_specific_comment_styles() {
         let mut theme = theme("demo");
-        theme.syntax.insert(tag("comment.todo"), Style::new().fg(Color::ansi(22)));
-        theme.syntax
+        theme
+            .syntax
+            .insert(tag("comment.todo"), Style::new().fg(Color::ansi(22)));
+        theme
+            .syntax
             .insert(tag("comment.fixme"), Style::new().fg(Color::ansi(23)));
 
         assert_eq!(

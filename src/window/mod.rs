@@ -8,6 +8,7 @@
 mod commands;
 mod geometry;
 mod gutter;
+mod jumplist;
 mod motions;
 mod render;
 mod view;
@@ -92,6 +93,7 @@ pub struct Window {
     render_data: RenderData,
     size: Size,
     pending_repeat_suffix: Option<String>,
+    jumplist: jumplist::JumpList,
 }
 
 impl Window {
@@ -104,6 +106,7 @@ impl Window {
             render_data: RenderData::new(0),
             size: Size::default(),
             pending_repeat_suffix: None,
+            jumplist: jumplist::JumpList::new(),
         }
     }
 
@@ -114,6 +117,7 @@ impl Window {
             render_data: RenderData::new(0),
             size: Size::default(),
             pending_repeat_suffix: None,
+            jumplist: jumplist::JumpList::new(),
         }
     }
 
@@ -184,6 +188,42 @@ impl Window {
 
     pub fn set_cursor(&mut self, cursor: Cursor) {
         self.buffer_view.set_cursor(cursor);
+    }
+
+    /// Sets the cursor from stored state after syncing it to the current buffer.
+    pub fn set_cursor_synced(&mut self, cursor: Cursor) {
+        self.buffer_view.set_cursor_synced(cursor);
+    }
+
+    /// Records the active cursor position in the jumplist.
+    pub fn record_cursor_position(&mut self) {
+        let buffer_id = self.buffer_view.buffer_id();
+        let cursor = self.buffer_view.cursor();
+        let cursor = self
+            .buffer_view
+            .with_buffer(|buffer| buffer.sync_cursor(cursor))
+            .unwrap_or(cursor);
+        self.jumplist.record_cursor(buffer_id, cursor);
+    }
+
+    /// Moves backward in the jumplist, restoring the selected cursor if possible.
+    pub fn jump_list_back(&mut self) -> bool {
+        let Some(cursor) = self.jumplist.jump_back() else {
+            return false;
+        };
+        self.set_cursor_synced(cursor);
+        self.jumplist.sync_current_cursor(self.buffer_view.cursor());
+        true
+    }
+
+    /// Moves forward in the jumplist, restoring the selected cursor if possible.
+    pub fn jump_list_forward(&mut self) -> bool {
+        let Some(cursor) = self.jumplist.jump_forward() else {
+            return false;
+        };
+        self.set_cursor_synced(cursor);
+        self.jumplist.sync_current_cursor(self.buffer_view.cursor());
+        true
     }
 }
 

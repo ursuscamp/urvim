@@ -589,7 +589,9 @@ fn test_window_render_skips_todo_markers_when_syntax_is_disabled() {
 
 #[test]
 fn test_open_line_below_uses_neighbor_indent() {
-    let mut window = Window::new(Buffer::from_str("    fn main() {\n  println!(\"hi\");\n    }"));
+    let mut window = Window::new(Buffer::from_str(
+        "    fn main() {\n  println!(\"hi\");\n    }",
+    ));
     let _config_guard = globals::set_test_config(auto_indent_test_config(AutoIndentMode::Neighbor));
     window.set_cursor(Cursor::new(0, 4));
 
@@ -606,7 +608,9 @@ fn test_open_line_below_uses_neighbor_indent() {
 
 #[test]
 fn test_open_line_above_uses_neighbor_indent() {
-    let mut window = Window::new(Buffer::from_str("  fn main() {\n    println!(\"hi\");\n  }"));
+    let mut window = Window::new(Buffer::from_str(
+        "  fn main() {\n    println!(\"hi\");\n  }",
+    ));
     let _config_guard = globals::set_test_config(auto_indent_test_config(AutoIndentMode::Neighbor));
     window.set_cursor(Cursor::new(1, 4));
 
@@ -623,7 +627,9 @@ fn test_open_line_above_uses_neighbor_indent() {
 
 #[test]
 fn test_insert_newline_uses_neighbor_indent_and_reports_suffix() {
-    let mut window = Window::new(Buffer::from_str("    fn main() {\n  println!(\"hi\");\n    }"));
+    let mut window = Window::new(Buffer::from_str(
+        "    fn main() {\n  println!(\"hi\");\n    }",
+    ));
     let _config_guard = globals::set_test_config(auto_indent_test_config(AutoIndentMode::Neighbor));
     let line_end = window.buffer_view().line_len(0);
     window.set_cursor(Cursor::new(0, line_end));
@@ -650,14 +656,19 @@ fn test_change_line_preserves_current_indentation_when_auto_indent_is_enabled() 
         window.process_action(&Action::new(ActionKind::ChangeLine).with_to_mode(ModeKind::Insert)),
         ActionResult::Handled
     );
-    assert_eq!(buffer_text(window.buffer_view()), "    \n  println!(\"hi\");");
+    assert_eq!(
+        buffer_text(window.buffer_view()),
+        "    \n  println!(\"hi\");"
+    );
     assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 4));
     assert_eq!(window.take_pending_repeat_suffix().as_deref(), Some("    "));
 }
 
 #[test]
 fn test_insert_newline_reports_no_suffix_when_disabled() {
-    let mut window = Window::new(Buffer::from_str("    fn main() {\n  println!(\"hi\");\n    }"));
+    let mut window = Window::new(Buffer::from_str(
+        "    fn main() {\n  println!(\"hi\");\n    }",
+    ));
     let _config_guard = globals::set_test_config(auto_indent_test_config(AutoIndentMode::Off));
     let line_end = window.buffer_view().line_len(0);
     window.set_cursor(Cursor::new(0, line_end));
@@ -719,7 +730,10 @@ fn test_counted_indent_decrease_shifts_multiple_lines() {
         ),
         ActionResult::Handled
     );
-    assert_eq!(buffer_text(window.buffer_view()), "hello\n    world\n  done");
+    assert_eq!(
+        buffer_text(window.buffer_view()),
+        "hello\n    world\n  done"
+    );
     assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 0));
 }
 
@@ -744,7 +758,9 @@ fn test_insert_mode_backspace_dedents_inside_leading_whitespace() {
     window.set_cursor(Cursor::new(0, 2));
 
     assert_eq!(
-        window.process_action(&Action::new(ActionKind::DeleteBackward).with_from_mode(ModeKind::Insert)),
+        window.process_action(
+            &Action::new(ActionKind::DeleteBackward).with_from_mode(ModeKind::Insert)
+        ),
         ActionResult::Handled
     );
     assert_eq!(buffer_text(window.buffer_view()), "hello");
@@ -757,7 +773,9 @@ fn test_insert_mode_backspace_keeps_plain_deletion_outside_indentation() {
     window.set_cursor(Cursor::new(0, 5));
 
     assert_eq!(
-        window.process_action(&Action::new(ActionKind::DeleteBackward).with_from_mode(ModeKind::Insert)),
+        window.process_action(
+            &Action::new(ActionKind::DeleteBackward).with_from_mode(ModeKind::Insert)
+        ),
         ActionResult::Handled
     );
     assert_eq!(buffer_text(window.buffer_view()), "    ello");
@@ -1785,6 +1803,79 @@ fn test_pair_delete_undo_and_redo_restore_exact_states() {
     }
     assert_eq!(buffer_text(window.buffer_view()), "");
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
+}
+
+#[test]
+fn test_jumplist_navigation_updates_and_branches() {
+    let buffer = Buffer::from_str("a\nabcdefghijklmnopqrst\nb\nc\nd\ne\nf\ng\nh\ni\nj");
+    let mut window = Window::new(buffer);
+
+    window.buffer_view.set_cursor(Cursor::new(0, 0));
+    window.record_cursor_position();
+
+    assert_eq!(
+        window.process_action(&Action::new(ActionKind::MoveDown)),
+        ActionResult::Handled
+    );
+    assert_eq!(window.buffer_view.cursor(), Cursor::new(1, 0));
+
+    assert_eq!(
+        window.process_action(&Action::new(ActionKind::MoveToLastLine)),
+        ActionResult::Handled
+    );
+    assert_eq!(window.buffer_view.cursor(), Cursor::new(10, 0));
+
+    assert_eq!(
+        window.process_action(&Action::jump_backward()),
+        ActionResult::Handled
+    );
+    assert_eq!(window.buffer_view.cursor(), Cursor::new(1, 0));
+
+    assert_eq!(
+        window.process_action(&Action::new(ActionKind::MoveRight)),
+        ActionResult::Handled
+    );
+    assert_eq!(window.buffer_view.cursor(), Cursor::new(1, 1));
+
+    assert_eq!(
+        window.process_action(&Action::jump_forward()),
+        ActionResult::Handled
+    );
+    assert_eq!(window.buffer_view.cursor(), Cursor::new(10, 0));
+
+    assert_eq!(
+        window.process_action(&Action::jump_backward()),
+        ActionResult::Handled
+    );
+    assert_eq!(window.buffer_view.cursor(), Cursor::new(1, 1));
+
+    assert_eq!(
+        window.process_action(&Action::new(ActionKind::MoveToLineEnd)),
+        ActionResult::Handled
+    );
+    assert_eq!(window.buffer_view.cursor(), Cursor::new(1, 19));
+
+    assert_eq!(
+        window.process_action(&Action::jump_forward()),
+        ActionResult::Handled
+    );
+    assert_eq!(window.buffer_view.cursor(), Cursor::new(1, 19));
+}
+
+#[test]
+fn test_set_cursor_synced_normalizes_stored_cursor_after_buffer_change() {
+    let buffer = Buffer::from_str("a😀b");
+    let mut window = Window::new(buffer);
+
+    window
+        .buffer_view
+        .with_buffer_mut(|buffer| buffer.remove(Cursor::new(0, 0), Cursor::new(0, 1)))
+        .unwrap_or(());
+
+    window.set_cursor_synced(Cursor::new(0, 3));
+
+    assert_eq!(buffer_text(window.buffer_view()), "😀b");
+    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 4));
 }
 
 #[test]

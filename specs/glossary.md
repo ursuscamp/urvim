@@ -46,6 +46,13 @@ A position in the buffer represented by `line` and `col` (byte position within l
 ### Cursor On a Character
 In normal mode, the block cursor visually covers a character, indicating the cursor is positioned **before** that character. The notation "cursor on 'o'" means the cursor is positioned between the preceding character and 'o', i.e., "hell|o" represents cursor on 'o'. This is the Vim convention where the cursor selects the character beneath it.
 
+### Cursor Sync
+The process of normalizing a cursor position so it lands on a valid grapheme boundary before the editor stores or restores it. Cursor sync prevents persisted or recorded positions from pointing at invalid byte offsets after the buffer has changed.
+
+**Context:** Cursor storage, jumplist restoration, buffer mutation, Unicode safety
+
+**Related Terms:** Cursor, Grapheme Cluster, Jumplist, Buffer
+
 ### Action
 An enum representing operations that the editor can perform in response to keypresses. Examples include `MoveLeft`, `MoveDown`, `InsertChar`, `SwitchToNormal`, etc.
 
@@ -174,6 +181,13 @@ A nested syntax that is resolved from the text inside a surrounding syntax rule,
 **Context:** Injected highlighting, Markdown fences, nested highlighting
 
 **Related Terms:** Injection Rule, Syntax Definition, Syntax Highlighting
+
+### Jumplist
+A per-window navigation history that stores meaningful cursor locations so the editor can jump backward and forward through recent positions. A jumplist entry identifies both the buffer and the cursor position within that buffer.
+
+**Context:** Window navigation, cursor history, jump actions
+
+**Related Terms:** Window, Buffer, Cursor
 
 ### Syntax Alias
 A secondary language name declared in syntax metadata that resolves to the same syntax definition as the canonical syntax name. Syntax alias labels are used for injected language names such as Markdown fence tags and other user-provided selectors.

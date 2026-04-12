@@ -108,6 +108,14 @@ fn test_normal_mode_page_keys() {
         handle_and_unwrap(&mut mode, &ctrl_key('d')),
         Action::new(ActionKind::MoveHalfPageDown)
     );
+    assert_eq!(
+        handle_and_unwrap(&mut mode, &ctrl_key('o')),
+        Action::jump_backward()
+    );
+    assert_eq!(
+        handle_and_unwrap(&mut mode, &ctrl_key('i')),
+        Action::jump_forward()
+    );
 }
 
 #[test]
@@ -195,7 +203,10 @@ fn test_insert_mode_shift_tab_binds_to_indent_decrease() {
     let mut mode = InsertMode::new();
 
     assert_eq!(
-        handle_and_unwrap(&mut mode, &Key::with_modifiers(KeyCode::Tab, Modifiers::SHIFT)),
+        handle_and_unwrap(
+            &mut mode,
+            &Key::with_modifiers(KeyCode::Tab, Modifiers::SHIFT)
+        ),
         Action::new(ActionKind::IndentDecrease)
     );
 }
@@ -262,7 +273,9 @@ fn test_insert_mode_page_keys() {
 
 #[test]
 fn test_insert_mode_enter_emits_plain_newline() {
-    let _guard = set_test_config(configured_test_config_with_auto_indent(AutoIndentMode::Neighbor));
+    let _guard = set_test_config(configured_test_config_with_auto_indent(
+        AutoIndentMode::Neighbor,
+    ));
     let mut mode = InsertMode::new();
 
     assert_eq!(
@@ -1068,6 +1081,21 @@ fn test_change_operation_traits() {
         counted_insert_action.kind.as_ref(),
         Some(ActionKind::Count(2, inner)) if inner.to_mode == Some(ModeKind::Insert)
     ));
+}
+
+#[test]
+fn test_jump_action_traits() {
+    let backward = Action::jump_backward();
+    let forward = Action::jump_forward();
+
+    assert!(!backward.is_countable());
+    assert!(!forward.is_countable());
+    assert!(!backward.is_snapshottable());
+    assert!(!forward.is_snapshottable());
+    assert!(!backward.uses_remembered_column());
+    assert!(!forward.uses_remembered_column());
+    assert!(!backward.updates_snapshot_cursor());
+    assert!(!forward.updates_snapshot_cursor());
 }
 
 #[test]

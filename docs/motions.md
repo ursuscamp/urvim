@@ -28,6 +28,8 @@ This document describes the motions implemented in urvim and how they differ fro
 | `PageDown` | Move down one page |
 | `Ctrl-U` | Move up half a page |
 | `Ctrl-D` | Move down half a page |
+| `Ctrl-O` | Jump backward through the current window's jumplist |
+| `Ctrl-I` | Jump forward through the current window's jumplist |
 | `{` | Move to blank line before the previous paragraph |
 | `}` | Move to blank line before the next paragraph |
 | `a` | Append after cursor (enter insert mode) |
@@ -210,6 +212,22 @@ Example: On "hello" (cursor at 'e'):
 Example: On "hello" (cursor at or past 'o'):
 - Vim: `$` -> stays at end of line
 - urvim: `$` -> wraps to end of next line (if available)
+
+## Jumplist Navigation
+
+### Ctrl-O - Jump Backward
+
+Moves backward through the current window's jumplist.
+
+- **Count**: No
+- **Vim difference**: Matches Vim's backward jumplist navigation semantics at a high level, but urvim currently keeps the history session-local and window-local only.
+
+### Ctrl-I - Jump Forward
+
+Moves forward through the current window's jumplist.
+
+- **Count**: No
+- **Vim difference**: Matches Vim's forward jumplist navigation semantics at a high level, but urvim currently keeps the history session-local and window-local only.
 
 ### 0 - Line Start
 

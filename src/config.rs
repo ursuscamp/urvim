@@ -12,8 +12,8 @@ use std::fs;
 use std::path::PathBuf;
 
 use crate::editor::validate_key_string;
-use imbl::Vector;
 use crate::theme::Tag;
+use imbl::Vector;
 use smol_str::SmolStr;
 
 const DEFAULT_THEME: &str = "Friday Night";

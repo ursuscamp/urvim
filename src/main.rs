@@ -111,7 +111,11 @@ fn main() -> io::Result<()> {
                                 .with_buffer_mut(|buffer| buffer.undo())
                                 .flatten()
                             {
-                                layout.active_buffer_view_mut().set_cursor(cursor);
+                                layout.active_buffer_view_mut().set_cursor_synced(cursor);
+                                layout
+                                    .tab_group_mut()
+                                    .active_window_mut()
+                                    .record_cursor_position();
                             }
                         }
                         Some(ActionKind::Redo) => {
@@ -120,7 +124,11 @@ fn main() -> io::Result<()> {
                                 .with_buffer_mut(|buffer| buffer.redo())
                                 .flatten()
                             {
-                                layout.active_buffer_view_mut().set_cursor(cursor);
+                                layout.active_buffer_view_mut().set_cursor_synced(cursor);
+                                layout
+                                    .tab_group_mut()
+                                    .active_window_mut()
+                                    .record_cursor_position();
                             }
                         }
                         _ => {
@@ -209,8 +217,7 @@ fn main() -> io::Result<()> {
                                         _ => { /* Should have been handled by window */ }
                                     }
                                 } else if action_result == ActionResult::Handled {
-                                    let pending_repeat_suffix =
-                                        layout.take_pending_repeat_suffix();
+                                    let pending_repeat_suffix = layout.take_pending_repeat_suffix();
                                     if dispatch_action.switches_to_insert_mode() {
                                         mode = Box::new(InsertMode::new());
                                         terminal.set_cursor_style(mode.cursor_style())?;
@@ -553,5 +560,4 @@ mod tests {
         assert_eq!(text, "hello world");
         assert_eq!(layout.active_buffer_view().cursor(), Cursor::new(0, 6));
     }
-
 }

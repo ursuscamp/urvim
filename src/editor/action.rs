@@ -171,6 +171,10 @@ pub enum ActionKind {
     MoveHalfPageUp,
     /// Move down by half of the viewport height.
     MoveHalfPageDown,
+    /// Move backward through the current window's jumplist.
+    JumpBackward,
+    /// Move forward through the current window's jumplist.
+    JumpForward,
     MoveToScreenTop,
     MoveToScreenMiddle,
     MoveToScreenBottom,
@@ -293,6 +297,16 @@ impl Action {
     /// Creates a line-comment toggle action.
     pub fn toggle_line_comment() -> Self {
         Self::new(ActionKind::ToggleLineComment)
+    }
+
+    /// Creates a jumplist backward navigation action.
+    pub fn jump_backward() -> Self {
+        Self::new(ActionKind::JumpBackward)
+    }
+
+    /// Creates a jumplist forward navigation action.
+    pub fn jump_forward() -> Self {
+        Self::new(ActionKind::JumpForward)
     }
 
     /// Wraps an action in a repeat count.
@@ -449,13 +463,13 @@ impl Action {
                 | Some(ActionKind::MoveToLineContentStart)
                 | Some(ActionKind::MoveToFirstLine)
                 | Some(ActionKind::MoveToLastLine)
-            | Some(ActionKind::AppendToLineEnd)
-            | Some(ActionKind::InsertAtLineStart)
-            | Some(ActionKind::ToggleLineComment)
-            | Some(ActionKind::IndentDecrease)
-            | Some(ActionKind::IndentIncrease)
-            | Some(ActionKind::PreviousTab)
-            | Some(ActionKind::NextTab)
+                | Some(ActionKind::AppendToLineEnd)
+                | Some(ActionKind::InsertAtLineStart)
+                | Some(ActionKind::ToggleLineComment)
+                | Some(ActionKind::IndentDecrease)
+                | Some(ActionKind::IndentIncrease)
+                | Some(ActionKind::PreviousTab)
+                | Some(ActionKind::NextTab)
         )
     }
 

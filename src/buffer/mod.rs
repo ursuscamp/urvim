@@ -37,9 +37,9 @@
 mod boundary;
 mod bracket_text_object;
 mod comment;
-mod indent;
 mod cursor;
 mod edit;
+mod indent;
 mod io;
 mod operator_target;
 mod pool;
@@ -51,8 +51,8 @@ mod text_object;
 mod undo;
 mod unicode;
 
-pub use pool::{BufferId, BufferPool};
 pub use indent::IndentDirection;
+pub use pool::{BufferId, BufferPool};
 pub use syntax::SyntaxSpan;
 pub use unicode::{
     char_width, configured_tab_width, display_char_width, display_grapheme_width, display_width_at,

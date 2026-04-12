@@ -39,7 +39,11 @@ impl Buffer {
     }
 
     /// Shifts the indentation of the given line by one step and returns the number of bytes changed.
-    pub fn shift_line_indentation(&mut self, line_idx: usize, direction: IndentDirection) -> Option<usize> {
+    pub fn shift_line_indentation(
+        &mut self,
+        line_idx: usize,
+        direction: IndentDirection,
+    ) -> Option<usize> {
         let _ = self.line_at(line_idx)?;
         match direction {
             IndentDirection::Increase => self.increase_line_indentation(line_idx),
@@ -85,25 +89,26 @@ impl Buffer {
 
         let mut best: Option<(usize, usize, String)> = None;
 
-        let consider = |line_idx: usize, order: usize, best: &mut Option<(usize, usize, String)>| {
-            let Some(line) = self.line_at(line_idx).map(|line| line.as_ref()) else {
-                return;
-            };
-            let Some((prefix, width)) = leading_whitespace_prefix(line) else {
-                return;
-            };
+        let consider =
+            |line_idx: usize, order: usize, best: &mut Option<(usize, usize, String)>| {
+                let Some(line) = self.line_at(line_idx).map(|line| line.as_ref()) else {
+                    return;
+                };
+                let Some((prefix, width)) = leading_whitespace_prefix(line) else {
+                    return;
+                };
 
-            let replace = match best {
-                Some((best_width, best_order, _)) => {
-                    width > *best_width || (width == *best_width && order < *best_order)
+                let replace = match best {
+                    Some((best_width, best_order, _)) => {
+                        width > *best_width || (width == *best_width && order < *best_order)
+                    }
+                    None => true,
+                };
+
+                if replace {
+                    *best = Some((width, order, prefix));
                 }
-                None => true,
             };
-
-            if replace {
-                *best = Some((width, order, prefix));
-            }
-        };
 
         consider(cursor.line, 0, &mut best);
         if cursor.line > 0 {
@@ -159,9 +164,9 @@ fn leading_whitespace_prefix(line: &str) -> Option<(String, usize)> {
         .chars()
         .take_while(|ch| matches!(ch, ' ' | '\t'))
         .collect::<String>();
-    let width = prefix.chars().fold(0, |acc, ch| {
-        acc + if ch == '\t' { tab_width } else { 1 }
-    });
+    let width = prefix
+        .chars()
+        .fold(0, |acc, ch| acc + if ch == '\t' { tab_width } else { 1 });
     if prefix.is_empty() {
         None
     } else {

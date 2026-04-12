@@ -242,8 +242,8 @@ fn resolve_palette_reference(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::theme::{Tag, ThemeRegistry};
     use crate::terminal::Rgb;
+    use crate::theme::{Tag, ThemeRegistry};
 
     fn tag(value: &str) -> Tag {
         Tag::parse(value).expect("valid tag")
@@ -634,8 +634,7 @@ variable = { fg = "base" }
             for marker in ["todo", "fixme", "bug", "note"] {
                 let style = theme.syntax_style_for_tag(&tag(&format!("comment.{marker}")));
                 assert_ne!(
-                    style,
-                    comment_style,
+                    style, comment_style,
                     "{name} should expose a distinct {marker} style"
                 );
                 assert_eq!(
