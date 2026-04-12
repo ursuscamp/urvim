@@ -146,7 +146,7 @@ fn parse_escape_seq_with_buffer(buf: &mut ByteBuffer) -> Event {
     }
 
     // CSI: \x1b[params;modifier@A - Standard CSI sequences
-    // Arrow keys, function keys, Home/End with optional modifiers
+    // Arrow keys, function keys, Home/End, and reverse-tab with optional modifiers
     if let Some((consumed, event)) = try_parse_csi(data) {
         buf.consume(if skip_esc { 1 + consumed } else { consumed });
         return event;
@@ -304,6 +304,7 @@ pub fn try_parse_csi(data: &[u8]) -> Option<(usize, Event)> {
         b'D' => KeyCode::Left,
         b'H' => KeyCode::Home,
         b'F' => KeyCode::End,
+        b'Z' => KeyCode::Tab,
         b'P' => KeyCode::F1,
         b'Q' => KeyCode::F2,
         b'R' => KeyCode::F3,
@@ -311,7 +312,11 @@ pub fn try_parse_csi(data: &[u8]) -> Option<(usize, Event)> {
         _ => return None,
     };
 
-    let modifiers = parse_modifiers_from_params(params, final_byte_pos);
+    let modifiers = if *final_byte == b'Z' {
+        parse_modifiers_from_params(params, final_byte_pos) | Modifiers::SHIFT
+    } else {
+        parse_modifiers_from_params(params, final_byte_pos)
+    };
 
     let consumed = 1 + final_byte_pos + 1;
     Some((consumed, key.with_modifiers(modifiers).event()))

@@ -139,6 +139,30 @@ fn test_normal_mode_append_after_cursor_sets_insert_mode() {
 }
 
 #[test]
+fn test_normal_mode_indent_bindings() {
+    let mut mode = NormalMode::new();
+
+    assert!(matches!(
+        mode.handle_key(&key('<')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert_eq!(
+        handle_and_unwrap(&mut mode, &key('<')),
+        Action::new(ActionKind::IndentDecrease)
+    );
+
+    let mut mode = NormalMode::new();
+    assert!(matches!(
+        mode.handle_key(&key('>')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert_eq!(
+        handle_and_unwrap(&mut mode, &key('>')),
+        Action::new(ActionKind::IndentIncrease)
+    );
+}
+
+#[test]
 fn test_normal_mode_dot_repeat_action() {
     let mut mode = NormalMode::new();
     assert_eq!(
@@ -162,6 +186,17 @@ fn test_insert_mode_escape_switches_to_normal() {
     assert_eq!(
         handle_and_unwrap(&mut mode, &Key::new(crate::terminal::KeyCode::Esc)),
         Action::mode_transition(ModeKind::Normal)
+    );
+}
+
+#[test]
+fn test_insert_mode_shift_tab_binds_to_indent_decrease() {
+    let _guard = set_test_config(configured_test_config(None));
+    let mut mode = InsertMode::new();
+
+    assert_eq!(
+        handle_and_unwrap(&mut mode, &Key::with_modifiers(KeyCode::Tab, Modifiers::SHIFT)),
+        Action::new(ActionKind::IndentDecrease)
     );
 }
 
@@ -988,6 +1023,8 @@ fn test_action_with_count() {
 #[test]
 fn test_dot_repeat_source_classification() {
     assert!(Action::new(ActionKind::DeleteLine).is_dot_repeat_source());
+    assert!(Action::new(ActionKind::IndentDecrease).is_dot_repeat_source());
+    assert!(Action::new(ActionKind::IndentIncrease).is_dot_repeat_source());
     assert!(!Action::mode_transition(ModeKind::Insert).is_dot_repeat_source());
     assert!(
         Action::operation(
@@ -998,6 +1035,19 @@ fn test_dot_repeat_source_classification() {
     );
     assert!(!Action::new(ActionKind::MoveDown).is_dot_repeat_source());
     assert!(!Action::new(ActionKind::RepeatLastChange).is_dot_repeat_source());
+}
+
+#[test]
+fn test_indent_action_traits() {
+    let decrease = Action::new(ActionKind::IndentDecrease);
+    let increase = Action::new(ActionKind::IndentIncrease);
+
+    assert!(decrease.is_countable());
+    assert!(increase.is_countable());
+    assert!(decrease.is_line_action());
+    assert!(increase.is_line_action());
+    assert!(decrease.is_snapshottable());
+    assert!(increase.is_snapshottable());
 }
 
 #[test]

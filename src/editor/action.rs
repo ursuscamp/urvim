@@ -186,6 +186,10 @@ pub enum ActionKind {
     InsertAtLineStart,
     OpenLineBelow,
     OpenLineAbove,
+    /// Shift the current line or line range left by one indentation step.
+    IndentDecrease,
+    /// Shift the current line or line range right by one indentation step.
+    IndentIncrease,
     /// Toggle the current line's comment prefix.
     ToggleLineComment,
     PreviousTab,
@@ -360,6 +364,8 @@ impl Action {
                 | Some(ActionKind::ChangeToLineEnd)
                 | Some(ActionKind::JoinWithSpace)
                 | Some(ActionKind::JoinWithoutSpace)
+                | Some(ActionKind::IndentDecrease)
+                | Some(ActionKind::IndentIncrease)
                 | Some(ActionKind::AppendAfterCursor)
                 | Some(ActionKind::AppendToLineEnd)
                 | Some(ActionKind::InsertAtLineStart)
@@ -411,6 +417,8 @@ impl Action {
                 | Some(ActionKind::MoveToScreenBottom)
                 | Some(ActionKind::JoinWithSpace)
                 | Some(ActionKind::JoinWithoutSpace)
+                | Some(ActionKind::IndentDecrease)
+                | Some(ActionKind::IndentIncrease)
                 | Some(ActionKind::DeleteLine)
                 | Some(ActionKind::ChangeLine)
                 | Some(ActionKind::ChangeToLineEnd)
@@ -441,11 +449,13 @@ impl Action {
                 | Some(ActionKind::MoveToLineContentStart)
                 | Some(ActionKind::MoveToFirstLine)
                 | Some(ActionKind::MoveToLastLine)
-                | Some(ActionKind::AppendToLineEnd)
-                | Some(ActionKind::InsertAtLineStart)
-                | Some(ActionKind::ToggleLineComment)
-                | Some(ActionKind::PreviousTab)
-                | Some(ActionKind::NextTab)
+            | Some(ActionKind::AppendToLineEnd)
+            | Some(ActionKind::InsertAtLineStart)
+            | Some(ActionKind::ToggleLineComment)
+            | Some(ActionKind::IndentDecrease)
+            | Some(ActionKind::IndentIncrease)
+            | Some(ActionKind::PreviousTab)
+            | Some(ActionKind::NextTab)
         )
     }
 
@@ -473,6 +483,8 @@ impl Action {
             | Some(ActionKind::ChangeToLineEnd)
             | Some(ActionKind::JoinWithSpace)
             | Some(ActionKind::JoinWithoutSpace)
+            | Some(ActionKind::IndentDecrease)
+            | Some(ActionKind::IndentIncrease)
             | Some(ActionKind::AppendAfterCursor)
             | Some(ActionKind::AppendToLineEnd)
             | Some(ActionKind::InsertAtLineStart)
@@ -535,6 +547,8 @@ impl Action {
             | Some(ActionKind::DeleteLine)
             | Some(ActionKind::ChangeLine)
             | Some(ActionKind::ChangeToLineEnd)
+            | Some(ActionKind::IndentDecrease)
+            | Some(ActionKind::IndentIncrease)
             | Some(ActionKind::AppendAfterCursor)
             | Some(ActionKind::AppendToLineEnd)
             | Some(ActionKind::InsertAtLineStart)

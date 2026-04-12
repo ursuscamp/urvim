@@ -3600,6 +3600,58 @@ fn test_inferred_auto_indent_prefix_ignores_blank_lines() {
     assert_eq!(buf.inferred_auto_indent_prefix(Cursor::new(1, 0)), None);
 }
 
+#[test]
+fn test_shift_line_indentation_increases_and_decreases_with_spaces() {
+    let _guard = globals::set_test_config(Config {
+        tab_width: 4,
+        ..Default::default()
+    });
+    let mut buf = Buffer::from_str("hello");
+
+    assert_eq!(buf.increase_line_indentation(0), Some(4));
+    assert_eq!(buf.as_str(), "    hello");
+    assert_eq!(buf.decrease_line_indentation(0), Some(4));
+    assert_eq!(buf.as_str(), "hello");
+}
+
+#[test]
+fn test_shift_line_indentation_uses_tabs_when_buffer_style_is_tabs() {
+    let _guard = globals::set_test_config(Config {
+        tab_width: 4,
+        ..Default::default()
+    });
+    let mut buf = Buffer::from_str("fn main() {\n\t\tprintln!(\"hi\");");
+
+    assert_eq!(buf.decrease_line_indentation(1), Some(1));
+    assert_eq!(buf.as_str(), "fn main() {\n\tprintln!(\"hi\");");
+}
+
+#[test]
+fn test_shift_line_indentation_preserves_mixed_remaining_prefix() {
+    let _guard = globals::set_test_config(Config {
+        tab_width: 4,
+        ..Default::default()
+    });
+    let mut buf = Buffer::from_str("\t  hello");
+
+    assert_eq!(buf.decrease_line_indentation(0), Some(1));
+    assert_eq!(buf.as_str(), "  hello");
+}
+
+#[test]
+fn test_shift_line_indentation_stops_at_column_zero() {
+    let _guard = globals::set_test_config(Config {
+        tab_width: 4,
+        ..Default::default()
+    });
+    let mut buf = Buffer::from_str("  hello");
+
+    assert_eq!(buf.decrease_line_indentation(0), Some(2));
+    assert_eq!(buf.as_str(), "hello");
+    assert_eq!(buf.decrease_line_indentation(0), Some(0));
+    assert_eq!(buf.as_str(), "hello");
+}
+
 // Paragraph motion tests
 
 #[test]

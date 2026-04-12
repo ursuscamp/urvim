@@ -666,6 +666,12 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_shift_tab_canonical_string() {
+        let key = Key::with_modifiers(KeyCode::Tab, Modifiers::SHIFT);
+        assert_eq!(key.canonical_string(), "<S-Tab>");
+    }
+
     // ==================== Special Keys with Modifiers ====================
 
     #[test]

@@ -1,5 +1,5 @@
 use super::{Action, ActionKind, HandleKeyResult, Mode, ModeKind, TrieKeymap};
-use crate::buffer::{Buffer, Cursor};
+use crate::buffer::{Buffer, Cursor, IndentDirection};
 use crate::config::{DEFAULT_TAB_WIDTH, TabBehavior, TabInsertion};
 use crate::editor::pairs;
 use crate::editor::validate_key_string;
@@ -35,6 +35,7 @@ impl InsertMode {
         keymap.insert_str("<C-u>", Action::new(ActionKind::MoveHalfPageUp));
         keymap.insert_str("<C-d>", Action::new(ActionKind::MoveHalfPageDown));
         keymap.insert_str("<Enter>", Action::insert_newline());
+        keymap.insert_str("<S-Tab>", Action::new(ActionKind::IndentDecrease));
         keymap.insert_str("<Backspace>", Action::new(ActionKind::DeleteBackward));
         keymap.insert_str("<Delete>", Action::new(ActionKind::DeleteForward));
         globals::with_opt_config(|config| {
@@ -132,6 +133,24 @@ impl InsertMode {
     }
 
     fn record_delete_backward(&mut self) {
+        let prefix_len = self
+            .repeat_capture
+            .line_leading_whitespace_prefix(self.repeat_cursor.line)
+            .map(|prefix| prefix.len())
+            .unwrap_or(0);
+        if prefix_len > 0
+            && self.repeat_cursor.col <= prefix_len
+            && let Some(delta) = self
+                .repeat_capture
+                .shift_line_indentation(self.repeat_cursor.line, IndentDirection::Decrease)
+        {
+            self.repeat_cursor = Cursor::new(
+                self.repeat_cursor.line,
+                self.repeat_cursor.col.saturating_sub(delta),
+            );
+            return;
+        }
+
         if self.auto_close_pairs
             && let Some(opening) = self.repeat_capture.char_before_cursor(self.repeat_cursor)
             && let Some(closing) = self.repeat_capture.char_at_cursor(self.repeat_cursor)
@@ -254,7 +273,7 @@ impl Mode for InsertMode {
             return HandleKeyResult::Complete(action);
         }
 
-        if key.code == KeyCode::Tab {
+        if key.code == KeyCode::Tab && !key.modifiers.has_shift() {
             self.buffer.clear();
             self.waiting = false;
             let action =

@@ -183,9 +183,33 @@ impl Widget for Window {
             }
             Some(ActionKind::DeleteBackward) => {
                 if insert_mode {
-                    self.delete_insert_char_before_cursor();
+                    if !self.delete_insert_indent_before_cursor() {
+                        self.delete_insert_char_before_cursor();
+                    }
                 } else {
                     self.delete_char_before_cursor();
+                }
+                ActionResult::Handled
+            }
+            Some(ActionKind::IndentDecrease) => {
+                let cursor = self.buffer_view.cursor();
+                if let Some(new_cursor) = self.shift_lines_indentation(
+                    cursor.line,
+                    1,
+                    crate::buffer::IndentDirection::Decrease,
+                ) {
+                    self.buffer_view.set_cursor(new_cursor);
+                }
+                ActionResult::Handled
+            }
+            Some(ActionKind::IndentIncrease) => {
+                let cursor = self.buffer_view.cursor();
+                if let Some(new_cursor) = self.shift_lines_indentation(
+                    cursor.line,
+                    1,
+                    crate::buffer::IndentDirection::Increase,
+                ) {
+                    self.buffer_view.set_cursor(new_cursor);
                 }
                 ActionResult::Handled
             }

@@ -74,6 +74,14 @@ impl NormalMode {
             "O",
             Action::new(ActionKind::OpenLineAbove).with_to_mode(ModeKind::Insert),
         );
+        trie_keymap.insert_str(
+            "<LessThan><LessThan>",
+            Action::new(ActionKind::IndentDecrease),
+        );
+        trie_keymap.insert_str(
+            "<GreaterThan><GreaterThan>",
+            Action::new(ActionKind::IndentIncrease),
+        );
         trie_keymap.insert_str("gcc", Action::toggle_line_comment());
         trie_keymap.insert_str("[b", Action::new(ActionKind::PreviousTab));
         trie_keymap.insert_str("]b", Action::new(ActionKind::NextTab));

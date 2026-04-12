@@ -592,6 +592,77 @@ fn test_insert_newline_prefers_next_line_indent_when_it_is_more_indented() {
 }
 
 #[test]
+fn test_indent_decrease_shifts_current_line() {
+    let mut window = Window::new(Buffer::from_str("    hello\n  world"));
+    window.set_cursor(Cursor::new(0, 4));
+
+    assert_eq!(
+        window.process_action(&Action::new(ActionKind::IndentDecrease)),
+        ActionResult::Handled
+    );
+    assert_eq!(buffer_text(window.buffer_view()), "hello\n  world");
+    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 0));
+}
+
+#[test]
+fn test_counted_indent_decrease_shifts_multiple_lines() {
+    let mut window = Window::new(Buffer::from_str("    hello\n        world\n  done"));
+    window.set_cursor(Cursor::new(0, 4));
+
+    assert_eq!(
+        window.process_action(
+            &Action::new(ActionKind::IndentDecrease)
+                .with_count(2)
+                .expect("counted indent decrease should be allowed"),
+        ),
+        ActionResult::Handled
+    );
+    assert_eq!(buffer_text(window.buffer_view()), "hello\n    world\n  done");
+    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 0));
+}
+
+#[test]
+fn test_insert_mode_shift_tab_dedents_without_leaving_insert_mode() {
+    let mut window = Window::new(Buffer::from_str("    hello"));
+    window.set_cursor(Cursor::new(0, 4));
+
+    assert_eq!(
+        window.process_action(
+            &Action::new(ActionKind::IndentDecrease).with_from_mode(ModeKind::Insert),
+        ),
+        ActionResult::Handled
+    );
+    assert_eq!(buffer_text(window.buffer_view()), "hello");
+    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 0));
+}
+
+#[test]
+fn test_insert_mode_backspace_dedents_inside_leading_whitespace() {
+    let mut window = Window::new(Buffer::from_str("    hello"));
+    window.set_cursor(Cursor::new(0, 2));
+
+    assert_eq!(
+        window.process_action(&Action::new(ActionKind::DeleteBackward).with_from_mode(ModeKind::Insert)),
+        ActionResult::Handled
+    );
+    assert_eq!(buffer_text(window.buffer_view()), "hello");
+    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 0));
+}
+
+#[test]
+fn test_insert_mode_backspace_keeps_plain_deletion_outside_indentation() {
+    let mut window = Window::new(Buffer::from_str("    hello"));
+    window.set_cursor(Cursor::new(0, 5));
+
+    assert_eq!(
+        window.process_action(&Action::new(ActionKind::DeleteBackward).with_from_mode(ModeKind::Insert)),
+        ActionResult::Handled
+    );
+    assert_eq!(buffer_text(window.buffer_view()), "    ello");
+    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 4));
+}
+
+#[test]
 fn test_render_chunk_new() {
     let chunk = RenderChunk::new("test", crate::terminal::Style::default());
     assert_eq!(chunk.text, "test");

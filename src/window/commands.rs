@@ -1,4 +1,5 @@
 use super::*;
+use crate::buffer::IndentDirection;
 use crate::editor::ActionKind;
 use crate::editor::pairs;
 
@@ -92,6 +93,71 @@ impl Window {
         }
 
         ActionResult::Handled
+    }
+
+    pub(super) fn shift_lines_indentation(
+        &mut self,
+        start_line: usize,
+        count: usize,
+        direction: IndentDirection,
+    ) -> Option<Cursor> {
+        let cursor = self.buffer_view.cursor();
+        let line_count = self.buffer_view.line_count();
+        if line_count == 0 || start_line >= line_count || count == 0 {
+            return Some(cursor);
+        }
+
+        let actual_count = (line_count - start_line).min(count);
+        let mut cursor_delta = None;
+
+        for line_idx in start_line..start_line + actual_count {
+            let delta = self
+                .buffer_view
+                .with_buffer_mut(|buffer| buffer.shift_line_indentation(line_idx, direction))
+                .flatten()?;
+            if line_idx == cursor.line {
+                cursor_delta = Some(delta);
+            }
+        }
+
+        if let Some(delta) = cursor_delta {
+            let new_cursor = match direction {
+                IndentDirection::Increase => Cursor::new(cursor.line, cursor.col + delta),
+                IndentDirection::Decrease => {
+                    Cursor::new(cursor.line, cursor.col.saturating_sub(delta))
+                }
+            };
+            self.buffer_view.set_cursor(new_cursor);
+            return Some(new_cursor);
+        }
+
+        Some(cursor)
+    }
+
+    pub(super) fn delete_insert_indent_before_cursor(&mut self) -> bool {
+        let cursor = self.buffer_view.cursor();
+        let Some(prefix_len) = self
+            .buffer_view
+            .with_buffer(|buffer| {
+                buffer
+                    .line_leading_whitespace_prefix(cursor.line)
+                    .map(|prefix| prefix.len())
+            })
+            .flatten()
+        else {
+            return false;
+        };
+
+        if prefix_len == 0 || cursor.col > prefix_len {
+            return false;
+        }
+
+        if let Some(new_cursor) = self
+            .shift_lines_indentation(cursor.line, 1, IndentDirection::Decrease)
+        {
+            self.buffer_view.set_cursor(new_cursor);
+        }
+        true
     }
 
     pub(super) fn insert_prefix_on_line_range(
@@ -238,6 +304,16 @@ impl Window {
             Some(ActionKind::ChangeToLineEnd) => self.handle_count_change_to_line_end(count),
             Some(ActionKind::OpenLineBelow) => self.handle_count_open_line_below(count),
             Some(ActionKind::OpenLineAbove) => self.handle_count_open_line_above(count),
+            Some(ActionKind::IndentDecrease) => {
+                let cursor = self.buffer_view.cursor();
+                self.shift_lines_indentation(cursor.line, count, IndentDirection::Decrease);
+                ActionResult::Handled
+            }
+            Some(ActionKind::IndentIncrease) => {
+                let cursor = self.buffer_view.cursor();
+                self.shift_lines_indentation(cursor.line, count, IndentDirection::Increase);
+                ActionResult::Handled
+            }
             Some(ActionKind::ToggleLineComment) => self.handle_count_toggle_line_comment(count),
             Some(ActionKind::Operation(_, _)) => self.handle_count_operation(count, inner),
             _ if inner.is_line_action() => self.handle_count_line_action(count, inner),

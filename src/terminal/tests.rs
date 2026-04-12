@@ -33,6 +33,16 @@ fn test_bracketed_paste() {
 }
 
 #[test]
+fn test_reverse_tab() {
+    let mut terminal = create_terminal(b"\x1b[Z".to_vec());
+    let event = terminal.read_event().unwrap();
+    assert_eq!(
+        event,
+        Event::Key(Key::with_modifiers(KeyCode::Tab, Modifiers::SHIFT))
+    );
+}
+
+#[test]
 fn test_set_style() {
     let backend = TestBackend::new(Vec::new());
     let output_backend = TestBackend::new(Vec::new());

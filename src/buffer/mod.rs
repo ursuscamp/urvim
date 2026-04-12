@@ -52,6 +52,7 @@ mod undo;
 mod unicode;
 
 pub use pool::{BufferId, BufferPool};
+pub use indent::IndentDirection;
 pub use syntax::SyntaxSpan;
 pub use unicode::{
     char_width, configured_tab_width, display_char_width, display_grapheme_width, display_width_at,
