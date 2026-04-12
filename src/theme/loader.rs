@@ -243,9 +243,63 @@ fn resolve_palette_reference(
 mod tests {
     use super::*;
     use crate::theme::{Tag, ThemeRegistry};
+    use crate::terminal::Rgb;
 
     fn tag(value: &str) -> Tag {
         Tag::parse(value).expect("valid tag")
+    }
+
+    fn marker_style(theme: &str, marker: &str) -> Style {
+        let fg = match theme {
+            "Friday Night" => Color::ansi(252),
+            "Saturday Morning" => Color::ansi(231),
+            "Rose Pine" => Color::Rgb(Rgb::new(25, 23, 36)),
+            "Dracula" => Color::Rgb(Rgb::new(40, 42, 54)),
+            "Tokyo Night" => Color::Rgb(Rgb::new(26, 27, 38)),
+            "Catppuccin" => Color::Rgb(Rgb::new(30, 30, 46)),
+            other => panic!("unexpected theme {other}"),
+        };
+        let bg = match marker {
+            "todo" => match theme {
+                "Friday Night" => Color::ansi(75),
+                "Saturday Morning" => Color::ansi(24),
+                "Rose Pine" => Color::Rgb(Rgb::new(196, 167, 231)),
+                "Dracula" => Color::Rgb(Rgb::new(189, 147, 249)),
+                "Tokyo Night" => Color::Rgb(Rgb::new(122, 162, 247)),
+                "Catppuccin" => Color::Rgb(Rgb::new(203, 166, 247)),
+                other => panic!("unexpected theme {other}"),
+            },
+            "fixme" => match theme {
+                "Friday Night" => Color::ansi(203),
+                "Saturday Morning" => Color::ansi(160),
+                "Rose Pine" => Color::Rgb(Rgb::new(235, 111, 146)),
+                "Dracula" => Color::Rgb(Rgb::new(255, 85, 85)),
+                "Tokyo Night" => Color::Rgb(Rgb::new(247, 118, 142)),
+                "Catppuccin" => Color::Rgb(Rgb::new(243, 139, 168)),
+                other => panic!("unexpected theme {other}"),
+            },
+            "bug" => match theme {
+                "Friday Night" => Color::ansi(214),
+                "Saturday Morning" => Color::ansi(166),
+                "Rose Pine" => Color::Rgb(Rgb::new(234, 154, 151)),
+                "Dracula" => Color::Rgb(Rgb::new(255, 184, 108)),
+                "Tokyo Night" => Color::Rgb(Rgb::new(255, 158, 100)),
+                "Catppuccin" => Color::Rgb(Rgb::new(250, 179, 135)),
+                other => panic!("unexpected theme {other}"),
+            },
+            "note" => match theme {
+                "Friday Night" => Color::ansi(80),
+                "Saturday Morning" => Color::ansi(31),
+                "Rose Pine" => Color::Rgb(Rgb::new(156, 207, 216)),
+                "Dracula" => Color::Rgb(Rgb::new(139, 233, 253)),
+                "Tokyo Night" => Color::Rgb(Rgb::new(125, 207, 255)),
+                "Catppuccin" => Color::Rgb(Rgb::new(148, 226, 213)),
+                other => panic!("unexpected theme {other}"),
+            },
+            other => panic!("unexpected marker {other}"),
+        };
+
+        Style::new().fg(fg).bg(bg).bold()
     }
 
     fn sample_theme() -> &'static str {
@@ -298,6 +352,23 @@ variable = { fg = "base" }
         );
         assert_eq!(
             theme.syntax_style_for_tag(&tag("keyword")),
+            Style::new()
+                .fg(Color::Rgb(Rgb::new(17, 34, 51)))
+                .bg(Color::Rgb(Rgb::new(17, 34, 51)))
+                .bold()
+        );
+    }
+
+    #[test]
+    fn resolves_comment_marker_tags_through_parent_lookup() {
+        let theme = sample_theme().replace(
+            "comment = { fg = \"base\" }\n",
+            "comment = { fg = \"base\" }\n\"comment.todo\" = { fg = \"accent\" }\n",
+        );
+        let theme = resolve_theme_from_str("sample", &theme).expect("theme should resolve");
+
+        assert_eq!(
+            theme.syntax_style_for_tag(&tag("comment.todo")),
             Style::new()
                 .fg(Color::Rgb(Rgb::new(17, 34, 51)))
                 .bg(Color::Rgb(Rgb::new(17, 34, 51)))
@@ -545,5 +616,34 @@ variable = { fg = "base" }
             friday_night.syntax_style_for_tag(&Tag::parse("string.interpolation").unwrap()),
             Style::new().fg(Color::ansi(75)).bg(Color::ansi(16))
         );
+    }
+
+    #[test]
+    fn builtin_themes_expose_marker_specific_comment_styles() {
+        let registry = ThemeRegistry::load_builtin().expect("builtins should load");
+        for name in [
+            "Friday Night",
+            "Saturday Morning",
+            "Rose Pine",
+            "Dracula",
+            "Tokyo Night",
+            "Catppuccin",
+        ] {
+            let theme = registry.get(name).expect("theme should exist");
+            let comment_style = theme.syntax_style_for_tag(&tag("comment"));
+            for marker in ["todo", "fixme", "bug", "note"] {
+                let style = theme.syntax_style_for_tag(&tag(&format!("comment.{marker}")));
+                assert_ne!(
+                    style,
+                    comment_style,
+                    "{name} should expose a distinct {marker} style"
+                );
+                assert_eq!(
+                    style,
+                    marker_style(name, marker),
+                    "{name} should use the expected {marker} foreground/background pairing"
+                );
+            }
+        }
     }
 }

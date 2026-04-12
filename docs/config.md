@@ -23,12 +23,13 @@ Command-line flags override config file values.
 
 ## Current Schema
 
-The canonical config values are `theme`, `insert_escape`, `syntax`, `auto_close_pairs`, `auto_indent`, `advanced_glyphs`, `tab_insertion`, `tab_behavior`, and `tab_width`.
+The canonical config values are `theme`, `insert_escape`, `syntax`, `todo_markers`, `auto_close_pairs`, `auto_indent`, `advanced_glyphs`, `tab_insertion`, `tab_behavior`, and `tab_width`.
 
 ```toml
 theme = "Friday Night"
 insert_escape = "jk"
 syntax = true
+todo_markers = ["TODO", "FIXME", "BUG", "NOTE"]
 auto_close_pairs = true
 auto_indent = "off"
 advanced_glyphs = ["nerdfont"]
@@ -63,6 +64,18 @@ Controls whether syntax highlighting is enabled for rendered buffers.
 - Default: `true`
 - Override: `--no-syntax`
 - Behavior: when `false`, buffers still detect filetypes and the status bar still shows the syntax label, but rendered text uses the base theme style only
+
+### `todo_markers`
+
+Sets the list of standalone marker tokens that receive comment-scoped todo highlighting.
+
+- Type: array of strings
+- Default: `["TODO", "FIXME", "BUG", "NOTE"]`
+- Behavior: the configured list replaces the built-in defaults entirely
+- Matching: markers are matched case-sensitively and only when they appear as standalone words inside comment spans
+- Styling: each marker is mapped to a marker-specific syntax tag such as `comment.todo`, `comment.fixme`, `comment.bug`, or `comment.note`
+- Validation: entries must be non-empty standalone word tokens that normalize to valid theme tags
+- Scope: rendered comments only
 
 ### `auto_close_pairs`
 

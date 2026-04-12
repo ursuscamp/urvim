@@ -29,6 +29,10 @@ Grammar authors may define additional valid tags, but the tags below are the rec
 - `comment.block`
 - `comment.documentation`
 - `comment.line`
+- `comment.todo`
+- `comment.fixme`
+- `comment.bug`
+- `comment.note`
 - `constant.boolean`
 - `constant.float`
 - `constant.integer`

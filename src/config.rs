@@ -12,8 +12,12 @@ use std::fs;
 use std::path::PathBuf;
 
 use crate::editor::validate_key_string;
+use imbl::Vector;
+use crate::theme::Tag;
+use smol_str::SmolStr;
 
 const DEFAULT_THEME: &str = "Friday Night";
+const DEFAULT_TODO_MARKERS: [&str; 4] = ["TODO", "FIXME", "BUG", "NOTE"];
 const CONFIG_RELATIVE_PATH: &str = "urvim/config.toml";
 const DEFAULT_XDG_CONFIG_DIRS: &str = "/etc/xdg";
 
@@ -87,6 +91,8 @@ pub struct Config {
     pub syntax: bool,
     /// Whether insert mode should auto-close supported bracket and quote pairs.
     pub auto_close_pairs: bool,
+    /// The configured comment todo markers used for highlighting.
+    pub todo_markers: Vector<SmolStr>,
     /// How insert mode should resolve indentation for newly created lines.
     pub auto_indent: AutoIndentMode,
     /// Enabled advanced glyph capabilities.
@@ -111,6 +117,8 @@ pub struct PartialConfig {
     pub syntax: Option<bool>,
     /// Whether insert mode should auto-close supported bracket and quote pairs.
     pub auto_close_pairs: Option<bool>,
+    /// The todo marker list stored in the config file.
+    pub todo_markers: Option<Vec<String>>,
     /// How insert mode should resolve indentation for newly created lines.
     pub auto_indent: Option<AutoIndentMode>,
     /// Enabled advanced glyph capabilities in the config file.
@@ -181,6 +189,10 @@ impl Config {
         let auto_close_pairs = file
             .and_then(|config| config.auto_close_pairs)
             .unwrap_or(true);
+        let todo_markers = file
+            .and_then(|config| config.todo_markers.clone())
+            .map(|markers| markers.into_iter().map(SmolStr::new).collect())
+            .unwrap_or_else(default_todo_markers);
         let auto_indent = file
             .and_then(|config| config.auto_indent)
             .unwrap_or_default();
@@ -203,6 +215,7 @@ impl Config {
             insert_escape,
             syntax,
             auto_close_pairs,
+            todo_markers,
             auto_indent,
             advanced_glyphs,
             tab_insertion,
@@ -233,6 +246,7 @@ impl Default for Config {
             insert_escape: None,
             syntax: true,
             auto_close_pairs: true,
+            todo_markers: default_todo_markers(),
             auto_indent: AutoIndentMode::default(),
             advanced_glyphs: BTreeSet::new(),
             tab_insertion: TabInsertion::default(),
@@ -328,6 +342,42 @@ fn validate_partial_config(config: &PartialConfig) -> Result<(), ConfigLoadError
         ));
     }
 
+    if let Some(markers) = config.todo_markers.as_ref() {
+        validate_todo_markers(markers)?;
+    }
+
+    Ok(())
+}
+
+fn default_todo_markers() -> Vector<SmolStr> {
+    DEFAULT_TODO_MARKERS
+        .iter()
+        .map(|marker| SmolStr::new(*marker))
+        .collect()
+}
+
+fn validate_todo_markers(markers: &[String]) -> Result<(), ConfigLoadError> {
+    for marker in markers {
+        validate_todo_marker(marker)?;
+    }
+
+    Ok(())
+}
+
+fn validate_todo_marker(marker: &str) -> Result<(), ConfigLoadError> {
+    if marker.trim().is_empty() {
+        return Err(ConfigLoadError::invalid(
+            "config todo_markers entries must not be empty or whitespace",
+        ));
+    }
+
+    let normalized = marker.to_ascii_lowercase();
+    Tag::parse(&normalized).map_err(|_| {
+        ConfigLoadError::invalid(format!(
+            "config todo_markers entries must be standalone word tokens that normalize to valid theme tags: {marker}"
+        ))
+    })?;
+
     Ok(())
 }
 
@@ -377,6 +427,14 @@ mod tests {
         values.iter().cloned().collect()
     }
 
+    fn todo_marker_strings(values: &[&str]) -> Vec<String> {
+        values.iter().map(|value| (*value).to_string()).collect()
+    }
+
+    fn resolved_todo_markers(values: &[&str]) -> Vector<SmolStr> {
+        values.iter().map(|value| SmolStr::new(*value)).collect()
+    }
+
     #[test]
     fn resolve_prefers_cli_then_file_then_default() {
         let file = PartialConfig {
@@ -384,6 +442,7 @@ mod tests {
             insert_escape: Some("jk".to_string()),
             syntax: Some(false),
             auto_close_pairs: Some(false),
+            todo_markers: Some(todo_marker_strings(&["TASK", "FIXME"])),
             auto_indent: Some(AutoIndentMode::Neighbor),
             advanced_glyphs: Some(vec![AdvancedGlyphCapability::Nerdfont]),
             ..Default::default()
@@ -403,6 +462,10 @@ mod tests {
         assert!(!Config::resolve(Some(&file), None, None).syntax);
         assert!(!Config::resolve(Some(&file), None, None).auto_close_pairs);
         assert_eq!(
+            Config::resolve(Some(&file), None, None).todo_markers,
+            resolved_todo_markers(&["TASK", "FIXME"])
+        );
+        assert_eq!(
             Config::resolve(Some(&file), None, None).auto_indent,
             AutoIndentMode::Neighbor
         );
@@ -415,6 +478,10 @@ mod tests {
         assert_eq!(Config::resolve(None, None, None).theme, DEFAULT_THEME);
         assert_eq!(Config::resolve(None, None, None).insert_escape, None);
         assert!(Config::resolve(None, None, None).advanced_glyphs.is_empty());
+        assert_eq!(
+            Config::resolve(None, None, None).todo_markers,
+            resolved_todo_markers(&DEFAULT_TODO_MARKERS)
+        );
         assert_eq!(
             Config::resolve(None, None, None).tab_insertion,
             TabInsertion::Spaces
@@ -617,6 +684,43 @@ mod tests {
         let config = Config::load_from_locations(home, vec![], None, None).expect("should load");
 
         assert!(!config.auto_close_pairs);
+    }
+
+    #[test]
+    fn load_from_locations_loads_todo_markers() {
+        let home = unique_temp_dir("todo-markers-home");
+        write_config(&home, "todo_markers = [\"TASK\", \"BUG\"]");
+
+        let config = Config::load_from_locations(home, vec![], None, None).expect("should load");
+
+        assert_eq!(config.todo_markers, resolved_todo_markers(&["TASK", "BUG"]));
+    }
+
+    #[test]
+    fn load_from_locations_defaults_todo_markers_to_builtin_set() {
+        let home = unique_temp_dir("todo-markers-default-home");
+
+        let config = Config::load_from_locations(home, vec![], None, None).expect("should load");
+
+        assert_eq!(
+            config.todo_markers,
+            resolved_todo_markers(&DEFAULT_TODO_MARKERS)
+        );
+    }
+
+    #[test]
+    fn load_from_locations_rejects_invalid_todo_marker_values() {
+        let home = unique_temp_dir("todo-markers-invalid-home");
+        write_config(&home, "todo_markers = [\"TODO!\", \"BUG\"]");
+
+        let error = Config::load_from_locations(home, vec![], None, None).expect_err("should fail");
+
+        match error {
+            ConfigLoadError::Invalid { message } => {
+                assert!(message.contains("todo_markers"));
+            }
+            other => panic!("expected validation error, got {other:?}"),
+        }
     }
 
     #[test]

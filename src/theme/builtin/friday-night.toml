@@ -30,6 +30,10 @@ window = { fg = "fg", bg = "bg" }
 
 [syntax]
 comment = { fg = "comment" }
+"comment.todo" = { fg = "bg", bg = "accent", bold = true }
+"comment.fixme" = { fg = "bg", bg = "red", bold = true }
+"comment.bug" = { fg = "bg", bg = "orange", bold = true }
+"comment.note" = { fg = "bg", bg = "cyan", bold = true }
 constant = { fg = "orange" }
 function = { fg = "blue" }
 keyword = { fg = "magenta" }

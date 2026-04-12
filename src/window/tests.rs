@@ -123,6 +123,17 @@ fn syntax_themed_window() -> Theme {
     )
 }
 
+fn todo_marker_themed_window() -> Theme {
+    let mut theme = syntax_themed_window();
+    theme
+        .syntax
+        .insert(tag("comment.todo"), Style::new().fg(Color::ansi(31)));
+    theme
+        .syntax
+        .insert(tag("comment.fixme"), Style::new().fg(Color::ansi(32)));
+    theme
+}
+
 fn tag(value: &str) -> Tag {
     Tag::parse(value).expect("valid tag")
 }
@@ -483,6 +494,97 @@ fn test_window_render_distinguishes_rust_format_string_escapes() {
         line.iter()
             .any(|chunk| chunk.text == "}}" && chunk.style == expected_escape_style)
     );
+}
+
+#[test]
+fn test_window_render_highlights_todo_markers_inside_comments() {
+    let path = temp_path_with_ext("todo-markers", "rs");
+    let buffer = Buffer::from_str_with_path("fn main() { let value = 1; // TODO FIXME }", path);
+    let mut window = Window::new(buffer);
+    let theme = todo_marker_themed_window();
+    let expected_keyword_style = theme
+        .default_style()
+        .overlay(theme.syntax_style_for_tag(&tag("keyword")));
+    let expected_comment_style = theme
+        .default_style()
+        .overlay(theme.syntax_style_for_tag(&tag("comment")));
+    let expected_todo_style = theme
+        .default_style()
+        .overlay(theme.syntax_style_for_tag(&tag("comment.todo")));
+    let expected_fixme_style = theme
+        .default_style()
+        .overlay(theme.syntax_style_for_tag(&tag("comment.fixme")));
+    let _theme_guard = globals::set_test_active_theme(theme);
+    let _config_guard = globals::set_test_config(Config {
+        theme: "demo-syntax".to_string(),
+        insert_escape: None,
+        syntax: true,
+        auto_close_pairs: true,
+        auto_indent: AutoIndentMode::Off,
+        advanced_glyphs: BTreeSet::new(),
+        ..Default::default()
+    });
+
+    let mut screen = crate::screen::Screen::new(1, 80);
+    window.render(&mut screen, Position::new(0, 0), Size::new(1, 80));
+
+    let line = window
+        .render_data()
+        .get_line(0)
+        .expect("rendered line should exist");
+    assert!(
+        line.iter()
+            .any(|chunk| chunk.text == "fn" && chunk.style == expected_keyword_style)
+    );
+    assert!(
+        line.iter()
+            .any(|chunk| chunk.text == "TODO" && chunk.style == expected_todo_style)
+    );
+    assert!(
+        line.iter()
+            .any(|chunk| chunk.text == "FIXME" && chunk.style == expected_fixme_style)
+    );
+    assert!(
+        line.iter()
+            .any(|chunk| chunk.text.contains("value") && chunk.style != expected_todo_style)
+    );
+    assert!(
+        line.iter()
+            .any(|chunk| chunk.text.contains("// ") && chunk.style == expected_comment_style)
+    );
+}
+
+#[test]
+fn test_window_render_skips_todo_markers_when_syntax_is_disabled() {
+    let path = temp_path_with_ext("todo-markers-disabled", "rs");
+    let buffer = Buffer::from_str_with_path("fn main() { // TODO FIXME }", path);
+    let mut window = Window::new(buffer);
+    let theme = todo_marker_themed_window();
+    let expected_default_style = theme.default_style();
+    let _theme_guard = globals::set_test_active_theme(theme);
+    let _config_guard = globals::set_test_config(Config {
+        theme: "demo-syntax".to_string(),
+        insert_escape: None,
+        syntax: false,
+        auto_close_pairs: true,
+        auto_indent: AutoIndentMode::Off,
+        advanced_glyphs: BTreeSet::new(),
+        ..Default::default()
+    });
+
+    let mut screen = crate::screen::Screen::new(1, 80);
+    window.render(&mut screen, Position::new(0, 0), Size::new(1, 80));
+
+    let line = window
+        .render_data()
+        .get_line(0)
+        .expect("rendered line should exist");
+    assert!(!line.is_empty());
+    assert!(
+        line.iter()
+            .all(|chunk| chunk.style == expected_default_style)
+    );
+    assert!(line.iter().any(|chunk| chunk.text.contains("TODO")));
 }
 
 #[test]

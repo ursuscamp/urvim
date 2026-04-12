@@ -23,7 +23,6 @@ urvim does not parse source code into an AST. Instead, it chooses a syntax defin
 
 A syntax definition contains:
 
-- metadata such as `name`, `display_name`, `alias`, `filename`, and `shebang`
 - metadata such as `name`, `display_name`, `alias`, `filename`, `shebang`, and `comment_prefix`
 - one ordered `rules` list
 
@@ -94,6 +93,8 @@ Context markers are the main way rules communicate with later rules:
 The tokenizer returns spans tagged with semantic labels like `keyword`, `string`, or `markup.code`.
 
 `src/window/view.rs` translates those tags into active theme styles, then `src/window/render.rs` writes the final styled chunks to the terminal.
+
+After the syntax spans are available, urvim can layer comment-scoped todo highlighting on top of them during rendering. That overlay scans only comment spans, looks for configured standalone markers such as `TODO` and `FIXME`, and applies marker-specific tags like `comment.todo` without changing the underlying buffer text.
 
 So the pipeline is:
 

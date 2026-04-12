@@ -412,6 +412,35 @@ mod tests {
             theme.syntax_style_for_tag(&tag("string.interpolation")),
             Style::new().bold().fg(Color::ansi(21))
         );
+        assert_eq!(
+            theme.syntax_style_for_tag(&tag("comment.todo")),
+            Style::new().bold().fg(Color::ansi(10))
+        );
+        assert_eq!(
+            theme.syntax_style_for_tag(&tag("comment.fixme")),
+            Style::new().bold().fg(Color::ansi(10))
+        );
+    }
+
+    #[test]
+    fn theme_returns_marker_specific_comment_styles() {
+        let mut theme = theme("demo");
+        theme.syntax.insert(tag("comment.todo"), Style::new().fg(Color::ansi(22)));
+        theme.syntax
+            .insert(tag("comment.fixme"), Style::new().fg(Color::ansi(23)));
+
+        assert_eq!(
+            theme.syntax_style_for_tag(&tag("comment.todo")),
+            Style::new().fg(Color::ansi(22))
+        );
+        assert_eq!(
+            theme.syntax_style_for_tag(&tag("comment.fixme")),
+            Style::new().fg(Color::ansi(23))
+        );
+        assert_eq!(
+            theme.syntax_style_for_tag(&tag("comment.note")),
+            Style::new().bold().fg(Color::ansi(10))
+        );
     }
 
     #[test]

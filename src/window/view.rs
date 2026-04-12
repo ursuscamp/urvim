@@ -1,6 +1,9 @@
 use super::*;
 use crate::buffer::BufferId;
 use crate::buffer::{configured_tab_width, display_grapheme_width, display_width_at};
+use crate::theme::Tag;
+use imbl::Vector;
+use smol_str::SmolStr;
 
 impl BufferView {
     /// Creates a new view and registers the buffer in the global pool.
@@ -171,6 +174,11 @@ impl BufferView {
         let syntax_styles =
             globals::with_active_theme(|theme| theme.map(|theme| theme.syntax.clone()));
         let syntax_enabled = globals::with_config(|config| config.syntax).unwrap_or(true);
+        let todo_markers: Vector<SmolStr> = if syntax_enabled {
+            globals::with_config(|config| config.todo_markers.clone()).unwrap_or_default()
+        } else {
+            Vector::new()
+        };
         let _ = self.with_buffer_mut(|buffer| {
             let start_line = self.scroll_offset.row as usize;
             let total_lines_needed = size.rows as usize + 10;
@@ -194,6 +202,7 @@ impl BufferView {
                         byte_offset,
                         &visible_text,
                         &syntax_spans,
+                        &todo_markers,
                         default_style,
                         syntax_styles.as_ref(),
                     );
@@ -224,6 +233,7 @@ impl BufferView {
         visible_start: usize,
         visible_text: &str,
         syntax_spans: &[crate::buffer::SyntaxSpan],
+        todo_markers: &Vector<SmolStr>,
         default_style: Style,
         syntax_styles: Option<&crate::theme::SyntaxTagStyles>,
     ) -> Vec<RenderChunk> {
@@ -258,14 +268,29 @@ impl BufferView {
             }
 
             if span_start < span_end {
-                // Convert the syntax category into the active theme's concrete style.
-                let syntax_style = syntax_styles
-                    .map(|styles| styles.style_for_tag(&span.style, default_style))
-                    .unwrap_or_default();
-                chunks.push(RenderChunk::new(
-                    &line_text[span_start..span_end],
-                    default_style.overlay(syntax_style),
-                ));
+                if is_comment_tag(&span.style) && !todo_markers.is_empty() {
+                    Self::build_comment_chunks(
+                        line_text,
+                        span.start_byte,
+                        span.end_byte,
+                        visible_start,
+                        visible_end,
+                        todo_markers,
+                        default_style,
+                        syntax_styles,
+                    )
+                    .into_iter()
+                    .for_each(|chunk| chunks.push(chunk));
+                } else {
+                    // Convert the syntax category into the active theme's concrete style.
+                    let syntax_style = syntax_styles
+                        .map(|styles| styles.style_for_tag(&span.style, default_style))
+                        .unwrap_or_default();
+                    chunks.push(RenderChunk::new(
+                        &line_text[span_start..span_end],
+                        default_style.overlay(syntax_style),
+                    ));
+                }
                 // Advance past the highlighted region so the next gap is computed correctly.
                 chunk_start = span_end;
             }
@@ -285,6 +310,139 @@ impl BufferView {
         }
 
         chunks
+    }
+
+    fn build_comment_chunks(
+        line_text: &str,
+        span_start: usize,
+        span_end: usize,
+        visible_start: usize,
+        visible_end: usize,
+        todo_markers: &Vector<SmolStr>,
+        default_style: Style,
+        syntax_styles: Option<&crate::theme::SyntaxTagStyles>,
+    ) -> Vec<RenderChunk> {
+        let render_start = span_start.max(visible_start);
+        let render_end = span_end.min(visible_end);
+        if render_start >= render_end {
+            return Vec::new();
+        }
+
+        // Scan the full comment span first so offscreen markers still
+        // contribute to the final split points when the viewport clips in the
+        // middle of a comment.
+        let comment_text = &line_text[span_start..span_end];
+        let comment_style = syntax_styles
+            .map(|styles| styles.style_for_tag(&comment_tag(), default_style))
+            .unwrap_or_default();
+        // Marker matches are computed in comment-local coordinates, then
+        // shifted back into line coordinates so the visible slice can be
+        // clipped cleanly below.
+        let matches = Self::find_todo_matches(comment_text, todo_markers.iter())
+            .into_iter()
+            .map(|marker_match| TodoMatch {
+                start_byte: span_start + marker_match.start_byte,
+                end_byte: span_start + marker_match.end_byte,
+                marker: marker_match.marker,
+            })
+            .collect::<Vec<_>>();
+        if matches.is_empty() {
+            return vec![RenderChunk::new(
+                &line_text[render_start..render_end],
+                default_style.overlay(comment_style),
+            )];
+        }
+
+        let mut chunks = Vec::with_capacity(matches.len() * 2 + 1);
+        let mut chunk_start = render_start;
+        for marker_match in matches {
+            if marker_match.end_byte <= render_start {
+                continue;
+            }
+            if marker_match.start_byte >= render_end {
+                break;
+            }
+
+            let marker_start = marker_match.start_byte.max(render_start);
+            let marker_end = marker_match.end_byte.min(render_end);
+
+            // Emit the ordinary comment text before the marker with the
+            // regular comment style, then emit the marker itself with its
+            // marker-specific theme tag.
+            if chunk_start < marker_start {
+                chunks.push(RenderChunk::new(
+                    &line_text[chunk_start..marker_start],
+                    default_style.overlay(comment_style),
+                ));
+            }
+
+            let marker_tag = todo_marker_tag(&marker_match.marker);
+            let marker_style = syntax_styles
+                .map(|styles| styles.style_for_tag(&marker_tag, default_style))
+                .unwrap_or_default();
+            chunks.push(RenderChunk::new(
+                &line_text[marker_start..marker_end],
+                default_style.overlay(marker_style),
+            ));
+            chunk_start = marker_end;
+        }
+
+        // Flush any trailing comment text after the last visible marker so the
+        // comment styling remains contiguous across the rendered slice.
+        if chunk_start < render_end {
+            chunks.push(RenderChunk::new(
+                &line_text[chunk_start..render_end],
+                default_style.overlay(comment_style),
+            ));
+        }
+
+        // If the scan found no visible markers, still return the comment text
+        // with the ordinary comment style instead of leaving the region plain.
+        if chunks.is_empty() {
+            chunks.push(RenderChunk::new(
+                &line_text[render_start..render_end],
+                default_style.overlay(comment_style),
+            ));
+        }
+
+        chunks
+    }
+
+    fn find_todo_matches<'a, I>(comment_text: &str, todo_markers: I) -> Vec<TodoMatch>
+    where
+        I: IntoIterator<Item = &'a SmolStr>,
+    {
+        let mut matches: Vec<TodoMatch> = Vec::new();
+        for marker in todo_markers {
+            let mut search_start = 0;
+            while let Some(relative_start) = comment_text[search_start..].find(marker.as_str()) {
+                let start_byte = search_start + relative_start;
+                let end_byte = start_byte + marker.len();
+                if is_standalone_word(comment_text, start_byte, end_byte) {
+                    let marker_match = TodoMatch {
+                        start_byte,
+                        end_byte,
+                        marker: marker.to_string(),
+                    };
+                    if !matches.iter().any(|existing| {
+                        existing.start_byte == marker_match.start_byte
+                            && existing.end_byte == marker_match.end_byte
+                            && existing.marker == marker_match.marker
+                    }) {
+                        matches.push(marker_match);
+                    }
+                }
+                search_start = end_byte;
+            }
+        }
+
+        matches.sort_by(|left, right| {
+            left.start_byte
+                .cmp(&right.start_byte)
+                .then(left.end_byte.cmp(&right.end_byte))
+                .then(left.marker.cmp(&right.marker))
+        });
+        matches
     }
 
     fn calculate_horizontal_offset(
@@ -315,5 +473,210 @@ impl BufferView {
 
         let visible_text = line_text[byte_offset..].to_string();
         (byte_offset, current_width, visible_text)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct TodoMatch {
+    start_byte: usize,
+    end_byte: usize,
+    marker: String,
+}
+
+fn todo_marker_tag(marker: &str) -> Tag {
+    Tag::parse(&format!("comment.{}", marker.to_ascii_lowercase())).expect("valid todo marker tag")
+}
+
+fn comment_tag() -> Tag {
+    Tag::parse("comment").expect("valid comment tag")
+}
+
+fn is_comment_tag(tag: &Tag) -> bool {
+    tag.parent_chain().any(|candidate| candidate == "comment")
+}
+
+fn is_standalone_word(text: &str, start_byte: usize, end_byte: usize) -> bool {
+    let before = text[..start_byte].chars().next_back();
+    let after = text[end_byte..].chars().next();
+    !matches!(before, Some(ch) if is_word_char(ch)) && !matches!(after, Some(ch) if is_word_char(ch))
+}
+
+fn is_word_char(ch: char) -> bool {
+    ch.is_ascii_alphanumeric() || ch == '_'
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::buffer::Buffer;
+    use crate::config::Config;
+    use crate::globals;
+    use crate::path::AbsolutePath;
+    use crate::terminal::{Color, Style};
+    use crate::theme::{SyntaxTagStyles, Theme, ThemeKind, UiStyles};
+    use std::collections::BTreeMap;
+    use std::collections::BTreeSet;
+
+    fn temp_path_with_ext(name: &str, ext: &str) -> AbsolutePath {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("time should move forward")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "urvim-view-tests-{}-{}-{}.{}",
+            std::process::id(),
+            nanos,
+            name,
+            ext
+        ));
+        AbsolutePath::from_path(path.as_path()).unwrap()
+    }
+
+    fn comment_only_theme() -> Theme {
+        let default_style = Style::new().fg(Color::ansi(15)).bg(Color::ansi(30));
+        let ui_styles = UiStyles::new(
+            Style::new().fg(Color::ansi(1)).bg(Color::ansi(2)),
+            Style::new().fg(Color::ansi(3)).bg(Color::ansi(4)),
+            Style::new().fg(Color::ansi(5)).bg(Color::ansi(6)),
+            Style::new().fg(Color::ansi(7)).bg(Color::ansi(8)),
+            Style::new().fg(Color::ansi(9)).bg(Color::ansi(10)),
+            Style::new().fg(Color::ansi(11)).bg(Color::ansi(12)),
+            Style::new().fg(Color::ansi(13)).bg(Color::ansi(14)),
+        );
+        let mut syntax_map = BTreeMap::new();
+        syntax_map.insert(
+            Tag::parse("comment").expect("valid tag"),
+            Style::new().fg(Color::ansi(20)),
+        );
+
+        Theme::new(
+            "comment-only",
+            ThemeKind::Ansi256,
+            default_style,
+            ui_styles,
+            SyntaxTagStyles::new(syntax_map),
+        )
+    }
+
+    fn marker_theme() -> Theme {
+        let default_style = Style::new().fg(Color::ansi(15)).bg(Color::ansi(30));
+        let ui_styles = UiStyles::new(
+            Style::new().fg(Color::ansi(1)).bg(Color::ansi(2)),
+            Style::new().fg(Color::ansi(3)).bg(Color::ansi(4)),
+            Style::new().fg(Color::ansi(5)).bg(Color::ansi(6)),
+            Style::new().fg(Color::ansi(7)).bg(Color::ansi(8)),
+            Style::new().fg(Color::ansi(9)).bg(Color::ansi(10)),
+            Style::new().fg(Color::ansi(11)).bg(Color::ansi(12)),
+            Style::new().fg(Color::ansi(13)).bg(Color::ansi(14)),
+        );
+        let mut syntax_map = BTreeMap::new();
+        syntax_map.insert(
+            Tag::parse("comment").expect("valid tag"),
+            Style::new().fg(Color::ansi(20)),
+        );
+        syntax_map.insert(
+            Tag::parse("comment.todo").expect("valid tag"),
+            Style::new().fg(Color::ansi(31)),
+        );
+        syntax_map.insert(
+            Tag::parse("comment.fixme").expect("valid tag"),
+            Style::new().fg(Color::ansi(32)),
+        );
+        syntax_map.insert(
+            Tag::parse("comment.bug").expect("valid tag"),
+            Style::new().fg(Color::ansi(33)),
+        );
+        syntax_map.insert(
+            Tag::parse("comment.note").expect("valid tag"),
+            Style::new().fg(Color::ansi(34)),
+        );
+
+        Theme::new(
+            "marker-demo",
+            ThemeKind::Ansi256,
+            default_style,
+            ui_styles,
+            SyntaxTagStyles::new(syntax_map),
+        )
+    }
+
+    #[test]
+    fn find_todo_matches_requires_standalone_case_sensitive_markers() {
+        let markers = imbl::Vector::from_iter(
+            ["TODO", "FIXME", "BUG", "NOTE"].into_iter().map(SmolStr::new),
+        );
+        let matches = BufferView::find_todo_matches(
+            "todo TODO FIXME FIXME123 BUG BUG123 NOTE NOTE123",
+            markers.iter(),
+        );
+
+        assert_eq!(
+            matches
+                .into_iter()
+                .map(|marker_match| (marker_match.start_byte, marker_match.marker))
+                .collect::<Vec<_>>(),
+            vec![
+                (5, "TODO".to_string()),
+                (10, "FIXME".to_string()),
+                (25, "BUG".to_string()),
+                (36, "NOTE".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn build_comment_chunks_falls_back_to_comment_style_when_marker_styles_are_missing() {
+        let path = temp_path_with_ext("todo-fallback", "rs");
+        let buffer = Buffer::from_str_with_path("fn main() { // TODO }", path);
+        let view = BufferView::new(buffer);
+        let theme = comment_only_theme();
+        let theme_default_style = theme.default_style();
+        let expected_comment_style = theme
+            .default_style()
+            .overlay(theme.syntax_style_for_tag(&Tag::parse("comment").expect("valid tag")));
+        let _theme_guard = globals::set_test_active_theme(theme);
+        let _config_guard = globals::set_test_config(Config {
+            theme: "comment-only".to_string(),
+            insert_escape: None,
+            syntax: true,
+            auto_close_pairs: true,
+            auto_indent: crate::config::AutoIndentMode::Off,
+            advanced_glyphs: BTreeSet::new(),
+            ..Default::default()
+        });
+
+        let render_data = view.build_render_data_with_style(Size::new(1, 80), theme_default_style);
+        let line = render_data
+            .get_line(0)
+            .expect("rendered line should exist");
+        assert!(
+            line.iter()
+                .any(|chunk| chunk.text == "TODO" && chunk.style == expected_comment_style)
+        );
+    }
+
+    #[test]
+    fn todo_markers_do_not_highlight_outside_comments() {
+        let buffer = Buffer::from_str("TODO = 1");
+        let view = BufferView::new(buffer);
+        let theme = marker_theme();
+        let theme_default_style = theme.default_style();
+        let expected_default_style = theme.default_style();
+        let _theme_guard = globals::set_test_active_theme(theme);
+        let _config_guard = globals::set_test_config(Config {
+            theme: "marker-demo".to_string(),
+            insert_escape: None,
+            syntax: true,
+            auto_close_pairs: true,
+            auto_indent: crate::config::AutoIndentMode::Off,
+            advanced_glyphs: BTreeSet::new(),
+            ..Default::default()
+        });
+
+        let render_data = view.build_render_data_with_style(Size::new(1, 80), theme_default_style);
+        let line = render_data.get_line(0).expect("rendered line should exist");
+
+        assert!(line.iter().any(|chunk| chunk.text.contains("TODO")));
+        assert!(line.iter().all(|chunk| chunk.style == expected_default_style));
     }
 }
