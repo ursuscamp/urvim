@@ -1806,63 +1806,6 @@ fn test_pair_delete_undo_and_redo_restore_exact_states() {
 }
 
 #[test]
-fn test_jumplist_navigation_updates_and_branches() {
-    let buffer = Buffer::from_str("a\nabcdefghijklmnopqrst\nb\nc\nd\ne\nf\ng\nh\ni\nj");
-    let mut window = Window::new(buffer);
-
-    window.buffer_view.set_cursor(Cursor::new(0, 0));
-    window.record_cursor_position();
-
-    assert_eq!(
-        window.process_action(&Action::new(ActionKind::MoveDown)),
-        ActionResult::Handled
-    );
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(1, 0));
-
-    assert_eq!(
-        window.process_action(&Action::new(ActionKind::MoveToLastLine)),
-        ActionResult::Handled
-    );
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(10, 0));
-
-    assert_eq!(
-        window.process_action(&Action::jump_backward()),
-        ActionResult::Handled
-    );
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(1, 0));
-
-    assert_eq!(
-        window.process_action(&Action::new(ActionKind::MoveRight)),
-        ActionResult::Handled
-    );
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(1, 1));
-
-    assert_eq!(
-        window.process_action(&Action::jump_forward()),
-        ActionResult::Handled
-    );
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(10, 0));
-
-    assert_eq!(
-        window.process_action(&Action::jump_backward()),
-        ActionResult::Handled
-    );
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(1, 1));
-
-    assert_eq!(
-        window.process_action(&Action::new(ActionKind::MoveToLineEnd)),
-        ActionResult::Handled
-    );
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(1, 19));
-
-    assert_eq!(
-        window.process_action(&Action::jump_forward()),
-        ActionResult::Handled
-    );
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(1, 19));
-}
-
-#[test]
 fn test_set_cursor_synced_normalizes_stored_cursor_after_buffer_change() {
     let buffer = Buffer::from_str("a😀b");
     let mut window = Window::new(buffer);

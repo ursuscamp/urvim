@@ -4,14 +4,16 @@
 //! renders a horizontal tab bar, and routes actions to the active window.
 
 use crate::action::ActionResult;
-use crate::buffer::Buffer;
+use crate::buffer::{Buffer, BufferId, Cursor};
 use crate::editor::Action;
 use crate::globals;
+use crate::jumplist::JumpList;
 use crate::screen::Screen;
 use crate::syntax::builtin_syntax_registry;
 use crate::terminal::Style;
 use crate::widget::Widget;
 use crate::window::{BufferView, Position, Size, Window};
+use std::cell::RefCell;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use unicode_segmentation::UnicodeSegmentation;
@@ -34,6 +36,7 @@ pub struct TabGroup {
     tabs: Vec<Window>,
     active_tab: usize,
     tab_bar_start: usize,
+    jumplist: RefCell<JumpList>,
 }
 
 impl TabGroup {
@@ -51,6 +54,7 @@ impl TabGroup {
             tabs,
             active_tab: 0,
             tab_bar_start: 0,
+            jumplist: RefCell::new(JumpList::new()),
         }
     }
 
@@ -94,6 +98,15 @@ impl TabGroup {
         &mut self.tabs[index]
     }
 
+    /// Records the active cursor position in the tab-group jumplist.
+    pub fn record_cursor_position(&mut self) {
+        let view = self.active_buffer_view();
+        let buffer_id = view.buffer_id();
+        let cursor = view.cursor();
+        let cursor = view.with_buffer(|buffer| buffer.sync_cursor(cursor)).unwrap_or(cursor);
+        self.jumplist.borrow_mut().record_cursor(buffer_id, cursor);
+    }
+
     /// Returns the active buffer view.
     pub fn active_buffer_view(&self) -> &BufferView {
         self.active_window().buffer_view()
@@ -107,6 +120,99 @@ impl TabGroup {
     /// Returns and clears any repeat-text suffix produced by the active window.
     pub fn take_pending_repeat_suffix(&mut self) -> Option<String> {
         self.active_window_mut().take_pending_repeat_suffix()
+    }
+
+    fn active_cursor_snapshot(&self) -> (BufferId, Cursor) {
+        let view = self.active_buffer_view();
+        (view.buffer_id(), view.cursor())
+    }
+
+    fn record_cursor_after_action(
+        &mut self,
+        before: (BufferId, Cursor),
+        after: (BufferId, Cursor),
+    ) {
+        if before == after {
+            return;
+        }
+
+        self.record_cursor_position();
+    }
+
+    fn active_buffer_exists(&self, buffer_id: BufferId) -> bool {
+        globals::with_buffer_pool(|pool| pool.get(buffer_id).is_some())
+    }
+
+    fn tab_index_for_buffer_id(&self, buffer_id: BufferId) -> Option<usize> {
+        self.tabs
+            .iter()
+            .position(|window| window.buffer_view().buffer_id() == buffer_id)
+    }
+
+    fn open_buffer_tab(&mut self, buffer_id: BufferId) -> usize {
+        self.tabs.push(Window::from_buffer_id(buffer_id));
+        self.tabs.len() - 1
+    }
+
+    fn activate_jump_target(&mut self, buffer_id: BufferId, cursor: Cursor) -> bool {
+        if !self.active_buffer_exists(buffer_id) {
+            return false;
+        }
+
+        let index = self
+            .tab_index_for_buffer_id(buffer_id)
+            .unwrap_or_else(|| self.open_buffer_tab(buffer_id));
+        self.active_tab = index;
+        self.active_window_mut().set_cursor_synced(cursor);
+        let restored_cursor = self.active_buffer_view().cursor();
+        self.jumplist.borrow_mut().sync_current_cursor(restored_cursor);
+        true
+    }
+
+    fn jump_back_count(&mut self, count: usize) -> bool {
+        let mut handled = false;
+        for _ in 0..count {
+            handled = self.jump_list_back() || handled;
+        }
+        handled
+    }
+
+    fn jump_forward_count(&mut self, count: usize) -> bool {
+        let mut handled = false;
+        for _ in 0..count {
+            handled = self.jump_list_forward() || handled;
+        }
+        handled
+    }
+
+    /// Moves backward in the tab-group jumplist, restoring the selected tab.
+    pub fn jump_list_back(&mut self) -> bool {
+        let Some((buffer_id, _cursor)) = self.jumplist.borrow().peek_back() else {
+            return false;
+        };
+        if !self.active_buffer_exists(buffer_id) {
+            return false;
+        }
+
+        let Some((buffer_id, cursor)) = self.jumplist.borrow_mut().jump_back() else {
+            return false;
+        };
+        self.activate_jump_target(buffer_id, cursor)
+    }
+
+    /// Moves forward in the tab-group jumplist, restoring the selected tab.
+    pub fn jump_list_forward(&mut self) -> bool {
+        let Some((buffer_id, _cursor)) = self.jumplist.borrow().peek_forward() else {
+            return false;
+        };
+        if !self.active_buffer_exists(buffer_id) {
+            return false;
+        }
+
+        let Some((buffer_id, cursor)) = self.jumplist.borrow_mut().jump_forward() else {
+            return false;
+        };
+        self.activate_jump_target(buffer_id, cursor)
     }
 
     /// Renders the tab group.
@@ -480,13 +586,22 @@ impl TabGroup {
 
 impl Widget for TabGroup {
     fn process_action(&mut self, action: &Action) -> ActionResult {
-        match action.kind.as_ref() {
+        let before = self.active_cursor_snapshot();
+        let result = match action.kind.as_ref() {
             Some(crate::editor::ActionKind::PreviousTab) => {
                 self.handle_previous_tab(1);
                 ActionResult::Handled
             }
             Some(crate::editor::ActionKind::NextTab) => {
                 self.handle_next_tab(1);
+                ActionResult::Handled
+            }
+            Some(crate::editor::ActionKind::JumpBackward) => {
+                self.jump_list_back();
+                ActionResult::Handled
+            }
+            Some(crate::editor::ActionKind::JumpForward) => {
+                self.jump_list_forward();
                 ActionResult::Handled
             }
             Some(crate::editor::ActionKind::Count(count, inner)) => match inner.kind.as_ref() {
@@ -498,9 +613,37 @@ impl Widget for TabGroup {
                     self.handle_next_tab(*count);
                     ActionResult::Handled
                 }
+                Some(crate::editor::ActionKind::JumpBackward) => {
+                    self.jump_back_count(*count);
+                    ActionResult::Handled
+                }
+                Some(crate::editor::ActionKind::JumpForward) => {
+                    self.jump_forward_count(*count);
+                    ActionResult::Handled
+                }
                 _ => self.active_window_mut().process_action(action),
             },
             _ => self.active_window_mut().process_action(action),
+        };
+
+        if result == ActionResult::Handled && self.should_record_cursor_position(action) {
+            let after = self.active_cursor_snapshot();
+            self.record_cursor_after_action(before, after);
+        }
+
+        result
+    }
+}
+
+impl TabGroup {
+    fn should_record_cursor_position(&self, action: &Action) -> bool {
+        match action.kind.as_ref() {
+            Some(crate::editor::ActionKind::JumpBackward)
+            | Some(crate::editor::ActionKind::JumpForward)
+            | Some(crate::editor::ActionKind::PreviousTab)
+            | Some(crate::editor::ActionKind::NextTab) => false,
+            Some(crate::editor::ActionKind::Count(_, inner)) => self.should_record_cursor_position(inner),
+            _ => true,
         }
     }
 }

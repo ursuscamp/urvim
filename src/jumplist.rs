@@ -1,3 +1,8 @@
+//! Session-local jumplist state.
+//!
+//! This module provides the shared jumplist history used by the active tab
+//! group and the windows it manages.
+
 use crate::buffer::{BufferId, Cursor};
 
 const MAX_JUMPLIST_ENTRIES: usize = 100;
@@ -9,14 +14,16 @@ struct JumpEntry {
     cursor: Cursor,
 }
 
+/// Session-local navigation history for jump playback.
 #[derive(Debug, Clone)]
-pub(super) struct JumpList {
+pub struct JumpList {
     entries: Vec<JumpEntry>,
     current: Option<usize>,
 }
 
 impl JumpList {
-    pub(super) fn new() -> Self {
+    /// Creates an empty jumplist.
+    pub fn new() -> Self {
         Self {
             entries: Vec::new(),
             current: None,
@@ -27,7 +34,8 @@ impl JumpList {
         self.current.and_then(|index| self.entries.get(index))
     }
 
-    pub(super) fn record_cursor(&mut self, buffer_id: BufferId, cursor: Cursor) {
+    /// Records a cursor position in the jumplist.
+    pub fn record_cursor(&mut self, buffer_id: BufferId, cursor: Cursor) {
         let entry = JumpEntry { buffer_id, cursor };
 
         match self.current {
@@ -59,7 +67,34 @@ impl JumpList {
         }
     }
 
-    pub(super) fn jump_back(&mut self) -> Option<Cursor> {
+    /// Returns the previous jumplist entry without advancing the current index.
+    pub fn peek_back(&self) -> Option<(BufferId, Cursor)> {
+        let current_index = self.current?;
+        if current_index == 0 {
+            return None;
+        }
+
+        let next_index = current_index - 1;
+        self.entries
+            .get(next_index)
+            .map(|entry| (entry.buffer_id, entry.cursor))
+    }
+
+    /// Returns the next jumplist entry without advancing the current index.
+    pub fn peek_forward(&self) -> Option<(BufferId, Cursor)> {
+        let current_index = self.current?;
+        let next_index = current_index + 1;
+        if next_index >= self.entries.len() {
+            return None;
+        }
+
+        self.entries
+            .get(next_index)
+            .map(|entry| (entry.buffer_id, entry.cursor))
+    }
+
+    /// Moves backward in the jumplist and returns the target entry.
+    pub fn jump_back(&mut self) -> Option<(BufferId, Cursor)> {
         let current_index = self.current?;
         if current_index == 0 {
             return None;
@@ -67,10 +102,13 @@ impl JumpList {
 
         let next_index = current_index - 1;
         self.current = Some(next_index);
-        self.entries.get(next_index).map(|entry| entry.cursor)
+        self.entries
+            .get(next_index)
+            .map(|entry| (entry.buffer_id, entry.cursor))
     }
 
-    pub(super) fn jump_forward(&mut self) -> Option<Cursor> {
+    /// Moves forward in the jumplist and returns the target entry.
+    pub fn jump_forward(&mut self) -> Option<(BufferId, Cursor)> {
         let current_index = self.current?;
         let next_index = current_index + 1;
         if next_index >= self.entries.len() {
@@ -78,10 +116,13 @@ impl JumpList {
         }
 
         self.current = Some(next_index);
-        self.entries.get(next_index).map(|entry| entry.cursor)
+        self.entries
+            .get(next_index)
+            .map(|entry| (entry.buffer_id, entry.cursor))
     }
 
-    pub(super) fn sync_current_cursor(&mut self, cursor: Cursor) {
+    /// Updates the current jumplist entry after restoring a cursor.
+    pub fn sync_current_cursor(&mut self, cursor: Cursor) {
         let Some(current_index) = self.current else {
             return;
         };
@@ -135,5 +176,11 @@ impl JumpList {
 
     fn cursor_distance(a: Cursor, b: Cursor) -> usize {
         a.line.abs_diff(b.line) + a.col.abs_diff(b.col)
+    }
+}
+
+impl Default for JumpList {
+    fn default() -> Self {
+        Self::new()
     }
 }

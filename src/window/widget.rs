@@ -39,14 +39,6 @@ impl Widget for Window {
                 self.move_cursor_half_page_down(self.size.rows as usize);
                 ActionResult::Handled
             }
-            Some(ActionKind::JumpBackward) => {
-                self.jump_list_back();
-                ActionResult::Handled
-            }
-            Some(ActionKind::JumpForward) => {
-                self.jump_list_forward();
-                ActionResult::Handled
-            }
             Some(ActionKind::MoveRight) => {
                 self.move_cursor_right();
                 ActionResult::Handled
@@ -390,6 +382,8 @@ impl Widget for Window {
             | Some(ActionKind::Redo)
             | Some(ActionKind::SaveBuffer(_))
             | Some(ActionKind::RepeatLastChange)
+            | Some(ActionKind::JumpBackward)
+            | Some(ActionKind::JumpForward)
             | Some(ActionKind::PreviousTab)
             | Some(ActionKind::NextTab)
             | None => ActionResult::NotHandled,
@@ -397,15 +391,6 @@ impl Widget for Window {
 
         if result == ActionResult::Handled && action.resets_remembered_column() {
             self.buffer_view.update_remembered_to_current();
-        }
-
-        if result == ActionResult::Handled
-            && !matches!(
-                action.kind.as_ref(),
-                Some(ActionKind::JumpBackward) | Some(ActionKind::JumpForward)
-            )
-        {
-            self.record_cursor_position();
         }
 
         result

@@ -19,6 +19,15 @@ fn buffer_with_label(label: &str) -> Buffer {
     Buffer::from_str_with_path("line1\nline2", abs_path(&path))
 }
 
+fn buffer_with_lines(label: &str, line_count: usize) -> Buffer {
+    let path = PathBuf::from(format!("/tmp/{}", label));
+    let text = (0..line_count)
+        .map(|line| format!("line{line}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    Buffer::from_str_with_path(&text, abs_path(&path))
+}
+
 fn tab_group_with_labels(labels: &[&str]) -> TabGroup {
     TabGroup::from_buffers(
         labels
@@ -71,6 +80,10 @@ fn buffer_line_count(view: &BufferView) -> usize {
 fn buffer_file_name(view: &BufferView) -> Option<std::ffi::OsString> {
     view.with_buffer(|buffer| buffer.file_name().map(|name| name.to_os_string()))
         .flatten()
+}
+
+fn buffer_cursor(view: &BufferView) -> Cursor {
+    view.cursor()
 }
 
 #[test]
@@ -307,4 +320,89 @@ fn test_visual_cursor_is_offset_by_tab_bar_row() {
 
     let cursor = group.visual_cursor().unwrap();
     assert_eq!(cursor.row, 1);
+}
+
+#[test]
+fn test_jump_navigation_selects_existing_tab() {
+    let mut group = tab_group_with_labels(&["a", "b"]);
+
+    group.active_buffer_view_mut().set_cursor(Cursor::new(0, 1));
+    let first_buffer = group.active_buffer_view().buffer_id();
+    group.record_cursor_position();
+
+    group.active_tab = 1;
+    group.active_buffer_view_mut().set_cursor(Cursor::new(0, 3));
+    let second_buffer = group.active_buffer_view().buffer_id();
+    group.record_cursor_position();
+
+    assert_eq!(group.process_action(&Action::jump_backward()), ActionResult::Handled);
+    assert_eq!(group.active_tab_index(), 0);
+    assert_eq!(group.active_window().buffer_view().buffer_id(), first_buffer);
+    assert_eq!(buffer_cursor(group.active_buffer_view()), Cursor::new(0, 1));
+    assert_eq!(group.process_action(&Action::jump_forward()), ActionResult::Handled);
+    assert_eq!(group.active_tab_index(), 1);
+    assert_eq!(group.active_window().buffer_view().buffer_id(), second_buffer);
+    assert_eq!(buffer_cursor(group.active_buffer_view()), Cursor::new(0, 3));
+}
+
+#[test]
+fn test_jump_navigation_reopens_missing_tab() {
+    let mut group = tab_group_with_labels(&["a", "b"]);
+
+    group.active_buffer_view_mut().set_cursor(Cursor::new(0, 1));
+    let first_buffer = group.active_buffer_view().buffer_id();
+    group.record_cursor_position();
+
+    group.active_tab = 1;
+    group.active_buffer_view_mut().set_cursor(Cursor::new(0, 4));
+    group.record_cursor_position();
+
+    group.tabs.remove(0);
+    group.active_tab = 0;
+
+    assert_eq!(group.process_action(&Action::jump_backward()), ActionResult::Handled);
+    assert_eq!(group.tabs.len(), 2);
+    assert_eq!(group.active_tab_index(), 1);
+    assert_eq!(group.active_window().buffer_view().buffer_id(), first_buffer);
+    assert_eq!(buffer_cursor(group.active_buffer_view()), Cursor::new(0, 1));
+}
+
+#[test]
+fn test_counted_jump_down_creates_a_new_entry() {
+    let mut group = TabGroup::from_buffers(vec![buffer_with_lines("jumplist-50j", 80)]);
+
+    group.active_buffer_view_mut().set_cursor(Cursor::new(0, 0));
+    group.record_cursor_position();
+
+    assert_eq!(
+        group.process_action(&Action::count(
+            50,
+            Box::new(Action::new(ActionKind::MoveDown))
+        )),
+        ActionResult::Handled
+    );
+    assert_eq!(buffer_cursor(group.active_buffer_view()), Cursor::new(50, 0));
+
+    assert_eq!(group.process_action(&Action::jump_backward()), ActionResult::Handled);
+    assert_eq!(buffer_cursor(group.active_buffer_view()), Cursor::new(0, 0));
+}
+
+#[test]
+fn test_smaller_counted_jump_down_updates_current_entry() {
+    let mut group = TabGroup::from_buffers(vec![buffer_with_lines("jumplist-5j", 20)]);
+
+    group.active_buffer_view_mut().set_cursor(Cursor::new(0, 0));
+    group.record_cursor_position();
+
+    assert_eq!(
+        group.process_action(&Action::count(
+            5,
+            Box::new(Action::new(ActionKind::MoveDown))
+        )),
+        ActionResult::Handled
+    );
+    assert_eq!(buffer_cursor(group.active_buffer_view()), Cursor::new(5, 0));
+
+    assert_eq!(group.process_action(&Action::jump_backward()), ActionResult::Handled);
+    assert_eq!(buffer_cursor(group.active_buffer_view()), Cursor::new(5, 0));
 }

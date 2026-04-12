@@ -16,6 +16,8 @@ pub mod theme;
 pub mod widget;
 pub mod window;
 
+mod jumplist;
+
 pub use layout::Layout;
 pub use path::AbsolutePath;
 pub use tab_group::TabGroup;

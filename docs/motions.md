@@ -28,8 +28,8 @@ This document describes the motions implemented in urvim and how they differ fro
 | `PageDown` | Move down one page |
 | `Ctrl-U` | Move up half a page |
 | `Ctrl-D` | Move down half a page |
-| `Ctrl-O` | Jump backward through the current window's jumplist |
-| `Ctrl-I` | Jump forward through the current window's jumplist |
+| `Ctrl-O` | Jump backward through the current tab group's jumplist |
+| `Ctrl-I` | Jump forward through the current tab group's jumplist |
 | `{` | Move to blank line before the previous paragraph |
 | `}` | Move to blank line before the next paragraph |
 | `a` | Append after cursor (enter insert mode) |
@@ -217,17 +217,21 @@ Example: On "hello" (cursor at or past 'o'):
 
 ### Ctrl-O - Jump Backward
 
-Moves backward through the current window's jumplist.
+Moves backward through the current tab group's jumplist.
+
+- **Behavior**: Activates the tab for the target buffer, or reopens the buffer in a new tab if it is not currently open.
 
 - **Count**: No
-- **Vim difference**: Matches Vim's backward jumplist navigation semantics at a high level, but urvim currently keeps the history session-local and window-local only.
+- **Vim difference**: Matches Vim's backward jumplist navigation semantics at a high level, but urvim keeps the history session-local and tab-group-owned.
 
 ### Ctrl-I - Jump Forward
 
-Moves forward through the current window's jumplist.
+Moves forward through the current tab group's jumplist.
+
+- **Behavior**: Activates the tab for the target buffer, or reopens the buffer in a new tab if it is not currently open.
 
 - **Count**: No
-- **Vim difference**: Matches Vim's forward jumplist navigation semantics at a high level, but urvim currently keeps the history session-local and window-local only.
+- **Vim difference**: Matches Vim's forward jumplist navigation semantics at a high level, but urvim keeps the history session-local and tab-group-owned.
 
 ### 0 - Line Start
 

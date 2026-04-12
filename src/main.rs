@@ -112,10 +112,7 @@ fn main() -> io::Result<()> {
                                 .flatten()
                             {
                                 layout.active_buffer_view_mut().set_cursor_synced(cursor);
-                                layout
-                                    .tab_group_mut()
-                                    .active_window_mut()
-                                    .record_cursor_position();
+                                layout.tab_group_mut().record_cursor_position();
                             }
                         }
                         Some(ActionKind::Redo) => {
@@ -125,10 +122,7 @@ fn main() -> io::Result<()> {
                                 .flatten()
                             {
                                 layout.active_buffer_view_mut().set_cursor_synced(cursor);
-                                layout
-                                    .tab_group_mut()
-                                    .active_window_mut()
-                                    .record_cursor_position();
+                                layout.tab_group_mut().record_cursor_position();
                             }
                         }
                         _ => {
