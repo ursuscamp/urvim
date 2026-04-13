@@ -9,7 +9,7 @@ This is a list, in no particular order, of things that need to be addressed whic
 - jump list
 - support raw text insertion by paste
 - improved layout
-- visual mode
+- visual line mode
 - session support
 
 # Bugs

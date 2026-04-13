@@ -277,7 +277,7 @@ impl BufferView {
             // comparing the selection range against the byte span of this
             // visible buffer line.
             let Some((line_start, line_end)) =
-                Self::visual_selection_line_range(
+                Self::intersect_line_range(
                     selection.start,
                     selection.end,
                     line_data.buffer_line,
@@ -293,33 +293,18 @@ impl BufferView {
                 // If the selection only covers part of the chunk, split it so
                 // we can overlay the selection style on just the intersecting
                 // byte range.
-                let chunk_len = chunk.text.len();
-                let chunk_end = chunk_start + chunk_len;
+                let selected_style = chunk.style.overlay(selection_style);
+                Self::push_split_render_chunk(
+                    &mut selected_chunks,
+                    &chunk.text,
+                    chunk_start,
+                    line_start,
+                    line_end,
+                    chunk.style,
+                    selected_style,
+                );
 
-                if chunk_end <= line_start || chunk_start >= line_end {
-                    selected_chunks.push(chunk);
-                } else {
-                    let local_start = line_start.saturating_sub(chunk_start).min(chunk_len);
-                    let local_end = line_end.saturating_sub(chunk_start).min(chunk_len);
-
-                    if local_start > 0 {
-                        selected_chunks.push(RenderChunk::new(
-                            &chunk.text[..local_start],
-                            chunk.style,
-                        ));
-                    }
-                    if local_start < local_end {
-                        selected_chunks.push(RenderChunk::new(
-                            &chunk.text[local_start..local_end],
-                            chunk.style.overlay(selection_style),
-                        ));
-                    }
-                    if local_end < chunk_len {
-                        selected_chunks.push(RenderChunk::new(&chunk.text[local_end..], chunk.style));
-                    }
-                }
-
-                chunk_start = chunk_end;
+                chunk_start += chunk.text.len();
             }
 
             line_data.chunks = selected_chunks;
@@ -420,11 +405,11 @@ impl BufferView {
         default_style: Style,
         syntax_styles: Option<&crate::theme::SyntaxTagStyles>,
     ) -> Vec<RenderChunk> {
-        let render_start = span_start.max(visible_start);
-        let render_end = span_end.min(visible_end);
-        if render_start >= render_end {
+        let Some((render_start, render_end)) =
+            Self::intersect_byte_ranges(span_start, span_end, visible_start, visible_end)
+        else {
             return Vec::new();
-        }
+        };
 
         // Scan the full comment span first so offscreen markers still
         // contribute to the final split points when the viewport clips in the
@@ -454,34 +439,28 @@ impl BufferView {
         let mut chunks = Vec::with_capacity(matches.len() * 2 + 1);
         let mut chunk_start = render_start;
         for marker_match in matches {
-            if marker_match.end_byte <= render_start {
+            let Some((marker_start, marker_end)) = Self::intersect_byte_ranges(
+                marker_match.start_byte,
+                marker_match.end_byte,
+                render_start,
+                render_end,
+            ) else {
                 continue;
-            }
-            if marker_match.start_byte >= render_end {
-                break;
-            }
-
-            let marker_start = marker_match.start_byte.max(render_start);
-            let marker_end = marker_match.end_byte.min(render_end);
-
-            // Emit the ordinary comment text before the marker with the
-            // regular comment style, then emit the marker itself with its
-            // marker-specific theme tag.
-            if chunk_start < marker_start {
-                chunks.push(RenderChunk::new(
-                    &line_text[chunk_start..marker_start],
-                    default_style.overlay(comment_style),
-                ));
-            }
-
+            };
             let marker_tag = todo_marker_tag(&marker_match.marker);
             let marker_style = syntax_styles
                 .map(|styles| styles.style_for_tag(&marker_tag, default_style))
                 .unwrap_or_default();
-            chunks.push(RenderChunk::new(
-                &line_text[marker_start..marker_end],
+            let segment_text = &line_text[chunk_start..marker_end];
+            Self::push_split_render_chunk(
+                &mut chunks,
+                segment_text,
+                chunk_start,
+                marker_start,
+                marker_end,
+                default_style.overlay(comment_style),
                 default_style.overlay(marker_style),
-            ));
+            );
             chunk_start = marker_end;
         }
 
@@ -504,6 +483,43 @@ impl BufferView {
         }
 
         chunks
+    }
+
+    /// Splits one rendered text slice into prefix, selected middle, and suffix.
+    ///
+    /// The prefix and suffix keep `base_style`, while the selected middle uses
+    /// `selected_style`. This lets callers reuse the same byte-range splitting
+    /// logic for both visual selection and inline marker highlighting.
+    fn push_split_render_chunk(
+        chunks: &mut Vec<RenderChunk>,
+        text: &str,
+        chunk_start: usize,
+        range_start: usize,
+        range_end: usize,
+        base_style: Style,
+        selected_style: Style,
+    ) {
+        let chunk_end = chunk_start + text.len();
+        if chunk_end <= range_start || chunk_start >= range_end {
+            chunks.push(RenderChunk::new(text, base_style));
+            return;
+        }
+
+        let local_start = range_start.saturating_sub(chunk_start).min(text.len());
+        let local_end = range_end.saturating_sub(chunk_start).min(text.len());
+
+        if local_start > 0 {
+            chunks.push(RenderChunk::new(&text[..local_start], base_style));
+        }
+        if local_start < local_end {
+            chunks.push(RenderChunk::new(
+                &text[local_start..local_end],
+                selected_style,
+            ));
+        }
+        if local_end < text.len() {
+            chunks.push(RenderChunk::new(&text[local_end..], base_style));
+        }
     }
 
     fn find_todo_matches<'a, I>(comment_text: &str, todo_markers: I) -> Vec<TodoMatch>
@@ -578,7 +594,7 @@ impl BufferView {
         Some(crate::buffer::TextObjectRange { start, end })
     }
 
-    fn visual_selection_line_range(
+    fn intersect_line_range(
         start: Cursor,
         end: Cursor,
         line_idx: usize,
@@ -602,6 +618,18 @@ impl BufferView {
         };
 
         Some(line_range)
+    }
+
+    /// Returns the overlap between two byte ranges, if any.
+    fn intersect_byte_ranges(
+        left_start: usize,
+        left_end: usize,
+        right_start: usize,
+        right_end: usize,
+    ) -> Option<(usize, usize)> {
+        let start = left_start.max(right_start);
+        let end = left_end.min(right_end);
+        (start < end).then_some((start, end))
     }
 
     fn calculate_horizontal_offset(
