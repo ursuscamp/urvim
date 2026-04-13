@@ -154,6 +154,10 @@ fn test_normal_mode_visual_binding_switches_to_visual_mode() {
         handle_and_unwrap(&mut mode, &key('v')),
         Action::mode_transition(ModeKind::Visual)
     );
+    assert_eq!(
+        handle_and_unwrap(&mut mode, &key('V')),
+        Action::mode_transition(ModeKind::VisualLine)
+    );
 }
 
 #[test]
@@ -194,10 +198,12 @@ fn test_mode_kind_reflects_mode_type() {
     let normal = NormalMode::new();
     let insert = InsertMode::new();
     let visual = VisualMode::new();
+    let visual_line = VisualLineMode::new();
 
     assert_eq!(normal.kind(), ModeKind::Normal);
     assert_eq!(insert.kind(), ModeKind::Insert);
     assert_eq!(visual.kind(), ModeKind::Visual);
+    assert_eq!(visual_line.kind(), ModeKind::VisualLine);
 }
 
 #[test]
@@ -221,6 +227,10 @@ fn test_visual_mode_motion_and_exit_bindings() {
         Action::new(ActionKind::DeleteSelection).with_to_mode(ModeKind::Normal)
     );
     assert_eq!(
+        handle_and_unwrap(&mut mode, &key('V')),
+        Action::mode_transition(ModeKind::VisualLine)
+    );
+    assert_eq!(
         handle_and_unwrap(&mut mode, &key('c')),
         Action::new(ActionKind::ChangeSelection).with_to_mode(ModeKind::Insert)
     );
@@ -236,6 +246,42 @@ fn test_visual_mode_v_exits_to_normal() {
 
     assert_eq!(
         handle_and_unwrap(&mut mode, &key('v')),
+        Action::mode_transition(ModeKind::Normal)
+    );
+}
+
+#[test]
+fn test_visual_line_mode_motion_and_exit_bindings() {
+    let mut mode = VisualLineMode::new();
+
+    assert_eq!(
+        handle_and_unwrap(&mut mode, &key('l')),
+        Action::new(ActionKind::MoveRight)
+    );
+    assert_eq!(
+        handle_and_unwrap(&mut mode, &key('v')),
+        Action::mode_transition(ModeKind::Visual)
+    );
+    assert_eq!(
+        handle_and_unwrap(&mut mode, &key('d')),
+        Action::new(ActionKind::DeleteSelection).with_to_mode(ModeKind::Normal)
+    );
+    assert_eq!(
+        handle_and_unwrap(&mut mode, &key('c')),
+        Action::new(ActionKind::ChangeSelection).with_to_mode(ModeKind::Insert)
+    );
+    assert_eq!(
+        handle_and_unwrap(&mut mode, &Key::new(crate::terminal::KeyCode::Esc)),
+        Action::mode_transition(ModeKind::Normal)
+    );
+}
+
+#[test]
+fn test_visual_line_mode_v_exits_to_normal() {
+    let mut mode = VisualLineMode::new();
+
+    assert_eq!(
+        handle_and_unwrap(&mut mode, &key('V')),
         Action::mode_transition(ModeKind::Normal)
     );
 }

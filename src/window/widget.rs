@@ -218,7 +218,11 @@ impl Widget for Window {
                 ActionResult::Handled
             }
             Some(ActionKind::DeleteSelection) => {
-                self.delete_visual_selection();
+                if action.from_mode == Some(ModeKind::VisualLine) {
+                    self.delete_linewise_visual_selection();
+                } else {
+                    self.delete_visual_selection();
+                }
                 ActionResult::Handled
             }
             Some(ActionKind::AppendAfterCursor) => {
@@ -257,7 +261,11 @@ impl Widget for Window {
             }
             Some(ActionKind::ChangeLine) => self.change_lines_with_auto_indent(1),
             Some(ActionKind::ChangeSelection) => {
-                self.change_visual_selection();
+                if action.from_mode == Some(ModeKind::VisualLine) {
+                    self.change_linewise_visual_selection();
+                } else {
+                    self.change_visual_selection();
+                }
                 ActionResult::Handled
             }
             Some(ActionKind::ChangeToLineEnd) => {

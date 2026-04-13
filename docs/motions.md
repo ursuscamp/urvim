@@ -87,9 +87,19 @@ urvim supports a simple character-wise visual mode.
 - Press `,` to repeat the last character search in the opposite direction.
 - Press `d` to delete the selection and return to normal mode.
 - Press `c` to change the selection and enter insert mode.
+- Press `V` while in visual mode to switch to linewise visual mode.
 - Press `Esc` or `v` again to leave visual mode without editing the buffer.
 
-Linewise and blockwise visual mode are not implemented yet.
+## Visual Line Mode
+
+urvim also supports linewise visual mode.
+
+- Press `V` in normal mode to enter linewise visual mode.
+- Move with the usual motion keys to extend the selection by whole lines.
+- Press `d` to delete the selected lines and return to normal mode.
+- Press `c` to replace the selected lines with a blank line and enter insert mode.
+- Press `v` while in linewise visual mode to switch back to character-wise visual mode.
+- Press `Esc` or `V` again to leave linewise visual mode without editing the buffer.
 
 ## Count Support
 

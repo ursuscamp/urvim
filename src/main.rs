@@ -8,14 +8,14 @@ use urvim::buffer::Cursor;
 use urvim::config::Config;
 use urvim::editor::{
     Action, ActionKind, HandleKeyResult, InsertMode, Mode, ModeKind, NormalMode, RepeatReplay,
-    VisualMode,
+    VisualLineMode, VisualMode,
 };
 use urvim::globals;
 use urvim::screen::Screen;
 use urvim::terminal::{Event, Terminal, size::get_terminal_size};
 use urvim::theme::ThemeRegistry;
 use urvim::widget::Widget;
-use urvim::window::{Position, Size};
+use urvim::window::{Position, Size, VisualSelectionKind};
 
 #[derive(Parser)]
 #[command(name = "urvim")]
@@ -303,7 +303,7 @@ fn switch_mode(layout: &mut Layout, mode: &mut Box<dyn Mode>, to_mode: ModeKind)
         None
     };
 
-    if mode.kind() == ModeKind::Visual && to_mode != ModeKind::Visual {
+    if mode.kind().is_visual() && to_mode != mode.kind() {
         layout.active_buffer_view_mut().clear_visual_selection();
     }
 
@@ -315,8 +315,16 @@ fn switch_mode(layout: &mut Layout, mode: &mut Box<dyn Mode>, to_mode: ModeKind)
             *mode = Box::new(InsertMode::new());
         }
         ModeKind::Visual => {
-            layout.active_buffer_view_mut().begin_visual_selection();
+            layout
+                .active_buffer_view_mut()
+                .begin_visual_selection(VisualSelectionKind::Character);
             *mode = Box::new(VisualMode::new());
+        }
+        ModeKind::VisualLine => {
+            layout
+                .active_buffer_view_mut()
+                .begin_visual_selection(VisualSelectionKind::Line);
+            *mode = Box::new(VisualLineMode::new());
         }
     }
 
@@ -583,14 +591,16 @@ mod tests {
             TabGroup::from_buffers(vec![Buffer::from_str("hello")]),
             ModeKind::Visual,
         );
-        layout.active_buffer_view_mut().begin_visual_selection();
+        layout
+            .active_buffer_view_mut()
+            .begin_visual_selection(VisualSelectionKind::Character);
         let mut mode: Box<dyn Mode> = Box::new(VisualMode::new());
 
         let repeat_text = switch_mode(&mut layout, &mut mode, ModeKind::Normal);
 
         assert_eq!(mode.kind(), ModeKind::Normal);
         assert!(repeat_text.is_none());
-        assert!(layout.active_buffer_view().visual_anchor().is_none());
+        assert!(layout.active_buffer_view().visual_selection().is_none());
     }
 
     #[test]
@@ -605,6 +615,25 @@ mod tests {
 
         assert_eq!(mode.kind(), ModeKind::Visual);
         assert!(repeat_text.is_none());
-        assert!(layout.active_buffer_view().visual_anchor().is_some());
+        assert!(layout.active_buffer_view().visual_selection().is_some());
+    }
+
+    #[test]
+    fn switch_mode_starts_linewise_visual_selection_when_entering_visual_line() {
+        let mut layout = Layout::new(
+            TabGroup::from_buffers(vec![Buffer::from_str("hello")]),
+            ModeKind::Normal,
+        );
+        let mut mode: Box<dyn Mode> = Box::new(NormalMode::new());
+
+        let repeat_text = switch_mode(&mut layout, &mut mode, ModeKind::VisualLine);
+
+        assert_eq!(mode.kind(), ModeKind::VisualLine);
+        assert!(repeat_text.is_none());
+        let selection = layout
+            .active_buffer_view()
+            .visual_selection()
+            .expect("linewise selection should exist");
+        assert_eq!(selection.kind, VisualSelectionKind::Line);
     }
 }

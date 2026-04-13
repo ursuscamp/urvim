@@ -10,6 +10,7 @@ mod mode;
 mod normal;
 pub mod pairs;
 mod visual;
+mod visual_line;
 
 pub use action::{
     Action, ActionKind, BoundaryMotion, BracketKind, HandleKeyResult, LinewiseMotion, Operator,
@@ -20,6 +21,7 @@ pub use keymap::{CountParser, KeyStringParseError, Keymap, TrieKeymap, validate_
 pub use mode::{Mode, ModeKind};
 pub use normal::NormalMode;
 pub use visual::VisualMode;
+pub use visual_line::VisualLineMode;
 
 #[cfg(test)]
 mod tests;

@@ -1004,7 +1004,9 @@ fn test_visual_selection_is_rendered() {
 
     let buffer = Buffer::from_str("abc");
     let mut window = Window::new(buffer);
-    window.buffer_view_mut().begin_visual_selection();
+    window
+        .buffer_view_mut()
+        .begin_visual_selection(VisualSelectionKind::Character);
     window.buffer_view_mut().set_cursor(Cursor::new(0, 1));
 
     let mut screen = crate::screen::Screen::new(1, 20);
@@ -1017,6 +1019,52 @@ fn test_visual_selection_is_rendered() {
     assert!(
         line.iter()
             .any(|chunk| chunk.text == "ab" && chunk.style == expected_style)
+    );
+}
+
+#[test]
+fn test_visual_line_selection_is_rendered() {
+    let mut theme = themed_window();
+    theme.ui.selection = Style::new().bg(Color::ansi(99));
+    let expected_style = theme.default_style().overlay(theme.ui.selection);
+    let _theme_guard = globals::set_test_active_theme(theme);
+    let _config_guard = globals::set_test_config(Config {
+        theme: "demo".to_string(),
+        insert_escape: None,
+        syntax: true,
+        auto_close_pairs: true,
+        auto_indent: AutoIndentMode::Off,
+        advanced_glyphs: BTreeSet::new(),
+        ..Default::default()
+    });
+
+    let buffer = Buffer::from_str("abc\ndef");
+    let mut window = Window::new(buffer);
+    window
+        .buffer_view_mut()
+        .begin_visual_selection(VisualSelectionKind::Line);
+    window.buffer_view_mut().set_cursor(Cursor::new(1, 1));
+
+    let mut screen = crate::screen::Screen::new(2, 20);
+    window.render(&mut screen, Position::new(0, 0), Size::new(2, 20));
+
+    let first = window
+        .render_data()
+        .get_line(0)
+        .expect("first rendered line should exist");
+    assert!(
+        first
+            .iter()
+            .any(|chunk| chunk.text == "abc" && chunk.style == expected_style)
+    );
+    let second = window
+        .render_data()
+        .get_line(1)
+        .expect("second rendered line should exist");
+    assert!(
+        second
+            .iter()
+            .any(|chunk| chunk.text == "def" && chunk.style == expected_style)
     );
 }
 
@@ -1036,7 +1084,9 @@ fn test_visual_repeated_motion_matches_counted_motion() {
 
     let buffer = Buffer::from_str("abcdef");
     let mut counted = Window::new(buffer.clone());
-    counted.buffer_view_mut().begin_visual_selection();
+    counted
+        .buffer_view_mut()
+        .begin_visual_selection(VisualSelectionKind::Character);
     let counted_action = Action::new(ActionKind::MoveRight)
         .with_count(3)
         .expect("counted motion should be allowed")
@@ -1047,7 +1097,9 @@ fn test_visual_repeated_motion_matches_counted_motion() {
     );
 
     let mut repeated = Window::new(buffer);
-    repeated.buffer_view_mut().begin_visual_selection();
+    repeated
+        .buffer_view_mut()
+        .begin_visual_selection(VisualSelectionKind::Character);
     let motion = Action::new(ActionKind::MoveRight).with_from_mode(ModeKind::Visual);
     for _ in 0..3 {
         assert_eq!(repeated.process_action(&motion), ActionResult::Handled);
@@ -1079,7 +1131,9 @@ fn test_visual_delete_leaves_cursor_at_selection_start() {
 
     let buffer = Buffer::from_str("abc");
     let mut window = Window::new(buffer);
-    window.buffer_view_mut().begin_visual_selection();
+    window
+        .buffer_view_mut()
+        .begin_visual_selection(VisualSelectionKind::Character);
     window.buffer_view_mut().set_cursor(Cursor::new(0, 1));
 
     let action = Action::new(ActionKind::DeleteSelection)
@@ -1106,7 +1160,9 @@ fn test_visual_change_leaves_cursor_at_selection_start() {
 
     let buffer = Buffer::from_str("abc");
     let mut window = Window::new(buffer);
-    window.buffer_view_mut().begin_visual_selection();
+    window
+        .buffer_view_mut()
+        .begin_visual_selection(VisualSelectionKind::Character);
     window.buffer_view_mut().set_cursor(Cursor::new(0, 1));
 
     let action = Action::new(ActionKind::ChangeSelection)
@@ -1115,6 +1171,66 @@ fn test_visual_change_leaves_cursor_at_selection_start() {
     assert_eq!(window.process_action(&action), ActionResult::Handled);
     assert_eq!(buffer_text(window.buffer_view()), "c");
     assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 0));
+}
+
+#[test]
+fn test_visual_line_delete_removes_entire_lines() {
+    let theme = themed_window();
+    let _theme_guard = globals::set_test_active_theme(theme);
+    let _config_guard = globals::set_test_config(Config {
+        theme: "demo".to_string(),
+        insert_escape: None,
+        syntax: true,
+        auto_close_pairs: true,
+        auto_indent: AutoIndentMode::Off,
+        advanced_glyphs: BTreeSet::new(),
+        ..Default::default()
+    });
+
+    let buffer = Buffer::from_str("one\ntwo\nthree\nfour");
+    let mut window = Window::new(buffer);
+    window.buffer_view_mut().set_cursor(Cursor::new(1, 1));
+    window
+        .buffer_view_mut()
+        .begin_visual_selection(VisualSelectionKind::Line);
+    window.buffer_view_mut().set_cursor(Cursor::new(2, 1));
+
+    let action = Action::new(ActionKind::DeleteSelection)
+        .with_from_mode(ModeKind::VisualLine)
+        .with_to_mode(ModeKind::Normal);
+    assert_eq!(window.process_action(&action), ActionResult::Handled);
+    assert_eq!(buffer_text(window.buffer_view()), "one\nfour");
+    assert_eq!(window.buffer_view().cursor(), Cursor::new(1, 0));
+}
+
+#[test]
+fn test_visual_line_change_leaves_blank_line() {
+    let theme = themed_window();
+    let _theme_guard = globals::set_test_active_theme(theme);
+    let _config_guard = globals::set_test_config(Config {
+        theme: "demo".to_string(),
+        insert_escape: None,
+        syntax: true,
+        auto_close_pairs: true,
+        auto_indent: AutoIndentMode::Off,
+        advanced_glyphs: BTreeSet::new(),
+        ..Default::default()
+    });
+
+    let buffer = Buffer::from_str("one\ntwo\nthree\nfour");
+    let mut window = Window::new(buffer);
+    window.buffer_view_mut().set_cursor(Cursor::new(1, 1));
+    window
+        .buffer_view_mut()
+        .begin_visual_selection(VisualSelectionKind::Line);
+    window.buffer_view_mut().set_cursor(Cursor::new(2, 1));
+
+    let action = Action::new(ActionKind::ChangeSelection)
+        .with_from_mode(ModeKind::VisualLine)
+        .with_to_mode(ModeKind::Insert);
+    assert_eq!(window.process_action(&action), ActionResult::Handled);
+    assert_eq!(buffer_text(window.buffer_view()), "one\n\nfour");
+    assert_eq!(window.buffer_view().cursor(), Cursor::new(1, 0));
 }
 
 #[test]

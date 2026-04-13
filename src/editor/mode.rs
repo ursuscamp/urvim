@@ -10,6 +10,8 @@ pub enum ModeKind {
     Insert,
     /// Visual mode.
     Visual,
+    /// Linewise visual mode.
+    VisualLine,
 }
 
 impl ModeKind {
@@ -19,7 +21,13 @@ impl ModeKind {
             Self::Normal => "NORMAL",
             Self::Insert => "INSERT",
             Self::Visual => "VISUAL",
+            Self::VisualLine => "V-LINE",
         }
+    }
+
+    /// Returns true when this mode is one of the visual selection modes.
+    pub fn is_visual(self) -> bool {
+        matches!(self, Self::Visual | Self::VisualLine)
     }
 }
 

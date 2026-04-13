@@ -19,7 +19,7 @@ impl BufferView {
             scroll_offset: Position::new(0, 0),
             cursor: Cursor::new(0, 0),
             remembered_visual_col: None,
-            visual_anchor: None,
+            visual_selection: None,
         }
     }
 
@@ -107,18 +107,21 @@ impl BufferView {
     }
 
     /// Starts a new visual selection anchored at the current cursor.
-    pub fn begin_visual_selection(&mut self) {
-        self.visual_anchor = Some(self.cursor);
+    pub fn begin_visual_selection(&mut self, kind: VisualSelectionKind) {
+        self.visual_selection = Some(VisualSelection {
+            anchor: self.cursor,
+            kind,
+        });
     }
 
     /// Clears the active visual selection.
     pub fn clear_visual_selection(&mut self) {
-        self.visual_anchor = None;
+        self.visual_selection = None;
     }
 
-    /// Returns the anchor of the active visual selection, if any.
-    pub fn visual_anchor(&self) -> Option<Cursor> {
-        self.visual_anchor
+    /// Returns the active visual selection record, if any.
+    pub fn visual_selection(&self) -> Option<VisualSelection> {
+        self.visual_selection
     }
 
     /// Sets the cursor from stored state after syncing it against the current buffer.
@@ -147,10 +150,26 @@ impl BufferView {
 
     /// Returns the active visual selection as a normalized range.
     pub fn visual_selection_range(&self) -> Option<crate::buffer::TextObjectRange> {
-        let anchor = self.visual_anchor?;
+        let selection = self.visual_selection?;
+        if selection.kind == VisualSelectionKind::Line {
+            return None;
+        }
+        let anchor = selection.anchor;
         let cursor = self.cursor;
         self.with_buffer(|buffer| Self::visual_selection_range_for(buffer, anchor, cursor))
             .flatten()
+    }
+
+    /// Returns the active linewise visual selection as a line span.
+    pub fn visual_line_selection_range(&self) -> Option<(usize, usize)> {
+        let selection = self.visual_selection?;
+        if selection.kind != VisualSelectionKind::Line {
+            return None;
+        }
+        self.with_buffer(|buffer| {
+            Self::visual_line_selection_range_for(buffer, selection.anchor, self.cursor)
+        })
+        .flatten()
     }
 
     pub fn scroll_to_cursor(&mut self, viewport_size: Size, gutter_width: u16) {
@@ -268,42 +287,61 @@ impl BufferView {
     }
 
     fn apply_visual_selection(&self, render_data: &mut RenderData, selection_style: Style) {
-        let Some(selection) = self.visual_selection_range() else {
+        let Some(selection) = self.visual_selection() else {
             return;
         };
 
-        for line_data in &mut render_data.line_data {
-            // Split the rendered line into selected and unselected slices by
-            // comparing the selection range against the byte span of this
-            // visible buffer line.
-            let Some((line_start, line_end)) =
-                Self::intersect_line_range(selection.start, selection.end, line_data.buffer_line)
-            else {
-                continue;
-            };
+        match selection.kind {
+            VisualSelectionKind::Character => {
+                let Some(selection) = self.visual_selection_range() else {
+                    return;
+                };
 
-            let mut selected_chunks = Vec::with_capacity(line_data.chunks.len());
-            let mut chunk_start = line_data.byte_offset;
-            for chunk in line_data.chunks.drain(..) {
-                // Each chunk is contiguous plain text or syntax-styled text.
-                // If the selection only covers part of the chunk, split it so
-                // we can overlay the selection style on just the intersecting
-                // byte range.
-                let selected_style = chunk.style.overlay(selection_style);
-                Self::push_split_render_chunk(
-                    &mut selected_chunks,
-                    &chunk.text,
-                    chunk_start,
-                    line_start,
-                    line_end,
-                    chunk.style,
-                    selected_style,
-                );
+                for line_data in &mut render_data.line_data {
+                    let Some((line_start, line_end)) = Self::intersect_line_range(
+                        selection.start,
+                        selection.end,
+                        line_data.buffer_line,
+                    ) else {
+                        continue;
+                    };
 
-                chunk_start += chunk.text.len();
+                    let mut selected_chunks = Vec::with_capacity(line_data.chunks.len());
+                    let mut chunk_start = line_data.byte_offset;
+                    for chunk in line_data.chunks.drain(..) {
+                        let selected_style = chunk.style.overlay(selection_style);
+                        Self::push_split_render_chunk(
+                            &mut selected_chunks,
+                            &chunk.text,
+                            chunk_start,
+                            line_start,
+                            line_end,
+                            chunk.style,
+                            selected_style,
+                        );
+
+                        chunk_start += chunk.text.len();
+                    }
+
+                    line_data.chunks = selected_chunks;
+                }
             }
+            VisualSelectionKind::Line => {
+                let Some((start_line, count)) = self.visual_line_selection_range() else {
+                    return;
+                };
+                let end_line = start_line.saturating_add(count.saturating_sub(1));
 
-            line_data.chunks = selected_chunks;
+                for line_data in &mut render_data.line_data {
+                    if line_data.buffer_line < start_line || line_data.buffer_line > end_line {
+                        continue;
+                    }
+
+                    for chunk in &mut line_data.chunks {
+                        chunk.style = chunk.style.overlay(selection_style);
+                    }
+                }
+            }
         }
     }
 
@@ -588,6 +626,19 @@ impl BufferView {
         }
 
         Some(crate::buffer::TextObjectRange { start, end })
+    }
+
+    fn visual_line_selection_range_for(
+        buffer: &crate::buffer::Buffer,
+        anchor: Cursor,
+        cursor: Cursor,
+    ) -> Option<(usize, usize)> {
+        let anchor = buffer.sync_cursor(anchor);
+        let cursor = buffer.sync_cursor(cursor);
+        let start_line = anchor.line.min(cursor.line);
+        let end_line = anchor.line.max(cursor.line);
+        let count = end_line.saturating_sub(start_line).saturating_add(1);
+        (count > 0).then_some((start_line, count))
     }
 
     fn intersect_line_range(start: Cursor, end: Cursor, line_idx: usize) -> Option<(usize, usize)> {

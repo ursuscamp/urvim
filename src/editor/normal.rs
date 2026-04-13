@@ -54,6 +54,7 @@ impl NormalMode {
         trie_keymap.insert_str("gJ", Action::new(ActionKind::JoinWithoutSpace));
         trie_keymap.insert_str("i", Action::mode_transition(ModeKind::Insert));
         trie_keymap.insert_str("v", Action::mode_transition(ModeKind::Visual));
+        trie_keymap.insert_str("V", Action::mode_transition(ModeKind::VisualLine));
         trie_keymap.insert_str("<C-s>", Action::save_buffer(None));
         trie_keymap.insert_str(
             "a",

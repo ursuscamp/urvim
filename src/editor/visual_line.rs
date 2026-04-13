@@ -5,21 +5,21 @@ use crate::motion::chained_keymap::ChainedKeymap;
 use crate::motion::char_scan_keymap::CharScanKeymap;
 use crate::terminal::{CursorStyle, Key, KeyCode};
 
-/// Visual mode for character-wise selection.
-pub struct VisualMode {
+/// Linewise visual mode for whole-line selection.
+pub struct VisualLineMode {
     keymap: ChainedKeymap,
     buffer: Vec<String>,
     waiting: bool,
 }
 
-impl Default for VisualMode {
+impl Default for VisualLineMode {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl VisualMode {
-    /// Creates a new visual mode with motion bindings and selection actions.
+impl VisualLineMode {
+    /// Creates a new linewise visual mode with motion bindings and selection actions.
     pub fn new() -> Self {
         let mut trie_keymap = TrieKeymap::new();
 
@@ -49,8 +49,8 @@ impl VisualMode {
         trie_keymap.insert_str("%", Action::new(ActionKind::MoveToMatchingBracket));
         trie_keymap.insert_str(";", Action::new(ActionKind::RepeatLastFind));
         trie_keymap.insert_str(",", Action::new(ActionKind::RepeatLastFindReverse));
-        trie_keymap.insert_str("v", Action::mode_transition(ModeKind::Normal));
-        trie_keymap.insert_str("V", Action::mode_transition(ModeKind::VisualLine));
+        trie_keymap.insert_str("v", Action::mode_transition(ModeKind::Visual));
+        trie_keymap.insert_str("V", Action::mode_transition(ModeKind::Normal));
         trie_keymap.insert_str(
             "d",
             Action::new(ActionKind::DeleteSelection).with_to_mode(ModeKind::Normal),
@@ -80,24 +80,19 @@ impl VisualMode {
     }
 }
 
-impl Mode for VisualMode {
+impl Mode for VisualLineMode {
     fn handle_key(&mut self, key: &Key) -> HandleKeyResult {
-        // Escape is always an immediate cancel key in visual mode.
         if key.code == KeyCode::Esc {
             self.buffer.clear();
             self.waiting = false;
             return HandleKeyResult::Complete(
-                Action::mode_transition(ModeKind::Normal).with_from_mode(ModeKind::Visual),
+                Action::mode_transition(ModeKind::Normal).with_from_mode(ModeKind::VisualLine),
             );
         }
 
-        // Canonicalize the key into the same string form used by the trie
-        // bindings, then accumulate it so multi-key sequences can resolve.
         let key_str = key.canonical_string();
         self.buffer.push(key_str.clone());
 
-        // If the user has typed only digits so far, we may still be waiting
-        // for the actual motion key that follows the count.
         let buffer_str: String = self.buffer.iter().cloned().collect();
         let all_digits = self.buffer.iter().all(|k| {
             k.len() == 1
@@ -112,8 +107,6 @@ impl Mode for VisualMode {
             return HandleKeyResult::WaitForMore;
         }
 
-        // First handle the case where the count prefix is separated from the
-        // motion key, such as `3w` or `12gg`.
         let (leading_count, remaining_keys) = extract_leading_count(&self.buffer);
         if leading_count > 0 && !remaining_keys.is_empty() {
             let (action_keys, sub_count) = CountParser::parse(&remaining_keys);
@@ -129,17 +122,17 @@ impl Mode for VisualMode {
                 self.waiting = false;
 
                 if Self::ignores_count_wrapping(&action) {
-                    return HandleKeyResult::Complete(action.with_from_mode(ModeKind::Visual));
+                    return HandleKeyResult::Complete(action.with_from_mode(ModeKind::VisualLine));
                 }
 
                 if total_count > 1
                     && let Some(counted_action) = action.clone().with_count(total_count)
                 {
                     return HandleKeyResult::Complete(
-                        counted_action.with_from_mode(ModeKind::Visual),
+                        counted_action.with_from_mode(ModeKind::VisualLine),
                     );
                 }
-                return HandleKeyResult::Complete(action.with_from_mode(ModeKind::Visual));
+                return HandleKeyResult::Complete(action.with_from_mode(ModeKind::VisualLine));
             }
 
             if self.keymap.is_prefix(&action_keys) {
@@ -148,8 +141,6 @@ impl Mode for VisualMode {
             }
         }
 
-        // Then handle the simpler case where the full buffered sequence is the
-        // action, possibly with a leading count already attached to it.
         let (action_keys, count) = CountParser::parse(&self.buffer);
         if let Some(action) = self.keymap.get_action(&action_keys) {
             if self.keymap.has_children(&action_keys) {
@@ -161,15 +152,17 @@ impl Mode for VisualMode {
             self.waiting = false;
 
             if Self::ignores_count_wrapping(&action) {
-                return HandleKeyResult::Complete(action.with_from_mode(ModeKind::Visual));
+                return HandleKeyResult::Complete(action.with_from_mode(ModeKind::VisualLine));
             }
 
             if count > 1
                 && let Some(counted_action) = action.clone().with_count(count)
             {
-                return HandleKeyResult::Complete(counted_action.with_from_mode(ModeKind::Visual));
+                return HandleKeyResult::Complete(
+                    counted_action.with_from_mode(ModeKind::VisualLine),
+                );
             }
-            return HandleKeyResult::Complete(action.with_from_mode(ModeKind::Visual));
+            return HandleKeyResult::Complete(action.with_from_mode(ModeKind::VisualLine));
         }
 
         if self.keymap.is_prefix(&action_keys) {
@@ -196,13 +189,11 @@ impl Mode for VisualMode {
     }
 
     fn kind(&self) -> ModeKind {
-        ModeKind::Visual
+        ModeKind::VisualLine
     }
 }
 
-impl VisualMode {
-    // These are mode commands rather than motions, so we never wrap them in a
-    // numeric repeat count.
+impl VisualLineMode {
     fn ignores_count_wrapping(action: &Action) -> bool {
         matches!(
             action.kind.as_ref(),

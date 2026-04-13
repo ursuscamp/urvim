@@ -273,9 +273,39 @@ impl Window {
         self.buffer_view.set_cursor(range.start);
     }
 
+    /// Deletes the active linewise visual selection and leaves the cursor at the selection start.
+    pub fn delete_linewise_visual_selection(&mut self) {
+        let Some((start_line, count)) = self.buffer_view.visual_line_selection_range() else {
+            return;
+        };
+
+        if let Some(new_cursor) = self
+            .buffer_view
+            .with_buffer_mut(|buffer| buffer.delete_lines(start_line, count))
+            .flatten()
+        {
+            self.buffer_view.set_cursor(new_cursor);
+        }
+    }
+
     /// Changes the active visual selection and leaves the cursor at the selection start.
     pub fn change_visual_selection(&mut self) {
         self.delete_visual_selection();
+    }
+
+    /// Changes the active linewise visual selection and leaves the cursor at the replacement line.
+    pub fn change_linewise_visual_selection(&mut self) {
+        let Some((start_line, count)) = self.buffer_view.visual_line_selection_range() else {
+            return;
+        };
+
+        if let Some(new_cursor) = self
+            .buffer_view
+            .with_buffer_mut(|buffer| buffer.change_lines(start_line, count))
+            .flatten()
+        {
+            self.buffer_view.set_cursor(new_cursor);
+        }
     }
 
     pub fn join_lines_with_space(&mut self) {

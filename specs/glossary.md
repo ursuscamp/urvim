@@ -101,11 +101,20 @@ A lightweight editor-facing enum used to label the current mode in the status ba
 **Related Terms:** Mode, Status Bar, Layout, Visual Mode
 
 ### Visual Mode
-A Vim-style selection mode that lets the cursor anchor a text range and expand that range with motions. In urvim's initial release, visual mode is character-wise only and supports delete and change operations on the active selection.
+A Vim-style selection mode that lets the cursor anchor a text range and expand that range with motions. In urvim, visual mode is character-wise and supports delete and change operations on the active selection.
 
 **Context:** Mode switching, selection rendering, range edits
 
-**Related Terms:** Mode, Mode Kind, Cursor On a Character, TextObjectRange, Window
+**Related Terms:** Mode, Mode Kind, Visual Line Mode, Cursor On a Character, TextObjectRange, Window
+
+### Visual Line Mode
+A Vim-style selection mode that selects whole lines and applies linewise edits to the selected range. In urvim, it is entered with `V` and supports linewise delete and change operations.
+
+**Context:** Mode switching, linewise selection rendering, range edits
+
+**Example:** Pressing `V` and then `j` selects two full lines.
+
+**Related Terms:** Visual Mode, Mode, Window
 
 ### Modified Buffer
 A buffer state that indicates the in-memory contents differ from the last successful save on disk. Modified buffers are shown with a compact unsaved-changes marker in the tab bar and status bar.

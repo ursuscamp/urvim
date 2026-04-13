@@ -84,7 +84,25 @@ pub struct BufferView {
     scroll_offset: Position,
     cursor: Cursor,
     remembered_visual_col: Option<usize>,
-    visual_anchor: Option<Cursor>,
+    visual_selection: Option<VisualSelection>,
+}
+
+/// Kind of visual selection currently active in a buffer view.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VisualSelectionKind {
+    /// Character-wise selection.
+    Character,
+    /// Whole-line selection.
+    Line,
+}
+
+/// Active visual selection metadata stored by a window-local buffer view.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VisualSelection {
+    /// Selection anchor cursor.
+    pub anchor: Cursor,
+    /// Selection granularity.
+    pub kind: VisualSelectionKind,
 }
 
 #[derive(Debug)]
