@@ -261,6 +261,23 @@ impl Window {
         }
     }
 
+    /// Deletes the active visual selection and leaves the cursor at the selection start.
+    pub fn delete_visual_selection(&mut self) {
+        let Some(range) = self.buffer_view.visual_selection_range() else {
+            return;
+        };
+
+        self.buffer_view
+            .with_buffer_mut(|buffer| buffer.delete_range(range))
+            .flatten();
+        self.buffer_view.set_cursor(range.start);
+    }
+
+    /// Changes the active visual selection and leaves the cursor at the selection start.
+    pub fn change_visual_selection(&mut self) {
+        self.delete_visual_selection();
+    }
+
     pub fn join_lines_with_space(&mut self) {
         let cursor = self.buffer_view.cursor();
         if let Some(new_cursor) = self

@@ -109,6 +109,14 @@ fn resolve_ui_styles(
         resolve_style(
             theme_name,
             "ui",
+            "selection",
+            default_style,
+            &raw.selection,
+            palette,
+        )?,
+        resolve_style(
+            theme_name,
+            "ui",
             "tab_active",
             default_style,
             &raw.tab_active,
@@ -300,6 +308,26 @@ mod tests {
         };
 
         Style::new().fg(fg).bg(bg).bold()
+    }
+
+    fn selection_style(theme: &str) -> Style {
+        match theme {
+            "Friday Night" => Style::new().fg(Color::ansi(16)).bg(Color::ansi(252)),
+            "Saturday Morning" => Style::new().fg(Color::ansi(231)).bg(Color::ansi(235)),
+            "Rose Pine" => Style::new()
+                .fg(Color::Rgb(Rgb::new(25, 23, 36)))
+                .bg(Color::Rgb(Rgb::new(224, 222, 244))),
+            "Dracula" => Style::new()
+                .fg(Color::Rgb(Rgb::new(40, 42, 54)))
+                .bg(Color::Rgb(Rgb::new(248, 248, 242))),
+            "Tokyo Night" => Style::new()
+                .fg(Color::Rgb(Rgb::new(26, 27, 38)))
+                .bg(Color::Rgb(Rgb::new(192, 202, 245))),
+            "Catppuccin" => Style::new()
+                .fg(Color::Rgb(Rgb::new(30, 30, 46)))
+                .bg(Color::Rgb(Rgb::new(205, 214, 244))),
+            other => panic!("unexpected theme {other}"),
+        }
     }
 
     fn sample_theme() -> &'static str {
@@ -612,6 +640,14 @@ variable = { fg = "base" }
             registry.get("Catppuccin").unwrap().kind(),
             ThemeKind::TrueColor
         );
+        for name in registry.names() {
+            let theme = registry.get(name).unwrap();
+            assert_eq!(
+                theme.ui.selection,
+                selection_style(name),
+                "theme {name} should define a visible visual selection style"
+            );
+        }
         assert_eq!(
             friday_night.syntax_style_for_tag(&Tag::parse("string.interpolation").unwrap()),
             Style::new().fg(Color::ansi(75)).bg(Color::ansi(16))

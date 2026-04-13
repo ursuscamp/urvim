@@ -8,6 +8,7 @@ mod insert;
 mod keymap;
 mod mode;
 mod normal;
+mod visual;
 pub mod pairs;
 
 pub use action::{
@@ -18,6 +19,7 @@ pub use insert::InsertMode;
 pub use keymap::{CountParser, KeyStringParseError, Keymap, TrieKeymap, validate_key_string};
 pub use mode::{Mode, ModeKind};
 pub use normal::NormalMode;
+pub use visual::VisualMode;
 
 #[cfg(test)]
 mod tests;

@@ -8,6 +8,7 @@ use urvim::buffer::Cursor;
 use urvim::config::Config;
 use urvim::editor::{
     Action, ActionKind, HandleKeyResult, InsertMode, Mode, ModeKind, NormalMode, RepeatReplay,
+    VisualMode,
 };
 use urvim::globals;
 use urvim::screen::Screen;
@@ -129,37 +130,28 @@ fn main() -> io::Result<()> {
                             let mut handled = false;
                             if let Some(replay) = repeat_replay.as_ref() {
                                 handled = replay_repeat_action(&mut layout, replay);
+                                if handled
+                                    && replay.action.kind.is_some()
+                                    && let Some(to_mode) = replay.action.to_mode
+                                {
+                                    let repeat_text =
+                                        switch_mode(&mut layout, &mut mode, to_mode);
+                                    terminal.set_cursor_style(mode.cursor_style())?;
+                                    if let Some(repeat_text) =
+                                        repeat_text.filter(|text| !text.is_empty())
+                                        && let Some(mut repeat_state) =
+                                            globals::get_last_repeat()
+                                    {
+                                        repeat_state.insert_text = Some(repeat_text);
+                                        globals::set_last_repeat(repeat_state);
+                                    }
+                                }
                             } else {
                                 let action_result = layout.process_action(&dispatch_action);
 
                                 if action_result == ActionResult::NotHandled {
                                     // Fall back to app-level handling
                                     match dispatch_action {
-                                        _ if dispatch_action.kind.is_none()
-                                            && dispatch_action.to_mode
-                                                == Some(ModeKind::Normal) =>
-                                        {
-                                            let repeat_text = mode.take_repeat_text();
-                                            mode = Box::new(NormalMode::new());
-                                            terminal.set_cursor_style(mode.cursor_style())?;
-                                            if let Some(repeat_text) =
-                                                repeat_text.filter(|text| !text.is_empty())
-                                                && let Some(mut repeat_state) =
-                                                    globals::get_last_repeat()
-                                            {
-                                                repeat_state.insert_text = Some(repeat_text);
-                                                globals::set_last_repeat(repeat_state);
-                                            }
-                                            handled = true;
-                                        }
-                                        _ if dispatch_action.kind.is_none()
-                                            && dispatch_action.to_mode
-                                                == Some(ModeKind::Insert) =>
-                                        {
-                                            mode = Box::new(InsertMode::new());
-                                            terminal.set_cursor_style(mode.cursor_style())?;
-                                            handled = true;
-                                        }
                                         _ if matches!(
                                             dispatch_action.kind.as_ref(),
                                             Some(ActionKind::SaveBuffer(_))
@@ -203,24 +195,33 @@ fn main() -> io::Result<()> {
                                         {
                                             break;
                                         }
-                                        _ if dispatch_action.kind.is_none()
-                                            && dispatch_action.to_mode.is_none() =>
-                                        {
+                                        _ if dispatch_action.kind.is_none() => {
                                             handled = true;
                                         }
                                         _ => { /* Should have been handled by window */ }
                                     }
                                 } else if action_result == ActionResult::Handled {
                                     let pending_repeat_suffix = layout.take_pending_repeat_suffix();
-                                    if dispatch_action.switches_to_insert_mode() {
-                                        mode = Box::new(InsertMode::new());
-                                        terminal.set_cursor_style(mode.cursor_style())?;
-                                    }
                                     if let Some(suffix) = pending_repeat_suffix.as_deref() {
                                         mode.append_repeat_text(suffix);
                                     }
-                                    // Check if this action switches to insert mode (handles Count actions recursively)
                                     handled = true;
+                                }
+
+                                if handled
+                                    && let Some(to_mode) = dispatch_action.to_mode
+                                {
+                                    let repeat_text =
+                                        switch_mode(&mut layout, &mut mode, to_mode);
+                                    terminal.set_cursor_style(mode.cursor_style())?;
+                                    if let Some(repeat_text) =
+                                        repeat_text.filter(|text| !text.is_empty())
+                                        && let Some(mut repeat_state) =
+                                            globals::get_last_repeat()
+                                    {
+                                        repeat_state.insert_text = Some(repeat_text);
+                                        globals::set_last_repeat(repeat_state);
+                                    }
                                 }
                             }
 
@@ -299,6 +300,37 @@ fn select_active_theme(
             registry.names().join(", ")
         )
     })
+}
+
+fn switch_mode(
+    layout: &mut Layout,
+    mode: &mut Box<dyn Mode>,
+    to_mode: ModeKind,
+) -> Option<String> {
+    let repeat_text = if to_mode == ModeKind::Normal {
+        mode.take_repeat_text()
+    } else {
+        None
+    };
+
+    if mode.kind() == ModeKind::Visual && to_mode != ModeKind::Visual {
+        layout.active_buffer_view_mut().clear_visual_selection();
+    }
+
+    match to_mode {
+        ModeKind::Normal => {
+            *mode = Box::new(NormalMode::new());
+        }
+        ModeKind::Insert => {
+            *mode = Box::new(InsertMode::new());
+        }
+        ModeKind::Visual => {
+            layout.active_buffer_view_mut().begin_visual_selection();
+            *mode = Box::new(VisualMode::new());
+        }
+    }
+
+    repeat_text
 }
 
 fn replay_repeat_action(layout: &mut Layout, replay: &RepeatReplay) -> bool {
@@ -553,5 +585,36 @@ mod tests {
             .expect("buffer should exist");
         assert_eq!(text, "hello world");
         assert_eq!(layout.active_buffer_view().cursor(), Cursor::new(0, 6));
+    }
+
+    #[test]
+    fn switch_mode_clears_visual_selection_when_leaving_visual() {
+        let mut layout = Layout::new(
+            TabGroup::from_buffers(vec![Buffer::from_str("hello")]),
+            ModeKind::Visual,
+        );
+        layout.active_buffer_view_mut().begin_visual_selection();
+        let mut mode: Box<dyn Mode> = Box::new(VisualMode::new());
+
+        let repeat_text = switch_mode(&mut layout, &mut mode, ModeKind::Normal);
+
+        assert_eq!(mode.kind(), ModeKind::Normal);
+        assert!(repeat_text.is_none());
+        assert!(layout.active_buffer_view().visual_anchor().is_none());
+    }
+
+    #[test]
+    fn switch_mode_restarts_visual_selection_when_entering_visual() {
+        let mut layout = Layout::new(
+            TabGroup::from_buffers(vec![Buffer::from_str("hello")]),
+            ModeKind::Normal,
+        );
+        let mut mode: Box<dyn Mode> = Box::new(NormalMode::new());
+
+        let repeat_text = switch_mode(&mut layout, &mut mode, ModeKind::Visual);
+
+        assert_eq!(mode.kind(), ModeKind::Visual);
+        assert!(repeat_text.is_none());
+        assert!(layout.active_buffer_view().visual_anchor().is_some());
     }
 }

@@ -180,10 +180,12 @@ pub enum ActionKind {
     MoveToScreenBottom,
     DeleteBackward,
     DeleteForward,
+    DeleteSelection,
     JoinWithSpace,
     JoinWithoutSpace,
     DeleteLine,
     ChangeLine,
+    ChangeSelection,
     ChangeToLineEnd,
     AppendAfterCursor,
     AppendToLineEnd,
@@ -373,8 +375,10 @@ impl Action {
                 | Some(ActionKind::InsertNewline)
                 | Some(ActionKind::DeleteBackward)
                 | Some(ActionKind::DeleteForward)
+                | Some(ActionKind::DeleteSelection)
                 | Some(ActionKind::DeleteLine)
                 | Some(ActionKind::ChangeLine)
+                | Some(ActionKind::ChangeSelection)
                 | Some(ActionKind::ChangeToLineEnd)
                 | Some(ActionKind::JoinWithSpace)
                 | Some(ActionKind::JoinWithoutSpace)
@@ -492,8 +496,10 @@ impl Action {
             None => false,
             Some(ActionKind::DeleteBackward)
             | Some(ActionKind::DeleteForward)
+            | Some(ActionKind::DeleteSelection)
             | Some(ActionKind::DeleteLine)
             | Some(ActionKind::ChangeLine)
+            | Some(ActionKind::ChangeSelection)
             | Some(ActionKind::ChangeToLineEnd)
             | Some(ActionKind::JoinWithSpace)
             | Some(ActionKind::JoinWithoutSpace)
@@ -556,10 +562,12 @@ impl Action {
         match self.kind_ref() {
             Some(ActionKind::DeleteBackward)
             | Some(ActionKind::DeleteForward)
+            | Some(ActionKind::DeleteSelection)
             | Some(ActionKind::JoinWithSpace)
             | Some(ActionKind::JoinWithoutSpace)
             | Some(ActionKind::DeleteLine)
             | Some(ActionKind::ChangeLine)
+            | Some(ActionKind::ChangeSelection)
             | Some(ActionKind::ChangeToLineEnd)
             | Some(ActionKind::IndentDecrease)
             | Some(ActionKind::IndentIncrease)

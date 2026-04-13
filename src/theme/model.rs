@@ -98,6 +98,8 @@ pub struct UiStyles {
     pub status_bar: Style,
     /// Style used by modified-buffer markers.
     pub modified_marker: Style,
+    /// Style used by the active visual selection.
+    pub selection: Style,
     /// Style used by the active tab.
     pub tab_active: Style,
     /// Style used by inactive tabs.
@@ -115,6 +117,7 @@ impl UiStyles {
     pub fn new(
         status_bar: Style,
         modified_marker: Style,
+        selection: Style,
         tab_active: Style,
         tab_inactive: Style,
         tab_scroll_indicator: Style,
@@ -124,6 +127,7 @@ impl UiStyles {
         Self {
             status_bar,
             modified_marker,
+            selection,
             tab_active,
             tab_inactive,
             tab_scroll_indicator,
@@ -344,6 +348,7 @@ mod tests {
         let ui_styles = UiStyles::new(
             Style::new().fg(Color::ansi(1)),
             Style::new().fg(Color::ansi(2)),
+            Style::new().reverse(),
             Style::new().fg(Color::ansi(3)),
             Style::new().fg(Color::ansi(4)),
             Style::new().fg(Color::ansi(5)),

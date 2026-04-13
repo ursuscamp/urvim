@@ -147,6 +147,16 @@ fn test_normal_mode_append_after_cursor_sets_insert_mode() {
 }
 
 #[test]
+fn test_normal_mode_visual_binding_switches_to_visual_mode() {
+    let mut mode = NormalMode::new();
+
+    assert_eq!(
+        handle_and_unwrap(&mut mode, &key('v')),
+        Action::mode_transition(ModeKind::Visual)
+    );
+}
+
+#[test]
 fn test_normal_mode_indent_bindings() {
     let mut mode = NormalMode::new();
 
@@ -183,9 +193,51 @@ fn test_normal_mode_dot_repeat_action() {
 fn test_mode_kind_reflects_mode_type() {
     let normal = NormalMode::new();
     let insert = InsertMode::new();
+    let visual = VisualMode::new();
 
     assert_eq!(normal.kind(), ModeKind::Normal);
     assert_eq!(insert.kind(), ModeKind::Insert);
+    assert_eq!(visual.kind(), ModeKind::Visual);
+}
+
+#[test]
+fn test_visual_mode_motion_and_exit_bindings() {
+    let mut mode = VisualMode::new();
+
+    assert_eq!(
+        handle_and_unwrap(&mut mode, &key('l')),
+        Action::new(ActionKind::MoveRight)
+    );
+    assert_eq!(
+        handle_and_unwrap(&mut mode, &key(';')),
+        Action::new(ActionKind::RepeatLastFind)
+    );
+    assert_eq!(
+        handle_and_unwrap(&mut mode, &key(',')),
+        Action::new(ActionKind::RepeatLastFindReverse)
+    );
+    assert_eq!(
+        handle_and_unwrap(&mut mode, &key('d')),
+        Action::new(ActionKind::DeleteSelection).with_to_mode(ModeKind::Normal)
+    );
+    assert_eq!(
+        handle_and_unwrap(&mut mode, &key('c')),
+        Action::new(ActionKind::ChangeSelection).with_to_mode(ModeKind::Insert)
+    );
+    assert_eq!(
+        handle_and_unwrap(&mut mode, &Key::new(crate::terminal::KeyCode::Esc)),
+        Action::mode_transition(ModeKind::Normal)
+    );
+}
+
+#[test]
+fn test_visual_mode_v_exits_to_normal() {
+    let mut mode = VisualMode::new();
+
+    assert_eq!(
+        handle_and_unwrap(&mut mode, &key('v')),
+        Action::mode_transition(ModeKind::Normal)
+    );
 }
 
 #[test]

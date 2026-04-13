@@ -19,6 +19,7 @@ impl BufferView {
             scroll_offset: Position::new(0, 0),
             cursor: Cursor::new(0, 0),
             remembered_visual_col: None,
+            visual_anchor: None,
         }
     }
 
@@ -105,6 +106,21 @@ impl BufferView {
         self.cursor = cursor;
     }
 
+    /// Starts a new visual selection anchored at the current cursor.
+    pub fn begin_visual_selection(&mut self) {
+        self.visual_anchor = Some(self.cursor);
+    }
+
+    /// Clears the active visual selection.
+    pub fn clear_visual_selection(&mut self) {
+        self.visual_anchor = None;
+    }
+
+    /// Returns the anchor of the active visual selection, if any.
+    pub fn visual_anchor(&self) -> Option<Cursor> {
+        self.visual_anchor
+    }
+
     /// Sets the cursor from stored state after syncing it against the current buffer.
     pub fn set_cursor_synced(&mut self, cursor: Cursor) {
         let synced_cursor = self
@@ -127,6 +143,14 @@ impl BufferView {
 
     pub fn set_remembered_visual_col(&mut self, col: usize) {
         self.remembered_visual_col = Some(col);
+    }
+
+    /// Returns the active visual selection as a normalized range.
+    pub fn visual_selection_range(&self) -> Option<crate::buffer::TextObjectRange> {
+        let anchor = self.visual_anchor?;
+        let cursor = self.cursor;
+        self.with_buffer(|buffer| Self::visual_selection_range_for(buffer, anchor, cursor))
+            .flatten()
     }
 
     pub fn scroll_to_cursor(&mut self, viewport_size: Size, gutter_width: u16) {
@@ -182,6 +206,8 @@ impl BufferView {
         let mut render_data = RenderData::new(size.rows);
         let syntax_styles =
             globals::with_active_theme(|theme| theme.map(|theme| theme.syntax.clone()));
+        let selection_style =
+            globals::with_active_theme(|theme| theme.map(|theme| theme.ui.selection));
         let syntax_enabled = globals::with_config(|config| config.syntax).unwrap_or(true);
         let todo_markers: Vector<SmolStr> = if syntax_enabled {
             globals::with_config(|config| config.todo_markers.clone()).unwrap_or_default()
@@ -234,7 +260,70 @@ impl BufferView {
             }
         }
 
+        if let Some(selection_style) = selection_style {
+            self.apply_visual_selection(&mut render_data, selection_style);
+        }
+
         render_data
+    }
+
+    fn apply_visual_selection(&self, render_data: &mut RenderData, selection_style: Style) {
+        let Some(selection) = self.visual_selection_range() else {
+            return;
+        };
+
+        for line_data in &mut render_data.line_data {
+            // Split the rendered line into selected and unselected slices by
+            // comparing the selection range against the byte span of this
+            // visible buffer line.
+            let Some((line_start, line_end)) =
+                Self::visual_selection_line_range(
+                    selection.start,
+                    selection.end,
+                    line_data.buffer_line,
+                )
+            else {
+                continue;
+            };
+
+            let mut selected_chunks = Vec::with_capacity(line_data.chunks.len());
+            let mut chunk_start = line_data.byte_offset;
+            for chunk in line_data.chunks.drain(..) {
+                // Each chunk is contiguous plain text or syntax-styled text.
+                // If the selection only covers part of the chunk, split it so
+                // we can overlay the selection style on just the intersecting
+                // byte range.
+                let chunk_len = chunk.text.len();
+                let chunk_end = chunk_start + chunk_len;
+
+                if chunk_end <= line_start || chunk_start >= line_end {
+                    selected_chunks.push(chunk);
+                } else {
+                    let local_start = line_start.saturating_sub(chunk_start).min(chunk_len);
+                    let local_end = line_end.saturating_sub(chunk_start).min(chunk_len);
+
+                    if local_start > 0 {
+                        selected_chunks.push(RenderChunk::new(
+                            &chunk.text[..local_start],
+                            chunk.style,
+                        ));
+                    }
+                    if local_start < local_end {
+                        selected_chunks.push(RenderChunk::new(
+                            &chunk.text[local_start..local_end],
+                            chunk.style.overlay(selection_style),
+                        ));
+                    }
+                    if local_end < chunk_len {
+                        selected_chunks.push(RenderChunk::new(&chunk.text[local_end..], chunk.style));
+                    }
+                }
+
+                chunk_start = chunk_end;
+            }
+
+            line_data.chunks = selected_chunks;
+        }
     }
 
     fn build_chunks_for_visible_line(
@@ -454,6 +543,67 @@ impl BufferView {
         matches
     }
 
+    fn visual_selection_range_for(
+        buffer: &crate::buffer::Buffer,
+        anchor: Cursor,
+        cursor: Cursor,
+    ) -> Option<crate::buffer::TextObjectRange> {
+        // Sync both endpoints against the current buffer so the range stays
+        // valid after edits that may have shifted or invalidated the cursors.
+        let anchor = buffer.sync_cursor(anchor);
+        let cursor = buffer.sync_cursor(cursor);
+
+        // Normalize the selection so start is always before end, regardless
+        // of which side the cursor is on.
+        let (start, end) = if (anchor.line, anchor.col) <= (cursor.line, cursor.col) {
+            (anchor, cursor)
+        } else {
+            (cursor, anchor)
+        };
+
+        // Visual selections behave like Vim: the end is inclusive of the last
+        // character, so extend it one cursor past the final selected grapheme.
+        let end = if let Some(ch) = buffer.char_at_cursor(end) {
+            buffer
+                .next_cursor(end)
+                .unwrap_or_else(|| Cursor::new(end.line, end.col + ch.len_utf8()))
+        } else {
+            end
+        };
+
+        if start.line > end.line || (start.line == end.line && start.col >= end.col) {
+            return None;
+        }
+
+        Some(crate::buffer::TextObjectRange { start, end })
+    }
+
+    fn visual_selection_line_range(
+        start: Cursor,
+        end: Cursor,
+        line_idx: usize,
+    ) -> Option<(usize, usize)> {
+        // Reject lines outside the selection span outright so callers can
+        // skip them without any extra range math.
+        if line_idx < start.line || line_idx > end.line {
+            return None;
+        }
+
+        // For the first and last selected lines, clamp to the visible
+        // endpoints. Middle lines are fully selected.
+        let line_range = if start.line == end.line {
+            (start.col, end.col)
+        } else if line_idx == start.line {
+            (start.col, usize::MAX)
+        } else if line_idx == end.line {
+            (0, end.col)
+        } else {
+            (0, usize::MAX)
+        };
+
+        Some(line_range)
+    }
+
     fn calculate_horizontal_offset(
         line_text: &str,
         visual_width_offset: usize,
@@ -552,6 +702,7 @@ mod tests {
             Style::new().fg(Color::ansi(9)).bg(Color::ansi(10)),
             Style::new().fg(Color::ansi(11)).bg(Color::ansi(12)),
             Style::new().fg(Color::ansi(13)).bg(Color::ansi(14)),
+            Style::new().fg(Color::ansi(15)).bg(Color::ansi(16)),
         );
         let mut syntax_map = BTreeMap::new();
         syntax_map.insert(
@@ -578,6 +729,7 @@ mod tests {
             Style::new().fg(Color::ansi(9)).bg(Color::ansi(10)),
             Style::new().fg(Color::ansi(11)).bg(Color::ansi(12)),
             Style::new().fg(Color::ansi(13)).bg(Color::ansi(14)),
+            Style::new().fg(Color::ansi(15)).bg(Color::ansi(16)),
         );
         let mut syntax_map = BTreeMap::new();
         syntax_map.insert(

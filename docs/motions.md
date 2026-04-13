@@ -77,6 +77,20 @@ This document describes the motions implemented in urvim and how they differ fro
 | `cgg` | Change linewise from the current line to line 1 (or to line N with a count) |
 | `cG` | Change linewise from the current line to the last line (or to line N with a count) |
 
+## Visual Mode
+
+urvim supports a simple character-wise visual mode.
+
+- Press `v` in normal mode to enter visual mode.
+- Move with the usual motion keys to expand or shrink the selection.
+- Press `;` to repeat the last character search in the same direction.
+- Press `,` to repeat the last character search in the opposite direction.
+- Press `d` to delete the selection and return to normal mode.
+- Press `c` to change the selection and enter insert mode.
+- Press `Esc` or `v` again to leave visual mode without editing the buffer.
+
+Linewise and blockwise visual mode are not implemented yet.
+
 ## Count Support
 
 urvim supports count prefixes for most motions. There are two types of count behaviors:

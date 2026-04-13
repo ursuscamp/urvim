@@ -84,6 +84,7 @@ pub struct BufferView {
     scroll_offset: Position,
     cursor: Cursor,
     remembered_visual_col: Option<usize>,
+    visual_anchor: Option<Cursor>,
 }
 
 #[derive(Debug)]

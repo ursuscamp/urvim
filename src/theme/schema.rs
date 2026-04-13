@@ -68,6 +68,9 @@ pub struct RawUiStyles {
     pub status_bar: RawStyle,
     /// The modified-buffer marker.
     pub modified_marker: RawStyle,
+    /// The active visual selection.
+    #[serde(default)]
+    pub selection: RawStyle,
     /// The currently active tab.
     pub tab_active: RawStyle,
     /// A non-active tab.

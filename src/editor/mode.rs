@@ -8,6 +8,8 @@ pub enum ModeKind {
     Normal,
     /// Insert mode.
     Insert,
+    /// Visual mode.
+    Visual,
 }
 
 impl ModeKind {
@@ -16,6 +18,7 @@ impl ModeKind {
         match self {
             Self::Normal => "NORMAL",
             Self::Insert => "INSERT",
+            Self::Visual => "VISUAL",
         }
     }
 }

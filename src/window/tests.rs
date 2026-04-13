@@ -48,6 +48,7 @@ fn themed_window() -> Theme {
     let ui_styles = UiStyles::new(
         Style::new().fg(Color::ansi(1)).bg(Color::ansi(2)),
         Style::new().fg(Color::ansi(3)).bg(Color::ansi(4)),
+        Style::new().reverse(),
         Style::new().fg(Color::ansi(5)).bg(Color::ansi(6)),
         Style::new().fg(Color::ansi(7)).bg(Color::ansi(8)),
         Style::new().fg(Color::ansi(9)).bg(Color::ansi(10)),
@@ -84,6 +85,7 @@ fn syntax_themed_window() -> Theme {
     let ui_styles = UiStyles::new(
         Style::new().fg(Color::ansi(1)).bg(Color::ansi(2)),
         Style::new().fg(Color::ansi(3)).bg(Color::ansi(4)),
+        Style::new().reverse(),
         Style::new().fg(Color::ansi(5)).bg(Color::ansi(6)),
         Style::new().fg(Color::ansi(7)).bg(Color::ansi(8)),
         Style::new().fg(Color::ansi(9)).bg(Color::ansi(10)),
@@ -982,6 +984,128 @@ fn test_window_visual_cursor_with_gutter() {
     // The cursor is at column 2 in the content, plus 3 for gutter = column 5
     let gutter_width = 3; // digits(3) + 2 = 3
     assert_eq!(pos.col, 2 + gutter_width);
+}
+
+#[test]
+fn test_visual_selection_is_rendered() {
+    let mut theme = themed_window();
+    theme.ui.selection = Style::new().bg(Color::ansi(99));
+    let expected_style = theme.default_style().overlay(theme.ui.selection);
+    let _theme_guard = globals::set_test_active_theme(theme);
+    let _config_guard = globals::set_test_config(Config {
+        theme: "demo".to_string(),
+        insert_escape: None,
+        syntax: true,
+        auto_close_pairs: true,
+        auto_indent: AutoIndentMode::Off,
+        advanced_glyphs: BTreeSet::new(),
+        ..Default::default()
+    });
+
+    let buffer = Buffer::from_str("abc");
+    let mut window = Window::new(buffer);
+    window.buffer_view_mut().begin_visual_selection();
+    window.buffer_view_mut().set_cursor(Cursor::new(0, 1));
+
+    let mut screen = crate::screen::Screen::new(1, 20);
+    window.render(&mut screen, Position::new(0, 0), Size::new(1, 20));
+
+    let line = window.render_data().get_line(0).expect("rendered line should exist");
+    assert!(
+        line.iter()
+            .any(|chunk| chunk.text == "ab" && chunk.style == expected_style)
+    );
+}
+
+#[test]
+fn test_visual_repeated_motion_matches_counted_motion() {
+    let theme = themed_window();
+    let _theme_guard = globals::set_test_active_theme(theme);
+    let _config_guard = globals::set_test_config(Config {
+        theme: "demo".to_string(),
+        insert_escape: None,
+        syntax: true,
+        auto_close_pairs: true,
+        auto_indent: AutoIndentMode::Off,
+        advanced_glyphs: BTreeSet::new(),
+        ..Default::default()
+    });
+
+    let buffer = Buffer::from_str("abcdef");
+    let mut counted = Window::new(buffer.clone());
+    counted.buffer_view_mut().begin_visual_selection();
+    let counted_action = Action::new(ActionKind::MoveRight)
+        .with_count(3)
+        .expect("counted motion should be allowed")
+        .with_from_mode(ModeKind::Visual);
+    assert_eq!(counted.process_action(&counted_action), ActionResult::Handled);
+
+    let mut repeated = Window::new(buffer);
+    repeated.buffer_view_mut().begin_visual_selection();
+    let motion = Action::new(ActionKind::MoveRight).with_from_mode(ModeKind::Visual);
+    for _ in 0..3 {
+        assert_eq!(repeated.process_action(&motion), ActionResult::Handled);
+    }
+
+    assert_eq!(counted.buffer_view().cursor(), repeated.buffer_view().cursor());
+    assert_eq!(
+        counted.buffer_view().visual_selection_range(),
+        repeated.buffer_view().visual_selection_range()
+    );
+}
+
+#[test]
+fn test_visual_delete_leaves_cursor_at_selection_start() {
+    let theme = themed_window();
+    let _theme_guard = globals::set_test_active_theme(theme);
+    let _config_guard = globals::set_test_config(Config {
+        theme: "demo".to_string(),
+        insert_escape: None,
+        syntax: true,
+        auto_close_pairs: true,
+        auto_indent: AutoIndentMode::Off,
+        advanced_glyphs: BTreeSet::new(),
+        ..Default::default()
+    });
+
+    let buffer = Buffer::from_str("abc");
+    let mut window = Window::new(buffer);
+    window.buffer_view_mut().begin_visual_selection();
+    window.buffer_view_mut().set_cursor(Cursor::new(0, 1));
+
+    let action = Action::new(ActionKind::DeleteSelection)
+        .with_from_mode(ModeKind::Visual)
+        .with_to_mode(ModeKind::Normal);
+    assert_eq!(window.process_action(&action), ActionResult::Handled);
+    assert_eq!(buffer_text(window.buffer_view()), "c");
+    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 0));
+}
+
+#[test]
+fn test_visual_change_leaves_cursor_at_selection_start() {
+    let theme = themed_window();
+    let _theme_guard = globals::set_test_active_theme(theme);
+    let _config_guard = globals::set_test_config(Config {
+        theme: "demo".to_string(),
+        insert_escape: None,
+        syntax: true,
+        auto_close_pairs: true,
+        auto_indent: AutoIndentMode::Off,
+        advanced_glyphs: BTreeSet::new(),
+        ..Default::default()
+    });
+
+    let buffer = Buffer::from_str("abc");
+    let mut window = Window::new(buffer);
+    window.buffer_view_mut().begin_visual_selection();
+    window.buffer_view_mut().set_cursor(Cursor::new(0, 1));
+
+    let action = Action::new(ActionKind::ChangeSelection)
+        .with_from_mode(ModeKind::Visual)
+        .with_to_mode(ModeKind::Insert);
+    assert_eq!(window.process_action(&action), ActionResult::Handled);
+    assert_eq!(buffer_text(window.buffer_view()), "c");
+    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 0));
 }
 
 #[test]

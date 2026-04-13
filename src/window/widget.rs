@@ -217,6 +217,10 @@ impl Widget for Window {
                 self.delete_char_at_cursor();
                 ActionResult::Handled
             }
+            Some(ActionKind::DeleteSelection) => {
+                self.delete_visual_selection();
+                ActionResult::Handled
+            }
             Some(ActionKind::AppendAfterCursor) => {
                 self.move_cursor_right();
                 ActionResult::Handled
@@ -252,6 +256,10 @@ impl Widget for Window {
                 ActionResult::Handled
             }
             Some(ActionKind::ChangeLine) => self.change_lines_with_auto_indent(1),
+            Some(ActionKind::ChangeSelection) => {
+                self.change_visual_selection();
+                ActionResult::Handled
+            }
             Some(ActionKind::ChangeToLineEnd) => {
                 self.handle_count_change_to_line_end(1);
                 ActionResult::Handled
@@ -375,7 +383,13 @@ impl Widget for Window {
                 }
                 ActionResult::Handled
             }
-            Some(ActionKind::Count(count, inner)) => return self.handle_count(*count, inner),
+            Some(ActionKind::Count(count, inner)) => {
+                let mut counted_inner = inner.as_ref().clone();
+                if action.from_mode.is_some() {
+                    counted_inner = counted_inner.with_from_mode(action.from_mode.unwrap());
+                }
+                self.handle_count(*count, &counted_inner)
+            }
             Some(ActionKind::Operation(op, target)) => return self.handle_operation(op, target),
             Some(ActionKind::Quit)
             | Some(ActionKind::Undo)

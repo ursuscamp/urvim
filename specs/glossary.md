@@ -90,14 +90,22 @@ A stored description of the last successful dot-repeatable edit. It records the 
 **Related Terms:** Change Operator, Insert Mode, Action, Mode
 
 ### Mode
-A trait that defines how the editor responds to key input in different states. Urvim implements two modes:
+A trait that defines how the editor responds to key input in different states. Urvim implements three modes:
 - **Normal Mode**: For navigation and command execution. Uses a steady block cursor.
 - **Insert Mode**: For text input. Uses a steady bar cursor.
+- **Visual Mode**: For character-wise selection and selection-based edits. Uses a steady block cursor.
 
 ### Mode Kind
 A lightweight editor-facing enum used to label the current mode in the status bar. It mirrors the live mode object managed by the main event loop and is returned by the `Mode::kind` method.
 
-**Related Terms:** Mode, Status Bar, Layout
+**Related Terms:** Mode, Status Bar, Layout, Visual Mode
+
+### Visual Mode
+A Vim-style selection mode that lets the cursor anchor a text range and expand that range with motions. In urvim's initial release, visual mode is character-wise only and supports delete and change operations on the active selection.
+
+**Context:** Mode switching, selection rendering, range edits
+
+**Related Terms:** Mode, Mode Kind, Cursor On a Character, TextObjectRange, Window
 
 ### Modified Buffer
 A buffer state that indicates the in-memory contents differ from the last successful save on disk. Modified buffers are shown with a compact unsaved-changes marker in the tab bar and status bar.
