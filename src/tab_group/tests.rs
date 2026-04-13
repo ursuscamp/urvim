@@ -336,13 +336,25 @@ fn test_jump_navigation_selects_existing_tab() {
     let second_buffer = group.active_buffer_view().buffer_id();
     group.record_cursor_position();
 
-    assert_eq!(group.process_action(&Action::jump_backward()), ActionResult::Handled);
+    assert_eq!(
+        group.process_action(&Action::jump_backward()),
+        ActionResult::Handled
+    );
     assert_eq!(group.active_tab_index(), 0);
-    assert_eq!(group.active_window().buffer_view().buffer_id(), first_buffer);
+    assert_eq!(
+        group.active_window().buffer_view().buffer_id(),
+        first_buffer
+    );
     assert_eq!(buffer_cursor(group.active_buffer_view()), Cursor::new(0, 1));
-    assert_eq!(group.process_action(&Action::jump_forward()), ActionResult::Handled);
+    assert_eq!(
+        group.process_action(&Action::jump_forward()),
+        ActionResult::Handled
+    );
     assert_eq!(group.active_tab_index(), 1);
-    assert_eq!(group.active_window().buffer_view().buffer_id(), second_buffer);
+    assert_eq!(
+        group.active_window().buffer_view().buffer_id(),
+        second_buffer
+    );
     assert_eq!(buffer_cursor(group.active_buffer_view()), Cursor::new(0, 3));
 }
 
@@ -361,10 +373,16 @@ fn test_jump_navigation_reopens_missing_tab() {
     group.tabs.remove(0);
     group.active_tab = 0;
 
-    assert_eq!(group.process_action(&Action::jump_backward()), ActionResult::Handled);
+    assert_eq!(
+        group.process_action(&Action::jump_backward()),
+        ActionResult::Handled
+    );
     assert_eq!(group.tabs.len(), 2);
     assert_eq!(group.active_tab_index(), 1);
-    assert_eq!(group.active_window().buffer_view().buffer_id(), first_buffer);
+    assert_eq!(
+        group.active_window().buffer_view().buffer_id(),
+        first_buffer
+    );
     assert_eq!(buffer_cursor(group.active_buffer_view()), Cursor::new(0, 1));
 }
 
@@ -382,9 +400,15 @@ fn test_counted_jump_down_creates_a_new_entry() {
         )),
         ActionResult::Handled
     );
-    assert_eq!(buffer_cursor(group.active_buffer_view()), Cursor::new(50, 0));
+    assert_eq!(
+        buffer_cursor(group.active_buffer_view()),
+        Cursor::new(50, 0)
+    );
 
-    assert_eq!(group.process_action(&Action::jump_backward()), ActionResult::Handled);
+    assert_eq!(
+        group.process_action(&Action::jump_backward()),
+        ActionResult::Handled
+    );
     assert_eq!(buffer_cursor(group.active_buffer_view()), Cursor::new(0, 0));
 }
 
@@ -404,6 +428,9 @@ fn test_smaller_counted_jump_down_updates_current_entry() {
     );
     assert_eq!(buffer_cursor(group.active_buffer_view()), Cursor::new(5, 0));
 
-    assert_eq!(group.process_action(&Action::jump_backward()), ActionResult::Handled);
+    assert_eq!(
+        group.process_action(&Action::jump_backward()),
+        ActionResult::Handled
+    );
     assert_eq!(buffer_cursor(group.active_buffer_view()), Cursor::new(5, 0));
 }

@@ -103,7 +103,9 @@ impl TabGroup {
         let view = self.active_buffer_view();
         let buffer_id = view.buffer_id();
         let cursor = view.cursor();
-        let cursor = view.with_buffer(|buffer| buffer.sync_cursor(cursor)).unwrap_or(cursor);
+        let cursor = view
+            .with_buffer(|buffer| buffer.sync_cursor(cursor))
+            .unwrap_or(cursor);
         self.jumplist.borrow_mut().record_cursor(buffer_id, cursor);
     }
 
@@ -165,7 +167,9 @@ impl TabGroup {
         self.active_tab = index;
         self.active_window_mut().set_cursor_synced(cursor);
         let restored_cursor = self.active_buffer_view().cursor();
-        self.jumplist.borrow_mut().sync_current_cursor(restored_cursor);
+        self.jumplist
+            .borrow_mut()
+            .sync_current_cursor(restored_cursor);
         true
     }
 
@@ -642,7 +646,9 @@ impl TabGroup {
             | Some(crate::editor::ActionKind::JumpForward)
             | Some(crate::editor::ActionKind::PreviousTab)
             | Some(crate::editor::ActionKind::NextTab) => false,
-            Some(crate::editor::ActionKind::Count(_, inner)) => self.should_record_cursor_position(inner),
+            Some(crate::editor::ActionKind::Count(_, inner)) => {
+                self.should_record_cursor_position(inner)
+            }
             _ => true,
         }
     }

@@ -1010,7 +1010,10 @@ fn test_visual_selection_is_rendered() {
     let mut screen = crate::screen::Screen::new(1, 20);
     window.render(&mut screen, Position::new(0, 0), Size::new(1, 20));
 
-    let line = window.render_data().get_line(0).expect("rendered line should exist");
+    let line = window
+        .render_data()
+        .get_line(0)
+        .expect("rendered line should exist");
     assert!(
         line.iter()
             .any(|chunk| chunk.text == "ab" && chunk.style == expected_style)
@@ -1038,7 +1041,10 @@ fn test_visual_repeated_motion_matches_counted_motion() {
         .with_count(3)
         .expect("counted motion should be allowed")
         .with_from_mode(ModeKind::Visual);
-    assert_eq!(counted.process_action(&counted_action), ActionResult::Handled);
+    assert_eq!(
+        counted.process_action(&counted_action),
+        ActionResult::Handled
+    );
 
     let mut repeated = Window::new(buffer);
     repeated.buffer_view_mut().begin_visual_selection();
@@ -1047,7 +1053,10 @@ fn test_visual_repeated_motion_matches_counted_motion() {
         assert_eq!(repeated.process_action(&motion), ActionResult::Handled);
     }
 
-    assert_eq!(counted.buffer_view().cursor(), repeated.buffer_view().cursor());
+    assert_eq!(
+        counted.buffer_view().cursor(),
+        repeated.buffer_view().cursor()
+    );
     assert_eq!(
         counted.buffer_view().visual_selection_range(),
         repeated.buffer_view().visual_selection_range()

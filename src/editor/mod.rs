@@ -8,8 +8,8 @@ mod insert;
 mod keymap;
 mod mode;
 mod normal;
-mod visual;
 pub mod pairs;
+mod visual;
 
 pub use action::{
     Action, ActionKind, BoundaryMotion, BracketKind, HandleKeyResult, LinewiseMotion, Operator,

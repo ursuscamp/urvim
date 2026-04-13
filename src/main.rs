@@ -134,13 +134,11 @@ fn main() -> io::Result<()> {
                                     && replay.action.kind.is_some()
                                     && let Some(to_mode) = replay.action.to_mode
                                 {
-                                    let repeat_text =
-                                        switch_mode(&mut layout, &mut mode, to_mode);
+                                    let repeat_text = switch_mode(&mut layout, &mut mode, to_mode);
                                     terminal.set_cursor_style(mode.cursor_style())?;
                                     if let Some(repeat_text) =
                                         repeat_text.filter(|text| !text.is_empty())
-                                        && let Some(mut repeat_state) =
-                                            globals::get_last_repeat()
+                                        && let Some(mut repeat_state) = globals::get_last_repeat()
                                     {
                                         repeat_state.insert_text = Some(repeat_text);
                                         globals::set_last_repeat(repeat_state);
@@ -208,16 +206,12 @@ fn main() -> io::Result<()> {
                                     handled = true;
                                 }
 
-                                if handled
-                                    && let Some(to_mode) = dispatch_action.to_mode
-                                {
-                                    let repeat_text =
-                                        switch_mode(&mut layout, &mut mode, to_mode);
+                                if handled && let Some(to_mode) = dispatch_action.to_mode {
+                                    let repeat_text = switch_mode(&mut layout, &mut mode, to_mode);
                                     terminal.set_cursor_style(mode.cursor_style())?;
                                     if let Some(repeat_text) =
                                         repeat_text.filter(|text| !text.is_empty())
-                                        && let Some(mut repeat_state) =
-                                            globals::get_last_repeat()
+                                        && let Some(mut repeat_state) = globals::get_last_repeat()
                                     {
                                         repeat_state.insert_text = Some(repeat_text);
                                         globals::set_last_repeat(repeat_state);
@@ -302,11 +296,7 @@ fn select_active_theme(
     })
 }
 
-fn switch_mode(
-    layout: &mut Layout,
-    mode: &mut Box<dyn Mode>,
-    to_mode: ModeKind,
-) -> Option<String> {
+fn switch_mode(layout: &mut Layout, mode: &mut Box<dyn Mode>, to_mode: ModeKind) -> Option<String> {
     let repeat_text = if to_mode == ModeKind::Normal {
         mode.take_repeat_text()
     } else {

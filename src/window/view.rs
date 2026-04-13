@@ -277,11 +277,7 @@ impl BufferView {
             // comparing the selection range against the byte span of this
             // visible buffer line.
             let Some((line_start, line_end)) =
-                Self::intersect_line_range(
-                    selection.start,
-                    selection.end,
-                    line_data.buffer_line,
-                )
+                Self::intersect_line_range(selection.start, selection.end, line_data.buffer_line)
             else {
                 continue;
             };
@@ -594,11 +590,7 @@ impl BufferView {
         Some(crate::buffer::TextObjectRange { start, end })
     }
 
-    fn intersect_line_range(
-        start: Cursor,
-        end: Cursor,
-        line_idx: usize,
-    ) -> Option<(usize, usize)> {
+    fn intersect_line_range(start: Cursor, end: Cursor, line_idx: usize) -> Option<(usize, usize)> {
         // Reject lines outside the selection span outright so callers can
         // skip them without any extra range math.
         if line_idx < start.line || line_idx > end.line {
