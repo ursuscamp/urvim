@@ -13,6 +13,7 @@ urvim does not parse source code into an AST. Instead, it chooses a syntax defin
 | `src/buffer/io.rs` | Chooses an initial syntax when a buffer is created from text or a file path. |
 | `src/buffer/mod.rs` | Stores the active syntax name, resolves display labels, and refreshes syntax when the buffer changes. |
 | `src/buffer/syntax.rs` | Tokenizes lines, caches syntax state, and computes highlight spans. |
+| `docs/background-jobs.md` | Describes the internal deferred-work framework that syntax catch-up uses. |
 | `src/window/view.rs` | Requests spans for visible lines and converts tags into theme styles. |
 | `src/theme/model.rs` | Defines theme style data, including the syntax tag-to-style mapping. |
 | `src/window/render.rs` | Writes styled chunks to the terminal screen. |
@@ -41,6 +42,8 @@ A tag is the semantic label attached to a match, such as `keyword`, `string`, or
 
 The buffer keeps a cache of syntax state and spans line by line, so edits only invalidate the necessary suffix of the buffer.
 
+When a buffer is rendered, urvim uses any cached spans it already has for the visible viewport. If the cache has not reached a line yet, the editor paints that line with the base theme style first and lets background syntax catch-up fill in the missing spans later.
+
 ## High-Level Flow
 
 ```mermaid
@@ -48,13 +51,15 @@ flowchart TD
     A["Buffer is created or loaded"] --> B["Resolve syntax from path or shebang"]
     B --> C["Store canonical syntax name in Buffer"]
     C --> D["Render requests visible lines"]
-    D --> E["Buffer syntax cache computes spans"]
-    E --> F["Tokenizer walks lines using ordered rules"]
-    F --> G["Spans are returned as tags"]
-    G --> H["Theme maps tags to styles"]
-    H --> I["Terminal renders styled chunks"]
-    J["Text edit"] --> K["Invalidate syntax from changed line"]
-    K --> E
+    D --> E["Use cached spans when they already exist"]
+    E --> F["Render visible lines immediately"]
+    F --> G["Background catch-up fills in missing cache lines"]
+    G --> H["Tokenizer walks lines using ordered rules"]
+    H --> I["Spans are returned as tags"]
+    I --> J["Theme maps tags to styles"]
+    J --> K["Terminal renders styled chunks"]
+    L["Text edit"] --> M["Invalidate syntax from changed line"]
+    M --> E
 ```
 
 ## Choosing A Syntax
@@ -74,6 +79,8 @@ The syntax resolution code also handles aliases.
 `Buffer::syntax_spans_for_line()` in `src/buffer/syntax.rs` asks the syntax cache to compute the requested line.
 
 The cache makes sure earlier lines have already been tokenized, then returns the cached spans for the requested line.
+
+If the requested line is not cached yet, the render path does not block waiting for the full file. It uses the current base style for that line and relies on the background job framework to catch up afterward.
 
 The tokenizer walks the line from left to right and tries the active rules in order.
 The first matching rule wins, so specific patterns should come before broad fallback patterns.
@@ -107,6 +114,7 @@ Every mutation invalidates syntax from the first changed line onward.
 
 That matters because syntax state can spill across lines.
 If line 10 changes, urvim cannot safely trust syntax results from line 10 onward, so it recomputes from that point forward using the preserved state from earlier lines.
+Any background catch-up result carries the buffer generation it was computed against, and stale results are discarded if the buffer changed in the meantime.
 
 ## Practical Advice
 

@@ -5,11 +5,15 @@ use crate::config::{AutoIndentMode, Config};
 use crate::editor::{Action, ActionKind, BoundaryMotion, BracketKind, LinewiseMotion, ModeKind};
 use crate::editor::{Operator, OperatorTarget, QuoteKind, TextObject};
 use crate::globals;
+use crate::job::{Job, JobContext, JobKind, JobManager, JobPriority, JobToken};
 use crate::path::AbsolutePath;
 use crate::terminal::{Color, Style};
 use crate::theme::{SyntaxTagStyles, Tag, Theme, ThemeKind, UiStyles};
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::sync::{Mutex, OnceLock};
+use std::thread;
+use std::time::{Duration, Instant};
 
 fn process_action_and_snapshot(window: &mut Window, action: &Action) {
     assert_eq!(window.process_action(action), ActionResult::Handled);
@@ -123,6 +127,34 @@ fn syntax_themed_window() -> Theme {
         ui_styles,
         syntax_styles,
     )
+}
+
+fn syntax_worker_lock() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(())).lock().unwrap()
+}
+
+fn repeated_rust_buffer(lines: usize) -> String {
+    std::iter::repeat("fn main() { let value: Option<String> = Some(\"hi\"); } // note")
+        .take(lines)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+struct GateJob {
+    gate: std::sync::Arc<(Mutex<bool>, std::sync::Condvar)>,
+}
+
+impl Job for GateJob {
+    type Output = ();
+
+    fn run(self, _context: &JobContext) -> Self::Output {
+        let (lock, cvar) = &*self.gate;
+        let mut open = lock.lock().unwrap();
+        while !*open {
+            open = cvar.wait(open).unwrap();
+        }
+    }
 }
 
 fn todo_marker_themed_window() -> Theme {
@@ -460,6 +492,158 @@ fn test_window_render_omits_syntax_styles_when_disabled() {
             .all(|chunk| chunk.style == expected_default_style)
     );
     assert!(line.iter().any(|chunk| chunk.text.contains("fn main()")));
+    assert!(
+        !window
+            .buffer_view()
+            .with_buffer(|buffer| buffer.syntax_background_pending())
+            .unwrap_or(true)
+    );
+}
+
+#[test]
+fn test_window_render_uses_background_syntax_after_tick() {
+    let _lock = syntax_worker_lock();
+    let theme = syntax_themed_window();
+    let _theme_guard = globals::set_test_active_theme(theme.clone());
+    let _config_guard = globals::set_test_config(Config {
+        theme: "demo-syntax".to_string(),
+        insert_escape: None,
+        syntax: true,
+        auto_close_pairs: true,
+        auto_indent: AutoIndentMode::Off,
+        advanced_glyphs: BTreeSet::new(),
+        ..Default::default()
+    });
+    globals::set_job_manager(JobManager::new());
+
+    let gate = std::sync::Arc::new((Mutex::new(false), std::sync::Condvar::new()));
+    globals::with_job_manager(|job_manager| {
+        let job_manager = job_manager.expect("job manager should be configured");
+        job_manager
+            .submit(
+                JobKind::new("gate"),
+                JobPriority::Foreground,
+                JobToken::new(1),
+                GateJob {
+                    gate: std::sync::Arc::clone(&gate),
+                },
+            )
+            .expect("gate job should submit");
+    });
+
+    let buffer = Buffer::from_str_with_path(
+        &repeated_rust_buffer(64),
+        temp_path_with_ext("background-syntax", "rs"),
+    );
+    let mut window = Window::new(buffer);
+    let expected_keyword_style = theme
+        .default_style()
+        .overlay(theme.syntax_style_for_tag(&tag("keyword")));
+    let expected_constant_style = theme
+        .default_style()
+        .overlay(theme.syntax_style_for_tag(&tag("constant")));
+    let expected_type_style = theme
+        .default_style()
+        .overlay(theme.syntax_style_for_tag(&tag("type")));
+    let expected_variable_style = theme
+        .default_style()
+        .overlay(theme.syntax_style_for_tag(&tag("variable")));
+    let expected_string_style = theme
+        .default_style()
+        .overlay(theme.syntax_style_for_tag(&tag("string")));
+    let expected_comment_style = theme
+        .default_style()
+        .overlay(theme.syntax_style_for_tag(&tag("comment")));
+    let expected_default_style = theme.default_style();
+
+    let mut screen = crate::screen::Screen::new(1, 80);
+    window.render(&mut screen, Position::new(0, 0), Size::new(1, 80));
+
+    let line = window
+        .render_data()
+        .get_line(0)
+        .expect("rendered line should exist");
+    assert!(
+        line.iter()
+            .all(|chunk| chunk.style == expected_default_style)
+    );
+    assert!(
+        window
+            .buffer_view()
+            .with_buffer(|buffer| buffer.syntax_background_pending())
+            .unwrap_or(false)
+    );
+
+    {
+        let (lock, cvar) = &*gate;
+        let mut open = lock.lock().unwrap();
+        *open = true;
+        cvar.notify_all();
+    }
+
+    let deadline = Instant::now() + Duration::from_secs(2);
+    let mut applied = false;
+    while !applied {
+        globals::with_job_manager(|job_manager| {
+            if let Some(job_manager) = job_manager {
+                let _ = job_manager.process_completed(|event| {
+                    if let Ok((_kind, _token, result)) =
+                        event.into_completed_output::<crate::buffer::SyntaxCatchUpResult>()
+                    {
+                        globals::with_buffer_mut(result.buffer_id, |buffer| {
+                            applied = buffer.apply_syntax_catch_up_result(result);
+                        });
+                    }
+                });
+            }
+        });
+
+        assert!(
+            Instant::now() < deadline,
+            "timed out waiting for syntax result"
+        );
+        thread::sleep(Duration::from_millis(5));
+    }
+
+    assert!(applied);
+    assert!(globals::with_job_manager(|job_manager| {
+        job_manager
+            .map(|job_manager| job_manager.take_redraw_requested())
+            .unwrap_or(false)
+    }));
+
+    window.render(&mut screen, Position::new(0, 0), Size::new(1, 80));
+
+    let line = window
+        .render_data()
+        .get_line(0)
+        .expect("rendered line should exist");
+    assert!(
+        line.iter()
+            .any(|chunk| chunk.text == "fn" && chunk.style == expected_keyword_style)
+    );
+    assert!(
+        line.iter()
+            .any(|chunk| chunk.text == "Some" && chunk.style == expected_constant_style)
+    );
+    assert!(
+        line.iter()
+            .any(|chunk| chunk.text == "Option" && chunk.style == expected_type_style)
+    );
+    assert!(
+        line.iter()
+            .any(|chunk| chunk.text == "value" && chunk.style == expected_variable_style)
+    );
+    assert!(
+        line.iter()
+            .any(|chunk| chunk.text.contains("hi") && chunk.style == expected_string_style)
+    );
+    assert!(
+        line.iter()
+            .any(|chunk| chunk.text.contains("note") && chunk.style == expected_comment_style)
+    );
+
+    globals::shutdown_job_manager();
 }
 
 #[test]

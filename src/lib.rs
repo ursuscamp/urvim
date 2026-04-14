@@ -3,6 +3,7 @@ pub mod buffer;
 pub mod config;
 pub mod editor;
 pub mod globals;
+pub mod job;
 pub mod layout;
 pub mod logger;
 pub mod motion;

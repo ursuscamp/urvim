@@ -6,6 +6,7 @@
 use crate::buffer::{Buffer, BufferId, BufferPool};
 use crate::config::Config;
 use crate::editor::Action;
+use crate::job::JobManager;
 use crate::theme::Theme;
 use std::sync::{Mutex, OnceLock, RwLock};
 
@@ -52,6 +53,7 @@ static BUFFER_POOL: OnceLock<RwLock<BufferPool>> = OnceLock::new();
 static ACTIVE_BUFFER_ID: OnceLock<RwLock<Option<BufferId>>> = OnceLock::new();
 static CONFIG: OnceLock<RwLock<Option<Config>>> = OnceLock::new();
 static ACTIVE_THEME: OnceLock<RwLock<Option<Theme>>> = OnceLock::new();
+static JOB_MANAGER: OnceLock<RwLock<Option<JobManager>>> = OnceLock::new();
 
 #[cfg(test)]
 thread_local! {
@@ -194,6 +196,10 @@ fn active_theme_slot() -> &'static RwLock<Option<Theme>> {
     ACTIVE_THEME.get_or_init(|| RwLock::new(None))
 }
 
+fn job_manager_slot() -> &'static RwLock<Option<JobManager>> {
+    JOB_MANAGER.get_or_init(|| RwLock::new(None))
+}
+
 /// Sets the active theme used by renderers.
 ///
 /// The editor treats the active theme as startup configuration, so this should
@@ -219,6 +225,27 @@ pub fn with_active_theme<R>(f: impl FnOnce(Option<&Theme>) -> R) -> R {
         let theme = active_theme_slot().read().unwrap();
         f(theme.as_ref())
     }
+}
+
+/// Sets the active job manager used by the editor loop.
+pub fn set_job_manager(manager: JobManager) {
+    let mut job_manager = job_manager_slot().write().unwrap();
+    *job_manager = Some(manager);
+}
+
+/// Runs a closure with access to the active job manager if one has been configured.
+pub fn with_job_manager<R>(f: impl FnOnce(Option<&JobManager>) -> R) -> R {
+    let job_manager = job_manager_slot().read().unwrap();
+    f(job_manager.as_ref())
+}
+
+/// Requests shutdown of the active job manager if one is configured.
+pub fn shutdown_job_manager() {
+    with_job_manager(|job_manager| {
+        if let Some(job_manager) = job_manager {
+            job_manager.shutdown();
+        }
+    });
 }
 
 #[cfg(test)]

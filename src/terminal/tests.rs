@@ -1,5 +1,6 @@
 use super::*;
 use crate::terminal::test_backend::TestBackend;
+use std::os::unix::net::UnixStream;
 
 fn create_terminal(data: Vec<u8>) -> Terminal<TestBackend, TestBackend> {
     let backend = TestBackend::new(data);
@@ -55,4 +56,19 @@ fn test_set_style() {
 #[test]
 fn test_cursor_style_name() {
     assert_eq!(CursorStyle::SteadyBar.name(), "Steady Bar");
+}
+
+#[test]
+fn test_tick_event_on_poll_timeout() {
+    let (input, _input_peer) = UnixStream::pair().unwrap();
+    let (output, _output_peer) = UnixStream::pair().unwrap();
+    let mut terminal = Terminal::new_for_testing_with_tty(input, output, true);
+
+    if let Some((rows, cols)) = get_terminal_size() {
+        terminal.last_rows = rows;
+        terminal.last_cols = cols;
+    }
+
+    let event = terminal.read_event().unwrap();
+    assert_eq!(event, Event::Tick);
 }

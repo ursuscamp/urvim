@@ -4,6 +4,20 @@ This document defines the key terminology used throughout the urvim codebase and
 
 ## Core Concepts
 
+### Job
+A unit of deferred editor work submitted to the internal job framework. A job carries a priority tier, cancellation or generation token, and an output payload that the main thread can accept or discard.
+
+**Context:** Job framework, deferred editor work, syntax catch-up, future maintenance tasks
+
+**Related Terms:** Job Framework, Syntax Catch-Up, Configuration, Buffer
+
+### Job Framework
+The internal editor subsystem that executes deferred jobs off the main input/render path. In the first version, the worker is serial and priority-aware, and it returns results to the main thread for validation and application.
+
+**Context:** Deferred editor work, syntax catch-up, future task scheduling
+
+**Related Terms:** Job, Syntax Highlighting, Buffer, Window
+
 ### Buffer
 A text storage data structure backed by `imbl::Vector<Arc<str>>`. Each line is stored as an `Arc<str>` without trailing newline characters. Newlines exist implicitly between lines. The buffer supports efficient text manipulation with proper Unicode handling including grapheme clusters, combining characters, and emoji.
 

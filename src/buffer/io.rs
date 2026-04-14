@@ -14,6 +14,8 @@ impl Buffer {
             saved_lines,
             path: None,
             syntax_name: syntax_name.clone(),
+            syntax_generation: 0,
+            syntax_background_generation: None,
             undo_state: UndoState::new(undo_lines, Cursor::new(0, 0)),
             syntax_cache: SyntaxCache::new(syntax_name),
         }
@@ -36,6 +38,8 @@ impl Buffer {
             saved_lines,
             path: None,
             syntax_name: syntax_name.clone(),
+            syntax_generation: 0,
+            syntax_background_generation: None,
             undo_state: UndoState::new(undo_lines, Cursor::new(0, 0)),
             syntax_cache: SyntaxCache::new(syntax_name),
         }
@@ -61,6 +65,8 @@ impl Buffer {
             saved_lines,
             path: Some(path),
             syntax_name: syntax_name.clone(),
+            syntax_generation: 0,
+            syntax_background_generation: None,
             undo_state: UndoState::new(undo_lines, Cursor::new(0, 0)),
             syntax_cache: SyntaxCache::new(syntax_name),
         }

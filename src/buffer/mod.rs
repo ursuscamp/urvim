@@ -53,7 +53,7 @@ mod unicode;
 
 pub use indent::IndentDirection;
 pub use pool::{BufferId, BufferPool};
-pub use syntax::SyntaxSpan;
+pub use syntax::{SyntaxCatchUpResult, SyntaxSpan};
 pub use unicode::{
     char_width, configured_tab_width, display_char_width, display_grapheme_width, display_width_at,
     expand_tabs, grapheme_width, str_width, to_byte_index,
@@ -162,6 +162,8 @@ pub struct Buffer {
     saved_lines: Vector<Arc<str>>,
     path: Option<AbsolutePath>,
     syntax_name: SmolStr,
+    syntax_generation: u64,
+    syntax_background_generation: Option<u64>,
     undo_state: UndoState,
     syntax_cache: syntax::SyntaxCache,
 }
@@ -173,6 +175,8 @@ impl Clone for Buffer {
             saved_lines: self.saved_lines.clone(),
             path: self.path.clone(),
             syntax_name: self.syntax_name.clone(),
+            syntax_generation: self.syntax_generation,
+            syntax_background_generation: self.syntax_background_generation,
             undo_state: self.undo_state.clone(),
             syntax_cache: self.syntax_cache.clone(),
         }
@@ -323,6 +327,8 @@ impl Buffer {
             self.syntax_name = new_syntax_name.clone();
             self.syntax_cache.set_syntax_name(new_syntax_name);
             self.syntax_cache.invalidate_from(0);
+            self.syntax_generation = self.syntax_generation.wrapping_add(1);
+            self.syntax_background_generation = None;
         }
     }
 

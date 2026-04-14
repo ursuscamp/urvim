@@ -47,6 +47,22 @@ impl<I: Read + AsFd, O: Write + AsFd> Terminal<I, O> {
         }
     }
 
+    /// Creates a new terminal instance for testing with an explicit TTY flag.
+    #[cfg(test)]
+    pub fn new_for_testing_with_tty(input: I, output: O, is_tty: bool) -> Self {
+        Self {
+            input,
+            output,
+            original: None,
+            buffer: ByteBuffer::new(),
+            paste_active: false,
+            last_rows: 24,
+            last_cols: 80,
+            is_tty,
+            flush: true,
+        }
+    }
+
     /// Restores the terminal to its original state.
     pub fn restore(&mut self) -> io::Result<()> {
         self.output.write_all(DISABLE_CSI_U.as_bytes())?;

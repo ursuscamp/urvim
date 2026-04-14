@@ -5,6 +5,7 @@
 //! - Raw terminal mode setup and restoration
 //! - Escape sequence parsing for key events
 //! - Terminal resize detection
+//! - Timer ticks for editor wakeups
 //! - Bracketed paste mode support
 //! - Text styling and cursor control
 //! - Clipboard operations (OSC 52)
@@ -26,6 +27,9 @@
 //!         }
 //!         Event::Resize(rows, cols) => {
 //!             println!("Terminal resized to {}x{}", rows, cols);
+//!         }
+//!         Event::Tick => {
+//!             // No input was available; the editor loop woke up for background work.
 //!         }
 //!         Event::Paste(text) => {
 //!             println!("Pasted: {}", text);

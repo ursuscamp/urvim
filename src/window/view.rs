@@ -238,6 +238,10 @@ impl BufferView {
             let total_lines_needed = size.rows as usize + 10;
             let horizontal_offset = self.scroll_offset.col as usize;
 
+            if syntax_enabled {
+                buffer.request_syntax_catch_up(self.buffer_id());
+            }
+
             for screen_line in 0..total_lines_needed {
                 let buffer_line_idx = start_line + screen_line;
                 if let Some(line_text) = buffer.line_at(buffer_line_idx).cloned() {
@@ -246,7 +250,7 @@ impl BufferView {
                         Self::calculate_horizontal_offset(line_text, horizontal_offset);
                     let syntax_spans = if syntax_enabled {
                         buffer
-                            .syntax_spans_for_line(buffer_line_idx)
+                            .cached_syntax_spans_for_line(buffer_line_idx)
                             .unwrap_or_default()
                     } else {
                         Vec::new()

@@ -1,6 +1,9 @@
 //! Buffer-owned syntax highlighting cache and tokenizers.
 
 use crate::buffer::Buffer;
+use crate::buffer::BufferId;
+use crate::globals;
+use crate::job::{Job, JobContext, JobKind, JobPriority, JobToken};
 use crate::syntax::{
     ContextControl, InjectedSyntaxFallback, InjectedSyntaxSelector, SyntaxDefinition, SyntaxRule,
     builtin_syntax_registry,
@@ -8,6 +11,7 @@ use crate::syntax::{
 use crate::theme::Tag;
 use regex::Regex;
 use smol_str::SmolStr;
+use std::sync::Arc;
 
 /// A highlighted span within one buffer line.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -67,9 +71,24 @@ impl SyntaxCache {
         }
     }
 
+    /// Replaces the current cache with a newer snapshot.
+    pub fn replace_with(&mut self, other: SyntaxCache) {
+        *self = other;
+    }
+
     /// Invalidates cached syntax data from the provided line onward.
     pub fn invalidate_from(&mut self, line: usize) {
         self.lines.truncate(line.min(self.lines.len()));
+    }
+
+    /// Returns cached spans for a line without computing any missing prefix.
+    pub fn cached_spans_for_line(&self, line: usize) -> Option<Vec<SyntaxSpan>> {
+        self.lines.get(line).map(|entry| entry.spans.clone())
+    }
+
+    /// Returns true when every line in the buffer has a cached syntax result.
+    pub fn is_complete_for_line_count(&self, line_count: usize) -> bool {
+        self.lines.len() >= line_count
     }
 
     /// Returns the cached spans for a line, computing any missing prefix first.
@@ -111,6 +130,63 @@ impl SyntaxCache {
             let (spans, next_state) = tokenize_line(syntax_name, line_text, state);
             self.lines.push(SyntaxLine::new(spans, next_state.clone()));
             state = next_state;
+        }
+    }
+}
+
+/// Result produced by the background syntax catch-up job.
+#[derive(Debug, Clone)]
+pub struct SyntaxCatchUpResult {
+    /// Buffer the result applies to.
+    pub buffer_id: BufferId,
+    /// Syntax generation that produced the result.
+    pub generation: u64,
+    /// Completed syntax cache snapshot.
+    pub cache: SyntaxCache,
+}
+
+struct SyntaxCatchUpJob {
+    buffer_id: BufferId,
+    generation: u64,
+    syntax_name: SmolStr,
+    cache: SyntaxCache,
+    line_texts: Vec<Arc<str>>,
+}
+
+impl SyntaxCatchUpJob {
+    fn new(
+        buffer_id: BufferId,
+        generation: u64,
+        syntax_name: SmolStr,
+        cache: SyntaxCache,
+        line_texts: Vec<Arc<str>>,
+    ) -> Self {
+        Self {
+            buffer_id,
+            generation,
+            syntax_name,
+            cache,
+            line_texts,
+        }
+    }
+}
+
+impl Job for SyntaxCatchUpJob {
+    type Output = SyntaxCatchUpResult;
+
+    fn run(mut self, _context: &JobContext) -> Self::Output {
+        let line_refs: Vec<&str> = self.line_texts.iter().map(|line| line.as_ref()).collect();
+        if !line_refs.is_empty() {
+            self.cache
+                .ensure_through(&self.syntax_name, &line_refs, line_refs.len() - 1);
+        } else {
+            self.cache.set_syntax_name(self.syntax_name.as_str());
+        }
+
+        SyntaxCatchUpResult {
+            buffer_id: self.buffer_id,
+            generation: self.generation,
+            cache: self.cache,
         }
     }
 }
@@ -686,9 +762,32 @@ impl Buffer {
     /// Invalidates buffer-owned syntax data from the given line onward.
     pub fn invalidate_syntax_from(&mut self, line: usize) {
         self.syntax_cache.invalidate_from(line);
+        self.syntax_generation = self.syntax_generation.wrapping_add(1);
+        self.syntax_background_generation = None;
         if line == 0 {
             self.refresh_syntax();
         }
+    }
+
+    /// Returns cached spans for a line without computing missing prefix data.
+    pub fn cached_syntax_spans_for_line(&self, line: usize) -> Option<Vec<SyntaxSpan>> {
+        self.syntax_cache.cached_spans_for_line(line)
+    }
+
+    /// Returns true when all buffer lines currently have cached syntax data.
+    pub fn syntax_cache_complete(&self) -> bool {
+        self.syntax_cache
+            .is_complete_for_line_count(self.line_count())
+    }
+
+    /// Returns the current syntax generation used to reject stale background results.
+    pub fn syntax_generation(&self) -> u64 {
+        self.syntax_generation
+    }
+
+    /// Returns true when a background syntax catch-up job has been queued for the current generation.
+    pub fn syntax_background_pending(&self) -> bool {
+        self.syntax_background_generation.is_some()
     }
 
     /// Returns the highlighted spans for a line, computing them on demand.
@@ -697,6 +796,55 @@ impl Buffer {
         let syntax_name = self.syntax_name.clone();
         self.syntax_cache
             .spans_for_line(&syntax_name, &line_texts, line)
+    }
+
+    /// Applies a background syntax catch-up result when it still matches this buffer.
+    pub fn apply_syntax_catch_up_result(&mut self, result: SyntaxCatchUpResult) -> bool {
+        if result.generation != self.syntax_generation {
+            return false;
+        }
+
+        self.syntax_cache.replace_with(result.cache);
+        if self.syntax_background_generation == Some(result.generation) {
+            self.syntax_background_generation = None;
+        }
+        true
+    }
+
+    /// Requests background syntax catch-up when the cache is incomplete.
+    pub fn request_syntax_catch_up(&mut self, buffer_id: BufferId) {
+        if self.syntax_cache_complete() {
+            return;
+        }
+
+        if self.syntax_background_generation == Some(self.syntax_generation) {
+            return;
+        }
+
+        let line_texts = self.lines.iter().cloned().collect::<Vec<_>>();
+        let job = SyntaxCatchUpJob::new(
+            buffer_id,
+            self.syntax_generation,
+            self.syntax_name.clone(),
+            self.syntax_cache.clone(),
+            line_texts,
+        );
+        let kind = JobKind::new(format!("syntax:{}", buffer_id.get()));
+        let token = JobToken::new(self.syntax_generation);
+
+        let submitted = globals::with_job_manager(|job_manager| {
+            job_manager
+                .map(|job_manager| {
+                    job_manager
+                        .submit(kind.clone(), JobPriority::Background, token, job)
+                        .is_ok()
+                })
+                .unwrap_or(false)
+        });
+
+        if submitted {
+            self.syntax_background_generation = Some(self.syntax_generation);
+        }
     }
 
     /// Ensures syntax data exists through a line without returning it.
@@ -711,9 +859,35 @@ impl Buffer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::buffer::BufferId;
+    use crate::job::{JobEvent, JobHandle, JobKind, JobPriority, JobToken};
+    use crate::path::AbsolutePath;
+    use std::thread;
+    use std::time::{Duration, Instant};
 
     fn tag(value: &str) -> Tag {
         Tag::parse(value).expect("valid tag")
+    }
+
+    fn temp_path_with_ext(name: &str, ext: &str) -> AbsolutePath {
+        let path = std::env::temp_dir().join(format!(
+            "urvim-syntax-tests-{}-{}.{}",
+            name,
+            std::process::id(),
+            ext
+        ));
+        AbsolutePath::from_path(path.as_path()).expect("temp path should be absolute")
+    }
+
+    fn wait_for_event(handle: &JobHandle) -> JobEvent {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            if let Some(event) = handle.poll_completion() {
+                return event;
+            }
+            assert!(Instant::now() < deadline, "timed out waiting for job event");
+            thread::sleep(Duration::from_millis(5));
+        }
     }
 
     #[test]
@@ -783,5 +957,120 @@ mod tests {
         let (closing_spans, _) = tokenize_rule_list_line(&definition, "```", state);
         assert_eq!(closing_spans.len(), 1);
         assert_eq!(closing_spans[0].style, tag("markup.code"));
+    }
+
+    #[test]
+    fn cached_spans_can_be_replaced_and_read_without_recomputing() {
+        let mut cache = SyntaxCache::new("plain");
+        assert_eq!(cache.cached_spans_for_line(0), None);
+
+        cache.lines.push(SyntaxLine::new(
+            vec![SyntaxSpan::new(0, 3, tag("text.plain"))],
+            SyntaxState::default(),
+        ));
+
+        let cached = cache
+            .cached_spans_for_line(0)
+            .expect("cached spans should be available");
+        assert_eq!(cached.len(), 1);
+        assert_eq!(cached[0].style, tag("text.plain"));
+
+        let mut replacement = SyntaxCache::new("plain");
+        replacement.lines.push(SyntaxLine::new(
+            vec![SyntaxSpan::new(0, 4, tag("text.replaced"))],
+            SyntaxState::default(),
+        ));
+        replacement.lines.push(SyntaxLine::new(
+            vec![SyntaxSpan::new(0, 5, tag("text.replaced"))],
+            SyntaxState::default(),
+        ));
+
+        cache.replace_with(replacement);
+
+        let cached = cache
+            .cached_spans_for_line(1)
+            .expect("replacement cache should have line 1");
+        assert_eq!(cached.len(), 1);
+        assert_eq!(cached[0].style, tag("text.replaced"));
+    }
+
+    #[test]
+    fn background_generation_is_cleared_when_syntax_is_invalidated() {
+        let mut buffer = Buffer::from_str("line 1\nline 2");
+        buffer.syntax_generation = 7;
+        buffer.syntax_background_generation = Some(7);
+        buffer.ensure_syntax_through(1);
+
+        buffer.invalidate_syntax_from(1);
+
+        assert_eq!(buffer.syntax_generation(), 8);
+        assert_eq!(buffer.syntax_background_generation, None);
+        assert!(buffer.cached_syntax_spans_for_line(0).is_some());
+        assert_eq!(buffer.cached_syntax_spans_for_line(1), None);
+    }
+
+    #[test]
+    fn complete_cache_requests_no_background_catch_up() {
+        let mut buffer = Buffer::from_str("line 1");
+        buffer.ensure_syntax_through(0);
+        buffer.syntax_background_generation = None;
+
+        buffer.request_syntax_catch_up(BufferId::new(1));
+
+        assert_eq!(buffer.syntax_background_generation, None);
+    }
+
+    #[test]
+    fn background_catch_up_job_populates_offscreen_spans() {
+        let path = temp_path_with_ext("background-catch-up", "rs");
+        let text =
+            std::iter::repeat("fn main() { let value: Option<String> = Some(\"hi\"); } // note")
+                .take(64)
+                .collect::<Vec<_>>()
+                .join("\n");
+        let buffer = Buffer::from_str_with_path(&text, path);
+        let handle = JobHandle::new();
+        let token = JobToken::new(buffer.syntax_generation());
+        let job = SyntaxCatchUpJob::new(
+            BufferId::new(1),
+            buffer.syntax_generation(),
+            buffer.syntax_name.clone(),
+            buffer.syntax_cache.clone(),
+            buffer.lines.iter().cloned().collect(),
+        );
+
+        handle
+            .submit(
+                JobKind::new("syntax:background"),
+                JobPriority::Background,
+                token,
+                job,
+            )
+            .expect("syntax catch-up job should submit");
+
+        let event = wait_for_event(&handle);
+        let (_kind, _token, result) = event
+            .into_completed_output::<SyntaxCatchUpResult>()
+            .expect("syntax catch-up output should downcast");
+
+        assert!(result.cache.cached_spans_for_line(50).is_some());
+        assert!(result.cache.is_complete_for_line_count(64));
+
+        handle.shutdown();
+    }
+
+    #[test]
+    fn stale_background_result_is_rejected_after_invalidation() {
+        let path = temp_path_with_ext("stale-result", "rs");
+        let mut buffer = Buffer::from_str_with_path("fn main() {}", path);
+        let result = SyntaxCatchUpResult {
+            buffer_id: BufferId::new(1),
+            generation: buffer.syntax_generation(),
+            cache: buffer.syntax_cache.clone(),
+        };
+
+        buffer.invalidate_syntax_from(0);
+
+        assert!(!buffer.apply_syntax_catch_up_result(result));
     }
 }

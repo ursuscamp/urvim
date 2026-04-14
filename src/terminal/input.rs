@@ -52,7 +52,7 @@ impl<I: Read + AsFd, O: Write + AsFd> Terminal<I, O> {
                             Err(e) => return Err(e),
                         }
                     }
-                    Ok(_) => continue,
+                    Ok(_) => return Ok(Event::Tick),
                     Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
                     Err(e) => return Err(e.into()),
                 }

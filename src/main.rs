@@ -4,7 +4,7 @@ use std::io;
 
 use urvim::Layout;
 use urvim::action::ActionResult;
-use urvim::buffer::Cursor;
+use urvim::buffer::{Cursor, SyntaxCatchUpResult};
 use urvim::config::Config;
 use urvim::editor::{
     Action, ActionKind, HandleKeyResult, InsertMode, Mode, ModeKind, NormalMode, RepeatReplay,
@@ -63,6 +63,7 @@ fn main() -> io::Result<()> {
             io::Error::new(io::ErrorKind::InvalidInput, error)
         })?;
     globals::set_active_theme(active_theme);
+    globals::set_job_manager(urvim::job::JobManager::new());
 
     let mut terminal = Terminal::new(stdin, stdout)?;
 
@@ -78,6 +79,20 @@ fn main() -> io::Result<()> {
     layout.set_mode_kind(mode.kind());
 
     loop {
+        globals::with_job_manager(|job_manager| {
+            if let Some(job_manager) = job_manager {
+                let _ = job_manager.process_completed(|event| {
+                    if let Ok((_kind, _token, result)) =
+                        event.into_completed_output::<SyntaxCatchUpResult>()
+                    {
+                        globals::with_buffer_mut(result.buffer_id, |buffer| {
+                            buffer.apply_syntax_catch_up_result(result);
+                        });
+                    }
+                });
+            }
+        });
+
         globals::set_active_buffer_id(layout.active_buffer_view().buffer_id());
         screen.clear();
         layout.render(&mut screen, Position::new(0, 0), Size::new(rows, cols));
@@ -88,6 +103,10 @@ fn main() -> io::Result<()> {
         }
 
         let event = terminal.read_event()?;
+
+        if let Event::Tick = event {
+            continue;
+        }
 
         if let Event::Key(key) = event {
             let result = mode.handle_key(&key);
@@ -191,6 +210,7 @@ fn main() -> io::Result<()> {
                                             Some(ActionKind::Quit)
                                         ) =>
                                         {
+                                            globals::shutdown_job_manager();
                                             break;
                                         }
                                         _ if dispatch_action.kind.is_none() => {

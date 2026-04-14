@@ -393,6 +393,7 @@ fn get_shifted_char(c: char) -> Option<char> {
 /// received from the terminal:
 /// - Key presses (with optional modifiers)
 /// - Terminal resize events
+/// - Timer ticks used to wake the editor loop for background work
 /// - Bracketed paste events (large text pastes)
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Event {
@@ -400,6 +401,8 @@ pub enum Event {
     Key(Key),
     /// A terminal resize event (rows, columns).
     Resize(u16, u16),
+    /// A timer tick emitted when the terminal poll times out.
+    Tick,
     /// A bracketed paste event containing pasted text.
     Paste(String),
 }
