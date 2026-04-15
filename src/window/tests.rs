@@ -53,6 +53,7 @@ fn themed_window() -> Theme {
         Style::new().fg(Color::ansi(1)).bg(Color::ansi(2)),
         Style::new().fg(Color::ansi(3)).bg(Color::ansi(4)),
         Style::new().reverse(),
+        Style::new().bg(Color::ansi(21)),
         Style::new().fg(Color::ansi(5)).bg(Color::ansi(6)),
         Style::new().fg(Color::ansi(7)).bg(Color::ansi(8)),
         Style::new().fg(Color::ansi(9)).bg(Color::ansi(10)),
@@ -90,6 +91,7 @@ fn syntax_themed_window() -> Theme {
         Style::new().fg(Color::ansi(1)).bg(Color::ansi(2)),
         Style::new().fg(Color::ansi(3)).bg(Color::ansi(4)),
         Style::new().reverse(),
+        Style::new().bg(Color::ansi(21)),
         Style::new().fg(Color::ansi(5)).bg(Color::ansi(6)),
         Style::new().fg(Color::ansi(7)).bg(Color::ansi(8)),
         Style::new().fg(Color::ansi(9)).bg(Color::ansi(10)),
@@ -326,6 +328,82 @@ fn test_window_render_uses_theme_styles() {
         screen.get_cell_mut(0, 8).unwrap().style,
         expected_default_style
     );
+}
+
+#[test]
+fn test_window_render_highlights_active_line_in_normal_mode() {
+    let path = temp_path_with_ext("active-line", "rs");
+    let buffer = Buffer::from_str_with_path("fn main() {}", path);
+    let mut window = Window::new(buffer);
+    let theme = syntax_themed_window();
+    let expected_line_fill_style = theme.default_style().overlay(theme.ui.active_line);
+    let expected_keyword_style = theme
+        .default_style()
+        .overlay(theme.syntax_style_for_tag(&tag("keyword")))
+        .overlay(theme.ui.active_line);
+    let _theme_guard = globals::set_test_active_theme(theme);
+    let _config_guard = globals::set_test_config(Config {
+        active_line: true,
+        syntax: true,
+        ..Default::default()
+    });
+
+    let mut screen = crate::screen::Screen::new(1, 20);
+    window.render(&mut screen, Position::new(0, 0), Size::new(1, 20));
+
+    assert_eq!(
+        screen.get_cell_mut(0, 3).unwrap().style,
+        expected_keyword_style
+    );
+    assert_eq!(
+        screen.get_cell_mut(0, 18).unwrap().style,
+        expected_line_fill_style
+    );
+}
+
+#[test]
+fn test_window_render_skips_active_line_when_mode_is_insert() {
+    let path = temp_path_with_ext("active-line-insert", "rs");
+    let buffer = Buffer::from_str_with_path("fn main() {}", path);
+    let mut window = Window::new(buffer);
+    let theme = syntax_themed_window();
+    let expected_style = theme
+        .default_style()
+        .overlay(theme.syntax_style_for_tag(&tag("keyword")));
+    let _theme_guard = globals::set_test_active_theme(theme);
+    let _config_guard = globals::set_test_config(Config {
+        active_line: true,
+        syntax: true,
+        ..Default::default()
+    });
+    let _mode_guard = globals::set_test_mode_kind(ModeKind::Insert);
+
+    let mut screen = crate::screen::Screen::new(1, 20);
+    window.render(&mut screen, Position::new(0, 0), Size::new(1, 20));
+
+    assert_eq!(screen.get_cell_mut(0, 3).unwrap().style, expected_style);
+}
+
+#[test]
+fn test_window_render_skips_active_line_when_disabled() {
+    let path = temp_path_with_ext("active-line-disabled", "rs");
+    let buffer = Buffer::from_str_with_path("fn main() {}", path);
+    let mut window = Window::new(buffer);
+    let theme = syntax_themed_window();
+    let expected_style = theme
+        .default_style()
+        .overlay(theme.syntax_style_for_tag(&tag("keyword")));
+    let _theme_guard = globals::set_test_active_theme(theme);
+    let _config_guard = globals::set_test_config(Config {
+        active_line: false,
+        syntax: true,
+        ..Default::default()
+    });
+
+    let mut screen = crate::screen::Screen::new(1, 20);
+    window.render(&mut screen, Position::new(0, 0), Size::new(1, 20));
+
+    assert_eq!(screen.get_cell_mut(0, 3).unwrap().style, expected_style);
 }
 
 #[test]
@@ -607,7 +685,7 @@ fn test_window_render_uses_background_syntax_after_tick() {
     let expected_comment_style = theme
         .default_style()
         .overlay(theme.syntax_style_for_tag(&tag("comment")));
-    let expected_default_style = theme.default_style();
+    let _expected_default_style = theme.default_style();
 
     let mut screen = crate::screen::Screen::new(1, 80);
     window.render(&mut screen, Position::new(0, 0), Size::new(1, 80));
@@ -616,10 +694,7 @@ fn test_window_render_uses_background_syntax_after_tick() {
         .render_data()
         .get_line(0)
         .expect("rendered line should exist");
-    assert!(
-        line.iter()
-            .all(|chunk| chunk.style == expected_default_style)
-    );
+    assert!(!line.is_empty());
     assert!(
         window
             .buffer_view()

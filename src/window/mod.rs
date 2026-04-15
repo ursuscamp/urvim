@@ -15,7 +15,7 @@ mod widget;
 
 use crate::action::ActionResult;
 use crate::buffer::{Boundary, Buffer, BufferId, Cursor};
-use crate::editor::{Action, LinewiseMotion, Operator, OperatorTarget};
+use crate::editor::{Action, LinewiseMotion, ModeKind, Operator, OperatorTarget};
 use crate::globals;
 use crate::screen::Screen;
 use crate::terminal::Color;
@@ -199,6 +199,26 @@ impl Window {
             .buffer_view
             .build_render_data_with_style(content_size, default_style);
         self.render_data.render(screen, content_origin);
+
+        let active_line_enabled =
+            globals::with_config(|config| config.active_line).unwrap_or(false);
+        let is_normal_mode = globals::with_mode_kind(|mode_kind| mode_kind == ModeKind::Normal);
+        if active_line_enabled
+            && is_normal_mode
+            && let Some(cursor_position) = self
+                .render_data
+                .cursor_screen_position(self.buffer_view.cursor())
+            && let Some(active_line_style) =
+                globals::with_active_theme(|theme| theme.map(|theme| theme.ui.active_line))
+        {
+            screen.overlay_region(
+                content_origin.row + cursor_position.row,
+                content_origin.col,
+                1,
+                content_size.cols,
+                active_line_style,
+            );
+        }
     }
 
     pub fn set_cursor(&mut self, cursor: Cursor) {

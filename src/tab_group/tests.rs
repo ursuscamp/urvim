@@ -43,6 +43,7 @@ fn themed_group() -> Theme {
         Style::new().fg(Color::ansi(1)).bg(Color::ansi(2)),
         Style::new().fg(Color::ansi(3)).bg(Color::ansi(4)).bold(),
         Style::new().reverse(),
+        Style::new().bg(Color::ansi(21)),
         Style::new().fg(Color::ansi(5)).bg(Color::ansi(6)),
         Style::new().fg(Color::ansi(7)).bg(Color::ansi(8)),
         Style::new().fg(Color::ansi(9)).bg(Color::ansi(10)),

@@ -77,6 +77,13 @@ An optional set of editor configuration capabilities that request special glyph 
 
 **Related Terms:** Filetype Glyph, Filetype, Tab Group, Status Bar, Configuration
 
+### Active Line
+The line in the focused editor window that is visually emphasized to help the user track the current cursor location. Active line highlighting is a UI concern controlled by configuration and theme styling.
+
+**Context:** Window rendering, theme UI styling, configuration
+
+**Related Terms:** Window, Focused Window, Theme, Configuration, Normal Mode
+
 ### Auto-Indent
 A user-facing insert-mode setting that selects how new lines should inherit indentation. The initial supported style is a neighbor mode that reuses nearby leading whitespace, and the setting is intentionally extensible so additional indentation strategies can be added later.
 

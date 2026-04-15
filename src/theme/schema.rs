@@ -58,6 +58,9 @@ pub struct RawStyle {
     pub strikethrough: Option<bool>,
     /// Overline flag.
     pub overline: Option<bool>,
+    /// Whether this raw style should overlay a blank style instead of the theme default.
+    #[serde(rename = "overlay", default)]
+    pub overlay: bool,
 }
 
 /// Closed raw UI style definitions.
@@ -71,6 +74,9 @@ pub struct RawUiStyles {
     /// The active visual selection.
     #[serde(default)]
     pub selection: RawStyle,
+    /// The highlighted active line in the focused window.
+    #[serde(default)]
+    pub active_line: RawStyle,
     /// The currently active tab.
     pub tab_active: RawStyle,
     /// A non-active tab.

@@ -6,6 +6,7 @@
 
 use crate::action::ActionResult;
 use crate::editor::{Action, ModeKind};
+use crate::globals;
 use crate::screen::Screen;
 use crate::status_bar::{StatusBar, StatusBarContext};
 use crate::tab_group::TabGroup;
@@ -29,6 +30,7 @@ pub struct Layout {
 impl Layout {
     /// Creates a layout from an existing tab group and initial mode kind.
     pub fn new(tab_group: TabGroup, mode_kind: ModeKind) -> Self {
+        globals::set_mode_kind(mode_kind);
         Self {
             tab_group,
             status_bar: StatusBar::new(),
@@ -66,6 +68,7 @@ impl Layout {
     /// Updates the current layout mode kind.
     pub fn set_mode_kind(&mut self, mode_kind: ModeKind) {
         self.mode_kind = mode_kind;
+        globals::set_mode_kind(mode_kind);
     }
 
     /// Returns the last rendered layout origin.

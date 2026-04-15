@@ -82,6 +82,7 @@ fn test_layout_visual_cursor_tracks_child() {
 #[test]
 fn test_layout_mode_kind_updates_footer() {
     let mut layout = layout_with_buffers(vec![Buffer::from_str("alpha")]);
+    let _mode_guard = globals::set_test_mode_kind(ModeKind::Normal);
     layout.set_mode_kind(ModeKind::Insert);
 
     let mut screen = crate::screen::Screen::new(3, 12);

@@ -16,7 +16,7 @@ mod tag;
 pub use error::ThemeLoadError;
 pub use keys::UiStyleKey;
 pub use loader::{resolve_theme, resolve_theme_from_str};
-pub use model::{StyleOverride, SyntaxTagStyles, Theme, ThemeKind, ThemeRegistry, UiStyles};
+pub use model::{StyleOverlay, SyntaxTagStyles, Theme, ThemeKind, ThemeRegistry, UiStyles};
 pub use parser::parse_theme;
 pub use schema::{RawColorValue, RawStyle, RawTheme, RawUiStyles};
 pub use tag::TagParents;

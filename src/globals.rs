@@ -5,7 +5,7 @@
 
 use crate::buffer::{Buffer, BufferId, BufferPool};
 use crate::config::Config;
-use crate::editor::Action;
+use crate::editor::{Action, ModeKind};
 use crate::job::JobManager;
 use crate::theme::Theme;
 use std::sync::{Mutex, OnceLock, RwLock};
@@ -53,12 +53,15 @@ static BUFFER_POOL: OnceLock<RwLock<BufferPool>> = OnceLock::new();
 static ACTIVE_BUFFER_ID: OnceLock<RwLock<Option<BufferId>>> = OnceLock::new();
 static CONFIG: OnceLock<RwLock<Option<Config>>> = OnceLock::new();
 static ACTIVE_THEME: OnceLock<RwLock<Option<Theme>>> = OnceLock::new();
+#[cfg(not(test))]
+static MODE_KIND: OnceLock<RwLock<Option<ModeKind>>> = OnceLock::new();
 static JOB_MANAGER: OnceLock<RwLock<Option<JobManager>>> = OnceLock::new();
 
 #[cfg(test)]
 thread_local! {
     static TEST_CONFIG: RefCell<Option<Config>> = const { RefCell::new(None) };
     static TEST_ACTIVE_THEME: RefCell<Option<Theme>> = const { RefCell::new(None) };
+    static TEST_MODE_KIND: RefCell<Option<ModeKind>> = const { RefCell::new(None) };
     static TEST_LAST_REPEAT: RefCell<Option<RepeatState>> = const { RefCell::new(None) };
 }
 
@@ -196,6 +199,11 @@ fn active_theme_slot() -> &'static RwLock<Option<Theme>> {
     ACTIVE_THEME.get_or_init(|| RwLock::new(None))
 }
 
+#[cfg(not(test))]
+fn mode_kind_slot() -> &'static RwLock<Option<ModeKind>> {
+    MODE_KIND.get_or_init(|| RwLock::new(None))
+}
+
 fn job_manager_slot() -> &'static RwLock<Option<JobManager>> {
     JOB_MANAGER.get_or_init(|| RwLock::new(None))
 }
@@ -207,6 +215,45 @@ fn job_manager_slot() -> &'static RwLock<Option<JobManager>> {
 pub fn set_active_theme(theme: Theme) {
     let mut active_theme = active_theme_slot().write().unwrap();
     *active_theme = Some(theme);
+}
+
+/// Sets the current editor mode kind used by renderers.
+pub fn set_mode_kind(mode_kind: ModeKind) {
+    #[cfg(test)]
+    {
+        TEST_MODE_KIND.with(|slot| {
+            *slot.borrow_mut() = Some(mode_kind);
+        });
+    }
+
+    #[cfg(not(test))]
+    {
+        let mut stored = mode_kind_slot().write().unwrap();
+        *stored = Some(mode_kind);
+    }
+}
+
+/// Runs a closure with the current editor mode kind, defaulting to normal mode.
+pub fn with_mode_kind<R>(f: impl FnOnce(ModeKind) -> R) -> R {
+    #[cfg(test)]
+    {
+        let test_mode_kind = TEST_MODE_KIND.with(|slot| slot.borrow().clone());
+        if let Some(mode_kind) = test_mode_kind {
+            return f(mode_kind);
+        }
+        return f(ModeKind::Normal);
+    }
+
+    #[cfg(not(test))]
+    {
+        let mode_kind = mode_kind_slot()
+            .read()
+            .unwrap()
+            .as_ref()
+            .copied()
+            .unwrap_or(ModeKind::Normal);
+        f(mode_kind)
+    }
 }
 
 /// Runs a closure with access to the active theme if one has been configured.
@@ -293,6 +340,28 @@ pub fn set_test_active_theme(theme: Theme) -> TestActiveThemeGuard {
 }
 
 #[cfg(test)]
+/// A guard that installs a test-only mode kind for the current thread.
+pub struct TestModeKindGuard;
+
+#[cfg(test)]
+impl Drop for TestModeKindGuard {
+    fn drop(&mut self) {
+        TEST_MODE_KIND.with(|slot| {
+            *slot.borrow_mut() = None;
+        });
+    }
+}
+
+#[cfg(test)]
+/// Installs a mode kind for the current test thread and clears it when the guard drops.
+pub fn set_test_mode_kind(mode_kind: ModeKind) -> TestModeKindGuard {
+    TEST_MODE_KIND.with(|slot| {
+        *slot.borrow_mut() = Some(mode_kind);
+    });
+    TestModeKindGuard
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::config::Config;
@@ -307,6 +376,7 @@ mod tests {
             Style::new().fg(Color::ansi(1)).bg(Color::ansi(2)),
             Style::new().fg(Color::ansi(3)).bg(Color::ansi(4)),
             Style::new().reverse(),
+            Style::new().bg(Color::ansi(21)),
             Style::new().fg(Color::ansi(5)).bg(Color::ansi(6)),
             Style::new().fg(Color::ansi(7)).bg(Color::ansi(8)),
             Style::new().fg(Color::ansi(9)).bg(Color::ansi(10)),
@@ -330,6 +400,7 @@ mod tests {
             insert_escape: None,
             syntax: true,
             auto_close_pairs: true,
+            active_line: false,
             advanced_glyphs: std::collections::BTreeSet::new(),
             ..Default::default()
         }
@@ -444,6 +515,20 @@ mod tests {
     }
 
     #[test]
+    fn test_test_mode_kind_guard_clears_on_drop() {
+        {
+            let _guard = set_test_mode_kind(ModeKind::Insert);
+            with_mode_kind(|mode_kind| {
+                assert_eq!(mode_kind, ModeKind::Insert);
+            });
+        }
+
+        with_mode_kind(|mode_kind| {
+            assert_eq!(mode_kind, ModeKind::Normal);
+        });
+    }
+
+    #[test]
     fn test_with_config_returns_value_when_config_present() {
         let config = themed_config("demo");
         let expected_theme = config.theme.clone();
@@ -463,6 +548,17 @@ mod tests {
         let theme_name = with_config(|active_config| active_config.theme.clone());
 
         assert_eq!(theme_name, None);
+    }
+
+    #[test]
+    fn test_set_mode_kind_updates_global_slot() {
+        set_mode_kind(ModeKind::VisualLine);
+
+        with_mode_kind(|mode_kind| {
+            assert_eq!(mode_kind, ModeKind::VisualLine);
+        });
+
+        set_mode_kind(ModeKind::Normal);
     }
 
     #[test]

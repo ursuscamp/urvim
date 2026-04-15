@@ -6,7 +6,7 @@ use crate::terminal::{Color, Rgb, Style};
 
 use super::Tag;
 use super::error::ThemeLoadError;
-use super::model::{StyleOverride, SyntaxTagStyles, Theme, ThemeKind, UiStyles};
+use super::model::{StyleOverlay, SyntaxTagStyles, Theme, ThemeKind, UiStyles};
 use super::parser::parse_theme;
 use super::schema::{RawColorValue, RawStyle, RawTheme, RawUiStyles};
 
@@ -117,6 +117,14 @@ fn resolve_ui_styles(
         resolve_style(
             theme_name,
             "ui",
+            "active_line",
+            Style::default(),
+            &raw.active_line,
+            palette,
+        )?,
+        resolve_style(
+            theme_name,
+            "ui",
             "tab_active",
             default_style,
             &raw.tab_active,
@@ -192,18 +200,19 @@ fn resolve_style(
     raw: &RawStyle,
     palette: &BTreeMap<String, Color>,
 ) -> Result<Style, ThemeLoadError> {
-    let override_style = resolve_style_override(theme_name, section, key, raw, palette)?;
-    Ok(override_style.apply_to(base))
+    let overlay_style = resolve_style_overlay(theme_name, section, key, raw, palette)?;
+    let base = if raw.overlay { Style::default() } else { base };
+    Ok(overlay_style.apply_to(base))
 }
 
-fn resolve_style_override(
+fn resolve_style_overlay(
     theme_name: &str,
     section: &'static str,
     key: &str,
     raw: &RawStyle,
     palette: &BTreeMap<String, Color>,
-) -> Result<StyleOverride, ThemeLoadError> {
-    Ok(StyleOverride {
+) -> Result<StyleOverlay, ThemeLoadError> {
+    Ok(StyleOverlay {
         fg: resolve_palette_reference(theme_name, section, key, "fg", raw.fg.as_ref(), palette)?,
         bg: resolve_palette_reference(theme_name, section, key, "bg", raw.bg.as_ref(), palette)?,
         underline_color: resolve_palette_reference(
@@ -330,6 +339,18 @@ mod tests {
         }
     }
 
+    fn active_line_style(theme: &str) -> Style {
+        match theme {
+            "Friday Night" => Style::new().bg(Color::ansi(235)),
+            "Saturday Morning" => Style::new().bg(Color::ansi(254)),
+            "Rose Pine" => Style::new().bg(Color::Rgb(Rgb::new(31, 29, 46))),
+            "Dracula" => Style::new().bg(Color::Rgb(Rgb::new(68, 71, 90))),
+            "Tokyo Night" => Style::new().bg(Color::Rgb(Rgb::new(36, 40, 59))),
+            "Catppuccin" => Style::new().bg(Color::Rgb(Rgb::new(49, 50, 68))),
+            other => panic!("unexpected theme {other}"),
+        }
+    }
+
     fn sample_theme() -> &'static str {
         r##"
 name = "demo"
@@ -346,6 +367,7 @@ bold = true
 [ui]
 status_bar = { fg = "accent" }
 modified_marker = { fg = "base", bold = true }
+active_line = { bg = "base", overlay = true }
 tab_active = { fg = "base" }
 tab_inactive = { fg = "base" }
 tab_scroll_indicator = { fg = "base" }
@@ -385,6 +407,7 @@ variable = { fg = "base" }
                 .bg(Color::Rgb(Rgb::new(17, 34, 51)))
                 .bold()
         );
+        assert_eq!(theme.ui.active_line, Style::new().bg(Color::ansi(0)));
     }
 
     #[test]
@@ -573,6 +596,47 @@ variable = { fg = "base" }
     }
 
     #[test]
+    fn resolves_overlay_styles_against_blank_style() {
+        let theme = r#"
+name = "demo"
+
+[palette]
+base = 0
+accent = 1
+
+[default]
+fg = "base"
+bg = "accent"
+bold = true
+
+[ui]
+status_bar = { fg = "accent" }
+modified_marker = { fg = "base", bold = true }
+active_line = { bg = "base", overlay = true }
+tab_active = { fg = "base" }
+tab_inactive = { fg = "base" }
+tab_scroll_indicator = { fg = "base" }
+gutter = { fg = "base" }
+window = { fg = "base" }
+
+[syntax]
+comment = { fg = "base" }
+constant = { fg = "base" }
+function = { fg = "base" }
+keyword = { fg = "accent" }
+number = { fg = "base" }
+operator = { fg = "base" }
+punctuation = { fg = "base" }
+string = { fg = "base" }
+type = { fg = "base" }
+variable = { fg = "base" }
+"#;
+
+        let theme = resolve_theme_from_str("sample", theme).expect("theme should resolve");
+        assert_eq!(theme.ui.active_line, Style::new().bg(Color::ansi(0)));
+    }
+
+    #[test]
     fn rejects_invalid_palette_values() {
         let theme = r##"
 name = "demo"
@@ -646,6 +710,11 @@ variable = { fg = "base" }
                 theme.ui.selection,
                 selection_style(name),
                 "theme {name} should define a visible visual selection style"
+            );
+            assert_eq!(
+                theme.ui.active_line,
+                active_line_style(name),
+                "theme {name} should define an active line style"
             );
         }
         assert_eq!(

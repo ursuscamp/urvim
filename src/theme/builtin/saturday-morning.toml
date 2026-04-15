@@ -23,6 +23,7 @@ bg = "bg"
 status_bar = { fg = "fg", bg = "panel", bold = true }
 modified_marker = { fg = "red", bold = true }
 selection = { fg = "bg", bg = "fg" }
+active_line = { bg = "panel", overlay = true }
 tab_active = { fg = "bg", bg = "accent", bold = true }
 tab_inactive = { fg = "fg", bg = "panel" }
 tab_scroll_indicator = { fg = "muted", bg = "bg" }

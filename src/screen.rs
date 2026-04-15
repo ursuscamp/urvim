@@ -138,6 +138,24 @@ impl Screen {
         }
     }
 
+    /// Overlays a style onto a rectangular region without changing the text.
+    ///
+    /// This is useful for emphasis effects such as the active line highlight,
+    /// where existing syntax colors and text content must remain intact while
+    /// the style is layered onto the cells.
+    pub fn overlay_region(&mut self, row: u16, col: u16, rows: u16, cols: u16, style: Style) {
+        let row_end = row.saturating_add(rows).min(self.rows);
+        let col_end = col.saturating_add(cols).min(self.cols);
+
+        for current_row in row.min(self.rows)..row_end {
+            for current_col in col.min(self.cols)..col_end {
+                if let Some(cell) = self.get_cell_mut(current_row, current_col) {
+                    cell.style = cell.style.overlay(style);
+                }
+            }
+        }
+    }
+
     /// Writes a string to the screen at the specified position.
     ///
     /// The string is written grapheme cluster by grapheme cluster. Each
@@ -355,6 +373,24 @@ mod tests {
         assert_eq!(screen.get_cell_mut(0, 0).unwrap().style, Style::default());
         assert_eq!(screen.get_cell_mut(1, 1).unwrap().style, style);
         assert_eq!(screen.get_cell_mut(2, 2).unwrap().style, style);
+    }
+
+    #[test]
+    fn test_overlay_region_preserves_text() {
+        let mut screen = Screen::new(2, 2);
+        let style = Style::new().bg(crate::terminal::Color::ansi(30));
+        screen.write_string(0, 0, Style::new().fg(crate::terminal::Color::ansi(5)), "a");
+
+        screen.overlay_region(0, 0, 1, 2, style);
+
+        let cell = screen.get_cell_mut(0, 0).unwrap();
+        assert_eq!(cell.text, "a");
+        assert_eq!(
+            cell.style,
+            Style::new()
+                .fg(crate::terminal::Color::ansi(5))
+                .bg(crate::terminal::Color::ansi(30))
+        );
     }
 
     #[test]

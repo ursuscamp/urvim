@@ -23,7 +23,7 @@ Command-line flags override config file values.
 
 ## Current Schema
 
-The canonical config values are `theme`, `insert_escape`, `syntax`, `todo_markers`, `auto_close_pairs`, `auto_indent`, `advanced_glyphs`, `tab_insertion`, `tab_behavior`, and `tab_width`.
+The canonical config values are `theme`, `insert_escape`, `syntax`, `todo_markers`, `auto_close_pairs`, `active_line`, `auto_indent`, `advanced_glyphs`, `tab_insertion`, `tab_behavior`, and `tab_width`.
 
 ```toml
 theme = "Friday Night"
@@ -31,6 +31,7 @@ insert_escape = "jk"
 syntax = true
 todo_markers = ["TODO", "FIXME", "BUG", "NOTE"]
 auto_close_pairs = true
+active_line = false
 auto_indent = "off"
 advanced_glyphs = ["nerdfont"]
 tab_insertion = "spaces"
@@ -86,6 +87,15 @@ Controls whether insert mode automatically pairs supported brackets and quotes.
 - Behavior: when `true`, insert mode auto-closes parentheses, square brackets, curly braces, double quotes, single quotes, and backticks; typing a supported closer next to an auto-inserted closer skips over it; pressing backspace between a supported opener and closer removes both characters
 - Behavior when `false`: opening and closing brackets and quotes insert as plain text, and backspace deletes only one character at a time
 - Scope: insert mode only
+
+### `active_line`
+
+Controls whether the focused window highlights the cursor line in normal mode.
+
+- Type: boolean
+- Default: `false`
+- Behavior: when `true`, the current line in the focused window receives the theme's active-line UI style while the editor is in normal mode; when `false`, the editor keeps its current rendering behavior
+- Scope: focused window only, normal mode only
 
 ### `auto_indent`
 

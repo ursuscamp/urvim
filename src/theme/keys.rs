@@ -5,6 +5,8 @@
 pub enum UiStyleKey {
     /// The editor status bar.
     StatusBar,
+    /// The active line in the focused window.
+    ActiveLine,
     /// The currently active tab.
     TabActive,
     /// A non-active tab.

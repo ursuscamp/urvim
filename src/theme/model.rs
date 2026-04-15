@@ -16,37 +16,37 @@ pub enum ThemeKind {
     TrueColor,
 }
 
-/// A partially specified style that can be layered onto the theme default.
+/// A partially specified style that can be layered onto another style.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct StyleOverride {
-    /// Optional foreground color override.
+pub struct StyleOverlay {
+    /// Optional foreground color overlay.
     pub fg: Option<Color>,
-    /// Optional background color override.
+    /// Optional background color overlay.
     pub bg: Option<Color>,
-    /// Optional underline color override.
+    /// Optional underline color overlay.
     pub underline_color: Option<Color>,
-    /// Optional bold override.
+    /// Optional bold overlay.
     pub bold: Option<bool>,
-    /// Optional italic override.
+    /// Optional italic overlay.
     pub italic: Option<bool>,
-    /// Optional underline override.
+    /// Optional underline overlay.
     pub underline: Option<bool>,
-    /// Optional double underline override.
+    /// Optional double underline overlay.
     pub double_underline: Option<bool>,
-    /// Optional dim override.
+    /// Optional dim overlay.
     pub dim: Option<bool>,
-    /// Optional reverse override.
+    /// Optional reverse overlay.
     pub reverse: Option<bool>,
-    /// Optional blink override.
+    /// Optional blink overlay.
     pub blink: Option<bool>,
-    /// Optional strikethrough override.
+    /// Optional strikethrough overlay.
     pub strikethrough: Option<bool>,
-    /// Optional overline override.
+    /// Optional overline overlay.
     pub overline: Option<bool>,
 }
 
-impl StyleOverride {
-    /// Applies this override to an existing style.
+impl StyleOverlay {
+    /// Applies this overlay to an existing style.
     pub fn apply_to(self, style: Style) -> Style {
         let mut style = style;
 
@@ -100,6 +100,8 @@ pub struct UiStyles {
     pub modified_marker: Style,
     /// Style used by the active visual selection.
     pub selection: Style,
+    /// Style used by the active line in the focused window.
+    pub active_line: Style,
     /// Style used by the active tab.
     pub tab_active: Style,
     /// Style used by inactive tabs.
@@ -118,6 +120,7 @@ impl UiStyles {
         status_bar: Style,
         modified_marker: Style,
         selection: Style,
+        active_line: Style,
         tab_active: Style,
         tab_inactive: Style,
         tab_scroll_indicator: Style,
@@ -128,6 +131,7 @@ impl UiStyles {
             status_bar,
             modified_marker,
             selection,
+            active_line,
             tab_active,
             tab_inactive,
             tab_scroll_indicator,
@@ -349,6 +353,7 @@ mod tests {
             Style::new().fg(Color::ansi(1)),
             Style::new().fg(Color::ansi(2)),
             Style::new().reverse(),
+            Style::new().bg(Color::ansi(21)),
             Style::new().fg(Color::ansi(3)),
             Style::new().fg(Color::ansi(4)),
             Style::new().fg(Color::ansi(5)),
@@ -390,6 +395,7 @@ mod tests {
 
         assert_eq!(theme.ui.status_bar, Style::new().fg(Color::ansi(1)));
         assert_eq!(theme.ui.modified_marker, Style::new().fg(Color::ansi(2)));
+        assert_eq!(theme.ui.active_line, Style::new().bg(Color::ansi(21)));
         assert_eq!(theme.ui.window, Style::new().fg(Color::ansi(7)));
     }
 

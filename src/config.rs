@@ -91,6 +91,8 @@ pub struct Config {
     pub syntax: bool,
     /// Whether insert mode should auto-close supported bracket and quote pairs.
     pub auto_close_pairs: bool,
+    /// Whether the active line should be highlighted in the focused window.
+    pub active_line: bool,
     /// The configured comment todo markers used for highlighting.
     pub todo_markers: Vector<SmolStr>,
     /// How insert mode should resolve indentation for newly created lines.
@@ -117,6 +119,8 @@ pub struct PartialConfig {
     pub syntax: Option<bool>,
     /// Whether insert mode should auto-close supported bracket and quote pairs.
     pub auto_close_pairs: Option<bool>,
+    /// Whether the active line should be highlighted in the focused window.
+    pub active_line: Option<bool>,
     /// The todo marker list stored in the config file.
     pub todo_markers: Option<Vec<String>>,
     /// How insert mode should resolve indentation for newly created lines.
@@ -189,6 +193,7 @@ impl Config {
         let auto_close_pairs = file
             .and_then(|config| config.auto_close_pairs)
             .unwrap_or(true);
+        let active_line = file.and_then(|config| config.active_line).unwrap_or(false);
         let todo_markers = file
             .and_then(|config| config.todo_markers.clone())
             .map(|markers| markers.into_iter().map(SmolStr::new).collect())
@@ -215,6 +220,7 @@ impl Config {
             insert_escape,
             syntax,
             auto_close_pairs,
+            active_line,
             todo_markers,
             auto_indent,
             advanced_glyphs,
@@ -246,6 +252,7 @@ impl Default for Config {
             insert_escape: None,
             syntax: true,
             auto_close_pairs: true,
+            active_line: false,
             todo_markers: default_todo_markers(),
             auto_indent: AutoIndentMode::default(),
             advanced_glyphs: BTreeSet::new(),
@@ -442,6 +449,7 @@ mod tests {
             insert_escape: Some("jk".to_string()),
             syntax: Some(false),
             auto_close_pairs: Some(false),
+            active_line: Some(true),
             todo_markers: Some(todo_marker_strings(&["TASK", "FIXME"])),
             auto_indent: Some(AutoIndentMode::Neighbor),
             advanced_glyphs: Some(vec![AdvancedGlyphCapability::Nerdfont]),
@@ -461,6 +469,7 @@ mod tests {
         );
         assert!(!Config::resolve(Some(&file), None, None).syntax);
         assert!(!Config::resolve(Some(&file), None, None).auto_close_pairs);
+        assert!(Config::resolve(Some(&file), None, None).active_line);
         assert_eq!(
             Config::resolve(Some(&file), None, None).todo_markers,
             resolved_todo_markers(&["TASK", "FIXME"])
@@ -471,6 +480,7 @@ mod tests {
         );
         assert!(Config::resolve(None, None, None).syntax);
         assert!(Config::resolve(None, None, None).auto_close_pairs);
+        assert!(!Config::resolve(None, None, None).active_line);
         assert_eq!(
             Config::resolve(None, None, None).auto_indent,
             AutoIndentMode::Off
@@ -684,6 +694,25 @@ mod tests {
         let config = Config::load_from_locations(home, vec![], None, None).expect("should load");
 
         assert!(!config.auto_close_pairs);
+    }
+
+    #[test]
+    fn load_from_locations_loads_active_line_flag() {
+        let home = unique_temp_dir("active-line-home");
+        write_config(&home, "active_line = true");
+
+        let config = Config::load_from_locations(home, vec![], None, None).expect("should load");
+
+        assert!(config.active_line);
+    }
+
+    #[test]
+    fn load_from_locations_defaults_active_line_to_false() {
+        let home = unique_temp_dir("active-line-default-home");
+
+        let config = Config::load_from_locations(home, vec![], None, None).expect("should load");
+
+        assert!(!config.active_line);
     }
 
     #[test]
