@@ -72,6 +72,14 @@ fn main() -> io::Result<()> {
 
     let mut layout = Layout::from_paths(&cli.files);
     globals::set_active_buffer_id(layout.active_buffer_view().buffer_id());
+    globals::with_buffer_pool(|pool| {
+        pool.warmup_syntax_at_startup(
+            Some(layout.active_buffer_view().buffer_id()),
+            layout.active_buffer_view().scroll_offset().row as usize,
+            rows.saturating_sub(1) as usize,
+            config.syntax,
+        );
+    });
 
     // Initialize with Normal mode and set cursor style
     let mut mode: Box<dyn Mode> = Box::new(NormalMode::new());

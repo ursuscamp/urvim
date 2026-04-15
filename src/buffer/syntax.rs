@@ -9,6 +9,7 @@ use crate::syntax::{
     builtin_syntax_registry,
 };
 use crate::theme::Tag;
+use imbl::Vector;
 use regex::Regex;
 use smol_str::SmolStr;
 use std::sync::Arc;
@@ -150,7 +151,7 @@ struct SyntaxCatchUpJob {
     generation: u64,
     syntax_name: SmolStr,
     cache: SyntaxCache,
-    line_texts: Vec<Arc<str>>,
+    line_texts: Vector<Arc<str>>,
 }
 
 impl SyntaxCatchUpJob {
@@ -159,7 +160,7 @@ impl SyntaxCatchUpJob {
         generation: u64,
         syntax_name: SmolStr,
         cache: SyntaxCache,
-        line_texts: Vec<Arc<str>>,
+        line_texts: Vector<Arc<str>>,
     ) -> Self {
         Self {
             buffer_id,
@@ -785,7 +786,7 @@ impl Buffer {
         self.syntax_generation
     }
 
-    /// Returns true when a background syntax catch-up job has been queued for the current generation.
+    /// Returns true when a syntax catch-up job has been queued for the current generation.
     pub fn syntax_background_pending(&self) -> bool {
         self.syntax_background_generation.is_some()
     }
@@ -813,6 +814,15 @@ impl Buffer {
 
     /// Requests background syntax catch-up when the cache is incomplete.
     pub fn request_syntax_catch_up(&mut self, buffer_id: BufferId) {
+        self.request_syntax_catch_up_with_priority(buffer_id, JobPriority::Background);
+    }
+
+    /// Requests syntax catch-up with the given job priority when the cache is incomplete.
+    pub fn request_syntax_catch_up_with_priority(
+        &mut self,
+        buffer_id: BufferId,
+        priority: JobPriority,
+    ) {
         if self.syntax_cache_complete() {
             return;
         }
@@ -821,13 +831,12 @@ impl Buffer {
             return;
         }
 
-        let line_texts = self.lines.iter().cloned().collect::<Vec<_>>();
         let job = SyntaxCatchUpJob::new(
             buffer_id,
             self.syntax_generation,
             self.syntax_name.clone(),
             self.syntax_cache.clone(),
-            line_texts,
+            self.lines.clone(),
         );
         let kind = JobKind::new(format!("syntax:{}", buffer_id.get()));
         let token = JobToken::new(self.syntax_generation);
@@ -836,7 +845,7 @@ impl Buffer {
             job_manager
                 .map(|job_manager| {
                     job_manager
-                        .submit(kind.clone(), JobPriority::Background, token, job)
+                        .submit(kind.clone(), priority, token, job)
                         .is_ok()
                 })
                 .unwrap_or(false)
@@ -1036,7 +1045,7 @@ mod tests {
             buffer.syntax_generation(),
             buffer.syntax_name.clone(),
             buffer.syntax_cache.clone(),
-            buffer.lines.iter().cloned().collect(),
+            buffer.lines.clone(),
         );
 
         handle

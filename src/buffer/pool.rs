@@ -7,6 +7,7 @@
 //! synchronized across threads.
 
 use super::Buffer;
+use crate::job::JobPriority;
 use crate::path::AbsolutePath;
 use std::collections::HashMap;
 use std::io;
@@ -112,6 +113,43 @@ impl BufferPool {
         self.buffers.get_mut(&id)
     }
 
+    /// Returns all buffer identifiers currently loaded into the pool.
+    pub fn buffer_ids(&self) -> Vec<BufferId> {
+        let mut ids = self.buffers.keys().copied().collect::<Vec<_>>();
+        ids.sort_unstable();
+        ids
+    }
+
+    /// Warms syntax for all loaded buffers at startup using a visible/hidden split.
+    pub fn warmup_syntax_at_startup(
+        &mut self,
+        active_buffer_id: Option<BufferId>,
+        active_scroll_row: usize,
+        visible_rows: usize,
+        syntax_enabled: bool,
+    ) {
+        if !syntax_enabled {
+            return;
+        }
+
+        let active_prefix_end = visible_rows.saturating_sub(1);
+
+        for buffer_id in self.buffer_ids() {
+            let Some(buffer) = self.buffers.get_mut(&buffer_id) else {
+                continue;
+            };
+
+            if Some(buffer_id) == active_buffer_id {
+                if active_scroll_row == 0 && visible_rows > 0 {
+                    buffer.ensure_syntax_through(active_prefix_end);
+                }
+                buffer.request_syntax_catch_up_with_priority(buffer_id, JobPriority::Foreground);
+            } else {
+                buffer.request_syntax_catch_up(buffer_id);
+            }
+        }
+    }
+
     /// Saves the buffer using its stored path.
     ///
     /// Missing files are created on write if the buffer already has a resolved path.
@@ -192,6 +230,10 @@ impl Default for BufferPool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::buffer::Buffer;
+    use crate::config::Config;
+    use crate::globals;
+    use crate::job::JobManager;
     use std::fs;
     use std::sync::{
         Arc, Barrier, Mutex, RwLock,
@@ -320,6 +362,38 @@ mod tests {
         let result = pool.with_buffer_mut(BufferId::new(999), |_buffer| ());
 
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_warmup_syntax_at_startup_warms_active_buffer_and_queues_hidden_buffers() {
+        let _config_guard = globals::set_test_config(Config {
+            theme: "demo".to_string(),
+            insert_escape: None,
+            syntax: true,
+            auto_close_pairs: true,
+            ..Default::default()
+        });
+        globals::set_job_manager(JobManager::new());
+
+        let mut pool = BufferPool::new();
+        let active_id = pool.register_buffer(Buffer::from_str_with_path(
+            "fn main() {\n    let value = 1;\n}",
+            AbsolutePath::from_path(std::path::Path::new("/tmp/active.rs")).unwrap(),
+        ));
+        let hidden_id = pool.register_buffer(Buffer::from_str_with_path(
+            "fn hidden() {\n    let value = 2;\n}",
+            AbsolutePath::from_path(std::path::Path::new("/tmp/hidden.rs")).unwrap(),
+        ));
+
+        pool.warmup_syntax_at_startup(Some(active_id), 0, 2, true);
+
+        let active = pool.get(active_id).expect("active buffer should exist");
+        let hidden = pool.get(hidden_id).expect("hidden buffer should exist");
+
+        assert!(active.cached_syntax_spans_for_line(0).is_some());
+        assert!(active.syntax_background_pending());
+        assert!(hidden.syntax_background_pending());
+        assert!(pool.buffer_ids().windows(2).all(|pair| pair[0] < pair[1]));
     }
 
     #[test]
