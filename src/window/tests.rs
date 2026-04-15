@@ -329,6 +329,59 @@ fn test_window_render_uses_theme_styles() {
 }
 
 #[test]
+fn test_window_render_refreshes_visible_syntax_after_edit() {
+    let path =
+        AbsolutePath::from_path(temp_path_with_ext("visible-syntax-refresh", "rs").as_path())
+            .unwrap();
+    let buffer = Buffer::from_str_with_path("let value = true;\nlet other = false;", path);
+    let mut window = Window::new(buffer);
+    let buffer_id = window.buffer_view().buffer_id();
+    let mut second_window = Window::from_buffer_id(buffer_id);
+
+    let theme = syntax_themed_window();
+    let expected_default_style = theme.default_style();
+    let expected_comment_style = expected_default_style.overlay(
+        theme
+            .syntax
+            .style_for_tag(&tag("comment"), expected_default_style),
+    );
+    let _theme_guard = globals::set_test_active_theme(theme);
+    let _config_guard = globals::set_test_config(Config {
+        theme: "demo-syntax".to_string(),
+        syntax: true,
+        auto_close_pairs: true,
+        advanced_glyphs: BTreeSet::new(),
+        ..Default::default()
+    });
+
+    let mut prime_screen = crate::screen::Screen::new(1, 24);
+    window.render(&mut prime_screen, Position::new(0, 0), Size::new(1, 24));
+
+    window
+        .buffer_view_mut()
+        .with_buffer_mut(|buffer| buffer.insert_text(Cursor::new(0, 0), "// "))
+        .unwrap();
+
+    let mut first_screen = crate::screen::Screen::new(1, 24);
+    window.render(&mut first_screen, Position::new(0, 0), Size::new(1, 24));
+    let mut second_screen = crate::screen::Screen::new(1, 24);
+    second_window.render(&mut second_screen, Position::new(0, 0), Size::new(1, 24));
+
+    let first_cell = first_screen.get_cell_mut(0, 3).unwrap();
+    let second_cell = second_screen.get_cell_mut(0, 3).unwrap();
+    let offscreen_cache = window
+        .buffer_view()
+        .with_buffer(|buffer| buffer.cached_syntax_spans_for_line(1))
+        .unwrap();
+
+    assert_eq!(first_cell.text, "/");
+    assert_eq!(second_cell.text, "/");
+    assert_eq!(first_cell.style, expected_comment_style);
+    assert_eq!(second_cell.style, expected_comment_style);
+    assert_eq!(offscreen_cache, None);
+}
+
+#[test]
 fn test_window_render_expands_tabs_using_configured_width() {
     let buffer = Buffer::from_str("a\tb");
     let window = Window::new(buffer);

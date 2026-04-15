@@ -233,12 +233,16 @@ impl BufferView {
         } else {
             Vector::new()
         };
-        let _ = self.with_buffer_mut(|buffer| {
+        let _applied = self.with_buffer_mut(|buffer| {
             let start_line = self.scroll_offset.row as usize;
             let total_lines_needed = size.rows as usize + 10;
             let horizontal_offset = self.scroll_offset.col as usize;
 
             if syntax_enabled {
+                if size.rows > 0 && buffer.line_count() > 0 {
+                    let visible_end_line = start_line.saturating_add(size.rows as usize - 1);
+                    buffer.ensure_syntax_through(visible_end_line);
+                }
                 buffer.request_syntax_catch_up(self.buffer_id());
             }
 
