@@ -12,7 +12,6 @@ This is a list, in no particular order, of things that need to be addressed whic
 
 - improved layout
     - cursor blinks rapidly for a moment moving between panes sometimes
-    - splits copy the active buffer from the source tabs
     - resize
     - remember split pane focus (going back to a split should go back to the last node in the split that the user used)
 

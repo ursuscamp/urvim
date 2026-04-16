@@ -17,6 +17,13 @@ fn buffer_line_count(view: &crate::window::BufferView) -> usize {
     view.with_buffer(|buffer| buffer.line_count()).unwrap_or(0)
 }
 
+fn pane_buffer_view(node: &LayoutNode) -> &crate::window::BufferView {
+    match node {
+        LayoutNode::Pane(pane) => pane.window_group.active_buffer_view(),
+        LayoutNode::Split(_) => panic!("expected pane"),
+    }
+}
+
 fn pane_count(node: &LayoutNode) -> usize {
     match node {
         LayoutNode::Pane(_) => 1,
@@ -107,6 +114,46 @@ fn test_layout_horizontal_split_creates_second_pane_with_even_weights() {
             assert_eq!(split.axis, SplitAxis::Horizontal);
             assert_eq!(split.split_size.first_weight(), 1);
             assert_eq!(split.split_size.second_weight(), 1);
+        }
+        LayoutNode::Pane(_) => panic!("split action should replace the root pane"),
+    }
+}
+
+#[test]
+fn test_layout_split_copies_active_buffer_view_state() {
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("one\ntwo\nthree\nfour")]);
+    let source_cursor = crate::buffer::Cursor::new(2, 3);
+    let source_scroll = Position::new(1, 4);
+
+    layout.active_buffer_view_mut().set_cursor(source_cursor);
+    layout
+        .active_buffer_view_mut()
+        .set_scroll_offset(source_scroll);
+
+    let source_buffer_id = layout.active_buffer_view().buffer_id();
+
+    assert_eq!(
+        layout.process_action(&Action::new(ActionKind::SplitVertical)),
+        ActionResult::Handled
+    );
+
+    assert_eq!(layout.focused_pane, PaneId(1));
+    assert_eq!(layout.active_buffer_view().buffer_id(), source_buffer_id);
+    assert_eq!(layout.active_buffer_view().cursor(), source_cursor);
+    assert_eq!(layout.active_buffer_view().scroll_offset(), source_scroll);
+
+    let root = layout.root.as_ref().expect("layout should keep a root");
+    match root {
+        LayoutNode::Split(split) => {
+            let original = pane_buffer_view(&split.first);
+            let copied = pane_buffer_view(&split.second);
+
+            assert_eq!(original.buffer_id(), source_buffer_id);
+            assert_eq!(original.cursor(), source_cursor);
+            assert_eq!(original.scroll_offset(), source_scroll);
+            assert_eq!(copied.buffer_id(), source_buffer_id);
+            assert_eq!(copied.cursor(), source_cursor);
+            assert_eq!(copied.scroll_offset(), source_scroll);
         }
         LayoutNode::Pane(_) => panic!("split action should replace the root pane"),
     }

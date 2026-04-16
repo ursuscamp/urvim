@@ -3,6 +3,7 @@
 use super::geometry::PaneRegion;
 use super::node::{LayoutNode, PaneNode, SplitAxis, SplitNode};
 use super::{Layout, PaneId};
+use crate::window::Window;
 use crate::window::{Position, Size};
 use crate::window_group::WindowGroup;
 
@@ -50,14 +51,28 @@ impl Layout {
         new_pane_id: PaneId,
     ) -> (LayoutNode, bool) {
         match node {
-            LayoutNode::Pane(pane) if pane.id == target => (
-                LayoutNode::Split(SplitNode::new(
-                    axis,
-                    LayoutNode::Pane(pane),
-                    LayoutNode::Pane(PaneNode::new(new_pane_id, WindowGroup::new(Vec::new()))),
-                )),
-                true,
-            ),
+            LayoutNode::Pane(pane) if pane.id == target => {
+                let buffer_view = pane.window_group.active_buffer_view();
+                let buffer_id = buffer_view.buffer_id();
+                let cursor = buffer_view.cursor();
+                let scroll_offset = buffer_view.scroll_offset();
+
+                let mut window_group = WindowGroup::new(vec![Window::from_buffer_id(buffer_id)]);
+                {
+                    let view = window_group.active_window_mut().buffer_view_mut();
+                    view.set_scroll_offset(scroll_offset);
+                    view.set_cursor(cursor);
+                }
+
+                (
+                    LayoutNode::Split(SplitNode::new(
+                        axis,
+                        LayoutNode::Pane(pane),
+                        LayoutNode::Pane(PaneNode::new(new_pane_id, window_group)),
+                    )),
+                    true,
+                )
+            }
             LayoutNode::Pane(pane) => (LayoutNode::Pane(pane), false),
             LayoutNode::Split(split) => {
                 let SplitNode {
