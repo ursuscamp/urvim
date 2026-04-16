@@ -15,12 +15,18 @@ mod widget;
 
 use crate::action::ActionResult;
 use crate::buffer::{Boundary, Buffer, BufferId, Cursor};
-use crate::editor::{Action, LinewiseMotion, ModeKind, Operator, OperatorTarget};
+use crate::editor::{
+    Action, InsertMode, LinewiseMotion, Mode, ModeKind, NormalMode, Operator, OperatorTarget,
+    VisualLineMode, VisualMode,
+};
 use crate::globals;
 use crate::screen::Screen;
 use crate::terminal::Color;
+use crate::terminal::CursorStyle;
+use crate::terminal::Key;
 use crate::terminal::Style;
 use crate::widget::Widget;
+use std::fmt;
 use unicode_segmentation::UnicodeSegmentation;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
@@ -105,12 +111,24 @@ pub struct VisualSelection {
     pub kind: VisualSelectionKind,
 }
 
-#[derive(Debug)]
 pub struct Window {
     buffer_view: BufferView,
     render_data: RenderData,
     size: Size,
     pending_repeat_suffix: Option<String>,
+    mode: Box<dyn Mode>,
+}
+
+impl fmt::Debug for Window {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Window")
+            .field("buffer_view", &self.buffer_view)
+            .field("render_data", &self.render_data)
+            .field("size", &self.size)
+            .field("pending_repeat_suffix", &self.pending_repeat_suffix)
+            .field("mode_kind", &self.mode.kind())
+            .finish()
+    }
 }
 
 impl Window {
@@ -123,6 +141,7 @@ impl Window {
             render_data: RenderData::new(0),
             size: Size::default(),
             pending_repeat_suffix: None,
+            mode: Box::new(NormalMode::new()),
         }
     }
 
@@ -133,6 +152,7 @@ impl Window {
             render_data: RenderData::new(0),
             size: Size::default(),
             pending_repeat_suffix: None,
+            mode: Box::new(NormalMode::new()),
         }
     }
 
@@ -150,6 +170,61 @@ impl Window {
 
     pub fn render_data(&self) -> &RenderData {
         &self.render_data
+    }
+
+    /// Returns the current mode kind owned by this window.
+    pub fn mode_kind(&self) -> ModeKind {
+        self.mode.kind()
+    }
+
+    /// Returns the current mode label owned by this window.
+    pub fn mode_label(&self) -> &'static str {
+        self.mode_kind().label()
+    }
+
+    /// Returns the terminal cursor style for the current mode owned by this window.
+    pub fn cursor_style(&self) -> CursorStyle {
+        self.mode.cursor_style()
+    }
+
+    /// Handles one key event through the window-owned mode.
+    pub fn handle_key(&mut self, key: &Key) -> crate::editor::HandleKeyResult {
+        self.mode.handle_key(key)
+    }
+
+    /// Appends committed insert text to the current mode's repeat capture, if supported.
+    pub fn append_repeat_text(&mut self, text: &str) {
+        self.mode.append_repeat_text(text);
+    }
+
+    /// Switches this window to a different mode.
+    pub fn switch_mode(&mut self, to_mode: ModeKind) -> Option<String> {
+        let repeat_text = if to_mode == ModeKind::Normal {
+            self.mode.take_repeat_text()
+        } else {
+            None
+        };
+
+        if self.mode.kind().is_visual() && to_mode != self.mode.kind() {
+            self.buffer_view.clear_visual_selection();
+        }
+
+        self.mode = match to_mode {
+            ModeKind::Normal => Box::new(NormalMode::new()),
+            ModeKind::Insert => Box::new(InsertMode::new()),
+            ModeKind::Visual => {
+                self.buffer_view
+                    .begin_visual_selection(crate::window::VisualSelectionKind::Character);
+                Box::new(VisualMode::new())
+            }
+            ModeKind::VisualLine => {
+                self.buffer_view
+                    .begin_visual_selection(crate::window::VisualSelectionKind::Line);
+                Box::new(VisualLineMode::new())
+            }
+        };
+
+        repeat_text
     }
 
     /// Returns and clears the repeat-text suffix produced by the last handled action.
@@ -202,7 +277,7 @@ impl Window {
 
         let active_line_enabled =
             globals::with_config(|config| config.active_line).unwrap_or(false);
-        let is_normal_mode = globals::with_mode_kind(|mode_kind| mode_kind == ModeKind::Normal);
+        let is_normal_mode = self.mode.kind() == ModeKind::Normal;
         if active_line_enabled
             && is_normal_mode
             && let Some(cursor_position) = self

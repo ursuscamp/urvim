@@ -10,7 +10,7 @@ use crate::window::{Position, Size};
 use std::collections::BTreeSet;
 
 fn layout_with_buffers(buffers: Vec<Buffer>) -> Layout {
-    Layout::new(TabGroup::from_buffers(buffers), ModeKind::Normal)
+    Layout::new(TabGroup::from_buffers(buffers))
 }
 
 fn buffer_line_count(view: &crate::window::BufferView) -> usize {
@@ -19,12 +19,15 @@ fn buffer_line_count(view: &crate::window::BufferView) -> usize {
 
 #[test]
 fn test_layout_new_wraps_tab_group() {
-    let layout = Layout::new(TabGroup::new(Vec::new()), ModeKind::Normal);
+    let layout = Layout::new(TabGroup::new(Vec::new()));
 
     assert_eq!(layout.origin(), Position::default());
     assert_eq!(layout.size(), Size::default());
     assert_eq!(layout.tab_group().active_tab_index(), 0);
-    assert_eq!(layout.mode_kind(), ModeKind::Normal);
+    assert_eq!(
+        layout.tab_group().active_window_mode_kind(),
+        ModeKind::Normal
+    );
     assert_eq!(layout.mode_label(), "NORMAL");
 }
 
@@ -82,8 +85,10 @@ fn test_layout_visual_cursor_tracks_child() {
 #[test]
 fn test_layout_mode_kind_updates_footer() {
     let mut layout = layout_with_buffers(vec![Buffer::from_str("alpha")]);
-    let _mode_guard = globals::set_test_mode_kind(ModeKind::Normal);
-    layout.set_mode_kind(ModeKind::Insert);
+    layout
+        .tab_group_mut()
+        .active_window_mut()
+        .switch_mode(ModeKind::Insert);
 
     let mut screen = crate::screen::Screen::new(3, 12);
     layout.render(&mut screen, Position::new(0, 0), Size::new(3, 12));

@@ -376,7 +376,7 @@ fn test_window_render_skips_active_line_when_mode_is_insert() {
         syntax: true,
         ..Default::default()
     });
-    let _mode_guard = globals::set_test_mode_kind(ModeKind::Insert);
+    window.switch_mode(ModeKind::Insert);
 
     let mut screen = crate::screen::Screen::new(1, 20);
     window.render(&mut screen, Position::new(0, 0), Size::new(1, 20));

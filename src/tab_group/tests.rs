@@ -2,7 +2,7 @@ use super::*;
 use crate::action::ActionResult;
 use crate::buffer::Cursor;
 use crate::config::{AdvancedGlyphCapability, Config};
-use crate::editor::{Action, ActionKind};
+use crate::editor::{Action, ActionKind, ModeKind};
 use crate::globals;
 use crate::terminal::{Color, Style};
 use crate::theme::{SyntaxTagStyles, Tag, Theme, ThemeKind, UiStyles};
@@ -187,6 +187,37 @@ fn test_tab_navigation_wraps_and_supports_counts() {
         ActionResult::Handled
     );
     assert_eq!(group.active_tab_index(), 3);
+}
+
+#[test]
+fn test_each_window_restores_its_own_mode() {
+    let mut group =
+        TabGroup::from_buffers(vec![Buffer::from_str("first"), Buffer::from_str("second")]);
+
+    group.active_window_mut().switch_mode(ModeKind::Insert);
+
+    assert_eq!(
+        group.process_action(&Action::new(ActionKind::NextTab)),
+        ActionResult::Handled
+    );
+    assert_eq!(group.active_tab_index(), 1);
+    assert_eq!(group.active_window_mode_kind(), ModeKind::Normal);
+
+    group.active_window_mut().switch_mode(ModeKind::VisualLine);
+
+    assert_eq!(
+        group.process_action(&Action::new(ActionKind::PreviousTab)),
+        ActionResult::Handled
+    );
+    assert_eq!(group.active_tab_index(), 0);
+    assert_eq!(group.active_window_mode_kind(), ModeKind::Insert);
+
+    assert_eq!(
+        group.process_action(&Action::new(ActionKind::NextTab)),
+        ActionResult::Handled
+    );
+    assert_eq!(group.active_tab_index(), 1);
+    assert_eq!(group.active_window_mode_kind(), ModeKind::VisualLine);
 }
 
 #[test]

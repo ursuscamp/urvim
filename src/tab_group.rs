@@ -10,6 +10,7 @@ use crate::globals;
 use crate::jumplist::JumpList;
 use crate::screen::Screen;
 use crate::syntax::builtin_syntax_registry;
+use crate::terminal::CursorStyle;
 use crate::terminal::Style;
 use crate::widget::Widget;
 use crate::window::{BufferView, Position, Size, Window};
@@ -96,6 +97,21 @@ impl TabGroup {
     pub fn active_window_mut(&mut self) -> &mut Window {
         let index = self.active_tab_index();
         &mut self.tabs[index]
+    }
+
+    /// Returns the active window's current mode kind.
+    pub fn active_window_mode_kind(&self) -> crate::editor::ModeKind {
+        self.active_window().mode_kind()
+    }
+
+    /// Returns the active window's current mode label.
+    pub fn active_window_mode_label(&self) -> &'static str {
+        self.active_window().mode_label()
+    }
+
+    /// Returns the active window's current cursor style.
+    pub fn active_window_cursor_style(&self) -> CursorStyle {
+        self.active_window().cursor_style()
     }
 
     /// Records the active cursor position in the tab-group jumplist.

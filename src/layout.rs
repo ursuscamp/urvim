@@ -5,8 +5,7 @@
 //! `TabGroup` and footer status bar.
 
 use crate::action::ActionResult;
-use crate::editor::{Action, ModeKind};
-use crate::globals;
+use crate::editor::Action;
 use crate::screen::Screen;
 use crate::status_bar::{StatusBar, StatusBarContext};
 use crate::tab_group::TabGroup;
@@ -22,19 +21,16 @@ use std::path::PathBuf;
 pub struct Layout {
     tab_group: TabGroup,
     status_bar: StatusBar,
-    mode_kind: ModeKind,
     origin: Position,
     size: Size,
 }
 
 impl Layout {
-    /// Creates a layout from an existing tab group and initial mode kind.
-    pub fn new(tab_group: TabGroup, mode_kind: ModeKind) -> Self {
-        globals::set_mode_kind(mode_kind);
+    /// Creates a layout from an existing tab group.
+    pub fn new(tab_group: TabGroup) -> Self {
         Self {
             tab_group,
             status_bar: StatusBar::new(),
-            mode_kind,
             origin: Position::default(),
             size: Size::default(),
         }
@@ -42,7 +38,7 @@ impl Layout {
 
     /// Creates a layout from CLI file paths.
     pub fn from_paths(paths: &[PathBuf]) -> Self {
-        Self::new(TabGroup::from_paths(paths), ModeKind::Normal)
+        Self::new(TabGroup::from_paths(paths))
     }
 
     /// Returns the active tab group.
@@ -55,20 +51,9 @@ impl Layout {
         &mut self.tab_group
     }
 
-    /// Returns the current layout mode kind.
-    pub fn mode_kind(&self) -> ModeKind {
-        self.mode_kind
-    }
-
     /// Returns the current layout mode label.
     pub fn mode_label(&self) -> &'static str {
-        self.mode_kind.label()
-    }
-
-    /// Updates the current layout mode kind.
-    pub fn set_mode_kind(&mut self, mode_kind: ModeKind) {
-        self.mode_kind = mode_kind;
-        globals::set_mode_kind(mode_kind);
+        self.tab_group.active_window().mode_label()
     }
 
     /// Returns the last rendered layout origin.
