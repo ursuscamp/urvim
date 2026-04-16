@@ -127,7 +127,7 @@ impl Layout {
         size: Size,
     ) {
         match node {
-            LayoutNode::Pane(pane) => pane.tab_group.render(screen, origin, size),
+            LayoutNode::Pane(pane) => pane.window_group.render(screen, origin, size),
             LayoutNode::Split(split) => {
                 let (first_origin, first_size, second_origin, second_size) =
                     Self::split_regions(origin, size, split.axis, split.split_size);

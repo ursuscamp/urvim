@@ -112,7 +112,7 @@ fn main() -> io::Result<()> {
 
         if let Event::Key(key) = event {
             let result = layout
-                .active_tab_group_mut()
+                .active_window_group_mut()
                 .active_window_mut()
                 .handle_key(&key);
 
@@ -137,7 +137,7 @@ fn main() -> io::Result<()> {
                                 .flatten()
                             {
                                 layout.active_buffer_view_mut().set_cursor_synced(cursor);
-                                layout.active_tab_group_mut().record_cursor_position();
+                                layout.active_window_group_mut().record_cursor_position();
                             }
                         }
                         Some(ActionKind::Redo) => {
@@ -147,7 +147,7 @@ fn main() -> io::Result<()> {
                                 .flatten()
                             {
                                 layout.active_buffer_view_mut().set_cursor_synced(cursor);
-                                layout.active_tab_group_mut().record_cursor_position();
+                                layout.active_window_group_mut().record_cursor_position();
                             }
                         }
                         _ => {
@@ -160,7 +160,7 @@ fn main() -> io::Result<()> {
                                 {
                                     let repeat_text = {
                                         let window =
-                                            layout.active_tab_group_mut().active_window_mut();
+                                            layout.active_window_group_mut().active_window_mut();
                                         window.switch_mode(to_mode)
                                     };
                                     terminal
@@ -232,7 +232,7 @@ fn main() -> io::Result<()> {
                                     let pending_repeat_suffix = layout.take_pending_repeat_suffix();
                                     if let Some(suffix) = pending_repeat_suffix.as_deref() {
                                         layout
-                                            .active_tab_group_mut()
+                                            .active_window_group_mut()
                                             .active_window_mut()
                                             .append_repeat_text(suffix);
                                     }
@@ -242,7 +242,7 @@ fn main() -> io::Result<()> {
                                 if handled && let Some(to_mode) = dispatch_action.to_mode {
                                     let repeat_text = {
                                         let window =
-                                            layout.active_tab_group_mut().active_window_mut();
+                                            layout.active_window_group_mut().active_window_mut();
                                         window.switch_mode(to_mode)
                                     };
                                     terminal
@@ -410,7 +410,7 @@ mod tests {
     use std::sync::{Arc, Mutex, OnceLock};
     use urvim::buffer::Buffer;
     use urvim::editor::ModeKind;
-    use urvim::tab_group::TabGroup;
+    use urvim::window_group::WindowGroup;
     use urvim::window::VisualSelectionKind;
 
     struct TestBackend {
@@ -552,7 +552,7 @@ mod tests {
 
     #[test]
     fn replay_repeat_action_applies_structural_count_once_before_insert_text() {
-        let mut layout = Layout::new(TabGroup::from_buffers(vec![Buffer::from_str(
+        let mut layout = Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str(
             "line1\nline2\nline3",
         )]));
         let replay = RepeatReplay {
@@ -573,7 +573,7 @@ mod tests {
 
     #[test]
     fn replay_repeat_action_replays_direct_insert_text() {
-        let mut layout = Layout::new(TabGroup::from_buffers(vec![Buffer::from_str("world")]));
+        let mut layout = Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("world")]));
         let replay = RepeatReplay {
             action: Action::mode_transition(ModeKind::Insert),
             structural_count: 1,
@@ -592,18 +592,18 @@ mod tests {
 
     #[test]
     fn switch_mode_clears_visual_selection_when_leaving_visual() {
-        let mut layout = Layout::new(TabGroup::from_buffers(vec![Buffer::from_str("hello")]));
+        let mut layout = Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("hello")]));
         let enter_repeat_text = layout
-            .tab_group_mut()
+            .window_group_mut()
             .active_window_mut()
             .switch_mode(ModeKind::Visual);
         let repeat_text = layout
-            .tab_group_mut()
+            .window_group_mut()
             .active_window_mut()
             .switch_mode(ModeKind::Normal);
 
         assert_eq!(
-            layout.tab_group().active_window_mode_kind(),
+            layout.window_group().active_window_mode_kind(),
             ModeKind::Normal
         );
         assert!(enter_repeat_text.is_none());
@@ -613,15 +613,15 @@ mod tests {
 
     #[test]
     fn switch_mode_restarts_visual_selection_when_entering_visual() {
-        let mut layout = Layout::new(TabGroup::from_buffers(vec![Buffer::from_str("hello")]));
+        let mut layout = Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("hello")]));
 
         let repeat_text = layout
-            .tab_group_mut()
+            .window_group_mut()
             .active_window_mut()
             .switch_mode(ModeKind::Visual);
 
         assert_eq!(
-            layout.tab_group().active_window_mode_kind(),
+            layout.window_group().active_window_mode_kind(),
             ModeKind::Visual
         );
         assert!(repeat_text.is_none());
@@ -630,15 +630,15 @@ mod tests {
 
     #[test]
     fn switch_mode_starts_linewise_visual_selection_when_entering_visual_line() {
-        let mut layout = Layout::new(TabGroup::from_buffers(vec![Buffer::from_str("hello")]));
+        let mut layout = Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("hello")]));
 
         let repeat_text = layout
-            .tab_group_mut()
+            .window_group_mut()
             .active_window_mut()
             .switch_mode(ModeKind::VisualLine);
 
         assert_eq!(
-            layout.tab_group().active_window_mode_kind(),
+            layout.window_group().active_window_mode_kind(),
             ModeKind::VisualLine
         );
         assert!(repeat_text.is_none());

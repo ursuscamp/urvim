@@ -1,7 +1,7 @@
 //! Layout module.
 //!
 //! This module provides the `Layout` root container, which owns a binary split
-//! tree of pane-hosted tab groups, routes split-management actions, and renders
+//! tree of pane-hosted window groups, routes split-management actions, and renders
 //! a footer status bar below the active editor region.
 
 mod geometry;
@@ -36,11 +36,11 @@ pub struct Layout {
 }
 
 impl Layout {
-    /// Creates a layout from an existing tab group.
-    pub fn new(tab_group: crate::tab_group::TabGroup) -> Self {
+    /// Creates a layout from an existing window group.
+    pub fn new(window_group: crate::window_group::WindowGroup) -> Self {
         let focused_pane = PaneId(0);
         Self {
-            root: Some(LayoutNode::Pane(PaneNode::new(focused_pane, tab_group))),
+            root: Some(LayoutNode::Pane(PaneNode::new(focused_pane, window_group))),
             focused_pane,
             next_pane_id: 1,
             status_bar: StatusBar::new(),
@@ -51,7 +51,7 @@ impl Layout {
 
     /// Creates a layout from CLI file paths.
     pub fn from_paths(paths: &[PathBuf]) -> Self {
-        Self::new(crate::tab_group::TabGroup::from_paths(paths))
+        Self::new(crate::window_group::WindowGroup::from_paths(paths))
     }
 
     /// Returns true when the layout has no panes left to render.
@@ -59,52 +59,52 @@ impl Layout {
         self.root.is_none()
     }
 
-    /// Returns the active tab group for the focused pane.
-    pub fn active_tab_group(&self) -> &crate::tab_group::TabGroup {
+    /// Returns the active window group for the focused pane.
+    pub fn active_window_group(&self) -> &crate::window_group::WindowGroup {
         let root = self
             .root
             .as_ref()
             .expect("layout should contain a focused pane");
         Self::find_pane(root, self.focused_pane)
-            .map(|pane| &pane.tab_group)
+            .map(|pane| &pane.window_group)
             .expect("focused pane should exist")
     }
 
-    /// Returns the active tab group mutably for the focused pane.
-    pub fn active_tab_group_mut(&mut self) -> &mut crate::tab_group::TabGroup {
+    /// Returns the active window group mutably for the focused pane.
+    pub fn active_window_group_mut(&mut self) -> &mut crate::window_group::WindowGroup {
         let focused_pane = self.focused_pane;
         let root = self
             .root
             .as_mut()
             .expect("layout should contain a focused pane");
         Self::find_pane_mut(root, focused_pane)
-            .map(|pane| &mut pane.tab_group)
+            .map(|pane| &mut pane.window_group)
             .expect("focused pane should exist")
     }
 
-    /// Returns the active tab group.
-    pub fn tab_group(&self) -> &crate::tab_group::TabGroup {
-        self.active_tab_group()
+    /// Returns the active window group.
+    pub fn window_group(&self) -> &crate::window_group::WindowGroup {
+        self.active_window_group()
     }
 
-    /// Returns the active tab group mutably.
-    pub fn tab_group_mut(&mut self) -> &mut crate::tab_group::TabGroup {
-        self.active_tab_group_mut()
+    /// Returns the active window group mutably.
+    pub fn window_group_mut(&mut self) -> &mut crate::window_group::WindowGroup {
+        self.active_window_group_mut()
     }
 
     /// Returns the current layout mode label.
     pub fn mode_label(&self) -> &'static str {
-        self.active_tab_group().active_window_mode_label()
+        self.active_window_group().active_window_mode_label()
     }
 
     /// Returns the current mode kind of the focused pane's active window.
     pub fn active_window_mode_kind(&self) -> ModeKind {
-        self.active_tab_group().active_window_mode_kind()
+        self.active_window_group().active_window_mode_kind()
     }
 
     /// Returns the cursor style of the focused pane's active window.
     pub fn active_window_cursor_style(&self) -> CursorStyle {
-        self.active_tab_group().active_window_cursor_style()
+        self.active_window_group().active_window_cursor_style()
     }
 
     /// Returns the last rendered layout origin.
@@ -119,12 +119,12 @@ impl Layout {
 
     /// Returns the active buffer view from the focused pane.
     pub fn active_buffer_view(&self) -> &BufferView {
-        self.active_tab_group().active_buffer_view()
+        self.active_window_group().active_buffer_view()
     }
 
     /// Returns the active buffer view mutably from the focused pane.
     pub fn active_buffer_view_mut(&mut self) -> &mut BufferView {
-        self.active_tab_group_mut().active_buffer_view_mut()
+        self.active_window_group_mut().active_buffer_view_mut()
     }
 
     /// Returns and clears any repeat-text suffix produced by the active child window.
@@ -133,13 +133,13 @@ impl Layout {
             return None;
         }
 
-        self.active_tab_group_mut().take_pending_repeat_suffix()
+        self.active_window_group_mut().take_pending_repeat_suffix()
     }
 
     /// Returns the visual cursor for the focused pane, if any.
     pub fn visual_cursor(&self) -> Option<Position> {
         let pane_region = self.pane_region(self.focused_pane)?;
-        let mut pos = self.active_tab_group().visual_cursor()?;
+        let mut pos = self.active_window_group().visual_cursor()?;
         pos.row = pos.row.saturating_add(pane_region.origin.row);
         pos.col = pos.col.saturating_add(pane_region.origin.col);
         Some(pos)
@@ -167,8 +167,8 @@ impl Widget for Layout {
                     false
                 } else {
                     let handled =
-                        self.active_tab_group_mut().process_action(action) == ActionResult::Handled;
-                    if handled && self.active_tab_group().is_empty() {
+                        self.active_window_group_mut().process_action(action) == ActionResult::Handled;
+                    if handled && self.active_window_group().is_empty() {
                         self.close_focused_pane();
                     }
                     handled

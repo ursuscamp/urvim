@@ -1,6 +1,6 @@
 //! Layout tree node types and split metadata.
 
-use crate::tab_group::TabGroup;
+use crate::window_group::WindowGroup;
 
 /// Stable identifier for a pane in the layout split tree.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -47,16 +47,16 @@ impl SplitSize {
     }
 }
 
-/// Leaf node that owns one pane-hosted tab group.
+/// Leaf node that owns one pane-hosted window group.
 #[derive(Debug)]
 pub struct PaneNode {
     pub(super) id: PaneId,
-    pub(super) tab_group: TabGroup,
+    pub(super) window_group: WindowGroup,
 }
 
 impl PaneNode {
-    pub(super) fn new(id: PaneId, tab_group: TabGroup) -> Self {
-        Self { id, tab_group }
+    pub(super) fn new(id: PaneId, window_group: WindowGroup) -> Self {
+        Self { id, window_group }
     }
 }
 
@@ -83,7 +83,7 @@ impl SplitNode {
 /// Recursive layout tree node.
 #[derive(Debug)]
 pub enum LayoutNode {
-    /// A visible editor pane that owns a tab group.
+    /// A visible editor pane that owns a window group.
     Pane(PaneNode),
     /// A binary split node that owns two child layout nodes.
     Split(SplitNode),

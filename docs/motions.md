@@ -28,8 +28,8 @@ This document describes the motions implemented in urvim and how they differ fro
 | `PageDown` | Move down one page |
 | `Ctrl-U` | Move up half a page |
 | `Ctrl-D` | Move down half a page |
-| `Ctrl-O` | Jump backward through the current tab group's jumplist |
-| `Ctrl-I` | Jump forward through the current tab group's jumplist |
+| `Ctrl-O` | Jump backward through the current window group's jumplist |
+| `Ctrl-I` | Jump forward through the current window group's jumplist |
 | `Ctrl-W v` | Split the current pane vertically |
 | `Ctrl-W s` | Split the current pane horizontally |
 | `Ctrl-W h` | Move focus to the pane on the left |
@@ -141,7 +141,7 @@ urvim supports count prefixes for most motions. There are two types of count beh
 
 ## Window Commands
 
-urvim supports a Vim-style pane layout rooted in binary vertical and horizontal splits. Each pane hosts a tab group.
+urvim supports a Vim-style pane layout rooted in binary vertical and horizontal splits. Each pane hosts a window group.
 
 ### Ctrl-W v - Split Vertically
 
@@ -280,7 +280,7 @@ Example: On "hello" (cursor at or past 'o'):
 
 ### Ctrl-O - Jump Backward
 
-Moves backward through the current tab group's jumplist.
+Moves backward through the current window group's jumplist.
 
 - **Behavior**: Activates the tab for the target buffer, or reopens the buffer in a new tab if it is not currently open.
 
@@ -289,7 +289,7 @@ Moves backward through the current tab group's jumplist.
 
 ### Ctrl-I - Jump Forward
 
-Moves forward through the current tab group's jumplist.
+Moves forward through the current window group's jumplist.
 
 - **Behavior**: Activates the tab for the target buffer, or reopens the buffer in a new tab if it is not currently open.
 

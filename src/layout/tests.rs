@@ -5,12 +5,12 @@ use crate::config::Config;
 use crate::editor::{Action, ActionKind, ModeKind};
 use crate::globals;
 use crate::path::AbsolutePath;
-use crate::tab_group::TabGroup;
+use crate::window_group::WindowGroup;
 use crate::window::{Position, Size};
 use std::collections::BTreeSet;
 
 fn layout_with_buffers(buffers: Vec<Buffer>) -> Layout {
-    Layout::new(TabGroup::from_buffers(buffers))
+    Layout::new(WindowGroup::from_buffers(buffers))
 }
 
 fn buffer_line_count(view: &crate::window::BufferView) -> usize {
@@ -35,14 +35,14 @@ fn collect_pane_ids(node: &LayoutNode, ids: &mut Vec<PaneId>) {
 }
 
 #[test]
-fn test_layout_new_wraps_tab_group() {
-    let layout = Layout::new(TabGroup::new(Vec::new()));
+fn test_layout_new_wraps_window_group() {
+    let layout = Layout::new(WindowGroup::new(Vec::new()));
 
     assert_eq!(layout.origin(), Position::default());
     assert_eq!(layout.size(), Size::default());
-    assert_eq!(layout.tab_group().active_tab_index(), 0);
+    assert_eq!(layout.window_group().active_tab_index(), 0);
     assert_eq!(
-        layout.tab_group().active_window_mode_kind(),
+        layout.window_group().active_window_mode_kind(),
         ModeKind::Normal
     );
     assert_eq!(layout.mode_label(), "NORMAL");
@@ -56,7 +56,7 @@ fn test_layout_exposes_active_buffer_view() {
 }
 
 #[test]
-fn test_layout_process_action_delegates_to_tab_group() {
+fn test_layout_process_action_delegates_to_window_group() {
     let mut layout = layout_with_buffers(vec![
         Buffer::from_str("one"),
         Buffer::from_str("two"),
@@ -67,7 +67,7 @@ fn test_layout_process_action_delegates_to_tab_group() {
         layout.process_action(&Action::new(ActionKind::NextTab)),
         ActionResult::Handled
     );
-    assert_eq!(layout.tab_group().active_tab_index(), 1);
+    assert_eq!(layout.window_group().active_tab_index(), 1);
 }
 
 #[test]
@@ -134,7 +134,7 @@ fn test_layout_render_stores_geometry_and_forwards_size() {
 
     assert_eq!(layout.origin(), origin);
     assert_eq!(layout.size(), size);
-    assert_eq!(layout.tab_group().active_window().size(), Size::new(1, 12));
+    assert_eq!(layout.window_group().active_window().size(), Size::new(1, 12));
     assert_eq!(screen.get_cell_mut(5, 4).unwrap().text, "N");
 }
 
@@ -188,7 +188,7 @@ fn test_layout_visual_cursor_tracks_child() {
 fn test_layout_mode_kind_updates_footer() {
     let mut layout = layout_with_buffers(vec![Buffer::from_str("alpha")]);
     layout
-        .tab_group_mut()
+        .window_group_mut()
         .active_window_mut()
         .switch_mode(ModeKind::Insert);
 
@@ -313,11 +313,11 @@ fn test_layout_close_pane_collapses_parent_split_to_surviving_child() {
 }
 
 #[test]
-fn test_layout_prunes_empty_tab_group_during_render() {
+fn test_layout_prunes_empty_window_group_during_render() {
     let mut layout = layout_with_buffers(vec![Buffer::from_str("one")]);
     layout.process_action(&Action::new(ActionKind::SplitVertical));
 
-    assert!(layout.active_tab_group_mut().close_active_tab());
+    assert!(layout.active_window_group_mut().close_active_tab());
 
     let mut screen = crate::screen::Screen::new(4, 20);
     layout.render(&mut screen, Position::new(0, 0), Size::new(4, 20));
@@ -336,7 +336,7 @@ fn test_layout_preserves_unrelated_pane_cursor_and_mode_state() {
         .active_buffer_view_mut()
         .set_cursor(crate::buffer::Cursor::new(0, 2));
     layout
-        .active_tab_group_mut()
+        .active_window_group_mut()
         .active_window_mut()
         .switch_mode(ModeKind::Insert);
 

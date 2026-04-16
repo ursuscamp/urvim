@@ -1,6 +1,6 @@
-//! Tab group module.
+//! Window group module.
 //!
-//! This module provides the `TabGroup` container, which owns multiple windows,
+//! This module provides the `WindowGroup` container, which owns multiple windows,
 //! renders a horizontal tab bar, and routes actions to the active window.
 
 use crate::action::ActionResult;
@@ -28,20 +28,20 @@ struct TabBarLayout {
     right_arrow: bool,
 }
 
-/// Root tab-group container for urvim.
+/// Root window-group container for urvim.
 ///
-/// A tab group owns multiple editor windows, keeps track of the active tab,
+/// A window group owns multiple editor windows, keeps track of the active tab,
 /// and renders a tab bar above the active window content.
 #[derive(Debug)]
-pub struct TabGroup {
+pub struct WindowGroup {
     tabs: Vec<Window>,
     active_tab: usize,
     tab_bar_start: usize,
     jumplist: RefCell<JumpList>,
 }
 
-impl TabGroup {
-    /// Creates a new tab group from windows.
+impl WindowGroup {
+    /// Creates a new window group from windows.
     pub fn new(mut tabs: Vec<Window>) -> Self {
         let mut seen_buffer_ids = HashSet::new();
         tabs.retain(|window| seen_buffer_ids.insert(window.buffer_view().buffer_id()));
@@ -59,12 +59,12 @@ impl TabGroup {
         }
     }
 
-    /// Creates a new tab group from buffers.
+    /// Creates a new window group from buffers.
     pub fn from_buffers(buffers: Vec<Buffer>) -> Self {
         Self::new(buffers.into_iter().map(Window::new).collect())
     }
 
-    /// Loads a tab group from CLI file paths.
+    /// Loads a window group from CLI file paths.
     pub fn from_paths(paths: &[PathBuf]) -> Self {
         let mut tabs = Vec::new();
 
@@ -88,7 +88,7 @@ impl TabGroup {
         self.active_tab.min(self.tabs.len().saturating_sub(1))
     }
 
-    /// Returns true when the tab group has no live tabs.
+    /// Returns true when the window group has no live tabs.
     pub fn is_empty(&self) -> bool {
         self.tabs.is_empty()
     }
@@ -119,7 +119,7 @@ impl TabGroup {
         self.active_window().cursor_style()
     }
 
-    /// Records the active cursor position in the tab-group jumplist.
+    /// Records the active cursor position in the window-group jumplist.
     pub fn record_cursor_position(&mut self) {
         let view = self.active_buffer_view();
         let buffer_id = view.buffer_id();
@@ -140,7 +140,7 @@ impl TabGroup {
         self.active_window_mut().buffer_view_mut()
     }
 
-    /// Closes the active tab and returns true when the tab group becomes empty.
+    /// Closes the active tab and returns true when the window group becomes empty.
     pub fn close_active_tab(&mut self) -> bool {
         if self.tabs.is_empty() {
             return true;
@@ -222,7 +222,7 @@ impl TabGroup {
         handled
     }
 
-    /// Moves backward in the tab-group jumplist, restoring the selected tab.
+    /// Moves backward in the window-group jumplist, restoring the selected tab.
     pub fn jump_list_back(&mut self) -> bool {
         let Some((buffer_id, _cursor)) = self.jumplist.borrow().peek_back() else {
             return false;
@@ -237,7 +237,7 @@ impl TabGroup {
         self.activate_jump_target(buffer_id, cursor)
     }
 
-    /// Moves forward in the tab-group jumplist, restoring the selected tab.
+    /// Moves forward in the window-group jumplist, restoring the selected tab.
     pub fn jump_list_forward(&mut self) -> bool {
         let Some((buffer_id, _cursor)) = self.jumplist.borrow().peek_forward() else {
             return false;
@@ -252,7 +252,7 @@ impl TabGroup {
         self.activate_jump_target(buffer_id, cursor)
     }
 
-    /// Renders the tab group.
+    /// Renders the window group.
     pub fn render(&mut self, screen: &mut Screen, origin: Position, size: Size) {
         self.normalize_state();
 
@@ -625,7 +625,7 @@ impl TabGroup {
     }
 }
 
-impl Widget for TabGroup {
+impl Widget for WindowGroup {
     fn process_action(&mut self, action: &Action) -> ActionResult {
         let before = self.active_cursor_snapshot();
         let result = match action.kind.as_ref() {
@@ -676,7 +676,7 @@ impl Widget for TabGroup {
     }
 }
 
-impl TabGroup {
+impl WindowGroup {
     fn should_record_cursor_position(&self, action: &Action) -> bool {
         match action.kind.as_ref() {
             Some(crate::editor::ActionKind::JumpBackward)

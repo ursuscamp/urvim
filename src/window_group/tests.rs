@@ -28,8 +28,8 @@ fn buffer_with_lines(label: &str, line_count: usize) -> Buffer {
     Buffer::from_str_with_path(&text, abs_path(&path))
 }
 
-fn tab_group_with_labels(labels: &[&str]) -> TabGroup {
-    TabGroup::from_buffers(
+fn window_group_with_labels(labels: &[&str]) -> WindowGroup {
+    WindowGroup::from_buffers(
         labels
             .iter()
             .map(|label| buffer_with_label(label))
@@ -89,14 +89,14 @@ fn buffer_cursor(view: &BufferView) -> Cursor {
 }
 
 #[test]
-fn test_tab_group_new_creates_empty_tab() {
-    let group = TabGroup::new(Vec::new());
+fn test_window_group_new_creates_empty_tab() {
+    let group = WindowGroup::new(Vec::new());
     assert_eq!(group.active_tab_index(), 0);
     assert_eq!(buffer_line_count(group.active_buffer_view()), 1);
 }
 
 #[test]
-fn test_tab_group_from_paths_opens_missing_files_as_empty_buffers() {
+fn test_window_group_from_paths_opens_missing_files_as_empty_buffers() {
     let temp_dir = std::env::temp_dir().join(format!(
         "urvim-tab-group-{}-{}",
         std::process::id(),
@@ -113,7 +113,7 @@ fn test_tab_group_from_paths_opens_missing_files_as_empty_buffers() {
     std::fs::write(&first, "alpha").unwrap();
     std::fs::write(&second, "beta").unwrap();
 
-    let group = TabGroup::from_paths(&[first.clone(), missing, second.clone()]);
+    let group = WindowGroup::from_paths(&[first.clone(), missing, second.clone()]);
 
     assert_eq!(group.tabs.len(), 3);
     assert_eq!(
@@ -134,7 +134,7 @@ fn test_tab_group_from_paths_opens_missing_files_as_empty_buffers() {
 }
 
 #[test]
-fn test_tab_group_from_paths_deduplicates_duplicate_files() {
+fn test_window_group_from_paths_deduplicates_duplicate_files() {
     let temp_dir = std::env::temp_dir().join(format!(
         "urvim-tab-group-{}-{}",
         std::process::id(),
@@ -148,7 +148,7 @@ fn test_tab_group_from_paths_deduplicates_duplicate_files() {
     let path = temp_dir.join("duplicate.txt");
     std::fs::write(&path, "alpha").unwrap();
 
-    let group = TabGroup::from_paths(&[path.clone(), path.clone()]);
+    let group = WindowGroup::from_paths(&[path.clone(), path.clone()]);
 
     assert_eq!(group.tabs.len(), 1);
     assert_eq!(
@@ -162,7 +162,7 @@ fn test_tab_group_from_paths_deduplicates_duplicate_files() {
 
 #[test]
 fn test_tab_navigation_wraps_and_supports_counts() {
-    let mut group = tab_group_with_labels(&["a", "b", "c", "d", "e"]);
+    let mut group = window_group_with_labels(&["a", "b", "c", "d", "e"]);
 
     assert_eq!(
         group.process_action(&Action::new(ActionKind::PreviousTab)),
@@ -192,7 +192,7 @@ fn test_tab_navigation_wraps_and_supports_counts() {
 #[test]
 fn test_each_window_restores_its_own_mode() {
     let mut group =
-        TabGroup::from_buffers(vec![Buffer::from_str("first"), Buffer::from_str("second")]);
+        WindowGroup::from_buffers(vec![Buffer::from_str("first"), Buffer::from_str("second")]);
 
     group.active_window_mut().switch_mode(ModeKind::Insert);
 
@@ -222,7 +222,7 @@ fn test_each_window_restores_its_own_mode() {
 
 #[test]
 fn test_tab_bar_scrolls_only_when_active_tab_is_offscreen() {
-    let mut group = tab_group_with_labels(&["a", "b", "c", "d", "e"]);
+    let mut group = window_group_with_labels(&["a", "b", "c", "d", "e"]);
     let mut screen = crate::screen::Screen::new(2, 12);
 
     group.active_tab = 4;
@@ -238,7 +238,7 @@ fn test_tab_bar_scrolls_only_when_active_tab_is_offscreen() {
 
 #[test]
 fn test_tab_bar_indicators_appear_when_tabs_are_offscreen() {
-    let mut group = tab_group_with_labels(&["a", "b", "c", "d", "e"]);
+    let mut group = window_group_with_labels(&["a", "b", "c", "d", "e"]);
     let mut screen = crate::screen::Screen::new(2, 12);
 
     group.active_tab = 3;
@@ -251,7 +251,7 @@ fn test_tab_bar_indicators_appear_when_tabs_are_offscreen() {
 
 #[test]
 fn test_tab_bar_right_indicator_appears_when_only_right_tabs_are_offscreen() {
-    let mut group = tab_group_with_labels(&["aaaa", "bbbb", "cccc", "dddd"]);
+    let mut group = window_group_with_labels(&["aaaa", "bbbb", "cccc", "dddd"]);
     let mut screen = crate::screen::Screen::new(2, 10);
 
     group.active_tab = 0;
@@ -263,7 +263,7 @@ fn test_tab_bar_right_indicator_appears_when_only_right_tabs_are_offscreen() {
 
 #[test]
 fn test_tab_bar_active_style_and_unicode_width() {
-    let mut group = tab_group_with_labels(&["あ", "b"]);
+    let mut group = window_group_with_labels(&["あ", "b"]);
     let mut screen = crate::screen::Screen::new(2, 12);
 
     group.render(&mut screen, Position::new(0, 0), Size::new(2, 12));
@@ -281,7 +281,7 @@ fn test_tab_bar_uses_theme_modified_marker_style() {
     let mut buffer = Buffer::from_str_with_path("line1", abs_path(&path));
     buffer.insert_char(Cursor::new(0, 5), '!');
 
-    let mut group = TabGroup::from_buffers(vec![buffer]);
+    let mut group = WindowGroup::from_buffers(vec![buffer]);
     let theme = themed_group();
     let expected_style = theme.ui.tab_active;
     let expected_marker_style = expected_style.accent(theme.ui.modified_marker);
@@ -300,7 +300,7 @@ fn test_tab_bar_uses_theme_modified_marker_style() {
 
 #[test]
 fn test_tab_bar_uses_theme_styles() {
-    let mut group = tab_group_with_labels(&["demo"]);
+    let mut group = window_group_with_labels(&["demo"]);
     let theme = themed_group();
     let expected_style = theme.ui.tab_active;
     let _theme_guard = globals::set_test_active_theme(theme);
@@ -315,7 +315,7 @@ fn test_tab_bar_uses_theme_styles() {
 fn test_tab_bar_renders_glyph_when_enabled() {
     let path = PathBuf::from("/tmp/rust-icon.rs");
     let buffer = Buffer::from_str_with_path("fn main() {}", abs_path(&path));
-    let mut group = TabGroup::from_buffers(vec![buffer]);
+    let mut group = WindowGroup::from_buffers(vec![buffer]);
     let theme = themed_group();
     let expected_tab_style = theme.ui.tab_active;
     let expected_glyph_style = expected_tab_style.fg(Color::rgb(222, 165, 132));
@@ -343,7 +343,7 @@ fn test_tab_bar_renders_glyph_when_enabled() {
 
 #[test]
 fn test_visual_cursor_is_offset_by_tab_bar_row() {
-    let mut group = tab_group_with_labels(&["a"]);
+    let mut group = window_group_with_labels(&["a"]);
     group
         .active_buffer_view_mut()
         .set_cursor(crate::buffer::Cursor::new(0, 0));
@@ -357,7 +357,7 @@ fn test_visual_cursor_is_offset_by_tab_bar_row() {
 
 #[test]
 fn test_jump_navigation_selects_existing_tab() {
-    let mut group = tab_group_with_labels(&["a", "b"]);
+    let mut group = window_group_with_labels(&["a", "b"]);
 
     group.active_buffer_view_mut().set_cursor(Cursor::new(0, 1));
     let first_buffer = group.active_buffer_view().buffer_id();
@@ -392,7 +392,7 @@ fn test_jump_navigation_selects_existing_tab() {
 
 #[test]
 fn test_jump_navigation_reopens_missing_tab() {
-    let mut group = tab_group_with_labels(&["a", "b"]);
+    let mut group = window_group_with_labels(&["a", "b"]);
 
     group.active_buffer_view_mut().set_cursor(Cursor::new(0, 1));
     let first_buffer = group.active_buffer_view().buffer_id();
@@ -420,7 +420,7 @@ fn test_jump_navigation_reopens_missing_tab() {
 
 #[test]
 fn test_counted_jump_down_creates_a_new_entry() {
-    let mut group = TabGroup::from_buffers(vec![buffer_with_lines("jumplist-50j", 80)]);
+    let mut group = WindowGroup::from_buffers(vec![buffer_with_lines("jumplist-50j", 80)]);
 
     group.active_buffer_view_mut().set_cursor(Cursor::new(0, 0));
     group.record_cursor_position();
@@ -446,7 +446,7 @@ fn test_counted_jump_down_creates_a_new_entry() {
 
 #[test]
 fn test_smaller_counted_jump_down_updates_current_entry() {
-    let mut group = TabGroup::from_buffers(vec![buffer_with_lines("jumplist-5j", 20)]);
+    let mut group = WindowGroup::from_buffers(vec![buffer_with_lines("jumplist-5j", 20)]);
 
     group.active_buffer_view_mut().set_cursor(Cursor::new(0, 0));
     group.record_cursor_position();

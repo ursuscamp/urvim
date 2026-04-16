@@ -3,7 +3,7 @@
 use super::geometry::PaneRegion;
 use super::node::{LayoutNode, PaneNode, SplitAxis, SplitNode};
 use super::{Layout, PaneId};
-use crate::tab_group::TabGroup;
+use crate::window_group::WindowGroup;
 use crate::window::{Position, Size};
 
 impl Layout {
@@ -54,7 +54,7 @@ impl Layout {
                 LayoutNode::Split(SplitNode::new(
                     axis,
                     LayoutNode::Pane(pane),
-                    LayoutNode::Pane(PaneNode::new(new_pane_id, TabGroup::new(Vec::new()))),
+                    LayoutNode::Pane(PaneNode::new(new_pane_id, WindowGroup::new(Vec::new()))),
                 )),
                 true,
             ),
@@ -167,7 +167,7 @@ impl Layout {
     fn prune_empty_nodes(node: LayoutNode) -> Option<LayoutNode> {
         match node {
             LayoutNode::Pane(pane) => {
-                if pane.tab_group.is_empty() {
+                if pane.window_group.is_empty() {
                     None
                 } else {
                     Some(LayoutNode::Pane(pane))
