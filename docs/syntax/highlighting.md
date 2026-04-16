@@ -43,6 +43,7 @@ A tag is the semantic label attached to a match, such as `keyword`, `string`, or
 The buffer keeps a cache of syntax state and spans line by line, so edits only invalidate the necessary suffix of the buffer.
 
 When a buffer is rendered, urvim uses any cached spans it already has for the visible viewport. If the cache has not reached a line yet, the editor paints that line with the base theme style first and lets background syntax catch-up fill in the missing spans later.
+Background syntax catch-up is submitted in latest-only mode, so rapid edits can cancel older queued highlight work before it runs. The editor keeps showing the last completed syntax state while fresher work is still pending.
 
 ## High-Level Flow
 
@@ -81,6 +82,7 @@ The syntax resolution code also handles aliases.
 The cache makes sure earlier lines have already been tokenized, then returns the cached spans for the requested line.
 
 If the requested line is not cached yet, the render path does not block waiting for the full file. It uses the current base style for that line and relies on the background job framework to catch up afterward.
+That background work may be superseded by newer edits, but the last completed highlight stays visible until a fresher result is accepted.
 
 The tokenizer walks the line from left to right and tries the active rules in order.
 The first matching rule wins, so specific patterns should come before broad fallback patterns.
@@ -115,6 +117,7 @@ Every mutation invalidates syntax from the first changed line onward.
 That matters because syntax state can spill across lines.
 If line 10 changes, urvim cannot safely trust syntax results from line 10 onward, so it recomputes from that point forward using the preserved state from earlier lines.
 Any background catch-up result carries the buffer generation it was computed against, and stale results are discarded if the buffer changed in the meantime.
+Older queued catch-up jobs for the same buffer are also pruned before execution, which keeps the worker focused on the newest visible syntax state.
 
 ## Practical Advice
 

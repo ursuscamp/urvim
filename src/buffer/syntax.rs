@@ -175,11 +175,38 @@ impl SyntaxCatchUpJob {
 impl Job for SyntaxCatchUpJob {
     type Output = SyntaxCatchUpResult;
 
-    fn run(mut self, _context: &JobContext) -> Self::Output {
+    fn run(mut self, context: &JobContext) -> Self::Output {
         let line_refs: Vec<&str> = self.line_texts.iter().map(|line| line.as_ref()).collect();
         if !line_refs.is_empty() {
-            self.cache
-                .ensure_through(&self.syntax_name, &line_refs, line_refs.len() - 1);
+            if self.cache.lines.len() > line_refs.len() {
+                self.cache.lines.truncate(line_refs.len());
+            }
+
+            let target_line = line_refs.len() - 1;
+            let mut state = self
+                .cache
+                .lines
+                .last()
+                .map(|line| line.state.clone())
+                .unwrap_or_default();
+            let start_line = self.cache.lines.len();
+
+            for line_text in line_refs.iter().take(target_line + 1).skip(start_line) {
+                if !context.is_current() {
+                    tracing::debug!(
+                        kind = %context.kind(),
+                        generation = context.token().generation(),
+                        "stopping stale syntax catch-up job"
+                    );
+                    break;
+                }
+
+                let (spans, next_state) = tokenize_line(&self.syntax_name, line_text, state);
+                self.cache
+                    .lines
+                    .push(SyntaxLine::new(spans, next_state.clone()));
+                state = next_state;
+            }
         } else {
             self.cache.set_syntax_name(self.syntax_name.as_str());
         }
@@ -818,6 +845,9 @@ impl Buffer {
     }
 
     /// Requests syntax catch-up with the given job priority when the cache is incomplete.
+    ///
+    /// Syntax catch-up uses latest-only job submission so stale queued work for the same buffer
+    /// can be pruned before it consumes worker time.
     pub fn request_syntax_catch_up_with_priority(
         &mut self,
         buffer_id: BufferId,
@@ -845,7 +875,7 @@ impl Buffer {
             job_manager
                 .map(|job_manager| {
                     job_manager
-                        .submit(kind.clone(), priority, token, job)
+                        .submit_latest_only(kind.clone(), priority, token, job)
                         .is_ok()
                 })
                 .unwrap_or(false)
@@ -871,6 +901,7 @@ mod tests {
     use crate::buffer::BufferId;
     use crate::job::{JobEvent, JobHandle, JobKind, JobPriority, JobToken};
     use crate::path::AbsolutePath;
+    use std::sync::Mutex;
     use std::thread;
     use std::time::{Duration, Instant};
 
@@ -1064,6 +1095,101 @@ mod tests {
 
         assert!(result.cache.cached_spans_for_line(50).is_some());
         assert!(result.cache.is_complete_for_line_count(64));
+
+        handle.shutdown();
+    }
+
+    #[test]
+    fn latest_only_syntax_catch_up_skips_stale_queue_entries() {
+        let handle = JobHandle::new();
+        let gate = Arc::new((Mutex::new(false), std::sync::Condvar::new()));
+        let gate_for_blocker = Arc::clone(&gate);
+
+        struct GateJob {
+            gate: Arc<(Mutex<bool>, std::sync::Condvar)>,
+        }
+
+        impl Job for GateJob {
+            type Output = ();
+
+            fn run(self, _context: &JobContext) -> Self::Output {
+                let (lock, cvar) = &*self.gate;
+                let mut open = lock.lock().unwrap();
+                while !*open {
+                    open = cvar.wait(open).unwrap();
+                }
+            }
+        }
+
+        handle
+            .submit(
+                JobKind::new("blocker"),
+                JobPriority::Foreground,
+                JobToken::new(1),
+                GateJob {
+                    gate: gate_for_blocker,
+                },
+            )
+            .expect("blocker job should submit");
+
+        thread::sleep(Duration::from_millis(25));
+
+        let old_path = temp_path_with_ext("latest-only-old", "rs");
+        let old_buffer = Buffer::from_str_with_path("fn main() { let old = 1; }", old_path);
+        let new_path = temp_path_with_ext("latest-only-new", "rs");
+        let new_text =
+            std::iter::repeat("fn main() { let value: Option<String> = Some(\"hi\"); } // note")
+                .take(32)
+                .collect::<Vec<_>>()
+                .join("\n");
+        let new_buffer = Buffer::from_str_with_path(&new_text, new_path);
+
+        handle
+            .submit_latest_only(
+                JobKind::new("syntax:1"),
+                JobPriority::Background,
+                JobToken::new(1),
+                SyntaxCatchUpJob::new(
+                    BufferId::new(1),
+                    old_buffer.syntax_generation(),
+                    old_buffer.syntax_name.clone(),
+                    old_buffer.syntax_cache.clone(),
+                    old_buffer.lines.clone(),
+                ),
+            )
+            .expect("old syntax job should submit");
+
+        handle
+            .submit_latest_only(
+                JobKind::new("syntax:1"),
+                JobPriority::Background,
+                JobToken::new(2),
+                SyntaxCatchUpJob::new(
+                    BufferId::new(1),
+                    new_buffer.syntax_generation(),
+                    new_buffer.syntax_name.clone(),
+                    new_buffer.syntax_cache.clone(),
+                    new_buffer.lines.clone(),
+                ),
+            )
+            .expect("new syntax job should submit");
+
+        {
+            let (lock, cvar) = &*gate;
+            let mut open = lock.lock().unwrap();
+            *open = true;
+            cvar.notify_all();
+        }
+
+        let blocker_event = wait_for_event(&handle);
+        assert_eq!(blocker_event.kind().as_str(), "blocker");
+
+        let syntax_event = wait_for_event(&handle);
+        let (_kind, token, result) = syntax_event
+            .into_completed_output::<SyntaxCatchUpResult>()
+            .expect("latest syntax job should complete");
+        assert_eq!(token.generation(), 2);
+        assert!(result.cache.is_complete_for_line_count(32));
 
         handle.shutdown();
     }

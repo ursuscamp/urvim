@@ -45,6 +45,15 @@ impl JobToken {
     }
 }
 
+/// Controls how queued jobs behave when newer work supersedes them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JobSubmissionMode {
+    /// Keep every queued job until it runs or is rejected after completion.
+    Standard,
+    /// Keep only the newest queued job for the same kind.
+    LatestOnly,
+}
+
 /// Opaque identifier for the kind of work a job performs.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct JobKind(SmolStr);
@@ -73,14 +82,21 @@ pub struct JobContext {
     kind: JobKind,
     token: JobToken,
     stopping: Arc<AtomicBool>,
+    latest_generations: Arc<Mutex<BTreeMap<JobKind, u64>>>,
 }
 
 impl JobContext {
-    fn new(kind: JobKind, token: JobToken, stopping: Arc<AtomicBool>) -> Self {
+    fn new(
+        kind: JobKind,
+        token: JobToken,
+        stopping: Arc<AtomicBool>,
+        latest_generations: Arc<Mutex<BTreeMap<JobKind, u64>>>,
+    ) -> Self {
         Self {
             kind,
             token,
             stopping,
+            latest_generations,
         }
     }
 
@@ -97,6 +113,14 @@ impl JobContext {
     /// Returns true when shutdown has been requested.
     pub fn is_stopping(&self) -> bool {
         self.stopping.load(Ordering::SeqCst)
+    }
+
+    /// Returns true when this job still matches the latest submitted generation for its kind.
+    pub fn is_current(&self) -> bool {
+        let generations = self.latest_generations.lock().unwrap();
+        generations
+            .get(&self.kind)
+            .is_some_and(|generation| *generation == self.token.generation())
     }
 }
 
@@ -224,7 +248,6 @@ pub struct JobHandle {
 /// Coordinates job submissions and completion handling on the main thread.
 pub struct JobManager {
     handle: JobHandle,
-    latest_generations: Mutex<BTreeMap<JobKind, u64>>,
     redraw_requested: AtomicBool,
 }
 
@@ -245,12 +268,11 @@ impl JobManager {
     pub fn new() -> Self {
         Self {
             handle: JobHandle::new(),
-            latest_generations: Mutex::new(BTreeMap::new()),
             redraw_requested: AtomicBool::new(false),
         }
     }
 
-    /// Submits a job and records its generation as the newest one for its kind.
+    /// Submits a job using the standard queueing path.
     pub fn submit<J>(
         &self,
         kind: JobKind,
@@ -261,12 +283,24 @@ impl JobManager {
     where
         J: Job,
     {
-        {
-            let mut generations = self.latest_generations.lock().unwrap();
-            generations.insert(kind.clone(), token.generation());
-        }
-
         match self.handle.submit(kind, priority, token, job) {
+            Ok(()) => Ok(()),
+            Err(error) => Err(error),
+        }
+    }
+
+    /// Submits a job and keeps only the newest queued job for the same kind.
+    pub fn submit_latest_only<J>(
+        &self,
+        kind: JobKind,
+        priority: JobPriority,
+        token: JobToken,
+        job: J,
+    ) -> Result<(), JobSubmitError>
+    where
+        J: Job,
+    {
+        match self.handle.submit_latest_only(kind, priority, token, job) {
             Ok(()) => Ok(()),
             Err(error) => Err(error),
         }
@@ -343,10 +377,7 @@ impl JobManager {
     }
 
     fn is_current(&self, kind: &JobKind, token: JobToken) -> bool {
-        let generations = self.latest_generations.lock().unwrap();
-        generations
-            .get(kind)
-            .is_some_and(|generation| *generation == token.generation())
+        self.handle.is_current(kind, token)
     }
 }
 
@@ -391,25 +422,21 @@ impl JobHandle {
     where
         J: Job,
     {
-        if self.shared.is_stopping() {
-            return Err(JobSubmitError::Stopped);
-        }
+        self.submit_internal(kind, priority, token, JobSubmissionMode::Standard, job)
+    }
 
-        let mut queues = self.shared.queues.lock().unwrap();
-        if self.shared.is_stopping() {
-            return Err(JobSubmitError::Stopped);
-        }
-
-        tracing::debug!(
-            kind = %kind,
-            generation = token.generation(),
-            priority = ?priority,
-            "submitting job"
-        );
-
-        queues.push(QueuedJob::new(kind, priority, token, job));
-        self.shared.available.notify_one();
-        Ok(())
+    /// Submits a job and keeps only the newest queued job for the same kind.
+    pub fn submit_latest_only<J>(
+        &self,
+        kind: JobKind,
+        priority: JobPriority,
+        token: JobToken,
+        job: J,
+    ) -> Result<(), JobSubmitError>
+    where
+        J: Job,
+    {
+        self.submit_internal(kind, priority, token, JobSubmissionMode::LatestOnly, job)
     }
 
     /// Returns the next completed job event, if one is available.
@@ -421,6 +448,13 @@ impl JobHandle {
         }
     }
 
+    fn is_current(&self, kind: &JobKind, token: JobToken) -> bool {
+        let generations = self.shared.latest_generations.lock().unwrap();
+        generations
+            .get(kind)
+            .is_some_and(|generation| *generation == token.generation())
+    }
+
     /// Requests shutdown and waits for the worker thread to exit.
     pub fn shutdown(&self) {
         self.shared.stop();
@@ -430,6 +464,51 @@ impl JobHandle {
         if let Some(worker) = worker {
             worker.join().ok();
         }
+    }
+
+    fn submit_internal<J>(
+        &self,
+        kind: JobKind,
+        priority: JobPriority,
+        token: JobToken,
+        mode: JobSubmissionMode,
+        job: J,
+    ) -> Result<(), JobSubmitError>
+    where
+        J: Job,
+    {
+        if self.shared.is_stopping() {
+            return Err(JobSubmitError::Stopped);
+        }
+
+        let mut queues = self.shared.queues.lock().unwrap();
+        if self.shared.is_stopping() {
+            return Err(JobSubmitError::Stopped);
+        }
+
+        {
+            let mut generations = self.shared.latest_generations.lock().unwrap();
+            generations.insert(kind.clone(), token.generation());
+        }
+
+        let removed_stale_jobs = if matches!(mode, JobSubmissionMode::LatestOnly) {
+            queues.discard_kind(&kind)
+        } else {
+            0
+        };
+
+        tracing::debug!(
+            kind = %kind,
+            generation = token.generation(),
+            priority = ?priority,
+            mode = ?mode,
+            removed_stale_jobs,
+            "submitting job"
+        );
+
+        queues.push(QueuedJob::new(kind, priority, token, job));
+        self.shared.available.notify_one();
+        Ok(())
     }
 }
 
@@ -446,6 +525,7 @@ impl Drop for JobHandle {
 
 struct JobShared {
     queues: Mutex<JobQueues>,
+    latest_generations: Arc<Mutex<BTreeMap<JobKind, u64>>>,
     available: Condvar,
     stopping: Arc<AtomicBool>,
     completed_tx: Sender<JobEvent>,
@@ -455,6 +535,7 @@ impl JobShared {
     fn new(completed_tx: Sender<JobEvent>) -> Self {
         Self {
             queues: Mutex::new(JobQueues::new()),
+            latest_generations: Arc::new(Mutex::new(BTreeMap::new())),
             available: Condvar::new(),
             stopping: Arc::new(AtomicBool::new(false)),
             completed_tx,
@@ -463,6 +544,13 @@ impl JobShared {
 
     fn is_stopping(&self) -> bool {
         self.stopping.load(Ordering::SeqCst)
+    }
+
+    fn is_current(&self, kind: &JobKind, token: JobToken) -> bool {
+        let generations = self.latest_generations.lock().unwrap();
+        generations
+            .get(kind)
+            .is_some_and(|generation| *generation == token.generation())
     }
 
     fn stop(&self) {
@@ -490,7 +578,21 @@ fn worker_loop(shared: Arc<JobShared>) {
 
         let kind = job.kind.clone();
         let token = job.token;
-        let context = JobContext::new(kind.clone(), token, Arc::clone(&shared.stopping));
+        if !shared.is_current(&kind, token) {
+            tracing::debug!(
+                kind = %kind,
+                generation = token.generation(),
+                "skipping stale job before execution"
+            );
+            continue;
+        }
+
+        let context = JobContext::new(
+            kind.clone(),
+            token,
+            Arc::clone(&shared.stopping),
+            Arc::clone(&shared.latest_generations),
+        );
         let event = job.run(&context);
         if shared.completed_tx.send(event).is_err() {
             tracing::debug!(
@@ -582,6 +684,25 @@ impl JobQueues {
             JobPriority::Foreground => self.foreground.push_back(job),
             JobPriority::Background => self.background.push_back(job),
         }
+    }
+
+    fn discard_kind(&mut self, kind: &JobKind) -> usize {
+        let mut removed = 0;
+        self.foreground.retain(|job| {
+            let keep = job.kind.as_str() != kind.as_str();
+            if !keep {
+                removed += 1;
+            }
+            keep
+        });
+        self.background.retain(|job| {
+            let keep = job.kind.as_str() != kind.as_str();
+            if !keep {
+                removed += 1;
+            }
+            keep
+        });
+        removed
     }
 
     fn pop_next(&mut self) -> Option<QueuedJob> {
@@ -728,6 +849,103 @@ mod tests {
 
         assert_eq!(started.load(Ordering::SeqCst), 1);
         assert_eq!(trace.lock().unwrap().as_slice(), &["demo"]);
+
+        handle.shutdown();
+    }
+
+    #[test]
+    fn test_handle_latest_only_jobs_skip_stale_queue_entries() {
+        let handle = JobHandle::new();
+        let gate = Arc::new((Mutex::new(false), std::sync::Condvar::new()));
+        let gate_for_blocker = Arc::clone(&gate);
+        let trace = Arc::new(Mutex::new(Vec::new()));
+        let started = Arc::new(AtomicUsize::new(0));
+
+        struct GateJob {
+            gate: Arc<(Mutex<bool>, std::sync::Condvar)>,
+            label: &'static str,
+            trace: Arc<Mutex<Vec<&'static str>>>,
+            started: Arc<AtomicUsize>,
+        }
+
+        impl Job for GateJob {
+            type Output = &'static str;
+
+            fn run(self, _context: &JobContext) -> Self::Output {
+                let (lock, cvar) = &*self.gate;
+                let mut open = lock.lock().unwrap();
+                while !*open {
+                    open = cvar.wait(open).unwrap();
+                }
+                self.started.fetch_add(1, Ordering::SeqCst);
+                self.trace.lock().unwrap().push(self.label);
+                self.label
+            }
+        }
+
+        handle
+            .submit(
+                JobKind::new("blocker"),
+                JobPriority::Foreground,
+                JobToken::new(1),
+                GateJob {
+                    gate: gate_for_blocker,
+                    label: "blocker",
+                    trace: Arc::clone(&trace),
+                    started: Arc::clone(&started),
+                },
+            )
+            .expect("blocker job should submit");
+
+        thread::sleep(Duration::from_millis(25));
+
+        handle
+            .submit_latest_only(
+                JobKind::new("syntax"),
+                JobPriority::Background,
+                JobToken::new(2),
+                TraceJob {
+                    label: "old",
+                    trace: Arc::clone(&trace),
+                    started: Arc::clone(&started),
+                },
+            )
+            .expect("old latest-only job should submit");
+
+        handle
+            .submit_latest_only(
+                JobKind::new("syntax"),
+                JobPriority::Background,
+                JobToken::new(3),
+                TraceJob {
+                    label: "new",
+                    trace: Arc::clone(&trace),
+                    started: Arc::clone(&started),
+                },
+            )
+            .expect("new latest-only job should submit");
+
+        {
+            let (lock, cvar) = &*gate;
+            let mut open = lock.lock().unwrap();
+            *open = true;
+            cvar.notify_all();
+        }
+
+        let first = wait_for_event(&handle);
+        let second = wait_for_event(&handle);
+
+        let mut labels = Vec::new();
+        for event in [first, second] {
+            let (_kind, _token, output) = event
+                .into_completed_output::<&'static str>()
+                .expect("latest-only output should downcast");
+            labels.push(output);
+        }
+
+        assert_eq!(labels.as_slice(), &["blocker", "new"]);
+        assert_eq!(started.load(Ordering::SeqCst), 2);
+        assert_eq!(trace.lock().unwrap().as_slice(), &["blocker", "new"]);
 
         handle.shutdown();
     }
