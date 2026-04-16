@@ -119,6 +119,50 @@ fn test_normal_mode_page_keys() {
 }
 
 #[test]
+fn test_normal_mode_split_management_bindings() {
+    let mut mode = NormalMode::new();
+
+    assert!(matches!(
+        mode.handle_key(&ctrl_key('w')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert_eq!(
+        handle_and_unwrap(&mut mode, &key('v')),
+        Action::new(ActionKind::SplitVertical)
+    );
+
+    let mut mode = NormalMode::new();
+    assert!(matches!(
+        mode.handle_key(&ctrl_key('w')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert_eq!(
+        handle_and_unwrap(&mut mode, &key('s')),
+        Action::new(ActionKind::SplitHorizontal)
+    );
+
+    let mut mode = NormalMode::new();
+    assert!(matches!(
+        mode.handle_key(&ctrl_key('w')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert_eq!(
+        handle_and_unwrap(&mut mode, &key('h')),
+        Action::new(ActionKind::FocusPaneLeft)
+    );
+
+    let mut mode = NormalMode::new();
+    assert!(matches!(
+        mode.handle_key(&ctrl_key('w')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert_eq!(
+        handle_and_unwrap(&mut mode, &key('q')),
+        Action::new(ActionKind::ClosePane)
+    );
+}
+
+#[test]
 fn test_normal_mode_comment_toggle_binding() {
     let mut mode = NormalMode::new();
     assert_eq!(handle_and_unwrap(&mut mode, &key('g')), Action::none());

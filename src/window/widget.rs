@@ -408,6 +408,13 @@ impl Widget for Window {
             | Some(ActionKind::JumpForward)
             | Some(ActionKind::PreviousTab)
             | Some(ActionKind::NextTab)
+            | Some(ActionKind::SplitVertical)
+            | Some(ActionKind::SplitHorizontal)
+            | Some(ActionKind::FocusPaneLeft)
+            | Some(ActionKind::FocusPaneDown)
+            | Some(ActionKind::FocusPaneUp)
+            | Some(ActionKind::FocusPaneRight)
+            | Some(ActionKind::ClosePane)
             | None => ActionResult::NotHandled,
         };
 

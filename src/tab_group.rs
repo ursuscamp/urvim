@@ -88,6 +88,11 @@ impl TabGroup {
         self.active_tab.min(self.tabs.len().saturating_sub(1))
     }
 
+    /// Returns true when the tab group has no live tabs.
+    pub fn is_empty(&self) -> bool {
+        self.tabs.is_empty()
+    }
+
     /// Returns the active window.
     pub fn active_window(&self) -> &Window {
         &self.tabs[self.active_tab_index()]
@@ -133,6 +138,18 @@ impl TabGroup {
     /// Returns the active buffer view mutably.
     pub fn active_buffer_view_mut(&mut self) -> &mut BufferView {
         self.active_window_mut().buffer_view_mut()
+    }
+
+    /// Closes the active tab and returns true when the tab group becomes empty.
+    pub fn close_active_tab(&mut self) -> bool {
+        if self.tabs.is_empty() {
+            return true;
+        }
+
+        let index = self.active_tab_index();
+        self.tabs.remove(index);
+        self.normalize_state();
+        self.tabs.is_empty()
     }
 
     /// Returns and clears any repeat-text suffix produced by the active window.
@@ -239,7 +256,7 @@ impl TabGroup {
     pub fn render(&mut self, screen: &mut Screen, origin: Position, size: Size) {
         self.normalize_state();
 
-        if size.rows == 0 {
+        if self.tabs.is_empty() || size.rows == 0 {
             return;
         }
 
@@ -258,6 +275,9 @@ impl TabGroup {
 
     /// Returns the cursor position for the active tab, offset by the tab bar row.
     pub fn visual_cursor(&self) -> Option<Position> {
+        if self.tabs.is_empty() {
+            return None;
+        }
         let mut pos = self.active_window().visual_cursor()?;
         pos.row += 1;
         Some(pos)
@@ -265,8 +285,9 @@ impl TabGroup {
 
     fn normalize_state(&mut self) {
         if self.tabs.is_empty() {
-            let buffer_id = crate::globals::with_buffer_pool(|pool| pool.create_buffer());
-            self.tabs.push(Window::from_buffer_id(buffer_id));
+            self.active_tab = 0;
+            self.tab_bar_start = 0;
+            return;
         }
 
         if self.active_tab >= self.tabs.len() {

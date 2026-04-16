@@ -78,7 +78,7 @@ fn main() -> io::Result<()> {
         );
     });
 
-    terminal.set_cursor_style(layout.tab_group().active_window_cursor_style())?;
+    terminal.set_cursor_style(layout.active_window_cursor_style())?;
 
     loop {
         globals::with_job_manager(|job_manager| {
@@ -111,7 +111,10 @@ fn main() -> io::Result<()> {
         }
 
         if let Event::Key(key) = event {
-            let result = layout.tab_group_mut().active_window_mut().handle_key(&key);
+            let result = layout
+                .active_tab_group_mut()
+                .active_window_mut()
+                .handle_key(&key);
 
             match result {
                 HandleKeyResult::Complete(action) => {
@@ -134,7 +137,7 @@ fn main() -> io::Result<()> {
                                 .flatten()
                             {
                                 layout.active_buffer_view_mut().set_cursor_synced(cursor);
-                                layout.tab_group_mut().record_cursor_position();
+                                layout.active_tab_group_mut().record_cursor_position();
                             }
                         }
                         Some(ActionKind::Redo) => {
@@ -144,7 +147,7 @@ fn main() -> io::Result<()> {
                                 .flatten()
                             {
                                 layout.active_buffer_view_mut().set_cursor_synced(cursor);
-                                layout.tab_group_mut().record_cursor_position();
+                                layout.active_tab_group_mut().record_cursor_position();
                             }
                         }
                         _ => {
@@ -156,12 +159,12 @@ fn main() -> io::Result<()> {
                                     && let Some(to_mode) = replay.action.to_mode
                                 {
                                     let repeat_text = {
-                                        let window = layout.tab_group_mut().active_window_mut();
+                                        let window =
+                                            layout.active_tab_group_mut().active_window_mut();
                                         window.switch_mode(to_mode)
                                     };
-                                    terminal.set_cursor_style(
-                                        layout.tab_group().active_window_cursor_style(),
-                                    )?;
+                                    terminal
+                                        .set_cursor_style(layout.active_window_cursor_style())?;
                                     if let Some(repeat_text) =
                                         repeat_text.filter(|text| !text.is_empty())
                                         && let Some(mut repeat_state) = globals::get_last_repeat()
@@ -229,7 +232,7 @@ fn main() -> io::Result<()> {
                                     let pending_repeat_suffix = layout.take_pending_repeat_suffix();
                                     if let Some(suffix) = pending_repeat_suffix.as_deref() {
                                         layout
-                                            .tab_group_mut()
+                                            .active_tab_group_mut()
                                             .active_window_mut()
                                             .append_repeat_text(suffix);
                                     }
@@ -238,12 +241,12 @@ fn main() -> io::Result<()> {
 
                                 if handled && let Some(to_mode) = dispatch_action.to_mode {
                                     let repeat_text = {
-                                        let window = layout.tab_group_mut().active_window_mut();
+                                        let window =
+                                            layout.active_tab_group_mut().active_window_mut();
                                         window.switch_mode(to_mode)
                                     };
-                                    terminal.set_cursor_style(
-                                        layout.tab_group().active_window_cursor_style(),
-                                    )?;
+                                    terminal
+                                        .set_cursor_style(layout.active_window_cursor_style())?;
                                     if let Some(repeat_text) =
                                         repeat_text.filter(|text| !text.is_empty())
                                         && let Some(mut repeat_state) = globals::get_last_repeat()
@@ -285,7 +288,12 @@ fn main() -> io::Result<()> {
                         }
                     }
 
-                    terminal.set_cursor_style(layout.tab_group().active_window_cursor_style())?;
+                    if layout.should_exit() {
+                        globals::shutdown_job_manager();
+                        break;
+                    }
+
+                    terminal.set_cursor_style(layout.active_window_cursor_style())?;
                 }
                 HandleKeyResult::WaitForMore => {
                     // Continue waiting for more keys, no action taken

@@ -86,6 +86,13 @@ impl NormalMode {
         );
         trie_keymap.insert_str("<C-o>", Action::jump_backward());
         trie_keymap.insert_str("<C-i>", Action::jump_forward());
+        trie_keymap.insert_str("<C-w>v", Action::new(ActionKind::SplitVertical));
+        trie_keymap.insert_str("<C-w>s", Action::new(ActionKind::SplitHorizontal));
+        trie_keymap.insert_str("<C-w>h", Action::new(ActionKind::FocusPaneLeft));
+        trie_keymap.insert_str("<C-w>j", Action::new(ActionKind::FocusPaneDown));
+        trie_keymap.insert_str("<C-w>k", Action::new(ActionKind::FocusPaneUp));
+        trie_keymap.insert_str("<C-w>l", Action::new(ActionKind::FocusPaneRight));
+        trie_keymap.insert_str("<C-w>q", Action::new(ActionKind::ClosePane));
         trie_keymap.insert_str("gcc", Action::toggle_line_comment());
         trie_keymap.insert_str("[b", Action::new(ActionKind::PreviousTab));
         trie_keymap.insert_str("]b", Action::new(ActionKind::NextTab));

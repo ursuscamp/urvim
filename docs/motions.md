@@ -30,6 +30,13 @@ This document describes the motions implemented in urvim and how they differ fro
 | `Ctrl-D` | Move down half a page |
 | `Ctrl-O` | Jump backward through the current tab group's jumplist |
 | `Ctrl-I` | Jump forward through the current tab group's jumplist |
+| `Ctrl-W v` | Split the current pane vertically |
+| `Ctrl-W s` | Split the current pane horizontally |
+| `Ctrl-W h` | Move focus to the pane on the left |
+| `Ctrl-W j` | Move focus to the pane below |
+| `Ctrl-W k` | Move focus to the pane above |
+| `Ctrl-W l` | Move focus to the pane on the right |
+| `Ctrl-W q` | Close the current pane |
 | `{` | Move to blank line before the previous paragraph |
 | `}` | Move to blank line before the next paragraph |
 | `a` | Append after cursor (enter insert mode) |
@@ -131,6 +138,38 @@ urvim supports count prefixes for most motions. There are two types of count beh
    - `3gcc` toggles the current line and the next two lines
 
 > Note: urvim limits counts to values 1-9999 to prevent excessive operations.
+
+## Window Commands
+
+urvim supports a Vim-style pane layout rooted in binary vertical and horizontal splits. Each pane hosts a tab group.
+
+### Ctrl-W v - Split Vertically
+
+Splits the current pane into left and right panes and focuses the newly created pane.
+
+- **Count**: No
+- **Vim difference**: urvim stores an even `1:1` weight ratio for the new binary split and does not yet expose interactive resize commands.
+
+### Ctrl-W s - Split Horizontally
+
+Splits the current pane into top and bottom panes and focuses the newly created pane.
+
+- **Count**: No
+- **Vim difference**: Same split-tree behavior as `Ctrl-W v`, but the stored weights divide rows instead of columns.
+
+### Ctrl-W h / j / k / l - Move Between Panes
+
+Moves focus to the nearest pane in the requested direction.
+
+- **Count**: No
+- **Vim difference**: urvim chooses neighbors from the rendered pane rectangles, so movement works across nested split levels rather than only within one immediate parent split.
+
+### Ctrl-W q - Close Pane
+
+Closes the current pane. If that removes one child from a split, the surviving sibling expands into the freed space.
+
+- **Count**: No
+- **Vim difference**: If the final pane is closed, urvim exits the editor.
 
 ## Basic Cursor Movements
 

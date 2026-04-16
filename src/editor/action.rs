@@ -151,6 +151,13 @@ pub enum ActionKind {
     MoveDown,
     MoveUp,
     MoveRight,
+    SplitVertical,
+    SplitHorizontal,
+    FocusPaneLeft,
+    FocusPaneDown,
+    FocusPaneUp,
+    FocusPaneRight,
+    ClosePane,
     InsertChar(char),
     InsertText(String),
     /// Insert a newline, letting the window decide whether to auto-indent it.
@@ -365,6 +372,8 @@ impl Action {
             self.kind_ref(),
             Some(ActionKind::MoveLeft)
                 | Some(ActionKind::MoveRight)
+                | Some(ActionKind::FocusPaneLeft)
+                | Some(ActionKind::FocusPaneRight)
                 | Some(ActionKind::ForwardTo(_))
                 | Some(ActionKind::BackTo(_))
                 | Some(ActionKind::MoveToLineEnd)
@@ -405,6 +414,8 @@ impl Action {
             self.kind_ref(),
             Some(ActionKind::MoveUp)
                 | Some(ActionKind::MoveDown)
+                | Some(ActionKind::FocusPaneUp)
+                | Some(ActionKind::FocusPaneDown)
                 | Some(ActionKind::MoveToFirstLine)
                 | Some(ActionKind::MoveToLastLine)
                 | Some(ActionKind::MovePageUp)
@@ -427,6 +438,10 @@ impl Action {
                 | Some(ActionKind::MoveRight)
                 | Some(ActionKind::MoveUp)
                 | Some(ActionKind::MoveDown)
+                | Some(ActionKind::FocusPaneLeft)
+                | Some(ActionKind::FocusPaneRight)
+                | Some(ActionKind::FocusPaneUp)
+                | Some(ActionKind::FocusPaneDown)
                 | Some(ActionKind::ForwardTo(_))
                 | Some(ActionKind::BackTo(_))
                 | Some(ActionKind::MoveToFirstLine)
@@ -474,6 +489,9 @@ impl Action {
                 | Some(ActionKind::IndentIncrease)
                 | Some(ActionKind::PreviousTab)
                 | Some(ActionKind::NextTab)
+                | Some(ActionKind::SplitVertical)
+                | Some(ActionKind::SplitHorizontal)
+                | Some(ActionKind::ClosePane)
         )
     }
 
@@ -528,6 +546,10 @@ impl Action {
             | Some(ActionKind::MoveDown)
             | Some(ActionKind::MoveUp)
             | Some(ActionKind::MoveRight)
+            | Some(ActionKind::FocusPaneLeft)
+            | Some(ActionKind::FocusPaneDown)
+            | Some(ActionKind::FocusPaneUp)
+            | Some(ActionKind::FocusPaneRight)
             | Some(ActionKind::ForwardTo(_))
             | Some(ActionKind::BackTo(_))
             | Some(ActionKind::MoveToLineEnd)

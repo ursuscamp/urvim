@@ -329,6 +329,20 @@ A container widget that owns one or more higher-level UI regions, positions them
 
 **Related Terms:** Tab Group, Window, Screen, Status Bar
 
+### Split
+A layout container node that divides screen space vertically or horizontally and owns child panes. In the split tree, a split can contain either another split node or a tab group, allowing nested vertical and horizontal layouts.
+
+**Context:** Layout tree, pane management, nested editor regions
+
+**Related Terms:** Layout, Pane, Tab Group
+
+### Pane
+A visible region in the split tree that contains a tab group and participates in split navigation. Pane is the user-facing term for the focused area created by a split.
+
+**Context:** Split navigation, split creation, focus movement
+
+**Related Terms:** Split, Tab Group, Layout
+
 ## Text Navigation
 
 ### Boundary
