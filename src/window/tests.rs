@@ -632,6 +632,48 @@ fn test_window_render_omits_syntax_styles_when_disabled() {
 }
 
 #[test]
+fn test_window_render_does_not_force_full_syntax_warmup_on_bottom_jump() {
+    let _lock = syntax_worker_lock();
+    let theme = syntax_themed_window();
+    let _theme_guard = globals::set_test_active_theme(theme);
+    let _config_guard = globals::set_test_config(Config {
+        theme: "demo-syntax".to_string(),
+        insert_escape: None,
+        syntax: true,
+        auto_close_pairs: true,
+        auto_indent: AutoIndentMode::Off,
+        advanced_glyphs: BTreeSet::new(),
+        ..Default::default()
+    });
+    globals::set_job_manager(JobManager::new());
+
+    let path = temp_path_with_ext("bottom-jump", "rs");
+    let buffer = Buffer::from_str_with_path(&repeated_rust_buffer(128), path);
+    let mut window = Window::new(buffer);
+    window.set_cursor(Cursor::new(127, 0));
+
+    let mut screen = crate::screen::Screen::new(4, 80);
+    window.render(&mut screen, Position::new(0, 0), Size::new(4, 80));
+
+    let syntax_pending = window
+        .buffer_view()
+        .with_buffer(|buffer| buffer.syntax_background_pending())
+        .unwrap_or(false);
+    let cache_complete = window
+        .buffer_view()
+        .with_buffer(|buffer| buffer.syntax_cache_complete())
+        .unwrap_or(true);
+    let top_line_cached = window
+        .buffer_view()
+        .with_buffer(|buffer| buffer.cached_syntax_spans_for_line(0).is_some())
+        .unwrap_or(true);
+
+    assert!(syntax_pending);
+    assert!(!cache_complete);
+    assert!(!top_line_cached);
+}
+
+#[test]
 fn test_window_render_uses_background_syntax_after_tick() {
     let _lock = syntax_worker_lock();
     let theme = syntax_themed_window();

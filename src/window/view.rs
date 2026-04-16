@@ -239,7 +239,9 @@ impl BufferView {
             let horizontal_offset = self.scroll_offset.col as usize;
 
             if syntax_enabled {
-                if size.rows > 0 && buffer.line_count() > 0 {
+                // Keep the initial viewport on screen highlighted immediately,
+                // but avoid forcing a full-file synchronous warmup after deep jumps.
+                if start_line == 0 && size.rows > 0 && buffer.line_count() > 0 {
                     let visible_end_line = start_line.saturating_add(size.rows as usize - 1);
                     buffer.ensure_syntax_through(visible_end_line);
                 }
