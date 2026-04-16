@@ -26,3 +26,4 @@ urvim is a terminal based text editor.
   - create or update appropriate fixture file for in syntax/fixtures folder
 - completed specs are a historical document, not a living one. do not update them after later changes invalidate them
 - format project code after edits
+- instead of module_name.rs and module_name/sub_mod.rs pattern, use module_name/mod.rs and module_name/sub_mod.rs pattern
