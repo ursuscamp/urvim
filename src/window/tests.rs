@@ -460,6 +460,77 @@ fn test_window_render_refreshes_visible_syntax_after_edit() {
 }
 
 #[test]
+fn test_window_render_refreshes_scrolled_visible_syntax_after_edit() {
+    let _lock = syntax_worker_lock();
+    globals::set_job_manager(JobManager::new());
+    let path = AbsolutePath::from_path(
+        temp_path_with_ext("scrolled-visible-syntax-refresh", "rs").as_path(),
+    )
+    .unwrap();
+    let buffer = Buffer::from_str_with_path(
+        "let first = true;\nlet second = false;\nlet third = true;\nlet fourth = false;\nlet fifth = true;",
+        path,
+    );
+    let mut window = Window::new(buffer);
+    let theme = syntax_themed_window();
+    let expected_default_style = theme.default_style();
+    let expected_comment_style = expected_default_style.overlay(
+        theme
+            .syntax
+            .style_for_tag(&tag("comment"), expected_default_style),
+    );
+    let _theme_guard = globals::set_test_active_theme(theme);
+    let _config_guard = globals::set_test_config(Config {
+        theme: "demo-syntax".to_string(),
+        syntax: true,
+        auto_close_pairs: true,
+        advanced_glyphs: BTreeSet::new(),
+        ..Default::default()
+    });
+
+    let mut prime_screen = crate::screen::Screen::new(2, 24);
+    window.set_cursor(Cursor::new(3, 0));
+    window.render(&mut prime_screen, Position::new(0, 0), Size::new(2, 24));
+
+    window
+        .buffer_view_mut()
+        .with_buffer_mut(|buffer| buffer.insert_text(Cursor::new(2, 0), "// "))
+        .unwrap();
+
+    let mut screen = crate::screen::Screen::new(2, 24);
+    window.render(&mut screen, Position::new(0, 0), Size::new(2, 24));
+
+    let rendered_line = window
+        .render_data()
+        .get_line(0)
+        .expect("visible line should be rendered");
+    assert!(
+        rendered_line
+            .iter()
+            .any(|chunk| chunk.text.starts_with("//") && chunk.style == expected_comment_style)
+    );
+    assert!(
+        window
+            .buffer_view()
+            .with_buffer(|buffer| buffer.syntax_background_pending())
+            .unwrap_or(false)
+    );
+
+    let cached_line = window
+        .buffer_view()
+        .with_buffer(|buffer| buffer.cached_syntax_spans_for_line(2))
+        .unwrap();
+    assert!(cached_line.is_some());
+    assert!(
+        window
+            .buffer_view()
+            .with_buffer(|buffer| buffer.cached_syntax_spans_for_line(4))
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[test]
 fn test_window_render_expands_tabs_using_configured_width() {
     let buffer = Buffer::from_str("a\tb");
     let window = Window::new(buffer);
@@ -648,7 +719,7 @@ fn test_window_render_does_not_force_full_syntax_warmup_on_bottom_jump() {
     globals::set_job_manager(JobManager::new());
 
     let path = temp_path_with_ext("bottom-jump", "rs");
-    let buffer = Buffer::from_str_with_path(&repeated_rust_buffer(128), path);
+    let buffer = Buffer::from_str_with_path(&repeated_rust_buffer(256), path);
     let mut window = Window::new(buffer);
     window.set_cursor(Cursor::new(127, 0));
 
@@ -663,14 +734,14 @@ fn test_window_render_does_not_force_full_syntax_warmup_on_bottom_jump() {
         .buffer_view()
         .with_buffer(|buffer| buffer.syntax_cache_complete())
         .unwrap_or(true);
-    let top_line_cached = window
+    let beyond_viewport_cached = window
         .buffer_view()
-        .with_buffer(|buffer| buffer.cached_syntax_spans_for_line(0).is_some())
+        .with_buffer(|buffer| buffer.cached_syntax_spans_for_line(200).is_some())
         .unwrap_or(true);
 
     assert!(syntax_pending);
     assert!(!cache_complete);
-    assert!(!top_line_cached);
+    assert!(!beyond_viewport_cached);
 }
 
 #[test]

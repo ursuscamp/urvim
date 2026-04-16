@@ -166,8 +166,8 @@ impl Widget for Layout {
                 if self.should_exit() {
                     false
                 } else {
-                    let handled =
-                        self.active_window_group_mut().process_action(action) == ActionResult::Handled;
+                    let handled = self.active_window_group_mut().process_action(action)
+                        == ActionResult::Handled;
                     if handled && self.active_window_group().is_empty() {
                         self.close_focused_pane();
                     }

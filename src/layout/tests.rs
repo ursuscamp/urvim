@@ -5,8 +5,8 @@ use crate::config::Config;
 use crate::editor::{Action, ActionKind, ModeKind};
 use crate::globals;
 use crate::path::AbsolutePath;
-use crate::window_group::WindowGroup;
 use crate::window::{Position, Size};
+use crate::window_group::WindowGroup;
 use std::collections::BTreeSet;
 
 fn layout_with_buffers(buffers: Vec<Buffer>) -> Layout {
@@ -134,7 +134,10 @@ fn test_layout_render_stores_geometry_and_forwards_size() {
 
     assert_eq!(layout.origin(), origin);
     assert_eq!(layout.size(), size);
-    assert_eq!(layout.window_group().active_window().size(), Size::new(1, 12));
+    assert_eq!(
+        layout.window_group().active_window().size(),
+        Size::new(1, 12)
+    );
     assert_eq!(screen.get_cell_mut(5, 4).unwrap().text, "N");
 }
 

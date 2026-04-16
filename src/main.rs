@@ -410,8 +410,8 @@ mod tests {
     use std::sync::{Arc, Mutex, OnceLock};
     use urvim::buffer::Buffer;
     use urvim::editor::ModeKind;
-    use urvim::window_group::WindowGroup;
     use urvim::window::VisualSelectionKind;
+    use urvim::window_group::WindowGroup;
 
     struct TestBackend {
         input: Arc<Mutex<VecDeque<u8>>>,

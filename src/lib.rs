@@ -11,11 +11,11 @@ pub mod path;
 pub mod screen;
 pub mod status_bar;
 pub mod syntax;
-pub mod window_group;
 pub mod terminal;
 pub mod theme;
 pub mod widget;
 pub mod window;
+pub mod window_group;
 
 mod jumplist;
 

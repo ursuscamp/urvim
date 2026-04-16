@@ -3,8 +3,8 @@
 use super::geometry::PaneRegion;
 use super::node::{LayoutNode, PaneNode, SplitAxis, SplitNode};
 use super::{Layout, PaneId};
-use crate::window_group::WindowGroup;
 use crate::window::{Position, Size};
+use crate::window_group::WindowGroup;
 
 impl Layout {
     pub(super) fn allocate_pane_id(&mut self) -> PaneId {
