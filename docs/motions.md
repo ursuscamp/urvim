@@ -162,7 +162,7 @@ Splits the current pane into top and bottom panes and focuses the newly created 
 Moves focus to the nearest pane in the requested direction.
 
 - **Count**: No
-- **Vim difference**: urvim chooses neighbors from the rendered pane rectangles, so movement works across nested split levels rather than only within one immediate parent split.
+- **Vim difference**: urvim chooses neighbors from the rendered pane rectangles, so movement works across nested split levels rather than only within one immediate parent split. When the move re-enters a split subtree, urvim restores the last focused pane inside that subtree instead of always choosing the first pane there.
 
 ### Ctrl-W q - Close Pane
 

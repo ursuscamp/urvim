@@ -67,15 +67,22 @@ pub struct SplitNode {
     pub(super) first: Box<LayoutNode>,
     pub(super) second: Box<LayoutNode>,
     pub(super) split_size: SplitSize,
+    pub(super) last_focused_pane: PaneId,
 }
 
 impl SplitNode {
-    pub(super) fn new(axis: SplitAxis, first: LayoutNode, second: LayoutNode) -> Self {
+    pub(super) fn new(
+        axis: SplitAxis,
+        first: LayoutNode,
+        second: LayoutNode,
+        last_focused_pane: PaneId,
+    ) -> Self {
         Self {
             axis,
             first: Box::new(first),
             second: Box::new(second),
             split_size: SplitSize::even(),
+            last_focused_pane,
         }
     }
 }

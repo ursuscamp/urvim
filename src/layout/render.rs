@@ -70,8 +70,10 @@ impl Layout {
         };
 
         if let Some(candidate) = candidate {
-            self.focused_pane = candidate.id;
-            return true;
+            let target = self
+                .resolve_directional_focus_target(current.id, candidate.id)
+                .unwrap_or(candidate.id);
+            return self.focus_pane(target);
         }
 
         false
