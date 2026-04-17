@@ -6,12 +6,11 @@ This is a list, in no particular order, of things that need to be addressed whic
 
 - operations + text objects
 - registers
-- jump list
 - support raw text insertion by paste
 - session support
 
-- improved layout
-    - resize
+resize:
+    - do something to make resize mode more obvious, like a UI change
 
 # Bugs
 

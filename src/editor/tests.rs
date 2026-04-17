@@ -160,6 +160,29 @@ fn test_normal_mode_split_management_bindings() {
         handle_and_unwrap(&mut mode, &key('q')),
         Action::new(ActionKind::ClosePane)
     );
+
+    let mut mode = NormalMode::new();
+    assert!(matches!(
+        mode.handle_key(&ctrl_key('w')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert_eq!(
+        handle_and_unwrap(&mut mode, &key('r')),
+        Action::mode_transition(ModeKind::Resizing)
+    );
+}
+
+#[test]
+fn test_normal_mode_equalize_binding() {
+    let mut mode = NormalMode::new();
+    assert!(matches!(
+        mode.handle_key(&ctrl_key('w')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert_eq!(
+        handle_and_unwrap(&mut mode, &key('=')),
+        Action::new(ActionKind::EqualizeSplits)
+    );
 }
 
 #[test]
@@ -243,11 +266,67 @@ fn test_mode_kind_reflects_mode_type() {
     let insert = InsertMode::new();
     let visual = VisualMode::new();
     let visual_line = VisualLineMode::new();
+    let resizing = ResizingMode::new();
 
     assert_eq!(normal.kind(), ModeKind::Normal);
     assert_eq!(insert.kind(), ModeKind::Insert);
     assert_eq!(visual.kind(), ModeKind::Visual);
     assert_eq!(visual_line.kind(), ModeKind::VisualLine);
+    assert_eq!(resizing.kind(), ModeKind::Resizing);
+}
+
+#[test]
+fn test_resizing_mode_key_bindings() {
+    let mut mode = ResizingMode::new();
+
+    assert_eq!(
+        mode.cursor_style(),
+        crate::terminal::CursorStyle::SteadyUnderline
+    );
+    assert_eq!(
+        handle_and_unwrap(&mut mode, &key('h')),
+        Action::new(ActionKind::ResizePaneLeft)
+    );
+    assert_eq!(
+        handle_and_unwrap(&mut mode, &key('H')),
+        Action::count(5, Box::new(Action::new(ActionKind::ResizePaneLeft)))
+    );
+    assert_eq!(
+        handle_and_unwrap(&mut mode, &key('l')),
+        Action::new(ActionKind::ResizePaneRight)
+    );
+    assert_eq!(
+        handle_and_unwrap(&mut mode, &key('L')),
+        Action::count(5, Box::new(Action::new(ActionKind::ResizePaneRight)))
+    );
+    assert_eq!(
+        handle_and_unwrap(&mut mode, &key('k')),
+        Action::new(ActionKind::ResizePaneUp)
+    );
+    assert_eq!(
+        handle_and_unwrap(&mut mode, &key('j')),
+        Action::new(ActionKind::ResizePaneDown)
+    );
+    assert_eq!(
+        handle_and_unwrap(&mut mode, &key('K')),
+        Action::count(5, Box::new(Action::new(ActionKind::ResizePaneUp)))
+    );
+    assert_eq!(
+        handle_and_unwrap(&mut mode, &key('J')),
+        Action::count(5, Box::new(Action::new(ActionKind::ResizePaneDown)))
+    );
+    assert_eq!(
+        handle_and_unwrap(&mut mode, &key('=')),
+        Action::new(ActionKind::EqualizeSplits)
+    );
+    assert_eq!(
+        handle_and_unwrap(&mut mode, &Key::new(KeyCode::Esc)),
+        Action::mode_transition(ModeKind::Normal)
+    );
+    assert!(matches!(
+        mode.handle_key(&key('x')),
+        HandleKeyResult::InvalidSequence
+    ));
 }
 
 #[test]

@@ -12,6 +12,8 @@ pub enum ModeKind {
     Visual,
     /// Linewise visual mode.
     VisualLine,
+    /// Pane resizing mode.
+    Resizing,
 }
 
 impl ModeKind {
@@ -22,6 +24,7 @@ impl ModeKind {
             Self::Insert => "INSERT",
             Self::Visual => "VISUAL",
             Self::VisualLine => "V-LINE",
+            Self::Resizing => "RESIZE",
         }
     }
 

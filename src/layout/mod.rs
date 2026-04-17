@@ -18,6 +18,7 @@ use crate::widget::Widget;
 use crate::window::{BufferView, Position, Size};
 use std::path::PathBuf;
 
+use self::tree::ResizeDirection;
 pub use node::{LayoutNode, PaneId, PaneNode, SplitAxis, SplitNode, SplitSize};
 
 /// Root layout container for urvim.
@@ -161,6 +162,30 @@ impl Widget for Layout {
             Some(ActionKind::FocusPaneDown) => self.move_focus(geometry::FocusDirection::Down),
             Some(ActionKind::FocusPaneUp) => self.move_focus(geometry::FocusDirection::Up),
             Some(ActionKind::FocusPaneRight) => self.move_focus(geometry::FocusDirection::Right),
+            Some(ActionKind::ResizePaneLeft) => {
+                self.resize_focused_pane(SplitAxis::Vertical, ResizeDirection::Left)
+            }
+            Some(ActionKind::ResizePaneRight) => {
+                self.resize_focused_pane(SplitAxis::Vertical, ResizeDirection::Right)
+            }
+            Some(ActionKind::ResizePaneUp) => {
+                self.resize_focused_pane(SplitAxis::Horizontal, ResizeDirection::Up)
+            }
+            Some(ActionKind::ResizePaneDown) => {
+                self.resize_focused_pane(SplitAxis::Horizontal, ResizeDirection::Down)
+            }
+            Some(ActionKind::Count(count, inner))
+                if matches!(
+                    inner.kind.as_ref(),
+                    Some(ActionKind::ResizePaneLeft)
+                        | Some(ActionKind::ResizePaneRight)
+                        | Some(ActionKind::ResizePaneUp)
+                        | Some(ActionKind::ResizePaneDown)
+                ) =>
+            {
+                self.resize_counted_pane(*count, inner.as_ref())
+            }
+            Some(ActionKind::EqualizeSplits) => self.equalize_splits(),
             Some(ActionKind::ClosePane) => self.close_focused_pane(),
             _ => {
                 if self.should_exit() {
@@ -181,6 +206,31 @@ impl Widget for Layout {
         } else {
             ActionResult::NotHandled
         }
+    }
+}
+
+impl Layout {
+    fn resize_counted_pane(&mut self, count: usize, action: &Action) -> bool {
+        let mut handled = false;
+        for _ in 0..count {
+            handled |= match action.kind.as_ref() {
+                Some(ActionKind::ResizePaneLeft) => {
+                    self.resize_focused_pane(SplitAxis::Vertical, ResizeDirection::Left)
+                }
+                Some(ActionKind::ResizePaneRight) => {
+                    self.resize_focused_pane(SplitAxis::Vertical, ResizeDirection::Right)
+                }
+                Some(ActionKind::ResizePaneUp) => {
+                    self.resize_focused_pane(SplitAxis::Horizontal, ResizeDirection::Up)
+                }
+                Some(ActionKind::ResizePaneDown) => {
+                    self.resize_focused_pane(SplitAxis::Horizontal, ResizeDirection::Down)
+                }
+                _ => false,
+            };
+        }
+
+        handled
     }
 }
 

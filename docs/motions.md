@@ -36,7 +36,9 @@ This document describes the motions implemented in urvim and how they differ fro
 | `Ctrl-W j` | Move focus to the pane below |
 | `Ctrl-W k` | Move focus to the pane above |
 | `Ctrl-W l` | Move focus to the pane on the right |
+| `Ctrl-W r` | Enter resize mode |
 | `Ctrl-W q` | Close the current pane |
+| `Ctrl-W =` | Equalize all splits |
 | `{` | Move to blank line before the previous paragraph |
 | `}` | Move to blank line before the next paragraph |
 | `a` | Append after cursor (enter insert mode) |
@@ -148,7 +150,7 @@ urvim supports a Vim-style pane layout rooted in binary vertical and horizontal 
 Splits the current pane into left and right panes and focuses the newly created pane.
 
 - **Count**: No
-- **Vim difference**: urvim stores an even `1:1` weight ratio for the new binary split and does not yet expose interactive resize commands.
+- **Vim difference**: urvim stores an even `1:1` weight ratio for the new binary split.
 
 ### Ctrl-W s - Split Horizontally
 
@@ -170,6 +172,27 @@ Closes the current pane. If that removes one child from a split, the surviving s
 
 - **Count**: No
 - **Vim difference**: If the final pane is closed, urvim exits the editor.
+
+### Ctrl-W = - Equalize Splits
+
+Equalizes every split in the current layout tree.
+
+- **Count**: No
+- **Vim difference**: urvim applies the equalization recursively to all nested splits.
+
+### Resize Mode
+
+Press `Ctrl-W r` to enter resize mode for the focused pane. While in resize mode:
+
+- `h` moves the split divider left
+- `l` moves the split divider right
+- `j` moves the split divider down
+- `k` moves the split divider up
+- `H`, `J`, `K`, and `L` perform the same directional resize with a larger step
+- `=` equalizes every split in the layout
+- `Esc` returns to normal mode
+
+Resize movement clamps at the minimum pane size, and non-resize keys are ignored while the mode is active.
 
 ## Basic Cursor Movements
 

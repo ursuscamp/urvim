@@ -93,6 +93,8 @@ impl NormalMode {
         trie_keymap.insert_str("<C-w>k", Action::new(ActionKind::FocusPaneUp));
         trie_keymap.insert_str("<C-w>l", Action::new(ActionKind::FocusPaneRight));
         trie_keymap.insert_str("<C-w>q", Action::new(ActionKind::ClosePane));
+        trie_keymap.insert_str("<C-w>=", Action::new(ActionKind::EqualizeSplits));
+        trie_keymap.insert_str("<C-w>r", Action::mode_transition(ModeKind::Resizing));
         trie_keymap.insert_str("gcc", Action::toggle_line_comment());
         trie_keymap.insert_str("[b", Action::new(ActionKind::PreviousTab));
         trie_keymap.insert_str("]b", Action::new(ActionKind::NextTab));

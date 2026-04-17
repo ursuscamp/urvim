@@ -17,7 +17,7 @@ use crate::action::ActionResult;
 use crate::buffer::{Boundary, Buffer, BufferId, Cursor};
 use crate::editor::{
     Action, InsertMode, LinewiseMotion, Mode, ModeKind, NormalMode, Operator, OperatorTarget,
-    VisualLineMode, VisualMode,
+    ResizingMode, VisualLineMode, VisualMode,
 };
 use crate::globals;
 use crate::screen::Screen;
@@ -212,6 +212,7 @@ impl Window {
         self.mode = match to_mode {
             ModeKind::Normal => Box::new(NormalMode::new()),
             ModeKind::Insert => Box::new(InsertMode::new()),
+            ModeKind::Resizing => Box::new(ResizingMode::new()),
             ModeKind::Visual => {
                 self.buffer_view
                     .begin_visual_selection(crate::window::VisualSelectionKind::Character);

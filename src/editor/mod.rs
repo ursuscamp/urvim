@@ -9,6 +9,7 @@ mod keymap;
 mod mode;
 mod normal;
 pub mod pairs;
+mod resizing;
 mod visual;
 mod visual_common;
 mod visual_line;
@@ -21,6 +22,7 @@ pub use insert::InsertMode;
 pub use keymap::{CountParser, KeyStringParseError, Keymap, TrieKeymap, validate_key_string};
 pub use mode::{Mode, ModeKind};
 pub use normal::NormalMode;
+pub use resizing::ResizingMode;
 pub use visual::VisualMode;
 pub use visual_line::VisualLineMode;
 

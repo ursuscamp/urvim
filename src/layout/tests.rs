@@ -41,6 +41,18 @@ fn collect_pane_ids(node: &LayoutNode, ids: &mut Vec<PaneId>) {
     }
 }
 
+fn assert_all_splits_even(node: &LayoutNode) {
+    match node {
+        LayoutNode::Pane(_) => {}
+        LayoutNode::Split(split) => {
+            assert_eq!(split.split_size.first_weight(), 1);
+            assert_eq!(split.split_size.second_weight(), 1);
+            assert_all_splits_even(&split.first);
+            assert_all_splits_even(&split.second);
+        }
+    }
+}
+
 #[test]
 fn test_layout_new_wraps_window_group() {
     let layout = Layout::new(WindowGroup::new(Vec::new()));
@@ -218,6 +230,244 @@ fn test_layout_render_divides_horizontal_split_rows_by_weights() {
     assert_eq!(regions.len(), 2);
     assert_eq!(regions[0].size.rows, 3);
     assert_eq!(regions[1].size.rows, 4);
+}
+
+#[test]
+fn test_layout_resize_left_moves_vertical_split_for_the_left_pane() {
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("alpha")]);
+    layout.process_action(&Action::new(ActionKind::SplitVertical));
+
+    let mut screen = crate::screen::Screen::new(5, 13);
+    layout.render(&mut screen, Position::new(0, 0), Size::new(5, 13));
+
+    assert_eq!(
+        layout.process_action(&Action::new(ActionKind::FocusPaneLeft)),
+        ActionResult::Handled
+    );
+
+    let regions_before = layout.pane_regions();
+    let left_before = regions_before
+        .iter()
+        .find(|region| region.id == PaneId(0))
+        .expect("left pane should be visible before resize");
+    let right_before = regions_before
+        .iter()
+        .find(|region| region.id == PaneId(1))
+        .expect("right pane should be visible before resize");
+
+    assert_eq!(
+        layout.process_action(&Action::new(ActionKind::ResizePaneLeft)),
+        ActionResult::Handled
+    );
+
+    let regions_after = layout.pane_regions();
+    let left_after = regions_after
+        .iter()
+        .find(|region| region.id == PaneId(0))
+        .expect("left pane should be visible after resize");
+    let right_after = regions_after
+        .iter()
+        .find(|region| region.id == PaneId(1))
+        .expect("right pane should be visible after resize");
+
+    assert!(left_after.size.cols < left_before.size.cols);
+    assert!(right_after.size.cols > right_before.size.cols);
+}
+
+#[test]
+fn test_layout_resize_right_moves_vertical_split_for_the_right_pane() {
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("alpha")]);
+    layout.process_action(&Action::new(ActionKind::SplitVertical));
+
+    let mut screen = crate::screen::Screen::new(5, 13);
+    layout.render(&mut screen, Position::new(0, 0), Size::new(5, 13));
+
+    let regions_before = layout.pane_regions();
+    let left_before = regions_before
+        .iter()
+        .find(|region| region.id == PaneId(0))
+        .expect("left pane should be visible before resize");
+    let right_before = regions_before
+        .iter()
+        .find(|region| region.id == PaneId(1))
+        .expect("right pane should be visible before resize");
+
+    assert_eq!(
+        layout.process_action(&Action::new(ActionKind::ResizePaneRight)),
+        ActionResult::Handled
+    );
+
+    let regions_after = layout.pane_regions();
+    let left_after = regions_after
+        .iter()
+        .find(|region| region.id == PaneId(0))
+        .expect("left pane should be visible after resize");
+    let right_after = regions_after
+        .iter()
+        .find(|region| region.id == PaneId(1))
+        .expect("right pane should be visible after resize");
+
+    assert!(left_after.size.cols > left_before.size.cols);
+    assert!(right_after.size.cols < right_before.size.cols);
+}
+
+#[test]
+fn test_layout_resize_counted_steps_apply_larger_changes() {
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("alpha")]);
+    layout.process_action(&Action::new(ActionKind::SplitVertical));
+
+    let mut screen = crate::screen::Screen::new(5, 21);
+    layout.render(&mut screen, Position::new(0, 0), Size::new(5, 21));
+
+    assert_eq!(
+        layout.process_action(&Action::new(ActionKind::FocusPaneLeft)),
+        ActionResult::Handled
+    );
+
+    let regions_before = layout.pane_regions();
+    let left_before = regions_before
+        .iter()
+        .find(|region| region.id == PaneId(0))
+        .expect("left pane should be visible before counted resize");
+    let right_before = regions_before
+        .iter()
+        .find(|region| region.id == PaneId(1))
+        .expect("right pane should be visible before counted resize");
+
+    assert_eq!(
+        layout.process_action(&Action::count(
+            5,
+            Box::new(Action::new(ActionKind::ResizePaneLeft))
+        )),
+        ActionResult::Handled
+    );
+
+    let regions_after = layout.pane_regions();
+    let left_after = regions_after
+        .iter()
+        .find(|region| region.id == PaneId(0))
+        .expect("left pane should be visible after counted resize");
+    let right_after = regions_after
+        .iter()
+        .find(|region| region.id == PaneId(1))
+        .expect("right pane should be visible after counted resize");
+
+    assert_eq!(left_before.size.cols - left_after.size.cols, 5);
+    assert_eq!(right_after.size.cols - right_before.size.cols, 5);
+}
+
+#[test]
+fn test_layout_equalize_splits_recursively_resets_weights() {
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("alpha")]);
+    layout.process_action(&Action::new(ActionKind::SplitVertical));
+    let mut screen = crate::screen::Screen::new(8, 20);
+    layout.render(&mut screen, Position::new(0, 0), Size::new(8, 20));
+    layout.process_action(&Action::new(ActionKind::FocusPaneLeft));
+    layout.process_action(&Action::new(ActionKind::SplitHorizontal));
+    let mut screen = crate::screen::Screen::new(8, 20);
+    layout.render(&mut screen, Position::new(0, 0), Size::new(8, 20));
+
+    assert_eq!(
+        layout.process_action(&Action::new(ActionKind::ResizePaneDown)),
+        ActionResult::Handled
+    );
+    assert_eq!(
+        layout.process_action(&Action::new(ActionKind::FocusPaneRight)),
+        ActionResult::Handled
+    );
+    assert_eq!(
+        layout.process_action(&Action::new(ActionKind::ResizePaneLeft)),
+        ActionResult::Handled
+    );
+
+    assert_eq!(
+        layout.process_action(&Action::new(ActionKind::EqualizeSplits)),
+        ActionResult::Handled
+    );
+
+    let root = layout.root.as_ref().expect("layout should keep a root");
+    assert_all_splits_even(root);
+}
+
+#[test]
+fn test_layout_resize_clamps_and_stays_local_to_the_matching_split() {
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("alpha")]);
+    layout.process_action(&Action::new(ActionKind::SplitVertical));
+    let mut screen = crate::screen::Screen::new(8, 20);
+    layout.render(&mut screen, Position::new(0, 0), Size::new(8, 20));
+    assert_eq!(
+        layout.process_action(&Action::new(ActionKind::FocusPaneLeft)),
+        ActionResult::Handled
+    );
+    layout.process_action(&Action::new(ActionKind::SplitHorizontal));
+    let mut screen = crate::screen::Screen::new(8, 20);
+    layout.render(&mut screen, Position::new(0, 0), Size::new(8, 20));
+
+    let regions_before = layout.pane_regions();
+    let focused_before = regions_before
+        .iter()
+        .find(|region| region.id == layout.focused_pane)
+        .expect("focused pane should be visible before resize");
+    let inner_sibling_before = regions_before
+        .iter()
+        .find(|region| region.id == PaneId(0))
+        .expect("inner sibling should be visible before resize");
+    let outer_sibling_before = regions_before
+        .iter()
+        .find(|region| region.id == PaneId(1))
+        .expect("outer sibling should be visible before resize");
+
+    assert_eq!(
+        layout.process_action(&Action::new(ActionKind::ResizePaneDown)),
+        ActionResult::Handled
+    );
+
+    let mut screen = crate::screen::Screen::new(8, 20);
+    layout.render(&mut screen, Position::new(0, 0), Size::new(8, 20));
+
+    let regions_after = layout.pane_regions();
+    let focused_after = regions_after
+        .iter()
+        .find(|region| region.id == layout.focused_pane)
+        .expect("focused pane should be visible after resize");
+    let inner_sibling_after = regions_after
+        .iter()
+        .find(|region| region.id == PaneId(0))
+        .expect("inner sibling should be visible after resize");
+    let outer_sibling_after = regions_after
+        .iter()
+        .find(|region| region.id == PaneId(1))
+        .expect("outer sibling should be visible after resize");
+
+    assert_eq!(outer_sibling_after.size, outer_sibling_before.size);
+    assert!(focused_after.size.rows < focused_before.size.rows);
+    assert!(inner_sibling_after.size.rows > inner_sibling_before.size.rows);
+    assert_eq!(
+        focused_after.size.rows + inner_sibling_after.size.rows,
+        focused_before.size.rows + inner_sibling_before.size.rows
+    );
+
+    for _ in 0..20 {
+        assert_eq!(
+            layout.process_action(&Action::new(ActionKind::ResizePaneUp)),
+            ActionResult::Handled
+        );
+    }
+
+    let root_after_clamp = layout.root.as_ref().expect("layout should keep a root");
+    match root_after_clamp {
+        LayoutNode::Split(outer) => match outer.first.as_ref() {
+            LayoutNode::Split(inner) => {
+                assert_eq!(inner.split_size.first_weight(), 1);
+                assert_eq!(
+                    inner.split_size.first_weight() + inner.split_size.second_weight(),
+                    focused_after.size.rows + inner_sibling_after.size.rows
+                );
+            }
+            LayoutNode::Pane(_) => panic!("expected nested split on the left side"),
+        },
+        LayoutNode::Pane(_) => panic!("resize test should keep the root split"),
+    }
 }
 
 #[test]

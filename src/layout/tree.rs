@@ -13,6 +13,21 @@ pub(super) enum ChildSide {
     Second,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ResizeOutcome {
+    NotFound,
+    Found,
+    Handled,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ResizeDirection {
+    Left,
+    Right,
+    Up,
+    Down,
+}
+
 impl Layout {
     pub(super) fn allocate_pane_id(&mut self) -> PaneId {
         let id = PaneId(self.next_pane_id);
@@ -131,6 +146,37 @@ impl Layout {
         removed
     }
 
+    pub(super) fn resize_focused_pane(
+        &mut self,
+        axis: SplitAxis,
+        direction: ResizeDirection,
+    ) -> bool {
+        let origin = self.origin;
+        let content_size = Size::new(self.size.rows.saturating_sub(1), self.size.cols);
+        let Some(root) = self.root.as_mut() else {
+            return false;
+        };
+
+        let mut path = Vec::new();
+        if !Self::pane_path(root, self.focused_pane, &mut path) {
+            return false;
+        }
+
+        matches!(
+            Self::resize_node(root, origin, content_size, &path, axis, direction),
+            ResizeOutcome::Handled | ResizeOutcome::Found
+        )
+    }
+
+    pub(super) fn equalize_splits(&mut self) -> bool {
+        let Some(root) = self.root.as_mut() else {
+            return false;
+        };
+
+        Self::equalize_node(root);
+        true
+    }
+
     fn remove_pane(node: LayoutNode, target: PaneId) -> (Option<LayoutNode>, bool) {
         match node {
             LayoutNode::Pane(pane) if pane.id == target => (None, true),
@@ -231,6 +277,124 @@ impl Layout {
                     (None, Some(second)) => Some(second),
                     (None, None) => None,
                 }
+            }
+        }
+    }
+
+    fn resize_node(
+        node: &mut LayoutNode,
+        origin: Position,
+        size: Size,
+        path: &[ChildSide],
+        axis: SplitAxis,
+        direction: ResizeDirection,
+    ) -> ResizeOutcome {
+        match node {
+            LayoutNode::Pane(_) => {
+                if path.is_empty() {
+                    ResizeOutcome::Found
+                } else {
+                    ResizeOutcome::NotFound
+                }
+            }
+            LayoutNode::Split(split) => {
+                let Some((next_side, remaining)) = path.split_first() else {
+                    return ResizeOutcome::NotFound;
+                };
+
+                let (first_origin, first_size, second_origin, second_size) =
+                    Self::split_regions(origin, size, split.axis, split.split_size);
+
+                let (child, child_origin, child_size) = match next_side {
+                    ChildSide::First => (&mut split.first, first_origin, first_size),
+                    ChildSide::Second => (&mut split.second, second_origin, second_size),
+                };
+
+                match Self::resize_node(child, child_origin, child_size, remaining, axis, direction)
+                {
+                    ResizeOutcome::Handled => ResizeOutcome::Handled,
+                    ResizeOutcome::NotFound => ResizeOutcome::NotFound,
+                    ResizeOutcome::Found => {
+                        if split.axis == axis {
+                            Self::resize_split(
+                                split,
+                                split.axis,
+                                first_size,
+                                second_size,
+                                *next_side,
+                                direction,
+                            );
+                            ResizeOutcome::Handled
+                        } else {
+                            ResizeOutcome::Found
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn resize_split(
+        split: &mut SplitNode,
+        axis: SplitAxis,
+        first_size: Size,
+        second_size: Size,
+        target_side: ChildSide,
+        direction: ResizeDirection,
+    ) {
+        let total = match axis {
+            SplitAxis::Horizontal => first_size.rows.saturating_add(second_size.rows),
+            SplitAxis::Vertical => first_size.cols.saturating_add(second_size.cols),
+        };
+
+        if total <= 1 {
+            return;
+        }
+
+        let current_target = match (axis, target_side) {
+            (SplitAxis::Horizontal, ChildSide::First) => first_size.rows,
+            (SplitAxis::Horizontal, ChildSide::Second) => second_size.rows,
+            (SplitAxis::Vertical, ChildSide::First) => first_size.cols,
+            (SplitAxis::Vertical, ChildSide::Second) => second_size.cols,
+        };
+
+        let delta = match (axis, direction, target_side) {
+            (SplitAxis::Vertical, ResizeDirection::Left, ChildSide::First) => -1,
+            (SplitAxis::Vertical, ResizeDirection::Left, ChildSide::Second) => 1,
+            (SplitAxis::Vertical, ResizeDirection::Right, ChildSide::First) => 1,
+            (SplitAxis::Vertical, ResizeDirection::Right, ChildSide::Second) => -1,
+            (SplitAxis::Horizontal, ResizeDirection::Up, ChildSide::First) => -1,
+            (SplitAxis::Horizontal, ResizeDirection::Up, ChildSide::Second) => 1,
+            (SplitAxis::Horizontal, ResizeDirection::Down, ChildSide::First) => 1,
+            (SplitAxis::Horizontal, ResizeDirection::Down, ChildSide::Second) => -1,
+            _ => 0,
+        };
+
+        if delta == 0 {
+            return;
+        }
+
+        let min_target = 1i16;
+        let max_target = total.saturating_sub(1) as i16;
+        let desired_target = (current_target as i16 + delta).clamp(min_target, max_target) as u16;
+
+        let (first_weight, second_weight) = match (axis, target_side) {
+            (SplitAxis::Horizontal, ChildSide::First) => (desired_target, total - desired_target),
+            (SplitAxis::Horizontal, ChildSide::Second) => (total - desired_target, desired_target),
+            (SplitAxis::Vertical, ChildSide::First) => (desired_target, total - desired_target),
+            (SplitAxis::Vertical, ChildSide::Second) => (total - desired_target, desired_target),
+        };
+
+        split.split_size = super::node::SplitSize::new(first_weight, second_weight);
+    }
+
+    fn equalize_node(node: &mut LayoutNode) {
+        match node {
+            LayoutNode::Pane(_) => {}
+            LayoutNode::Split(split) => {
+                split.split_size = super::node::SplitSize::even();
+                Self::equalize_node(&mut split.first);
+                Self::equalize_node(&mut split.second);
             }
         }
     }

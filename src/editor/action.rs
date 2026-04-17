@@ -151,6 +151,16 @@ pub enum ActionKind {
     MoveDown,
     MoveUp,
     MoveRight,
+    /// Shrink the focused pane horizontally.
+    ResizePaneLeft,
+    /// Grow the focused pane horizontally.
+    ResizePaneRight,
+    /// Shrink the focused pane vertically.
+    ResizePaneUp,
+    /// Grow the focused pane vertically.
+    ResizePaneDown,
+    /// Equalize all split ratios in the layout.
+    EqualizeSplits,
     SplitVertical,
     SplitHorizontal,
     FocusPaneLeft,

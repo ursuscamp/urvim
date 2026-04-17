@@ -414,6 +414,11 @@ impl Widget for Window {
             | Some(ActionKind::FocusPaneDown)
             | Some(ActionKind::FocusPaneUp)
             | Some(ActionKind::FocusPaneRight)
+            | Some(ActionKind::ResizePaneLeft)
+            | Some(ActionKind::ResizePaneRight)
+            | Some(ActionKind::ResizePaneUp)
+            | Some(ActionKind::ResizePaneDown)
+            | Some(ActionKind::EqualizeSplits)
             | Some(ActionKind::ClosePane)
             | None => ActionResult::NotHandled,
         };

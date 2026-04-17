@@ -110,6 +110,13 @@ A stored description of the last successful dot-repeatable edit. It records the 
 
 **Related Terms:** Change Operator, Insert Mode, Action, Mode
 
+### Resizing Mode
+A user-facing editor mode that lets the focused pane be resized with directional keys instead of editing text. In urvim, resizing mode is entered with `Ctrl-w r`, uses `h/j/k/l` for pane resizing, and exits with `Esc`.
+
+**Context:** Pane resizing, split layout management, mode switching
+
+**Related Terms:** Mode, Pane, Split, Normal Mode
+
 ### Mode
 A trait that defines how the editor responds to key input in different states. Urvim implements three modes:
 - **Normal Mode**: For navigation and command execution. Uses a steady block cursor.
