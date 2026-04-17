@@ -29,6 +29,8 @@ tab_inactive = { fg = "fg", bg = "panel" }
 tab_scroll_indicator = { fg = "muted", bg = "bg" }
 gutter = { fg = "muted", bg = "bg" }
 window = { fg = "fg", bg = "bg" }
+split_border = { fg = "muted" }
+split_border_resize = { fg = "accent", bold = true }
 
 [syntax]
 comment = { fg = "comment" }

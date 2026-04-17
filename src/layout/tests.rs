@@ -5,12 +5,58 @@ use crate::config::Config;
 use crate::editor::{Action, ActionKind, ModeKind};
 use crate::globals;
 use crate::path::AbsolutePath;
+use crate::terminal::{Color, Style};
+use crate::theme::{SyntaxTagStyles, Theme, ThemeKind, UiStyles};
 use crate::window::{Position, Size};
 use crate::window_group::WindowGroup;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 fn layout_with_buffers(buffers: Vec<Buffer>) -> Layout {
     Layout::new(WindowGroup::from_buffers(buffers))
+}
+
+fn border_theme() -> Theme {
+    let default_style = Style::new().fg(Color::ansi(15)).bg(Color::ansi(30));
+    let ui_styles = UiStyles::new(
+        Style::new().fg(Color::ansi(1)).bg(Color::ansi(2)),
+        Style::new().fg(Color::ansi(3)).bg(Color::ansi(4)),
+        Style::new().reverse(),
+        Style::new().bg(Color::ansi(21)),
+        Style::new().fg(Color::ansi(5)).bg(Color::ansi(6)),
+        Style::new().fg(Color::ansi(7)).bg(Color::ansi(8)),
+        Style::new().fg(Color::ansi(9)).bg(Color::ansi(10)),
+        Style::new().fg(Color::ansi(11)).bg(Color::ansi(12)),
+        Style::new().fg(Color::ansi(13)).bg(Color::ansi(14)),
+        Style::new().fg(Color::ansi(33)),
+        Style::new().fg(Color::ansi(160)).bold(),
+    );
+    let syntax_styles = SyntaxTagStyles::new(BTreeMap::new());
+
+    Theme::new(
+        "demo",
+        ThemeKind::Ansi256,
+        default_style,
+        ui_styles,
+        syntax_styles,
+    )
+}
+
+fn border_config(unicode_borders: bool) -> Config {
+    let advanced_glyphs = if unicode_borders {
+        BTreeSet::from([crate::config::AdvancedGlyphCapability::UnicodeBorders])
+    } else {
+        BTreeSet::new()
+    };
+
+    Config {
+        theme: "demo".to_string(),
+        insert_escape: None,
+        syntax: true,
+        auto_close_pairs: true,
+        active_line: false,
+        advanced_glyphs,
+        ..Default::default()
+    }
 }
 
 fn buffer_line_count(view: &crate::window::BufferView) -> usize {
@@ -213,7 +259,7 @@ fn test_layout_render_divides_vertical_split_width_by_weights() {
     Layout::collect_pane_regions(root, Position::new(0, 0), Size::new(4, 13), &mut regions);
     assert_eq!(regions.len(), 2);
     assert_eq!(regions[0].size.cols, 6);
-    assert_eq!(regions[1].size.cols, 7);
+    assert_eq!(regions[1].size.cols, 6);
 }
 
 #[test]
@@ -229,7 +275,7 @@ fn test_layout_render_divides_horizontal_split_rows_by_weights() {
     Layout::collect_pane_regions(root, Position::new(0, 0), Size::new(7, 10), &mut regions);
     assert_eq!(regions.len(), 2);
     assert_eq!(regions[0].size.rows, 3);
-    assert_eq!(regions[1].size.rows, 4);
+    assert_eq!(regions[1].size.rows, 3);
 }
 
 #[test]
@@ -550,6 +596,63 @@ fn test_layout_render_keeps_syntax_label_when_syntax_disabled() {
     assert_eq!(screen.get_cell_mut(1, 3).unwrap().text, "f");
     assert_eq!(screen.get_cell_mut(1, 3).unwrap().style, Default::default());
     assert_eq!(screen.get_cell_mut(2, 9).unwrap().text, "R");
+}
+
+#[test]
+fn test_layout_render_omits_split_borders_for_single_pane_layouts() {
+    let path = AbsolutePath::from_path(std::path::Path::new("/tmp/example.rs")).unwrap();
+    let buffer = Buffer::from_str_with_path("hi", path);
+    let mut layout = layout_with_buffers(vec![buffer]);
+    let mut screen = crate::screen::Screen::new(4, 20);
+    let theme = border_theme();
+    let border_style = theme.ui.split_border;
+    let _theme_guard = globals::set_test_active_theme(theme);
+    let _config_guard = globals::set_test_config(border_config(true));
+
+    layout.render(&mut screen, Position::new(0, 0), Size::new(4, 20));
+
+    assert_ne!(screen.get_cell_mut(0, 9).unwrap().style, border_style);
+}
+
+#[test]
+fn test_layout_render_draws_flattened_split_borders() {
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("alpha")]);
+    layout.process_action(&Action::new(ActionKind::SplitVertical));
+
+    let mut screen = crate::screen::Screen::new(5, 20);
+    let _theme_guard = globals::set_test_active_theme(border_theme());
+    let _config_guard = globals::set_test_config(border_config(true));
+
+    layout.render(&mut screen, Position::new(0, 0), Size::new(5, 20));
+    layout.process_action(&Action::new(ActionKind::FocusPaneLeft));
+    layout.process_action(&Action::new(ActionKind::SplitHorizontal));
+
+    layout.render(&mut screen, Position::new(0, 0), Size::new(5, 20));
+
+    assert_eq!(screen.get_cell_mut(0, 9).unwrap().text, "│");
+    assert_eq!(screen.get_cell_mut(1, 8).unwrap().text, "─");
+    assert_eq!(screen.get_cell_mut(1, 9).unwrap().text, "│");
+}
+
+#[test]
+fn test_layout_render_uses_resize_border_style_in_resize_mode() {
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("alpha")]);
+    layout.process_action(&Action::new(ActionKind::SplitVertical));
+    layout
+        .window_group_mut()
+        .active_window_mut()
+        .switch_mode(ModeKind::Resizing);
+
+    let mut screen = crate::screen::Screen::new(4, 20);
+    let _theme_guard = globals::set_test_active_theme(border_theme());
+    let _config_guard = globals::set_test_config(border_config(true));
+
+    layout.render(&mut screen, Position::new(0, 0), Size::new(4, 20));
+
+    assert_eq!(
+        screen.get_cell_mut(0, 9).unwrap().style,
+        Style::new().fg(Color::ansi(160)).bold()
+    );
 }
 
 #[test]

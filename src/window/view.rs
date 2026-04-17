@@ -222,6 +222,10 @@ impl BufferView {
 
     /// Builds render data for the visible buffer region using a base style.
     pub fn build_render_data_with_style(&self, size: Size, default_style: Style) -> RenderData {
+        if size.rows == 0 || size.cols == 0 {
+            return RenderData::new(0);
+        }
+
         let mut render_data = RenderData::new(size.rows);
         let syntax_styles =
             globals::with_active_theme(|theme| theme.map(|theme| theme.syntax.clone()));
@@ -239,7 +243,7 @@ impl BufferView {
             let horizontal_offset = self.scroll_offset.col as usize;
 
             if syntax_enabled {
-                let visible_end_line = start_line.saturating_add(size.rows as usize - 1);
+                let visible_end_line = start_line + size.rows.saturating_sub(1) as usize;
                 buffer.ensure_syntax_through(visible_end_line);
                 buffer.request_syntax_catch_up(self.buffer_id());
             }
@@ -781,6 +785,8 @@ mod tests {
             Style::new().fg(Color::ansi(11)).bg(Color::ansi(12)),
             Style::new().fg(Color::ansi(13)).bg(Color::ansi(14)),
             Style::new().fg(Color::ansi(15)).bg(Color::ansi(16)),
+            Style::new().fg(Color::ansi(17)).bg(Color::ansi(18)),
+            Style::new().fg(Color::ansi(19)).bg(Color::ansi(20)),
         );
         let mut syntax_map = BTreeMap::new();
         syntax_map.insert(
@@ -809,6 +815,8 @@ mod tests {
             Style::new().fg(Color::ansi(11)).bg(Color::ansi(12)),
             Style::new().fg(Color::ansi(13)).bg(Color::ansi(14)),
             Style::new().fg(Color::ansi(15)).bg(Color::ansi(16)),
+            Style::new().fg(Color::ansi(17)).bg(Color::ansi(18)),
+            Style::new().fg(Color::ansi(19)).bg(Color::ansi(20)),
         );
         let mut syntax_map = BTreeMap::new();
         syntax_map.insert(

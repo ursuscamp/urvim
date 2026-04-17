@@ -59,6 +59,8 @@ fn themed_window() -> Theme {
         Style::new().fg(Color::ansi(9)).bg(Color::ansi(10)),
         Style::new().fg(Color::ansi(11)).bg(Color::ansi(12)),
         Style::new().fg(Color::ansi(13)).bg(Color::ansi(14)),
+        Style::new().fg(Color::ansi(15)).bg(Color::ansi(16)),
+        Style::new().fg(Color::ansi(17)).bg(Color::ansi(18)),
     );
     let mut syntax_map = BTreeMap::new();
     for tag_name in [
@@ -97,6 +99,8 @@ fn syntax_themed_window() -> Theme {
         Style::new().fg(Color::ansi(9)).bg(Color::ansi(10)),
         Style::new().fg(Color::ansi(11)).bg(Color::ansi(12)),
         Style::new().fg(Color::ansi(13)).bg(Color::ansi(14)),
+        Style::new().fg(Color::ansi(15)).bg(Color::ansi(16)),
+        Style::new().fg(Color::ansi(17)).bg(Color::ansi(18)),
     );
     let mut syntax_map = BTreeMap::new();
     for (tag_name, color) in [

@@ -71,11 +71,11 @@ The process of normalizing a cursor position so it lands on a valid grapheme bou
 An enum representing operations that the editor can perform in response to keypresses. Examples include `MoveLeft`, `MoveDown`, `InsertChar`, `SwitchToNormal`, etc.
 
 ### Advanced Glyphs
-An optional set of editor configuration capabilities that request special glyph rendering behavior beyond plain text labels. The initial supported value is `nerdfont`.
+An optional set of editor configuration capabilities that request special glyph rendering behavior beyond plain text labels. The initial supported values are `nerdfont` and `unicode_borders`.
 
-**Context:** Configuration, tab bar rendering, status bar rendering
+**Context:** Configuration, tab bar rendering, status bar rendering, split border rendering
 
-**Related Terms:** Filetype Glyph, Filetype, Tab Group, Status Bar, Configuration
+**Related Terms:** Filetype Glyph, Filetype, Tab Group, Split Border, Status Bar, Configuration
 
 ### Active Line
 The line in the focused editor window that is visually emphasized to help the user track the current cursor location. Active line highlighting is a UI concern controlled by configuration and theme styling.
@@ -342,6 +342,13 @@ A layout container node that divides screen space vertically or horizontally and
 **Context:** Layout tree, pane management, nested editor regions
 
 **Related Terms:** Layout, Pane, Tab Group
+
+### Split Border
+The visible line-drawing separator that marks the boundary between adjacent panes in the rendered split layout. Split borders flatten the nested split tree into the on-screen arrangement, are hidden when only one pane is visible, and can change style when resizing mode is active.
+
+**Context:** Layout rendering, pane boundaries, resize mode, theme styling
+
+**Related Terms:** Split, Pane, Layout, Theme, Advanced Glyphs, Resizing Mode
 
 ### Pane
 A visible region in the split tree that contains a tab group and participates in split navigation. Pane is the user-facing term for the focused area created by a split.

@@ -17,4 +17,8 @@ pub enum UiStyleKey {
     Gutter,
     /// The main buffer viewport.
     Window,
+    /// The standard split border.
+    SplitBorder,
+    /// The split border used while resizing.
+    SplitBorderResize,
 }

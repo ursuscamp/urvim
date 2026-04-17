@@ -244,6 +244,8 @@ mod tests {
             Style::new().fg(Color::ansi(6)),
             Style::new().fg(Color::ansi(7)),
             Style::new().fg(Color::ansi(8)),
+            Style::new().fg(Color::ansi(9)),
+            Style::new().fg(Color::ansi(10)),
         );
         let syntax_map = BTreeMap::new();
         let syntax_styles = SyntaxTagStyles::new(syntax_map);

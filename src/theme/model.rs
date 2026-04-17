@@ -112,6 +112,10 @@ pub struct UiStyles {
     pub gutter: Style,
     /// Style used by the main window background.
     pub window: Style,
+    /// Style used by split borders during normal editing.
+    pub split_border: Style,
+    /// Style used by split borders while resizing.
+    pub split_border_resize: Style,
 }
 
 impl UiStyles {
@@ -126,6 +130,8 @@ impl UiStyles {
         tab_scroll_indicator: Style,
         gutter: Style,
         window: Style,
+        split_border: Style,
+        split_border_resize: Style,
     ) -> Self {
         Self {
             status_bar,
@@ -137,6 +143,8 @@ impl UiStyles {
             tab_scroll_indicator,
             gutter,
             window,
+            split_border,
+            split_border_resize,
         }
     }
 }
@@ -359,6 +367,8 @@ mod tests {
             Style::new().fg(Color::ansi(5)),
             Style::new().fg(Color::ansi(6)),
             Style::new().fg(Color::ansi(7)),
+            Style::new().fg(Color::ansi(8)),
+            Style::new().fg(Color::ansi(9)),
         );
         let mut syntax_styles = SyntaxTagStyles::default();
         syntax_styles.insert(tag("comment"), Style::new().bold().fg(Color::ansi(10)));

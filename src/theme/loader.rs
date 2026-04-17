@@ -162,6 +162,22 @@ fn resolve_ui_styles(
             &raw.window,
             palette,
         )?,
+        resolve_style(
+            theme_name,
+            "ui",
+            "split_border",
+            default_style,
+            &raw.split_border,
+            palette,
+        )?,
+        resolve_style(
+            theme_name,
+            "ui",
+            "split_border_resize",
+            default_style,
+            &raw.split_border_resize,
+            palette,
+        )?,
     ))
 }
 
@@ -351,6 +367,50 @@ mod tests {
         }
     }
 
+    fn split_border_style(theme: &str) -> Style {
+        match theme {
+            "Friday Night" => Style::new().fg(Color::ansi(244)).bg(Color::ansi(16)),
+            "Saturday Morning" => Style::new().fg(Color::ansi(241)).bg(Color::ansi(231)),
+            "Rose Pine" => Style::new()
+                .fg(Color::Rgb(Rgb::new(110, 106, 134)))
+                .bg(Color::Rgb(Rgb::new(25, 23, 36))),
+            "Dracula" => Style::new()
+                .fg(Color::Rgb(Rgb::new(98, 114, 164)))
+                .bg(Color::Rgb(Rgb::new(40, 42, 54))),
+            "Tokyo Night" => Style::new()
+                .fg(Color::Rgb(Rgb::new(86, 95, 137)))
+                .bg(Color::Rgb(Rgb::new(26, 27, 38))),
+            "Catppuccin" => Style::new()
+                .fg(Color::Rgb(Rgb::new(108, 112, 134)))
+                .bg(Color::Rgb(Rgb::new(30, 30, 46))),
+            other => panic!("unexpected theme {other}"),
+        }
+    }
+
+    fn split_border_resize_style(theme: &str) -> Style {
+        match theme {
+            "Friday Night" => Style::new().fg(Color::ansi(75)).bg(Color::ansi(16)).bold(),
+            "Saturday Morning" => Style::new().fg(Color::ansi(24)).bg(Color::ansi(231)).bold(),
+            "Rose Pine" => Style::new()
+                .fg(Color::Rgb(Rgb::new(196, 167, 231)))
+                .bg(Color::Rgb(Rgb::new(25, 23, 36)))
+                .bold(),
+            "Dracula" => Style::new()
+                .fg(Color::Rgb(Rgb::new(189, 147, 249)))
+                .bg(Color::Rgb(Rgb::new(40, 42, 54)))
+                .bold(),
+            "Tokyo Night" => Style::new()
+                .fg(Color::Rgb(Rgb::new(122, 162, 247)))
+                .bg(Color::Rgb(Rgb::new(26, 27, 38)))
+                .bold(),
+            "Catppuccin" => Style::new()
+                .fg(Color::Rgb(Rgb::new(203, 166, 247)))
+                .bg(Color::Rgb(Rgb::new(30, 30, 46)))
+                .bold(),
+            other => panic!("unexpected theme {other}"),
+        }
+    }
+
     fn sample_theme() -> &'static str {
         r##"
 name = "demo"
@@ -373,6 +433,8 @@ tab_inactive = { fg = "base" }
 tab_scroll_indicator = { fg = "base" }
 gutter = { fg = "base" }
 window = { fg = "base" }
+split_border = { fg = "base" }
+split_border_resize = { fg = "accent", bold = true }
 
 [syntax]
 comment = { fg = "base" }
@@ -408,6 +470,20 @@ variable = { fg = "base" }
                 .bold()
         );
         assert_eq!(theme.ui.active_line, Style::new().bg(Color::ansi(0)));
+        assert_eq!(
+            theme.ui.split_border,
+            Style::new()
+                .fg(Color::ansi(0))
+                .bg(Color::Rgb(Rgb::new(17, 34, 51)))
+                .bold()
+        );
+        assert_eq!(
+            theme.ui.split_border_resize,
+            Style::new()
+                .fg(Color::Rgb(Rgb::new(17, 34, 51)))
+                .bg(Color::Rgb(Rgb::new(17, 34, 51)))
+                .bold()
+        );
     }
 
     #[test]
@@ -715,6 +791,16 @@ variable = { fg = "base" }
                 theme.ui.active_line,
                 active_line_style(name),
                 "theme {name} should define an active line style"
+            );
+            assert_eq!(
+                theme.ui.split_border,
+                split_border_style(name),
+                "theme {name} should define a normal split border style"
+            );
+            assert_eq!(
+                theme.ui.split_border_resize,
+                split_border_resize_style(name),
+                "theme {name} should define a resize split border style"
             );
         }
         assert_eq!(

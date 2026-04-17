@@ -87,4 +87,10 @@ pub struct RawUiStyles {
     pub gutter: RawStyle,
     /// The main buffer viewport.
     pub window: RawStyle,
+    /// The standard split border.
+    #[serde(default)]
+    pub split_border: RawStyle,
+    /// The split border used while resizing.
+    #[serde(default)]
+    pub split_border_resize: RawStyle,
 }

@@ -27,6 +27,8 @@ const DEFAULT_XDG_CONFIG_DIRS: &str = "/etc/xdg";
 pub enum AdvancedGlyphCapability {
     /// Enable nerdfont glyph rendering.
     Nerdfont,
+    /// Enable Unicode line-drawing split borders.
+    UnicodeBorders,
 }
 
 /// How insert-mode tab presses should insert text.
@@ -234,6 +236,12 @@ impl Config {
     pub fn nerdfont_enabled(&self) -> bool {
         self.advanced_glyphs
             .contains(&AdvancedGlyphCapability::Nerdfont)
+    }
+
+    /// Returns whether Unicode split borders are enabled.
+    pub fn unicode_borders_enabled(&self) -> bool {
+        self.advanced_glyphs
+            .contains(&AdvancedGlyphCapability::UnicodeBorders)
     }
 }
 
@@ -452,7 +460,10 @@ mod tests {
             active_line: Some(true),
             todo_markers: Some(todo_marker_strings(&["TASK", "FIXME"])),
             auto_indent: Some(AutoIndentMode::Neighbor),
-            advanced_glyphs: Some(vec![AdvancedGlyphCapability::Nerdfont]),
+            advanced_glyphs: Some(vec![
+                AdvancedGlyphCapability::Nerdfont,
+                AdvancedGlyphCapability::UnicodeBorders,
+            ]),
             ..Default::default()
         };
 
@@ -506,7 +517,10 @@ mod tests {
         );
         assert_eq!(
             Config::resolve(Some(&file), None, None).advanced_glyphs,
-            glyph_caps(&[AdvancedGlyphCapability::Nerdfont])
+            glyph_caps(&[
+                AdvancedGlyphCapability::Nerdfont,
+                AdvancedGlyphCapability::UnicodeBorders
+            ])
         );
     }
 
@@ -520,6 +534,18 @@ mod tests {
         };
 
         assert!(Config::resolve(Some(&file), None, None).nerdfont_enabled());
+    }
+
+    #[test]
+    fn unicode_borders_enabled_checks_resolved_advanced_glyphs() {
+        assert!(!Config::resolve(None, None, None).unicode_borders_enabled());
+
+        let file = PartialConfig {
+            advanced_glyphs: Some(vec![AdvancedGlyphCapability::UnicodeBorders]),
+            ..Default::default()
+        };
+
+        assert!(Config::resolve(Some(&file), None, None).unicode_borders_enabled());
     }
 
     #[test]
@@ -755,13 +781,19 @@ mod tests {
     #[test]
     fn load_from_locations_loads_advanced_glyph_caps() {
         let home = unique_temp_dir("glyph-home");
-        write_config(&home, "advanced_glyphs = [\"nerdfont\", \"nerdfont\"]");
+        write_config(
+            &home,
+            "advanced_glyphs = [\"nerdfont\", \"unicode_borders\", \"nerdfont\"]",
+        );
 
         let config = Config::load_from_locations(home, vec![], None, None).expect("should load");
 
         assert_eq!(
             config.advanced_glyphs,
-            glyph_caps(&[AdvancedGlyphCapability::Nerdfont])
+            glyph_caps(&[
+                AdvancedGlyphCapability::Nerdfont,
+                AdvancedGlyphCapability::UnicodeBorders
+            ])
         );
     }
 
