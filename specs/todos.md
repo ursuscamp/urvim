@@ -11,7 +11,6 @@ This is a list, in no particular order, of things that need to be addressed whic
 - session support
 
 - improved layout
-    - cursor blinks rapidly for a moment moving between panes sometimes
     - resize
 
 # Bugs

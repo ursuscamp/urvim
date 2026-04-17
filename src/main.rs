@@ -80,10 +80,11 @@ fn main() -> io::Result<()> {
 
     terminal.set_cursor_style(layout.active_window_cursor_style())?;
 
+    let mut needs_redraw = true;
     loop {
-        globals::with_job_manager(|job_manager| {
+        let background_requested_redraw = globals::with_job_manager(|job_manager| {
             if let Some(job_manager) = job_manager {
-                let _ = job_manager.process_completed(|event| {
+                let accepted_redraw = job_manager.process_completed(|event| {
                     if let Ok((_kind, _token, result)) =
                         event.into_completed_output::<SyntaxCatchUpResult>()
                     {
@@ -92,222 +93,247 @@ fn main() -> io::Result<()> {
                         });
                     }
                 });
+
+                accepted_redraw || job_manager.take_redraw_requested()
+            } else {
+                false
             }
         });
 
-        globals::set_active_buffer_id(layout.active_buffer_view().buffer_id());
-        screen.clear();
-        layout.render(&mut screen, Position::new(0, 0), Size::new(rows, cols));
-        screen.render(&mut terminal)?;
+        if background_requested_redraw {
+            needs_redraw = true;
+        }
 
-        if let Some(cursor_pos) = layout.visual_cursor() {
-            terminal.set_cursor_position(cursor_pos.row + 1, cursor_pos.col + 1)?;
+        if render_frame_if_needed(
+            needs_redraw,
+            &mut layout,
+            &mut screen,
+            &mut terminal,
+            rows,
+            cols,
+        )? {
+            needs_redraw = false;
         }
 
         let event = terminal.read_event()?;
 
-        if let Event::Tick = event {
-            continue;
-        }
+        match event {
+            Event::Tick => continue,
+            Event::Paste(text) => {
+                tracing::debug!(
+                    len = text.len(),
+                    "ignoring bracketed paste event until raw paste insertion is implemented"
+                );
+            }
+            Event::Resize(new_rows, new_cols) => {
+                rows = new_rows;
+                cols = new_cols;
+                handle_resize(&mut terminal, &mut screen, rows, cols)?;
+                needs_redraw = true;
+            }
+            Event::Key(key) => {
+                let result = layout
+                    .active_window_group_mut()
+                    .active_window_mut()
+                    .handle_key(&key);
 
-        if let Event::Key(key) = event {
-            let result = layout
-                .active_window_group_mut()
-                .active_window_mut()
-                .handle_key(&key);
-
-            match result {
-                HandleKeyResult::Complete(action) => {
-                    let repeat_replay = action.resolve_dot_repeat();
-                    let dispatch_action = repeat_replay
-                        .as_ref()
-                        .map(|replay| replay.action.clone())
-                        .unwrap_or_else(|| {
-                            if action.is_repeat_command() {
-                                Action::none()
-                            } else {
-                                action.clone()
-                            }
-                        });
-                    match action.kind.as_ref() {
-                        Some(ActionKind::Undo) => {
-                            if let Some(cursor) = layout
-                                .active_buffer_view()
-                                .with_buffer_mut(|buffer| buffer.undo())
-                                .flatten()
-                            {
-                                layout.active_buffer_view_mut().set_cursor_synced(cursor);
-                                layout.active_window_group_mut().record_cursor_position();
-                            }
-                        }
-                        Some(ActionKind::Redo) => {
-                            if let Some(cursor) = layout
-                                .active_buffer_view()
-                                .with_buffer_mut(|buffer| buffer.redo())
-                                .flatten()
-                            {
-                                layout.active_buffer_view_mut().set_cursor_synced(cursor);
-                                layout.active_window_group_mut().record_cursor_position();
-                            }
-                        }
-                        _ => {
-                            let mut handled = false;
-                            if let Some(replay) = repeat_replay.as_ref() {
-                                handled = replay_repeat_action(&mut layout, replay);
-                                if handled
-                                    && replay.action.kind.is_some()
-                                    && let Some(to_mode) = replay.action.to_mode
-                                {
-                                    let repeat_text = {
-                                        let window =
-                                            layout.active_window_group_mut().active_window_mut();
-                                        window.switch_mode(to_mode)
-                                    };
-                                    terminal
-                                        .set_cursor_style(layout.active_window_cursor_style())?;
-                                    if let Some(repeat_text) =
-                                        repeat_text.filter(|text| !text.is_empty())
-                                        && let Some(mut repeat_state) = globals::get_last_repeat()
-                                    {
-                                        repeat_state.insert_text = Some(repeat_text);
-                                        globals::set_last_repeat(repeat_state);
-                                    }
+                match result {
+                    HandleKeyResult::Complete(action) => {
+                        let repeat_replay = action.resolve_dot_repeat();
+                        let dispatch_action = repeat_replay
+                            .as_ref()
+                            .map(|replay| replay.action.clone())
+                            .unwrap_or_else(|| {
+                                if action.is_repeat_command() {
+                                    Action::none()
+                                } else {
+                                    action.clone()
                                 }
-                            } else {
-                                let action_result = layout.process_action(&dispatch_action);
-
-                                if action_result == ActionResult::NotHandled {
-                                    // Fall back to app-level handling
-                                    match dispatch_action {
-                                        _ if matches!(
-                                            dispatch_action.kind.as_ref(),
-                                            Some(ActionKind::SaveBuffer(_))
-                                        ) =>
+                            });
+                        match action.kind.as_ref() {
+                            Some(ActionKind::Undo) => {
+                                if let Some(cursor) = layout
+                                    .active_buffer_view()
+                                    .with_buffer_mut(|buffer| buffer.undo())
+                                    .flatten()
+                                {
+                                    layout.active_buffer_view_mut().set_cursor_synced(cursor);
+                                    layout.active_window_group_mut().record_cursor_position();
+                                }
+                            }
+                            Some(ActionKind::Redo) => {
+                                if let Some(cursor) = layout
+                                    .active_buffer_view()
+                                    .with_buffer_mut(|buffer| buffer.redo())
+                                    .flatten()
+                                {
+                                    layout.active_buffer_view_mut().set_cursor_synced(cursor);
+                                    layout.active_window_group_mut().record_cursor_position();
+                                }
+                            }
+                            _ => {
+                                let mut handled = false;
+                                if let Some(replay) = repeat_replay.as_ref() {
+                                    handled = replay_repeat_action(&mut layout, replay);
+                                    if handled
+                                        && replay.action.kind.is_some()
+                                        && let Some(to_mode) = replay.action.to_mode
+                                    {
+                                        let repeat_text = {
+                                            let window = layout
+                                                .active_window_group_mut()
+                                                .active_window_mut();
+                                            window.switch_mode(to_mode)
+                                        };
+                                        terminal.set_cursor_style(
+                                            layout.active_window_cursor_style(),
+                                        )?;
+                                        if let Some(repeat_text) =
+                                            repeat_text.filter(|text| !text.is_empty())
+                                            && let Some(mut repeat_state) =
+                                                globals::get_last_repeat()
                                         {
-                                            let target = match dispatch_action.kind.as_ref() {
-                                                Some(ActionKind::SaveBuffer(target)) => *target,
-                                                _ => None,
-                                            };
-                                            let buffer_id = target.unwrap_or_else(|| {
-                                                layout.active_buffer_view().buffer_id()
-                                            });
-                                            let save_result = globals::with_buffer_pool(|pool| {
-                                                pool.save_buffer(buffer_id)
-                                            });
-                                            match save_result {
-                                                Ok(()) => {}
-                                                Err(error)
-                                                    if error.kind()
-                                                        == io::ErrorKind::InvalidInput =>
-                                                {
-                                                    tracing::info!(
-                                                        "Skipping save for unnamed buffer {:?}",
-                                                        buffer_id
-                                                    );
+                                            repeat_state.insert_text = Some(repeat_text);
+                                            globals::set_last_repeat(repeat_state);
+                                        }
+                                    }
+                                } else {
+                                    let action_result = layout.process_action(&dispatch_action);
+
+                                    if action_result == ActionResult::NotHandled {
+                                        // Fall back to app-level handling
+                                        match dispatch_action {
+                                            _ if matches!(
+                                                dispatch_action.kind.as_ref(),
+                                                Some(ActionKind::SaveBuffer(_))
+                                            ) =>
+                                            {
+                                                let target = match dispatch_action.kind.as_ref() {
+                                                    Some(ActionKind::SaveBuffer(target)) => *target,
+                                                    _ => None,
+                                                };
+                                                let buffer_id = target.unwrap_or_else(|| {
+                                                    layout.active_buffer_view().buffer_id()
+                                                });
+                                                let save_result =
+                                                    globals::with_buffer_pool(|pool| {
+                                                        pool.save_buffer(buffer_id)
+                                                    });
+                                                match save_result {
+                                                    Ok(()) => {}
+                                                    Err(error)
+                                                        if error.kind()
+                                                            == io::ErrorKind::InvalidInput =>
+                                                    {
+                                                        tracing::info!(
+                                                            "Skipping save for unnamed buffer {:?}",
+                                                            buffer_id
+                                                        );
+                                                    }
+                                                    Err(error) => {
+                                                        tracing::warn!(
+                                                            "Failed to save buffer {:?}: {}",
+                                                            buffer_id,
+                                                            error
+                                                        );
+                                                    }
                                                 }
-                                                Err(error) => {
-                                                    tracing::warn!(
-                                                        "Failed to save buffer {:?}: {}",
-                                                        buffer_id,
-                                                        error
-                                                    );
-                                                }
+                                                handled = true;
                                             }
-                                            handled = true;
+                                            _ if matches!(
+                                                dispatch_action.kind.as_ref(),
+                                                Some(ActionKind::Quit)
+                                            ) =>
+                                            {
+                                                globals::shutdown_job_manager();
+                                                break;
+                                            }
+                                            _ if dispatch_action.kind.is_none() => {
+                                                handled = true;
+                                            }
+                                            _ => { /* Should have been handled by window */ }
                                         }
-                                        _ if matches!(
-                                            dispatch_action.kind.as_ref(),
-                                            Some(ActionKind::Quit)
-                                        ) =>
+                                    } else if action_result == ActionResult::Handled {
+                                        let pending_repeat_suffix =
+                                            layout.take_pending_repeat_suffix();
+                                        if let Some(suffix) = pending_repeat_suffix.as_deref() {
+                                            layout
+                                                .active_window_group_mut()
+                                                .active_window_mut()
+                                                .append_repeat_text(suffix);
+                                        }
+                                        handled = true;
+                                    }
+
+                                    if handled && let Some(to_mode) = dispatch_action.to_mode {
+                                        let repeat_text = {
+                                            let window = layout
+                                                .active_window_group_mut()
+                                                .active_window_mut();
+                                            window.switch_mode(to_mode)
+                                        };
+                                        terminal.set_cursor_style(
+                                            layout.active_window_cursor_style(),
+                                        )?;
+                                        if let Some(repeat_text) =
+                                            repeat_text.filter(|text| !text.is_empty())
+                                            && let Some(mut repeat_state) =
+                                                globals::get_last_repeat()
                                         {
-                                            globals::shutdown_job_manager();
-                                            break;
+                                            repeat_state.insert_text = Some(repeat_text);
+                                            globals::set_last_repeat(repeat_state);
                                         }
-                                        _ if dispatch_action.kind.is_none() => {
-                                            handled = true;
-                                        }
-                                        _ => { /* Should have been handled by window */ }
                                     }
-                                } else if action_result == ActionResult::Handled {
-                                    let pending_repeat_suffix = layout.take_pending_repeat_suffix();
-                                    if let Some(suffix) = pending_repeat_suffix.as_deref() {
+                                }
+
+                                if handled {
+                                    // Snapshot after the edit so undo can restore the pre-change state.
+                                    if dispatch_action.is_snapshottable() {
+                                        let cursor = layout.active_buffer_view().cursor();
                                         layout
-                                            .active_window_group_mut()
-                                            .active_window_mut()
-                                            .append_repeat_text(suffix);
+                                            .active_buffer_view()
+                                            .with_buffer_mut(|buffer| buffer.push_snapshot(cursor))
+                                            .unwrap_or(());
                                     }
-                                    handled = true;
-                                }
 
-                                if handled && let Some(to_mode) = dispatch_action.to_mode {
-                                    let repeat_text = {
-                                        let window =
-                                            layout.active_window_group_mut().active_window_mut();
-                                        window.switch_mode(to_mode)
-                                    };
-                                    terminal
-                                        .set_cursor_style(layout.active_window_cursor_style())?;
-                                    if let Some(repeat_text) =
-                                        repeat_text.filter(|text| !text.is_empty())
-                                        && let Some(mut repeat_state) = globals::get_last_repeat()
+                                    if dispatch_action.updates_snapshot_cursor() {
+                                        let cursor = layout.active_buffer_view().cursor();
+                                        layout
+                                            .active_buffer_view()
+                                            .with_buffer_mut(|buffer| buffer.update_cursor(cursor))
+                                            .unwrap_or(());
+                                    }
+
+                                    if let Some((repeat_action, repeat_count)) =
+                                        action.dot_repeat_source()
                                     {
-                                        repeat_state.insert_text = Some(repeat_text);
-                                        globals::set_last_repeat(repeat_state);
+                                        globals::set_last_repeat(globals::RepeatState {
+                                            action: repeat_action,
+                                            count: repeat_count,
+                                            insert_text: None,
+                                        });
                                     }
-                                }
-                            }
 
-                            if handled {
-                                // Snapshot after the edit so undo can restore the pre-change state.
-                                if dispatch_action.is_snapshottable() {
-                                    let cursor = layout.active_buffer_view().cursor();
-                                    layout
-                                        .active_buffer_view()
-                                        .with_buffer_mut(|buffer| buffer.push_snapshot(cursor))
-                                        .unwrap_or(());
-                                }
-
-                                if dispatch_action.updates_snapshot_cursor() {
-                                    let cursor = layout.active_buffer_view().cursor();
-                                    layout
-                                        .active_buffer_view()
-                                        .with_buffer_mut(|buffer| buffer.update_cursor(cursor))
-                                        .unwrap_or(());
-                                }
-
-                                if let Some((repeat_action, repeat_count)) =
-                                    action.dot_repeat_source()
-                                {
-                                    globals::set_last_repeat(globals::RepeatState {
-                                        action: repeat_action,
-                                        count: repeat_count,
-                                        insert_text: None,
-                                    });
+                                    needs_redraw = true;
                                 }
                             }
                         }
-                    }
 
-                    if layout.should_exit() {
-                        globals::shutdown_job_manager();
-                        break;
-                    }
+                        if layout.should_exit() {
+                            globals::shutdown_job_manager();
+                            break;
+                        }
 
-                    terminal.set_cursor_style(layout.active_window_cursor_style())?;
-                }
-                HandleKeyResult::WaitForMore => {
-                    // Continue waiting for more keys, no action taken
-                }
-                HandleKeyResult::InvalidSequence => {
-                    // Ignore invalid sequences
+                        terminal.set_cursor_style(layout.active_window_cursor_style())?;
+                    }
+                    HandleKeyResult::WaitForMore => {
+                        // Continue waiting for more keys, no action taken
+                    }
+                    HandleKeyResult::InvalidSequence => {
+                        // Ignore invalid sequences
+                    }
                 }
             }
-        }
-
-        if let Event::Resize(new_rows, new_cols) = event {
-            rows = new_rows;
-            cols = new_cols;
-            handle_resize(&mut terminal, &mut screen, rows, cols)?;
         }
     }
 
@@ -337,6 +363,41 @@ fn select_active_theme(
             registry.names().join(", ")
         )
     })
+}
+
+fn render_frame_if_needed<I: io::Read + AsFd, O: io::Write + AsFd>(
+    needs_redraw: bool,
+    layout: &mut Layout,
+    screen: &mut Screen,
+    terminal: &mut Terminal<I, O>,
+    rows: u16,
+    cols: u16,
+) -> io::Result<bool> {
+    if !needs_redraw {
+        return Ok(false);
+    }
+
+    render_frame(layout, screen, terminal, rows, cols)?;
+    Ok(true)
+}
+
+fn render_frame<I: io::Read + AsFd, O: io::Write + AsFd>(
+    layout: &mut Layout,
+    screen: &mut Screen,
+    terminal: &mut Terminal<I, O>,
+    rows: u16,
+    cols: u16,
+) -> io::Result<()> {
+    globals::set_active_buffer_id(layout.active_buffer_view().buffer_id());
+    screen.clear();
+    layout.render(screen, Position::new(0, 0), Size::new(rows, cols));
+    screen.render(terminal)?;
+
+    if let Some(cursor_pos) = layout.visual_cursor() {
+        terminal.set_cursor_position(cursor_pos.row + 1, cursor_pos.col + 1)?;
+    }
+
+    Ok(())
 }
 
 fn replay_repeat_action(layout: &mut Layout, replay: &RepeatReplay) -> bool {
@@ -482,6 +543,21 @@ mod tests {
 
         assert_eq!(screen.size(), (3, 4));
         assert_eq!(output.lock().unwrap().as_slice(), b"\x1b[2J\x1b[H");
+    }
+
+    #[test]
+    fn render_frame_if_needed_skips_idle_noop_frames() {
+        let stdin = TestBackend::new(Vec::new());
+        let stdout = TestBackend::new(Vec::new());
+        let output = stdout.output.clone();
+        let mut terminal = Terminal::new_for_testing(stdin, stdout);
+        let mut layout = Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("hello")]));
+        let mut screen = Screen::new(1, 5);
+
+        assert!(
+            !render_frame_if_needed(false, &mut layout, &mut screen, &mut terminal, 1, 5).unwrap()
+        );
+        assert!(output.lock().unwrap().is_empty());
     }
 
     #[test]
