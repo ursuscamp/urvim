@@ -152,23 +152,13 @@ fn main() -> io::Result<()> {
                             });
                         match action.kind.as_ref() {
                             Some(ActionKind::Undo) => {
-                                if let Some(cursor) = layout
-                                    .active_buffer_view()
-                                    .with_buffer_mut(|buffer| buffer.undo())
-                                    .flatten()
-                                {
-                                    layout.active_buffer_view_mut().set_cursor_synced(cursor);
-                                    layout.active_window_group_mut().record_cursor_position();
+                                if apply_undo_redo(&mut layout, false) {
+                                    needs_redraw = true;
                                 }
                             }
                             Some(ActionKind::Redo) => {
-                                if let Some(cursor) = layout
-                                    .active_buffer_view()
-                                    .with_buffer_mut(|buffer| buffer.redo())
-                                    .flatten()
-                                {
-                                    layout.active_buffer_view_mut().set_cursor_synced(cursor);
-                                    layout.active_window_group_mut().record_cursor_position();
+                                if apply_undo_redo(&mut layout, true) {
+                                    needs_redraw = true;
                                 }
                             }
                             _ => {
@@ -381,6 +371,26 @@ fn render_frame_if_needed<I: io::Read + AsFd, O: io::Write + AsFd>(
     Ok(true)
 }
 
+fn apply_undo_redo(layout: &mut Layout, redo: bool) -> bool {
+    let cursor = if redo {
+        layout
+            .active_buffer_view()
+            .with_buffer_mut(|buffer| buffer.redo())
+    } else {
+        layout
+            .active_buffer_view()
+            .with_buffer_mut(|buffer| buffer.undo())
+    };
+
+    let Some(cursor) = cursor.flatten() else {
+        return false;
+    };
+
+    layout.active_buffer_view_mut().set_cursor_synced(cursor);
+    layout.active_window_group_mut().record_cursor_position();
+    true
+}
+
 fn render_frame<I: io::Read + AsFd, O: io::Write + AsFd>(
     layout: &mut Layout,
     screen: &mut Screen,
@@ -558,6 +568,39 @@ mod tests {
             !render_frame_if_needed(false, &mut layout, &mut screen, &mut terminal, 1, 5).unwrap()
         );
         assert!(output.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn apply_undo_redo_requests_redraw_after_success() {
+        let mut layout = Layout::new(WindowGroup::from_buffers(vec![Buffer::new()]));
+
+        assert!(
+            layout
+                .active_buffer_view_mut()
+                .with_buffer_mut(|buffer| {
+                    buffer.insert_text(Cursor::new(0, 0), "hello");
+                    buffer.push_snapshot(Cursor::new(0, 5));
+                })
+                .is_some()
+        );
+
+        assert!(apply_undo_redo(&mut layout, false));
+        assert_eq!(layout.active_buffer_view().cursor(), Cursor::new(0, 0));
+        assert_eq!(
+            layout
+                .active_buffer_view()
+                .with_buffer(|buffer| buffer.as_str().to_string()),
+            Some(String::new())
+        );
+
+        assert!(apply_undo_redo(&mut layout, true));
+        assert_eq!(layout.active_buffer_view().cursor(), Cursor::new(0, 5));
+        assert_eq!(
+            layout
+                .active_buffer_view()
+                .with_buffer(|buffer| buffer.as_str().to_string()),
+            Some("hello".to_string())
+        );
     }
 
     #[test]
