@@ -8,6 +8,7 @@ pub mod layout;
 pub mod logger;
 pub mod motion;
 pub mod path;
+pub mod register;
 pub mod screen;
 pub mod status_bar;
 pub mod syntax;

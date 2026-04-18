@@ -2,6 +2,8 @@
 
 This document describes the motions implemented in urvim and how they differ from Vim behavior.
 
+Register behavior is documented separately in [docs/registers.md](docs/registers.md).
+
 ## Supported Motions Cheat Sheet
 
 | Motion | Description |
@@ -94,6 +96,7 @@ urvim supports a simple character-wise visual mode.
 - Move with the usual motion keys to expand or shrink the selection.
 - Press `;` to repeat the last character search in the same direction.
 - Press `,` to repeat the last character search in the opposite direction.
+- Press `y` to yank the selection into the yank register and return to normal mode.
 - Press `d` to delete the selection and return to normal mode.
 - Press `c` to change the selection and enter insert mode.
 - Press `V` while in visual mode to switch to linewise visual mode.
@@ -105,6 +108,7 @@ urvim also supports linewise visual mode.
 
 - Press `V` in normal mode to enter linewise visual mode.
 - Move with the usual motion keys to extend the selection by whole lines.
+- Press `y` to yank the selected lines into the yank register and return to normal mode.
 - Press `d` to delete the selected lines and return to normal mode.
 - Press `c` to replace the selected lines with a blank line and enter insert mode.
 - Press `v` while in linewise visual mode to switch back to character-wise visual mode.

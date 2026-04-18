@@ -100,6 +100,54 @@ impl Buffer {
         }
     }
 
+    /// Returns the exact text covered by a characterwise range.
+    pub fn text_in_range(&self, start: Cursor, end: Cursor) -> Option<String> {
+        if start.line > end.line || (start.line == end.line && start.col >= end.col) {
+            return Some(String::new());
+        }
+        if !self.is_valid_cursor(start) || !self.is_valid_cursor(end) {
+            return None;
+        }
+
+        if start.line == end.line {
+            let line = self.line_at(start.line)?;
+            return Some(line[start.col..end.col].to_string());
+        }
+
+        let mut text = String::new();
+        let first_line = self.line_at(start.line)?;
+        text.push_str(&first_line[start.col..]);
+        for line_idx in start.line + 1..end.line {
+            text.push('\n');
+            text.push_str(self.line_at(line_idx)?);
+        }
+        text.push('\n');
+        let last_line = self.line_at(end.line)?;
+        text.push_str(&last_line[..end.col]);
+        Some(text)
+    }
+
+    /// Returns the exact text covered by a whole-line range.
+    pub fn text_in_lines(&self, start_line: usize, count: usize) -> Option<String> {
+        let total_lines = self.line_count();
+        if start_line >= total_lines {
+            return None;
+        }
+        if count == 0 {
+            return Some(String::new());
+        }
+
+        let actual_count = (total_lines - start_line).min(count);
+        let mut text = String::new();
+        for line_idx in start_line..start_line + actual_count {
+            if line_idx > start_line {
+                text.push('\n');
+            }
+            text.push_str(self.line_at(line_idx)?);
+        }
+        Some(text)
+    }
+
     pub fn delete_char_before_cursor(&mut self, cursor: Cursor) -> Option<Cursor> {
         if cursor.col == 0 {
             if cursor.line == 0 {

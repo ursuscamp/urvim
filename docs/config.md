@@ -23,11 +23,12 @@ Command-line flags override config file values.
 
 ## Current Schema
 
-The canonical config values are `theme`, `insert_escape`, `syntax`, `todo_markers`, `auto_close_pairs`, `active_line`, `auto_indent`, `advanced_glyphs`, `tab_insertion`, `tab_behavior`, and `tab_width`.
+The canonical config values are `theme`, `insert_escape`, `default_registers`, `syntax`, `todo_markers`, `auto_close_pairs`, `active_line`, `auto_indent`, `advanced_glyphs`, `tab_insertion`, `tab_behavior`, and `tab_width`.
 
 ```toml
 theme = "Friday Night"
 insert_escape = "jk"
+default_registers = { yank = "y", delete = "d", change = "c" }
 syntax = true
 todo_markers = ["TODO", "FIXME", "BUG", "NOTE"]
 auto_close_pairs = true
@@ -56,6 +57,16 @@ Sets an optional alternate insert-mode escape binding using urvim's canonical ke
 - Behavior: adds an additional insert-mode binding alongside `<Esc>`
 - Examples: `jk`, `<C-[>`
 - Validation: empty, whitespace-only, or malformed key strings are rejected at startup
+
+### `default_registers`
+
+Sets the default register selector used for yank, delete, and change operations.
+
+- Type: inline TOML table with `yank`, `delete`, and `change` entries
+- Default: `{ yank = "y", delete = "d", change = "c" }`
+- Behavior: these values control which register selector is used when the corresponding operator runs without an explicit register prefix, and they define the destinations selected by `"` + `y`, `"` + `d`, and `"` + `c`
+- Validation: each entry must be a single lowercase ASCII letter
+- Scope: register selection for yank, delete, and change
 
 ### `syntax`
 

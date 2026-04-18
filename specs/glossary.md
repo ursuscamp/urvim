@@ -110,6 +110,13 @@ A stored description of the last successful dot-repeatable edit. It records the 
 
 **Related Terms:** Change Operator, Insert Mode, Action, Mode
 
+### Register
+A session-scoped storage slot that holds copied or removed text along with whether that text is characterwise or linewise. Registers let yanked text be pasted later without depending on the buffer's current contents.
+
+**Context:** Yank, delete, change, paste workflows
+
+**Related Terms:** Buffer, Visual Mode, Visual Line Mode, Change Operator
+
 ### Resizing Mode
 A user-facing editor mode that lets the focused pane be resized with directional keys instead of editing text. In urvim, resizing mode is entered with `Ctrl-w r`, uses `h/j/k/l` for pane resizing, and exits with `Esc`.
 

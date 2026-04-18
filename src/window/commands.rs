@@ -1,9 +1,132 @@
 use super::*;
 use crate::buffer::IndentDirection;
+use crate::config::DefaultRegisters;
 use crate::editor::ActionKind;
 use crate::editor::pairs;
+use crate::register::{
+    self, DefaultRegisterRole, RegisterContent, RegisterContentKind, RegisterName,
+};
 
 impl Window {
+    fn resolved_register_name(
+        explicit: Option<RegisterName>,
+        role: DefaultRegisterRole,
+    ) -> RegisterName {
+        explicit.unwrap_or_else(|| {
+            let defaults = globals::with_config(|config| config.default_registers.clone())
+                .unwrap_or_else(DefaultRegisters::default);
+            register::default_register_name(role, &defaults)
+        })
+    }
+
+    pub(super) fn store_register_content(
+        &self,
+        explicit: Option<RegisterName>,
+        role: DefaultRegisterRole,
+        text: String,
+        kind: RegisterContentKind,
+    ) {
+        let register = Self::resolved_register_name(explicit, role);
+        globals::with_register_store_mut(|store| {
+            store.set(register, RegisterContent::new(text, kind));
+        });
+    }
+
+    pub(super) fn store_register_text(
+        &self,
+        explicit: Option<RegisterName>,
+        role: DefaultRegisterRole,
+        text: Option<String>,
+        kind: RegisterContentKind,
+    ) {
+        if let Some(text) = text {
+            self.store_register_content(explicit, role, text, kind);
+        }
+    }
+
+    pub(super) fn capture_characterwise_text(&self, start: Cursor, end: Cursor) -> Option<String> {
+        self.buffer_view
+            .with_buffer(|buffer| buffer.text_in_range(start, end))
+            .flatten()
+    }
+
+    pub(super) fn capture_linewise_text(&self, start_line: usize, count: usize) -> Option<String> {
+        self.buffer_view
+            .with_buffer(|buffer| buffer.text_in_lines(start_line, count))
+            .flatten()
+    }
+
+    fn paste_characterwise_text(&mut self, text: &str, after: bool) -> Option<Cursor> {
+        let cursor = self.buffer_view.cursor();
+        let insert_cursor = if after {
+            self.buffer_view
+                .with_buffer(|buffer| buffer.next_cursor_line(cursor))
+                .flatten()
+                .unwrap_or(cursor)
+        } else {
+            cursor
+        };
+
+        self.buffer_view
+            .with_buffer_mut(|buffer| buffer.insert_text(insert_cursor, text))
+            .unwrap_or(());
+
+        let mut new_cursor = insert_cursor;
+        for ch in text.chars() {
+            if ch == '\n' {
+                new_cursor = Cursor::new(new_cursor.line + 1, 0);
+            } else {
+                new_cursor = Cursor::new(new_cursor.line, new_cursor.col + ch.len_utf8());
+            }
+        }
+
+        Some(new_cursor)
+    }
+
+    fn paste_linewise_text(&mut self, text: &str, after: bool) -> Option<Cursor> {
+        let cursor = self.buffer_view.cursor();
+        let lines: Vec<&str> = text.split('\n').collect();
+        let line_count = lines.len();
+        let start_cursor = if after {
+            self.insert_auto_indented_lines_after(cursor.line, line_count, None)?
+        } else {
+            self.insert_auto_indented_lines_before(cursor.line, line_count, None)?
+        };
+
+        self.buffer_view.with_buffer_mut(|buffer| {
+            for (offset, line) in lines.iter().enumerate() {
+                buffer.insert_text(Cursor::new(start_cursor.line + offset, 0), line);
+            }
+        })?;
+
+        Some(start_cursor)
+    }
+
+    pub(super) fn paste_register_content(
+        &mut self,
+        explicit: Option<RegisterName>,
+        role: DefaultRegisterRole,
+        after: bool,
+    ) -> ActionResult {
+        let register = Self::resolved_register_name(explicit, role);
+        let Some(content) = globals::with_register_store(|store| store.get(register)) else {
+            return ActionResult::Handled;
+        };
+
+        let new_cursor = match content.kind {
+            RegisterContentKind::Characterwise => {
+                self.paste_characterwise_text(&content.text, after)
+            }
+            RegisterContentKind::Linewise => self.paste_linewise_text(&content.text, after),
+        };
+
+        if let Some(new_cursor) = new_cursor {
+            self.buffer_view.set_cursor(new_cursor);
+        }
+
+        ActionResult::Handled
+    }
+
     pub fn insert_char(&mut self, c: char) {
         let cursor = self.buffer_view.cursor();
         self.buffer_view
@@ -341,9 +464,12 @@ impl Window {
             Some(ActionKind::JoinWithSpace) | Some(ActionKind::JoinWithoutSpace) => {
                 self.handle_count_join(count, inner)
             }
-            Some(ActionKind::DeleteLine) => self.handle_count_delete_line(count),
-            Some(ActionKind::ChangeLine) => self.handle_count_change_line(count),
-            Some(ActionKind::ChangeToLineEnd) => self.handle_count_change_to_line_end(count),
+            Some(ActionKind::DeleteLine) => self.handle_count_delete_line(count, inner.register),
+            Some(ActionKind::YankLine) => self.handle_count_yank_line(count, inner.register),
+            Some(ActionKind::ChangeLine) => self.handle_count_change_line(count, inner.register),
+            Some(ActionKind::ChangeToLineEnd) => {
+                self.handle_count_change_to_line_end(count, inner.register)
+            }
             Some(ActionKind::OpenLineBelow) => self.handle_count_open_line_below(count),
             Some(ActionKind::OpenLineAbove) => self.handle_count_open_line_above(count),
             Some(ActionKind::IndentDecrease) => {
@@ -365,7 +491,7 @@ impl Window {
 
     fn handle_count_operation(&mut self, count: usize, action: &Action) -> ActionResult {
         if let Some(ActionKind::Operation(op, target)) = action.kind.as_ref() {
-            return self.handle_operation_with_count(*op, *target, count);
+            return self.handle_operation_with_count(*op, *target, count, action.register);
         }
         ActionResult::Handled
     }
@@ -428,8 +554,24 @@ impl Window {
         ActionResult::Handled
     }
 
-    fn handle_count_delete_line(&mut self, count: usize) -> ActionResult {
+    fn handle_count_delete_line(
+        &mut self,
+        count: usize,
+        register: Option<RegisterName>,
+    ) -> ActionResult {
         let cursor = self.buffer_view.cursor();
+        if let Some(text) = self
+            .buffer_view
+            .with_buffer(|buffer| buffer.text_in_lines(cursor.line, count))
+            .flatten()
+        {
+            self.store_register_content(
+                register,
+                DefaultRegisterRole::Delete,
+                text,
+                RegisterContentKind::Linewise,
+            );
+        }
         if let Some(new_cursor) = self
             .buffer_view
             .with_buffer_mut(|buffer| buffer.delete_lines(cursor.line, count))
@@ -440,18 +582,80 @@ impl Window {
         ActionResult::Handled
     }
 
-    fn handle_count_change_line(&mut self, count: usize) -> ActionResult {
+    fn handle_count_change_line(
+        &mut self,
+        count: usize,
+        register: Option<RegisterName>,
+    ) -> ActionResult {
+        let cursor = self.buffer_view.cursor();
+        if let Some(text) = self
+            .buffer_view
+            .with_buffer(|buffer| buffer.text_in_lines(cursor.line, count))
+            .flatten()
+        {
+            self.store_register_content(
+                register,
+                DefaultRegisterRole::Change,
+                text,
+                RegisterContentKind::Linewise,
+            );
+        }
         self.change_lines_with_auto_indent(count)
     }
 
-    pub(super) fn handle_count_change_to_line_end(&mut self, count: usize) -> ActionResult {
+    pub(super) fn handle_count_change_to_line_end(
+        &mut self,
+        count: usize,
+        register: Option<RegisterName>,
+    ) -> ActionResult {
         let cursor = self.buffer_view.cursor();
+        if let Some(text) = self
+            .buffer_view
+            .with_buffer(|buffer| {
+                let total_lines = buffer.line_count();
+                let end_line = cursor
+                    .line
+                    .saturating_add(count.saturating_sub(1))
+                    .min(total_lines.saturating_sub(1));
+                let end = Cursor::new(end_line, buffer.line_len(end_line));
+                buffer.text_in_range(cursor, end)
+            })
+            .flatten()
+        {
+            self.store_register_content(
+                register,
+                DefaultRegisterRole::Change,
+                text,
+                RegisterContentKind::Characterwise,
+            );
+        }
         if let Some(new_cursor) = self
             .buffer_view
             .with_buffer_mut(|buffer| buffer.change_to_line_end(cursor, count))
             .flatten()
         {
             self.buffer_view.set_cursor(new_cursor);
+        }
+        ActionResult::Handled
+    }
+
+    fn handle_count_yank_line(
+        &mut self,
+        count: usize,
+        register: Option<RegisterName>,
+    ) -> ActionResult {
+        let cursor = self.buffer_view.cursor();
+        if let Some(text) = self
+            .buffer_view
+            .with_buffer(|buffer| buffer.text_in_lines(cursor.line, count))
+            .flatten()
+        {
+            self.store_register_content(
+                register,
+                DefaultRegisterRole::Yank,
+                text,
+                RegisterContentKind::Linewise,
+            );
         }
         ActionResult::Handled
     }
@@ -521,12 +725,13 @@ impl Window {
         operator: Operator,
         target: OperatorTarget,
         count: usize,
+        register: Option<RegisterName>,
     ) -> ActionResult {
         match target {
             OperatorTarget::LinewiseMotion(motion) => {
-                self.handle_linewise_operation_with_count(operator, motion, count)
+                self.handle_linewise_operation_with_count(operator, motion, count, register)
             }
-            _ => self.handle_characterwise_operation_with_count(operator, target, count),
+            _ => self.handle_characterwise_operation_with_count(operator, target, count, register),
         }
     }
 
@@ -535,19 +740,61 @@ impl Window {
         operator: Operator,
         target: OperatorTarget,
         count: usize,
+        register: Option<RegisterName>,
     ) -> ActionResult {
         let cursor = self.buffer_view.cursor();
-        let result = self.buffer_view.with_buffer_mut(|buffer| {
-            let range = buffer.get_operator_target_range_with_count(cursor, target, count);
-            let range = range?;
-            if range.start == range.end {
-                return match operator {
-                    Operator::Change => Some(range.start),
-                    Operator::Delete => None,
-                };
+        let range = self
+            .buffer_view
+            .with_buffer(|buffer| {
+                buffer.get_operator_target_range_with_count(cursor, target, count)
+            })
+            .flatten();
+        let Some(range) = range else {
+            return self.operation_noop_result(operator);
+        };
+
+        let Some(text) = self
+            .buffer_view
+            .with_buffer(|buffer| buffer.text_in_range(range.start, range.end))
+            .flatten()
+        else {
+            return self.operation_noop_result(operator);
+        };
+
+        match operator {
+            Operator::Delete => self.store_register_content(
+                register,
+                DefaultRegisterRole::Delete,
+                text,
+                RegisterContentKind::Characterwise,
+            ),
+            Operator::Change => self.store_register_content(
+                register,
+                DefaultRegisterRole::Change,
+                text,
+                RegisterContentKind::Characterwise,
+            ),
+            Operator::Yank => {
+                self.store_register_content(
+                    register,
+                    DefaultRegisterRole::Yank,
+                    text,
+                    RegisterContentKind::Characterwise,
+                );
+                return ActionResult::Handled;
             }
-            buffer.delete_range(range)
-        });
+        }
+
+        if range.start == range.end {
+            if matches!(operator, Operator::Change) {
+                self.buffer_view.set_cursor(range.start);
+            }
+            return ActionResult::Handled;
+        }
+
+        let result = self
+            .buffer_view
+            .with_buffer_mut(|buffer| buffer.delete_range(range));
         let Some(Some(new_cursor)) = result else {
             return self.operation_noop_result(operator);
         };
@@ -560,15 +807,60 @@ impl Window {
         operator: Operator,
         motion: LinewiseMotion,
         count: usize,
+        register: Option<RegisterName>,
     ) -> ActionResult {
         let cursor = self.buffer_view.cursor();
-        let result = self.buffer_view.with_buffer_mut(|buffer| {
-            let range = buffer.get_linewise_operator_target_range_with_count(cursor, motion, count);
-            let range = range?;
-            if range.count == 0 {
-                return None;
+        let range = self
+            .buffer_view
+            .with_buffer(|buffer| {
+                buffer.get_linewise_operator_target_range_with_count(cursor, motion, count)
+            })
+            .flatten();
+        let Some(range) = range else {
+            return self.operation_noop_result(operator);
+        };
+
+        let Some(text) = self
+            .buffer_view
+            .with_buffer(|buffer| buffer.text_in_lines(range.start_line, range.count))
+            .flatten()
+        else {
+            return self.operation_noop_result(operator);
+        };
+
+        match operator {
+            Operator::Delete => self.store_register_content(
+                register,
+                DefaultRegisterRole::Delete,
+                text,
+                RegisterContentKind::Linewise,
+            ),
+            Operator::Change => self.store_register_content(
+                register,
+                DefaultRegisterRole::Change,
+                text,
+                RegisterContentKind::Linewise,
+            ),
+            Operator::Yank => {
+                self.store_register_content(
+                    register,
+                    DefaultRegisterRole::Yank,
+                    text,
+                    RegisterContentKind::Linewise,
+                );
+                return ActionResult::Handled;
             }
-            buffer.delete_lines(range.start_line, range.count)
+        }
+
+        if range.count == 0 {
+            return ActionResult::Handled;
+        }
+
+        let result = self.buffer_view.with_buffer_mut(|buffer| match operator {
+            Operator::Delete | Operator::Change => {
+                buffer.delete_lines(range.start_line, range.count)
+            }
+            Operator::Yank => None,
         });
         let Some(Some(new_cursor)) = result else {
             return self.operation_noop_result(operator);
@@ -581,12 +873,13 @@ impl Window {
         &mut self,
         operator: &Operator,
         target: &OperatorTarget,
+        register: Option<RegisterName>,
     ) -> ActionResult {
         match target {
             OperatorTarget::LinewiseMotion(motion) => {
-                self.handle_linewise_operation(*operator, *motion)
+                self.handle_linewise_operation(*operator, *motion, register)
             }
-            _ => self.handle_characterwise_operation_with_count(*operator, *target, 1),
+            _ => self.handle_characterwise_operation_with_count(*operator, *target, 1, register),
         }
     }
 
@@ -594,15 +887,58 @@ impl Window {
         &mut self,
         operator: Operator,
         motion: LinewiseMotion,
+        register: Option<RegisterName>,
     ) -> ActionResult {
         let cursor = self.buffer_view.cursor();
-        let result = self.buffer_view.with_buffer_mut(|buffer| {
-            let range = buffer.get_linewise_operator_target_range(cursor, motion);
-            let range = range?;
-            if range.count == 0 {
-                return None;
+        let range = self
+            .buffer_view
+            .with_buffer(|buffer| buffer.get_linewise_operator_target_range(cursor, motion))
+            .flatten();
+        let Some(range) = range else {
+            return self.operation_noop_result(operator);
+        };
+
+        let Some(text) = self
+            .buffer_view
+            .with_buffer(|buffer| buffer.text_in_lines(range.start_line, range.count))
+            .flatten()
+        else {
+            return self.operation_noop_result(operator);
+        };
+
+        match operator {
+            Operator::Delete => self.store_register_content(
+                register,
+                DefaultRegisterRole::Delete,
+                text,
+                RegisterContentKind::Linewise,
+            ),
+            Operator::Change => self.store_register_content(
+                register,
+                DefaultRegisterRole::Change,
+                text,
+                RegisterContentKind::Linewise,
+            ),
+            Operator::Yank => {
+                self.store_register_content(
+                    register,
+                    DefaultRegisterRole::Yank,
+                    text,
+                    RegisterContentKind::Linewise,
+                );
+                return ActionResult::Handled;
             }
-            buffer.delete_lines(range.start_line, range.count)
+        }
+
+        if range.count == 0 {
+            return ActionResult::Handled;
+        }
+
+        let result = self.buffer_view.with_buffer_mut(|buffer| match operator {
+            Operator::Delete | Operator::Change => {
+                buffer.delete_lines(range.start_line, range.count)
+            }
+            Operator::Yank => None,
         });
         let Some(Some(new_cursor)) = result else {
             return self.operation_noop_result(operator);
@@ -615,6 +951,7 @@ impl Window {
         match operator {
             Operator::Delete => ActionResult::Handled,
             Operator::Change => ActionResult::NotHandled,
+            Operator::Yank => ActionResult::Handled,
         }
     }
 }

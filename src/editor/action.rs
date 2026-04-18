@@ -1,6 +1,7 @@
 use crate::buffer::{Boundary, BufferId};
 use crate::editor::ModeKind;
 use crate::globals;
+use crate::register::RegisterName;
 
 /// Operators that wait for a motion or text object to define the target region.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -8,6 +9,8 @@ pub enum Operator {
     Delete,
     /// Delete text and enter insert mode after a successful operation.
     Change,
+    /// Copy text into a register without mutating the buffer.
+    Yank,
 }
 
 /// Boundary-based delete targets that mirror motion families.
@@ -142,6 +145,7 @@ pub struct Action {
     pub kind: Option<ActionKind>,
     pub from_mode: Option<ModeKind>,
     pub to_mode: Option<ModeKind>,
+    pub register: Option<RegisterName>,
 }
 
 /// Intent payload for an action envelope.
@@ -201,9 +205,14 @@ pub enum ActionKind {
     JoinWithSpace,
     JoinWithoutSpace,
     DeleteLine,
+    YankLine,
+    /// Copy the active visual selection without mutating the buffer.
+    YankSelection,
     ChangeLine,
     ChangeSelection,
     ChangeToLineEnd,
+    PasteAfter,
+    PasteBefore,
     AppendAfterCursor,
     AppendToLineEnd,
     InsertAtLineStart,
@@ -242,6 +251,7 @@ impl Action {
             kind: Some(kind),
             from_mode: None,
             to_mode: None,
+            register: None,
         }
     }
 
@@ -251,6 +261,7 @@ impl Action {
             kind: None,
             from_mode: None,
             to_mode: None,
+            register: None,
         }
     }
 
@@ -260,6 +271,7 @@ impl Action {
             kind: None,
             from_mode: None,
             to_mode: Some(to_mode),
+            register: None,
         }
     }
 
@@ -313,6 +325,16 @@ impl Action {
         Self::new(ActionKind::SaveBuffer(target))
     }
 
+    /// Creates a paste-after action.
+    pub fn paste_after() -> Self {
+        Self::new(ActionKind::PasteAfter)
+    }
+
+    /// Creates a paste-before action.
+    pub fn paste_before() -> Self {
+        Self::new(ActionKind::PasteBefore)
+    }
+
     /// Creates a line-comment toggle action.
     pub fn toggle_line_comment() -> Self {
         Self::new(ActionKind::ToggleLineComment)
@@ -330,12 +352,14 @@ impl Action {
 
     /// Wraps an action in a repeat count.
     pub fn count(count: usize, inner: Box<Action>) -> Self {
+        let register = inner.register;
         let from_mode = inner.from_mode;
         let to_mode = inner.to_mode;
         Self {
             kind: Some(ActionKind::Count(count, inner)),
             from_mode,
             to_mode,
+            register,
         }
     }
 
@@ -344,12 +368,23 @@ impl Action {
         Self::new(ActionKind::Operation(operator, target))
     }
 
+    /// Targets a register for this action.
+    pub fn with_register(self, register: RegisterName) -> Self {
+        Self {
+            kind: self.kind,
+            from_mode: self.from_mode,
+            to_mode: self.to_mode,
+            register: Some(register),
+        }
+    }
+
     /// Overrides both the source and destination mode metadata.
     pub fn with_mode(self, from_mode: Option<ModeKind>, to_mode: Option<ModeKind>) -> Self {
         Self {
             kind: self.kind,
             from_mode,
             to_mode,
+            register: self.register,
         }
     }
 
@@ -359,6 +394,7 @@ impl Action {
             kind: self.kind,
             from_mode: Some(from_mode),
             to_mode: self.to_mode,
+            register: self.register,
         }
     }
 
@@ -368,6 +404,7 @@ impl Action {
             kind: self.kind,
             from_mode: self.from_mode,
             to_mode: Some(to_mode),
+            register: self.register,
         }
     }
 
@@ -396,6 +433,8 @@ impl Action {
                 | Some(ActionKind::DeleteForward)
                 | Some(ActionKind::DeleteSelection)
                 | Some(ActionKind::DeleteLine)
+                | Some(ActionKind::YankLine)
+                | Some(ActionKind::YankSelection)
                 | Some(ActionKind::ChangeLine)
                 | Some(ActionKind::ChangeSelection)
                 | Some(ActionKind::ChangeToLineEnd)
@@ -465,6 +504,9 @@ impl Action {
                 | Some(ActionKind::DeleteLine)
                 | Some(ActionKind::ChangeLine)
                 | Some(ActionKind::ChangeToLineEnd)
+                | Some(ActionKind::YankSelection)
+                | Some(ActionKind::PasteAfter)
+                | Some(ActionKind::PasteBefore)
                 | Some(ActionKind::OpenLineBelow)
                 | Some(ActionKind::OpenLineAbove)
                 | Some(ActionKind::ToggleLineComment)
@@ -492,6 +534,7 @@ impl Action {
                 | Some(ActionKind::MoveToLineContentStart)
                 | Some(ActionKind::MoveToFirstLine)
                 | Some(ActionKind::MoveToLastLine)
+                | Some(ActionKind::YankLine)
                 | Some(ActionKind::AppendToLineEnd)
                 | Some(ActionKind::InsertAtLineStart)
                 | Some(ActionKind::ToggleLineComment)
@@ -529,6 +572,8 @@ impl Action {
             | Some(ActionKind::ChangeLine)
             | Some(ActionKind::ChangeSelection)
             | Some(ActionKind::ChangeToLineEnd)
+            | Some(ActionKind::PasteAfter)
+            | Some(ActionKind::PasteBefore)
             | Some(ActionKind::JoinWithSpace)
             | Some(ActionKind::JoinWithoutSpace)
             | Some(ActionKind::IndentDecrease)
@@ -546,6 +591,7 @@ impl Action {
             Some(ActionKind::Count(_, inner)) => inner.is_snapshottable(),
             Some(ActionKind::Operation(Operator::Delete, _))
             | Some(ActionKind::Operation(Operator::Change, _)) => true,
+            Some(ActionKind::Operation(Operator::Yank, _)) => false,
             _ => false,
         }
     }
@@ -574,6 +620,8 @@ impl Action {
             | Some(ActionKind::MoveToScreenTop)
             | Some(ActionKind::MoveToScreenMiddle)
             | Some(ActionKind::MoveToScreenBottom)
+            | Some(ActionKind::PasteAfter)
+            | Some(ActionKind::PasteBefore)
             | Some(ActionKind::MoveToMatchingBracket)
             | Some(ActionKind::MoveToPreviousParagraph)
             | Some(ActionKind::MoveToNextParagraph)
@@ -601,6 +649,8 @@ impl Action {
             | Some(ActionKind::ChangeLine)
             | Some(ActionKind::ChangeSelection)
             | Some(ActionKind::ChangeToLineEnd)
+            | Some(ActionKind::PasteAfter)
+            | Some(ActionKind::PasteBefore)
             | Some(ActionKind::IndentDecrease)
             | Some(ActionKind::IndentIncrease)
             | Some(ActionKind::AppendAfterCursor)
@@ -634,6 +684,7 @@ impl Action {
                     kind: Some(kind.clone()),
                     from_mode: self.from_mode,
                     to_mode: self.to_mode,
+                    register: self.register,
                 },
                 1,
             )),

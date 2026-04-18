@@ -5,6 +5,7 @@ use super::{
 };
 use crate::buffer::Boundary;
 use crate::editor::ActionKind;
+use crate::globals;
 use crate::motion::chained_keymap::ChainedKeymap;
 use crate::motion::char_scan_keymap::CharScanKeymap;
 use crate::terminal::{CursorStyle, Key, KeyCode};
@@ -101,6 +102,7 @@ impl NormalMode {
         trie_keymap.insert_str("x", Action::new(ActionKind::DeleteForward));
         trie_keymap.insert_str("X", Action::new(ActionKind::DeleteBackward));
         trie_keymap.insert_str("dd", Action::new(ActionKind::DeleteLine));
+        trie_keymap.insert_str("yy", Action::new(ActionKind::YankLine));
         trie_keymap.insert_str(
             "diw",
             Action::operation(
@@ -126,6 +128,34 @@ impl NormalMode {
             "daW",
             Action::operation(
                 Operator::Delete,
+                OperatorTarget::TextObject(TextObject::AroundBigWord),
+            ),
+        );
+        trie_keymap.insert_str(
+            "yiw",
+            Action::operation(
+                Operator::Yank,
+                OperatorTarget::TextObject(TextObject::InnerWord),
+            ),
+        );
+        trie_keymap.insert_str(
+            "yaw",
+            Action::operation(
+                Operator::Yank,
+                OperatorTarget::TextObject(TextObject::AroundWord),
+            ),
+        );
+        trie_keymap.insert_str(
+            "yiW",
+            Action::operation(
+                Operator::Yank,
+                OperatorTarget::TextObject(TextObject::InnerBigWord),
+            ),
+        );
+        trie_keymap.insert_str(
+            "yaW",
+            Action::operation(
+                Operator::Yank,
                 OperatorTarget::TextObject(TextObject::AroundBigWord),
             ),
         );
@@ -179,6 +209,20 @@ impl NormalMode {
                     OperatorTarget::TextObject(TextObject::AroundQuote(kind)),
                 )
                 .with_to_mode(ModeKind::Insert),
+            );
+            trie_keymap.insert_str(
+                &format!("yi{key}"),
+                Action::operation(
+                    Operator::Yank,
+                    OperatorTarget::TextObject(TextObject::InnerQuote(kind)),
+                ),
+            );
+            trie_keymap.insert_str(
+                &format!("ya{key}"),
+                Action::operation(
+                    Operator::Yank,
+                    OperatorTarget::TextObject(TextObject::AroundQuote(kind)),
+                ),
             );
         }
         for (kind, open, close) in [
@@ -254,6 +298,34 @@ impl NormalMode {
                     OperatorTarget::TextObject(TextObject::AroundBracket(kind)),
                 )
                 .with_to_mode(ModeKind::Insert),
+            );
+            trie_keymap.insert_str(
+                &format!("yi{open_key}"),
+                Action::operation(
+                    Operator::Yank,
+                    OperatorTarget::TextObject(TextObject::InnerBracket(kind)),
+                ),
+            );
+            trie_keymap.insert_str(
+                &format!("yi{close_key}"),
+                Action::operation(
+                    Operator::Yank,
+                    OperatorTarget::TextObject(TextObject::InnerBracket(kind)),
+                ),
+            );
+            trie_keymap.insert_str(
+                &format!("ya{open_key}"),
+                Action::operation(
+                    Operator::Yank,
+                    OperatorTarget::TextObject(TextObject::AroundBracket(kind)),
+                ),
+            );
+            trie_keymap.insert_str(
+                &format!("ya{close_key}"),
+                Action::operation(
+                    Operator::Yank,
+                    OperatorTarget::TextObject(TextObject::AroundBracket(kind)),
+                ),
             );
         }
         trie_keymap.insert_str(
@@ -333,6 +405,113 @@ impl NormalMode {
                 OperatorTarget::LinewiseMotion(LinewiseMotion::LastLine),
             ),
         );
+        trie_keymap.insert_str(
+            "yw",
+            Action::operation(
+                Operator::Yank,
+                OperatorTarget::BoundaryMotion(BoundaryMotion::WordForward),
+            ),
+        );
+        trie_keymap.insert_str(
+            "ye",
+            Action::operation(
+                Operator::Yank,
+                OperatorTarget::BoundaryMotion(BoundaryMotion::WordEnd),
+            ),
+        );
+        trie_keymap.insert_str(
+            "yb",
+            Action::operation(
+                Operator::Yank,
+                OperatorTarget::BoundaryMotion(BoundaryMotion::WordBackward),
+            ),
+        );
+        trie_keymap.insert_str(
+            "yW",
+            Action::operation(
+                Operator::Yank,
+                OperatorTarget::BoundaryMotion(BoundaryMotion::BigWordForward),
+            ),
+        );
+        trie_keymap.insert_str(
+            "yE",
+            Action::operation(
+                Operator::Yank,
+                OperatorTarget::BoundaryMotion(BoundaryMotion::BigWordEnd),
+            ),
+        );
+        trie_keymap.insert_str(
+            "yB",
+            Action::operation(
+                Operator::Yank,
+                OperatorTarget::BoundaryMotion(BoundaryMotion::BigWordBackward),
+            ),
+        );
+        trie_keymap.insert_str(
+            "yiw",
+            Action::operation(
+                Operator::Yank,
+                OperatorTarget::TextObject(TextObject::InnerWord),
+            ),
+        );
+        trie_keymap.insert_str(
+            "yaw",
+            Action::operation(
+                Operator::Yank,
+                OperatorTarget::TextObject(TextObject::AroundWord),
+            ),
+        );
+        trie_keymap.insert_str(
+            "yiW",
+            Action::operation(
+                Operator::Yank,
+                OperatorTarget::TextObject(TextObject::InnerBigWord),
+            ),
+        );
+        trie_keymap.insert_str(
+            "yaW",
+            Action::operation(
+                Operator::Yank,
+                OperatorTarget::TextObject(TextObject::AroundBigWord),
+            ),
+        );
+        trie_keymap.insert_str(
+            "y$",
+            Action::operation(
+                Operator::Yank,
+                OperatorTarget::BoundaryMotion(BoundaryMotion::LineEnd),
+            ),
+        );
+        trie_keymap.insert_str(
+            "y0",
+            Action::operation(
+                Operator::Yank,
+                OperatorTarget::BoundaryMotion(BoundaryMotion::LineStart),
+            ),
+        );
+        trie_keymap.insert_str(
+            "y^",
+            Action::operation(
+                Operator::Yank,
+                OperatorTarget::BoundaryMotion(BoundaryMotion::LineContentStart),
+            ),
+        );
+        trie_keymap.insert_str(
+            "ygg",
+            Action::operation(
+                Operator::Yank,
+                OperatorTarget::LinewiseMotion(LinewiseMotion::FirstLine),
+            ),
+        );
+        trie_keymap.insert_str(
+            "yG",
+            Action::operation(
+                Operator::Yank,
+                OperatorTarget::LinewiseMotion(LinewiseMotion::LastLine),
+            ),
+        );
+        trie_keymap.insert_str("p", Action::new(ActionKind::PasteAfter));
+        trie_keymap.insert_str("P", Action::new(ActionKind::PasteBefore));
         trie_keymap.insert_str(
             "cw",
             Action::operation(
@@ -471,6 +650,93 @@ impl NormalMode {
             waiting: false,
         }
     }
+
+    fn resolve_register_selector(selector: char) -> Option<crate::register::RegisterName> {
+        let defaults =
+            globals::with_config(|config| config.default_registers.clone()).unwrap_or_default();
+        crate::register::RegisterName::from_prefix(selector, &defaults)
+    }
+
+    fn parse_buffered_action(&self) -> HandleKeyResult {
+        let keys = self.buffer.clone();
+        let (leading_count, remaining_keys) = extract_leading_count(&keys);
+        let mut action_keys = remaining_keys;
+        let mut register_prefix = None;
+
+        if action_keys.first().is_some_and(|key| key == "\"") {
+            if action_keys.len() == 1 {
+                return HandleKeyResult::WaitForMore;
+            }
+
+            let selector = action_keys[1].chars().next();
+            let Some(selector) = selector.filter(|ch| ch.is_ascii_lowercase()) else {
+                return HandleKeyResult::InvalidSequence;
+            };
+
+            let Some(register) = Self::resolve_register_selector(selector) else {
+                return HandleKeyResult::InvalidSequence;
+            };
+
+            register_prefix = Some(register);
+            action_keys.drain(0..2);
+        }
+
+        if action_keys.is_empty() {
+            return if register_prefix.is_some() || leading_count > 0 {
+                HandleKeyResult::WaitForMore
+            } else {
+                HandleKeyResult::InvalidSequence
+            };
+        }
+
+        let (action_keys, count) = CountParser::parse(&action_keys);
+        let total_count = if leading_count > 0 {
+            leading_count.saturating_mul(count).min(MAX_COUNT)
+        } else {
+            count
+        };
+        if let Some(mut action) = self.keymap.get_action(&action_keys) {
+            if self.keymap.has_children(&action_keys) {
+                return HandleKeyResult::WaitForMore;
+            }
+
+            if let Some(register) = register_prefix {
+                action = action.with_register(register);
+            }
+
+            if Self::ignores_count_wrapping(&action) {
+                return HandleKeyResult::Complete(action.with_from_mode(ModeKind::Normal));
+            }
+
+            if total_count > 1
+                && let Some(counted_action) = action.clone().with_count(total_count)
+            {
+                return HandleKeyResult::Complete(counted_action.with_from_mode(ModeKind::Normal));
+            }
+            return HandleKeyResult::Complete(action.with_from_mode(ModeKind::Normal));
+        }
+
+        if self.keymap.is_prefix(&action_keys) {
+            return HandleKeyResult::WaitForMore;
+        }
+
+        if leading_count > 0 || register_prefix.is_some() {
+            HandleKeyResult::InvalidSequence
+        } else {
+            HandleKeyResult::InvalidSequence
+        }
+    }
+
+    // These are mode commands rather than motions, so we never wrap them in a
+    // numeric repeat count.
+    fn ignores_count_wrapping(action: &Action) -> bool {
+        matches!(
+            action.kind.as_ref(),
+            Some(ActionKind::DeleteSelection)
+                | Some(ActionKind::ChangeSelection)
+                | Some(ActionKind::YankSelection)
+        ) || (action.kind.is_none() && action.to_mode == Some(ModeKind::Normal))
+    }
 }
 
 impl Mode for NormalMode {
@@ -481,8 +747,7 @@ impl Mode for NormalMode {
             return HandleKeyResult::InvalidSequence;
         }
 
-        let key_str = key.canonical_string();
-        self.buffer.push(key_str.clone());
+        self.buffer.push(key.canonical_string());
 
         let buffer_str: String = self.buffer.iter().cloned().collect();
         let all_digits = self.buffer.iter().all(|k| {
@@ -498,62 +763,22 @@ impl Mode for NormalMode {
             return HandleKeyResult::WaitForMore;
         }
 
-        let (leading_count, remaining_keys) = extract_leading_count(&self.buffer);
-        if leading_count > 0 && !remaining_keys.is_empty() {
-            let (action_keys, sub_count) = CountParser::parse(&remaining_keys);
-            let total_count = leading_count.saturating_mul(sub_count).min(MAX_COUNT);
-
-            if let Some(action) = self.keymap.get_action(&action_keys) {
-                if self.keymap.has_children(&action_keys) {
-                    self.waiting = true;
-                    return HandleKeyResult::WaitForMore;
-                }
-
+        match self.parse_buffered_action() {
+            HandleKeyResult::WaitForMore => {
+                self.waiting = true;
+                HandleKeyResult::WaitForMore
+            }
+            HandleKeyResult::Complete(action) => {
                 self.buffer.clear();
                 self.waiting = false;
-
-                if total_count > 1
-                    && let Some(counted_action) = action.clone().with_count(total_count)
-                {
-                    return HandleKeyResult::Complete(
-                        counted_action.with_from_mode(ModeKind::Normal),
-                    );
-                }
-                return HandleKeyResult::Complete(action.with_from_mode(ModeKind::Normal));
+                HandleKeyResult::Complete(action)
             }
-
-            if self.keymap.is_prefix(&action_keys) {
-                self.waiting = true;
-                return HandleKeyResult::WaitForMore;
+            HandleKeyResult::InvalidSequence => {
+                self.buffer.clear();
+                self.waiting = false;
+                HandleKeyResult::InvalidSequence
             }
         }
-
-        let (action_keys, count) = CountParser::parse(&self.buffer);
-        if let Some(action) = self.keymap.get_action(&action_keys) {
-            if self.keymap.has_children(&action_keys) {
-                self.waiting = true;
-                return HandleKeyResult::WaitForMore;
-            }
-
-            self.buffer.clear();
-            self.waiting = false;
-
-            if count > 1
-                && let Some(counted_action) = action.clone().with_count(count)
-            {
-                return HandleKeyResult::Complete(counted_action.with_from_mode(ModeKind::Normal));
-            }
-            return HandleKeyResult::Complete(action.with_from_mode(ModeKind::Normal));
-        }
-
-        if self.keymap.is_prefix(&action_keys) {
-            self.waiting = true;
-            return HandleKeyResult::WaitForMore;
-        }
-
-        self.buffer.clear();
-        self.waiting = false;
-        HandleKeyResult::InvalidSequence
     }
 
     fn cursor_style(&self) -> CursorStyle {

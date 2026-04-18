@@ -31,15 +31,13 @@ impl VisualModeState {
 
     pub(super) fn handle_key(&mut self, key: &Key) -> HandleKeyResult {
         if key.code == KeyCode::Esc {
-            self.buffer.clear();
-            self.waiting = false;
+            self.clear_buffer();
             return HandleKeyResult::Complete(
                 Action::mode_transition(ModeKind::Normal).with_from_mode(self.mode_kind),
             );
         }
 
-        let key_str = key.canonical_string();
-        self.buffer.push(key_str.clone());
+        self.buffer.push(key.canonical_string());
 
         let buffer_str: String = self.buffer.iter().cloned().collect();
         let all_digits = self.buffer.iter().all(|k| {
@@ -55,70 +53,22 @@ impl VisualModeState {
             return HandleKeyResult::WaitForMore;
         }
 
-        let (leading_count, remaining_keys) = extract_leading_count(&self.buffer);
-        if leading_count > 0 && !remaining_keys.is_empty() {
-            let (action_keys, sub_count) = CountParser::parse(&remaining_keys);
-            let total_count = leading_count.saturating_mul(sub_count).min(MAX_COUNT);
-
-            if let Some(action) = self.keymap.get_action(&action_keys) {
-                if self.keymap.has_children(&action_keys) {
-                    self.waiting = true;
-                    return HandleKeyResult::WaitForMore;
-                }
-
+        match self.parse_buffered_action() {
+            HandleKeyResult::WaitForMore => {
+                self.waiting = true;
+                HandleKeyResult::WaitForMore
+            }
+            HandleKeyResult::Complete(action) => {
                 self.buffer.clear();
                 self.waiting = false;
-
-                if Self::ignores_count_wrapping(&action) {
-                    return HandleKeyResult::Complete(action.with_from_mode(self.mode_kind));
-                }
-
-                if total_count > 1
-                    && let Some(counted_action) = action.clone().with_count(total_count)
-                {
-                    return HandleKeyResult::Complete(
-                        counted_action.with_from_mode(self.mode_kind),
-                    );
-                }
-                return HandleKeyResult::Complete(action.with_from_mode(self.mode_kind));
+                HandleKeyResult::Complete(action)
             }
-
-            if self.keymap.is_prefix(&action_keys) {
-                self.waiting = true;
-                return HandleKeyResult::WaitForMore;
+            HandleKeyResult::InvalidSequence => {
+                self.buffer.clear();
+                self.waiting = false;
+                HandleKeyResult::InvalidSequence
             }
         }
-
-        let (action_keys, count) = CountParser::parse(&self.buffer);
-        if let Some(action) = self.keymap.get_action(&action_keys) {
-            if self.keymap.has_children(&action_keys) {
-                self.waiting = true;
-                return HandleKeyResult::WaitForMore;
-            }
-
-            self.buffer.clear();
-            self.waiting = false;
-
-            if Self::ignores_count_wrapping(&action) {
-                return HandleKeyResult::Complete(action.with_from_mode(self.mode_kind));
-            }
-
-            if count > 1
-                && let Some(counted_action) = action.clone().with_count(count)
-            {
-                return HandleKeyResult::Complete(counted_action.with_from_mode(self.mode_kind));
-            }
-            return HandleKeyResult::Complete(action.with_from_mode(self.mode_kind));
-        }
-
-        if self.keymap.is_prefix(&action_keys) {
-            self.waiting = true;
-            return HandleKeyResult::WaitForMore;
-        }
-
-        self.buffer.clear();
-        self.waiting = false;
-        HandleKeyResult::InvalidSequence
     }
 
     pub(super) fn is_waiting(&self) -> bool {
@@ -139,8 +89,75 @@ impl VisualModeState {
     fn ignores_count_wrapping(action: &Action) -> bool {
         matches!(
             action.kind.as_ref(),
-            Some(ActionKind::DeleteSelection) | Some(ActionKind::ChangeSelection)
+            Some(ActionKind::DeleteSelection)
+                | Some(ActionKind::ChangeSelection)
+                | Some(ActionKind::YankSelection)
         ) || (action.kind.is_none() && action.to_mode == Some(ModeKind::Normal))
+    }
+
+    fn parse_buffered_action(&self) -> HandleKeyResult {
+        let keys = self.buffer.clone();
+        let (leading_count, remaining_keys) = extract_leading_count(&keys);
+        let mut action_keys = remaining_keys;
+        let mut register_prefix = None;
+
+        if action_keys.first().is_some_and(|key| key == "\"") {
+            if action_keys.len() == 1 {
+                return HandleKeyResult::WaitForMore;
+            }
+
+            let selector = action_keys[1].chars().next();
+            let Some(selector) = selector.filter(|ch| ch.is_ascii_lowercase()) else {
+                return HandleKeyResult::InvalidSequence;
+            };
+
+            let defaults = crate::globals::with_config(|config| config.default_registers.clone())
+                .unwrap_or_default();
+            let Some(register) = crate::register::RegisterName::from_prefix(selector, &defaults)
+            else {
+                return HandleKeyResult::InvalidSequence;
+            };
+
+            register_prefix = Some(register);
+            action_keys.drain(0..2);
+        }
+
+        if action_keys.is_empty() {
+            return HandleKeyResult::WaitForMore;
+        }
+
+        let (action_keys, count) = CountParser::parse(&action_keys);
+        let total_count = if leading_count > 0 {
+            leading_count.saturating_mul(count).min(MAX_COUNT)
+        } else {
+            count
+        };
+        if let Some(mut action) = self.keymap.get_action(&action_keys) {
+            if self.keymap.has_children(&action_keys) {
+                return HandleKeyResult::WaitForMore;
+            }
+
+            if let Some(register) = register_prefix {
+                action = action.with_register(register);
+            }
+
+            if Self::ignores_count_wrapping(&action) {
+                return HandleKeyResult::Complete(action.with_from_mode(self.mode_kind));
+            }
+
+            if total_count > 1
+                && let Some(counted_action) = action.clone().with_count(total_count)
+            {
+                return HandleKeyResult::Complete(counted_action.with_from_mode(self.mode_kind));
+            }
+            return HandleKeyResult::Complete(action.with_from_mode(self.mode_kind));
+        }
+
+        if self.keymap.is_prefix(&action_keys) || leading_count > 0 || register_prefix.is_some() {
+            HandleKeyResult::WaitForMore
+        } else {
+            HandleKeyResult::InvalidSequence
+        }
     }
 }
 
@@ -178,6 +195,10 @@ fn build_visual_keymap(exit_key: &str, switch_key: &str, switch_to: ModeKind) ->
     trie_keymap.insert_str(
         "d",
         Action::new(ActionKind::DeleteSelection).with_to_mode(ModeKind::Normal),
+    );
+    trie_keymap.insert_str(
+        "y",
+        Action::new(ActionKind::YankSelection).with_to_mode(ModeKind::Normal),
     );
     trie_keymap.insert_str(
         "c",

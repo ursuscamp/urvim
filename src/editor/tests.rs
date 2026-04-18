@@ -1,10 +1,11 @@
 use super::*;
 use crate::buffer::Buffer;
-use crate::config::Config;
 use crate::config::{AutoIndentMode, TabBehavior, TabInsertion};
+use crate::config::{Config, DefaultRegisters};
 use crate::editor::ActionKind;
 use crate::globals;
 use crate::globals::set_test_config;
+use crate::register::RegisterName;
 use crate::terminal::{Key, KeyCode, Modifiers};
 use std::collections::BTreeSet;
 
@@ -350,6 +351,10 @@ fn test_visual_mode_motion_and_exit_bindings() {
         Action::new(ActionKind::DeleteSelection).with_to_mode(ModeKind::Normal)
     );
     assert_eq!(
+        handle_and_unwrap(&mut mode, &key('y')),
+        Action::new(ActionKind::YankSelection).with_to_mode(ModeKind::Normal)
+    );
+    assert_eq!(
         handle_and_unwrap(&mut mode, &key('V')),
         Action::mode_transition(ModeKind::VisualLine)
     );
@@ -388,6 +393,10 @@ fn test_visual_line_mode_motion_and_exit_bindings() {
     assert_eq!(
         handle_and_unwrap(&mut mode, &key('d')),
         Action::new(ActionKind::DeleteSelection).with_to_mode(ModeKind::Normal)
+    );
+    assert_eq!(
+        handle_and_unwrap(&mut mode, &key('y')),
+        Action::new(ActionKind::YankSelection).with_to_mode(ModeKind::Normal)
     );
     assert_eq!(
         handle_and_unwrap(&mut mode, &key('c')),
@@ -1364,4 +1373,117 @@ fn test_tab_navigation_action_traits() {
         next.clone().with_count(4),
         Some(action) if matches!(action.kind.as_ref(), Some(ActionKind::Count(4, _)))
     ));
+}
+
+#[test]
+fn test_register_prefix_uses_configured_default_and_named_registers() {
+    let _config_guard = set_test_config(Config {
+        default_registers: DefaultRegisters {
+            yank: 'm',
+            delete: 'n',
+            change: 'o',
+        },
+        ..configured_test_config(None)
+    });
+    let mut mode = NormalMode::new();
+
+    assert!(matches!(
+        mode.handle_key(&key('"')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert!(matches!(
+        mode.handle_key(&key('y')),
+        HandleKeyResult::WaitForMore
+    ));
+    let result = mode.handle_key(&key('p'));
+    match result {
+        HandleKeyResult::Complete(action) => {
+            assert_eq!(action.register, Some(RegisterName('m')));
+            assert!(matches!(action.kind.as_ref(), Some(ActionKind::PasteAfter)));
+        }
+        other => panic!("expected complete action, got {other:?}"),
+    }
+
+    assert!(matches!(
+        mode.handle_key(&key('"')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert!(matches!(
+        mode.handle_key(&key('a')),
+        HandleKeyResult::WaitForMore
+    ));
+    let result = mode.handle_key(&key('p'));
+    match result {
+        HandleKeyResult::Complete(action) => {
+            assert_eq!(action.register, Some(RegisterName('a')));
+            assert!(matches!(action.kind.as_ref(), Some(ActionKind::PasteAfter)));
+        }
+        other => panic!("expected complete action, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_visual_mode_register_prefix_applies_to_yank() {
+    let _config_guard = set_test_config(Config {
+        default_registers: DefaultRegisters {
+            yank: 'm',
+            delete: 'n',
+            change: 'o',
+        },
+        ..configured_test_config(None)
+    });
+    let mut mode = VisualMode::new();
+
+    assert!(matches!(
+        mode.handle_key(&key('"')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert!(matches!(
+        mode.handle_key(&key('a')),
+        HandleKeyResult::WaitForMore
+    ));
+    match mode.handle_key(&key('y')) {
+        HandleKeyResult::Complete(action) => {
+            assert_eq!(action.register, Some(RegisterName('a')));
+            assert!(matches!(
+                action.kind.as_ref(),
+                Some(ActionKind::YankSelection)
+            ));
+            assert_eq!(action.to_mode, Some(ModeKind::Normal));
+        }
+        other => panic!("expected complete action, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_visual_line_mode_register_prefix_applies_to_yank() {
+    let _config_guard = set_test_config(Config {
+        default_registers: DefaultRegisters {
+            yank: 'm',
+            delete: 'n',
+            change: 'o',
+        },
+        ..configured_test_config(None)
+    });
+    let mut mode = VisualLineMode::new();
+
+    assert!(matches!(
+        mode.handle_key(&key('"')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert!(matches!(
+        mode.handle_key(&key('b')),
+        HandleKeyResult::WaitForMore
+    ));
+    match mode.handle_key(&key('y')) {
+        HandleKeyResult::Complete(action) => {
+            assert_eq!(action.register, Some(RegisterName('b')));
+            assert!(matches!(
+                action.kind.as_ref(),
+                Some(ActionKind::YankSelection)
+            ));
+            assert_eq!(action.to_mode, Some(ModeKind::Normal));
+        }
+        other => panic!("expected complete action, got {other:?}"),
+    }
 }

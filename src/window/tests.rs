@@ -1,12 +1,13 @@
 use super::*;
 use crate::action::ActionResult;
 use crate::buffer::{BufferId, Cursor};
-use crate::config::{AutoIndentMode, Config};
+use crate::config::{AutoIndentMode, Config, DefaultRegisters};
 use crate::editor::{Action, ActionKind, BoundaryMotion, BracketKind, LinewiseMotion, ModeKind};
 use crate::editor::{Operator, OperatorTarget, QuoteKind, TextObject};
 use crate::globals;
 use crate::job::{Job, JobContext, JobKind, JobManager, JobPriority, JobToken};
 use crate::path::AbsolutePath;
+use crate::register::{RegisterContent, RegisterContentKind, RegisterName, RegisterStore};
 use crate::terminal::{Color, Style};
 use crate::theme::{SyntaxTagStyles, Tag, Theme, ThemeKind, UiStyles};
 use std::collections::BTreeMap;
@@ -1603,6 +1604,28 @@ fn test_visual_change_leaves_cursor_at_selection_start() {
 }
 
 #[test]
+fn test_visual_yank_copies_selection_without_mutating_buffer() {
+    let _register_guard = globals::set_test_register_store(RegisterStore::new());
+    let buffer = Buffer::from_str("abc");
+    let mut window = Window::new(buffer);
+    window
+        .buffer_view_mut()
+        .begin_visual_selection(VisualSelectionKind::Character);
+    window.buffer_view_mut().set_cursor(Cursor::new(0, 0));
+
+    let action = Action::new(ActionKind::YankSelection)
+        .with_from_mode(ModeKind::Visual)
+        .with_to_mode(ModeKind::Normal);
+    assert_eq!(window.process_action(&action), ActionResult::Handled);
+    assert_eq!(buffer_text(window.buffer_view()), "abc");
+
+    let content = globals::with_register_store(|store| store.get(RegisterName('y')))
+        .expect("register store should be available");
+    assert_eq!(content.text, "a");
+    assert_eq!(content.kind, RegisterContentKind::Characterwise);
+}
+
+#[test]
 fn test_visual_line_delete_removes_entire_lines() {
     let theme = themed_window();
     let _theme_guard = globals::set_test_active_theme(theme);
@@ -1660,6 +1683,29 @@ fn test_visual_line_change_leaves_blank_line() {
     assert_eq!(window.process_action(&action), ActionResult::Handled);
     assert_eq!(buffer_text(window.buffer_view()), "one\n\nfour");
     assert_eq!(window.buffer_view().cursor(), Cursor::new(1, 0));
+}
+
+#[test]
+fn test_visual_line_yank_copies_lines_without_mutating_buffer() {
+    let _register_guard = globals::set_test_register_store(RegisterStore::new());
+    let buffer = Buffer::from_str("one\ntwo\nthree\nfour");
+    let mut window = Window::new(buffer);
+    window.buffer_view_mut().set_cursor(Cursor::new(1, 1));
+    window
+        .buffer_view_mut()
+        .begin_visual_selection(VisualSelectionKind::Line);
+    window.buffer_view_mut().set_cursor(Cursor::new(2, 1));
+
+    let action = Action::new(ActionKind::YankSelection)
+        .with_from_mode(ModeKind::VisualLine)
+        .with_to_mode(ModeKind::Normal);
+    assert_eq!(window.process_action(&action), ActionResult::Handled);
+    assert_eq!(buffer_text(window.buffer_view()), "one\ntwo\nthree\nfour");
+
+    let content = globals::with_register_store(|store| store.get(RegisterName('y')))
+        .expect("register store should be available");
+    assert_eq!(content.text, "two\nthree");
+    assert_eq!(content.kind, RegisterContentKind::Linewise);
 }
 
 #[test]
@@ -2195,6 +2241,43 @@ fn test_cw_changes_through_next_word_start() {
         .with_to_mode(ModeKind::Insert)
         .switches_to_insert_mode()
     );
+}
+
+#[test]
+fn test_cw_undo_restores_original_text() {
+    let buffer = Buffer::from_str("hello world");
+    let mut window = Window::new(buffer);
+
+    window.buffer_view.set_cursor(Cursor::new(0, 0));
+    process_action_and_snapshot(
+        &mut window,
+        &Action::operation(
+            Operator::Change,
+            OperatorTarget::BoundaryMotion(BoundaryMotion::WordForward),
+        ),
+    );
+
+    assert_eq!(buffer_text(window.buffer_view()), "world");
+    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
+
+    assert_eq!(
+        window.process_action(
+            &Action::insert_text("hi".to_string()).with_from_mode(ModeKind::Insert)
+        ),
+        ActionResult::Handled
+    );
+    assert_eq!(buffer_text(window.buffer_view()), "hiworld");
+    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 2));
+
+    if let Some(cursor) = window
+        .buffer_view
+        .with_buffer_mut(|buffer| buffer.undo())
+        .flatten()
+    {
+        window.buffer_view.set_cursor(cursor);
+    }
+    assert_eq!(buffer_text(window.buffer_view()), "hello world");
+    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
 }
 
 #[test]
@@ -2952,4 +3035,98 @@ fn test_toggle_line_comment_returns_not_handled_without_prefix() {
             .unwrap(),
         "plain text".to_string()
     );
+}
+
+#[test]
+fn test_yank_line_populates_yank_register_and_paste_after_uses_it() {
+    let _register_guard = globals::set_test_register_store(RegisterStore::new());
+    let buffer = Buffer::from_str("alpha\nbeta");
+    let mut window = Window::new(buffer);
+
+    assert_eq!(
+        window.process_action(&Action::new(ActionKind::YankLine)),
+        ActionResult::Handled
+    );
+
+    let content = globals::with_register_store(|store| store.get(RegisterName('y')))
+        .expect("register store should be available");
+    assert_eq!(content.text, "alpha");
+    assert_eq!(content.kind, RegisterContentKind::Linewise);
+
+    assert_eq!(
+        window.process_action(&Action::paste_after()),
+        ActionResult::Handled
+    );
+    assert_eq!(
+        buffer_text(window.buffer_view()),
+        "alpha\nalpha\nbeta".to_string()
+    );
+}
+
+#[test]
+fn test_visual_yank_uses_explicit_named_register() {
+    let _register_guard = globals::set_test_register_store(RegisterStore::new());
+    let buffer = Buffer::from_str("abc");
+    let mut window = Window::new(buffer);
+    window
+        .buffer_view_mut()
+        .begin_visual_selection(VisualSelectionKind::Character);
+    window.buffer_view_mut().set_cursor(Cursor::new(0, 0));
+
+    let action = Action::new(ActionKind::YankSelection)
+        .with_from_mode(ModeKind::Visual)
+        .with_to_mode(ModeKind::Normal)
+        .with_register(RegisterName('z'));
+    assert_eq!(window.process_action(&action), ActionResult::Handled);
+
+    let content = globals::with_register_store(|store| store.get(RegisterName('z')))
+        .expect("register store should be available");
+    assert_eq!(content.text, "a");
+    assert_eq!(content.kind, RegisterContentKind::Characterwise);
+}
+
+#[test]
+fn test_delete_line_uses_configured_default_register() {
+    let _register_guard = globals::set_test_register_store(RegisterStore::new());
+    let _config_guard = globals::set_test_config(Config {
+        default_registers: DefaultRegisters {
+            yank: 'y',
+            delete: 'n',
+            change: 'c',
+        },
+        ..pairing_test_config(true)
+    });
+    let buffer = Buffer::from_str("alpha\nbeta");
+    let mut window = Window::new(buffer);
+
+    assert_eq!(
+        window.process_action(&Action::new(ActionKind::DeleteLine)),
+        ActionResult::Handled
+    );
+
+    let content = globals::with_register_store(|store| store.get(RegisterName('n')))
+        .expect("register store should be available");
+    assert_eq!(content.text, "alpha");
+    assert_eq!(content.kind, RegisterContentKind::Linewise);
+    assert_eq!(buffer_text(window.buffer_view()), "beta".to_string());
+}
+
+#[test]
+fn test_paste_after_uses_explicit_named_register() {
+    let _register_guard = globals::set_test_register_store(RegisterStore::new());
+    globals::with_register_store_mut(|store| {
+        store.set(
+            RegisterName('z'),
+            RegisterContent::new("hi".to_string(), RegisterContentKind::Characterwise),
+        );
+    });
+
+    let buffer = Buffer::from_str("ab");
+    let mut window = Window::new(buffer);
+
+    assert_eq!(
+        window.process_action(&Action::paste_after().with_register(RegisterName('z'))),
+        ActionResult::Handled
+    );
+    assert_eq!(buffer_text(window.buffer_view()), "ahib".to_string());
 }

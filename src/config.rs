@@ -79,6 +79,39 @@ impl Default for AutoIndentMode {
     }
 }
 
+/// The resolved default register selectors used by yank, delete, and change.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DefaultRegisters {
+    /// The register selector used by yank operations.
+    pub yank: char,
+    /// The register selector used by delete operations.
+    pub delete: char,
+    /// The register selector used by change operations.
+    pub change: char,
+}
+
+/// The TOML-backed default register table stored in the config file.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct PartialDefaultRegisters {
+    /// The register selector configured for yank operations.
+    pub yank: Option<String>,
+    /// The register selector configured for delete operations.
+    pub delete: Option<String>,
+    /// The register selector configured for change operations.
+    pub change: Option<String>,
+}
+
+impl Default for DefaultRegisters {
+    fn default() -> Self {
+        Self {
+            yank: 'y',
+            delete: 'd',
+            change: 'c',
+        }
+    }
+}
+
 /// Default visual width for tab characters when no config is available.
 pub const DEFAULT_TAB_WIDTH: usize = 4;
 
@@ -89,6 +122,8 @@ pub struct Config {
     pub theme: String,
     /// The optional insert-mode escape binding loaded from config.
     pub insert_escape: Option<String>,
+    /// The resolved default register selectors for yank, delete, and change.
+    pub default_registers: DefaultRegisters,
     /// Whether syntax highlighting is enabled for rendered buffers.
     pub syntax: bool,
     /// Whether insert mode should auto-close supported bracket and quote pairs.
@@ -117,6 +152,8 @@ pub struct PartialConfig {
     pub theme: Option<String>,
     /// The optional insert-mode escape binding stored in the config file.
     pub insert_escape: Option<String>,
+    /// The default register table stored in the config file.
+    pub default_registers: Option<PartialDefaultRegisters>,
     /// Whether syntax highlighting is enabled in the config file.
     pub syntax: Option<bool>,
     /// Whether insert mode should auto-close supported bracket and quote pairs.
@@ -189,6 +226,10 @@ impl Config {
             .or_else(|| file.and_then(|config| config.theme.clone()))
             .unwrap_or_else(|| DEFAULT_THEME.to_string());
         let insert_escape = file.and_then(|config| config.insert_escape.clone());
+        let default_registers = file
+            .and_then(|config| config.default_registers.as_ref())
+            .map(resolve_default_registers)
+            .unwrap_or_default();
         let syntax = cli_syntax
             .or_else(|| file.and_then(|config| config.syntax))
             .unwrap_or(true);
@@ -220,6 +261,7 @@ impl Config {
         Self {
             theme,
             insert_escape,
+            default_registers,
             syntax,
             auto_close_pairs,
             active_line,
@@ -258,6 +300,7 @@ impl Default for Config {
         Self {
             theme: DEFAULT_THEME.to_string(),
             insert_escape: None,
+            default_registers: DefaultRegisters::default(),
             syntax: true,
             auto_close_pairs: true,
             active_line: false,
@@ -349,6 +392,10 @@ fn validate_partial_config(config: &PartialConfig) -> Result<(), ConfigLoadError
         })?;
     }
 
+    if let Some(default_registers) = config.default_registers.as_ref() {
+        validate_default_registers(default_registers)?;
+    }
+
     if let Some(tab_width) = config.tab_width
         && tab_width == 0
     {
@@ -369,6 +416,50 @@ fn default_todo_markers() -> Vector<SmolStr> {
         .iter()
         .map(|marker| SmolStr::new(*marker))
         .collect()
+}
+
+fn resolve_default_registers(registers: &PartialDefaultRegisters) -> DefaultRegisters {
+    DefaultRegisters {
+        yank: parse_default_register(registers.yank.as_deref().unwrap_or("y")).unwrap_or('y'),
+        delete: parse_default_register(registers.delete.as_deref().unwrap_or("d")).unwrap_or('d'),
+        change: parse_default_register(registers.change.as_deref().unwrap_or("c")).unwrap_or('c'),
+    }
+}
+
+fn validate_default_registers(registers: &PartialDefaultRegisters) -> Result<(), ConfigLoadError> {
+    if let Some(yank) = registers.yank.as_deref() {
+        validate_default_register_value("yank", yank)?;
+    }
+    if let Some(delete) = registers.delete.as_deref() {
+        validate_default_register_value("delete", delete)?;
+    }
+    if let Some(change) = registers.change.as_deref() {
+        validate_default_register_value("change", change)?;
+    }
+
+    Ok(())
+}
+
+fn validate_default_register_value(field: &str, value: &str) -> Result<(), ConfigLoadError> {
+    if parse_default_register(value).is_none() {
+        return Err(ConfigLoadError::invalid(format!(
+            "config default_registers.{field} must be a single lowercase ASCII letter"
+        )));
+    }
+
+    Ok(())
+}
+
+fn parse_default_register(value: &str) -> Option<char> {
+    let mut chars = value.chars();
+    let Some(ch) = chars.next() else {
+        return None;
+    };
+    if chars.next().is_some() || !ch.is_ascii_lowercase() {
+        return None;
+    }
+
+    Some(ch)
 }
 
 fn validate_todo_markers(markers: &[String]) -> Result<(), ConfigLoadError> {
@@ -446,6 +537,18 @@ mod tests {
         values.iter().map(|value| (*value).to_string()).collect()
     }
 
+    fn default_register_strings(
+        yank: Option<&str>,
+        delete: Option<&str>,
+        change: Option<&str>,
+    ) -> PartialDefaultRegisters {
+        PartialDefaultRegisters {
+            yank: yank.map(str::to_owned),
+            delete: delete.map(str::to_owned),
+            change: change.map(str::to_owned),
+        }
+    }
+
     fn resolved_todo_markers(values: &[&str]) -> Vector<SmolStr> {
         values.iter().map(|value| SmolStr::new(*value)).collect()
     }
@@ -455,6 +558,7 @@ mod tests {
         let file = PartialConfig {
             theme: Some("file-theme".to_string()),
             insert_escape: Some("jk".to_string()),
+            default_registers: Some(default_register_strings(Some("a"), Some("b"), Some("c"))),
             syntax: Some(false),
             auto_close_pairs: Some(false),
             active_line: Some(true),
@@ -478,6 +582,14 @@ mod tests {
                 .as_deref(),
             Some("jk")
         );
+        assert_eq!(
+            Config::resolve(Some(&file), None, None).default_registers,
+            DefaultRegisters {
+                yank: 'a',
+                delete: 'b',
+                change: 'c',
+            }
+        );
         assert!(!Config::resolve(Some(&file), None, None).syntax);
         assert!(!Config::resolve(Some(&file), None, None).auto_close_pairs);
         assert!(Config::resolve(Some(&file), None, None).active_line);
@@ -498,6 +610,10 @@ mod tests {
         );
         assert_eq!(Config::resolve(None, None, None).theme, DEFAULT_THEME);
         assert_eq!(Config::resolve(None, None, None).insert_escape, None);
+        assert_eq!(
+            Config::resolve(None, None, None).default_registers,
+            DefaultRegisters::default()
+        );
         assert!(Config::resolve(None, None, None).advanced_glyphs.is_empty());
         assert_eq!(
             Config::resolve(None, None, None).todo_markers,
@@ -614,6 +730,53 @@ mod tests {
         let config = Config::load_from_locations(home, vec![], None, None).expect("should load");
 
         assert_eq!(config.insert_escape.as_deref(), Some("jk"));
+    }
+
+    #[test]
+    fn load_from_locations_loads_default_registers() {
+        let home = unique_temp_dir("default-registers-home");
+        write_config(
+            &home,
+            "default_registers = { yank = \"a\", delete = \"b\", change = \"c\" }",
+        );
+
+        let config = Config::load_from_locations(home, vec![], None, None).expect("should load");
+
+        assert_eq!(
+            config.default_registers,
+            DefaultRegisters {
+                yank: 'a',
+                delete: 'b',
+                change: 'c',
+            }
+        );
+    }
+
+    #[test]
+    fn load_from_locations_defaults_default_registers_to_builtin_set() {
+        let home = unique_temp_dir("default-registers-default-home");
+
+        let config = Config::load_from_locations(home, vec![], None, None).expect("should load");
+
+        assert_eq!(config.default_registers, DefaultRegisters::default());
+    }
+
+    #[test]
+    fn load_from_locations_rejects_invalid_default_register_value() {
+        let home = unique_temp_dir("default-registers-invalid-home");
+        write_config(
+            &home,
+            "default_registers = { yank = \"AA\", delete = \"b\", change = \"c\" }",
+        );
+
+        let error = Config::load_from_locations(home, vec![], None, None).expect_err("should fail");
+
+        match error {
+            ConfigLoadError::Invalid { message } => {
+                assert!(message.contains("default_registers.yank"));
+            }
+            other => panic!("expected validation error, got {other:?}"),
+        }
     }
 
     #[test]

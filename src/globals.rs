@@ -7,6 +7,7 @@ use crate::buffer::{Buffer, BufferId, BufferPool};
 use crate::config::Config;
 use crate::editor::Action;
 use crate::job::JobManager;
+use crate::register::RegisterStore;
 use crate::theme::Theme;
 use std::sync::{Mutex, OnceLock, RwLock};
 
@@ -54,12 +55,15 @@ static ACTIVE_BUFFER_ID: OnceLock<RwLock<Option<BufferId>>> = OnceLock::new();
 static CONFIG: OnceLock<RwLock<Option<Config>>> = OnceLock::new();
 static ACTIVE_THEME: OnceLock<RwLock<Option<Theme>>> = OnceLock::new();
 static JOB_MANAGER: OnceLock<RwLock<Option<JobManager>>> = OnceLock::new();
+#[cfg(not(test))]
+static REGISTER_STORE: OnceLock<RwLock<RegisterStore>> = OnceLock::new();
 
 #[cfg(test)]
 thread_local! {
     static TEST_CONFIG: RefCell<Option<Config>> = const { RefCell::new(None) };
     static TEST_ACTIVE_THEME: RefCell<Option<Theme>> = const { RefCell::new(None) };
     static TEST_LAST_REPEAT: RefCell<Option<RepeatState>> = const { RefCell::new(None) };
+    static TEST_REGISTER_STORE: RefCell<RegisterStore> = RefCell::new(RegisterStore::new());
 }
 
 /// Set the last character search state
@@ -200,6 +204,11 @@ fn job_manager_slot() -> &'static RwLock<Option<JobManager>> {
     JOB_MANAGER.get_or_init(|| RwLock::new(None))
 }
 
+#[cfg(not(test))]
+fn register_store_slot() -> &'static RwLock<RegisterStore> {
+    REGISTER_STORE.get_or_init(|| RwLock::new(RegisterStore::new()))
+}
+
 /// Sets the active theme used by renderers.
 ///
 /// The editor treats the active theme as startup configuration, so this should
@@ -239,6 +248,34 @@ pub fn with_job_manager<R>(f: impl FnOnce(Option<&JobManager>) -> R) -> R {
     f(job_manager.as_ref())
 }
 
+/// Runs a closure with shared access to the session-wide register store.
+pub fn with_register_store<R>(f: impl FnOnce(&RegisterStore) -> R) -> R {
+    #[cfg(test)]
+    {
+        TEST_REGISTER_STORE.with(|slot| f(&slot.borrow()))
+    }
+
+    #[cfg(not(test))]
+    {
+        let store = register_store_slot().read().unwrap();
+        f(&store)
+    }
+}
+
+/// Runs a closure with mutable access to the session-wide register store.
+pub fn with_register_store_mut<R>(f: impl FnOnce(&mut RegisterStore) -> R) -> R {
+    #[cfg(test)]
+    {
+        TEST_REGISTER_STORE.with(|slot| f(&mut slot.borrow_mut()))
+    }
+
+    #[cfg(not(test))]
+    {
+        let mut store = register_store_slot().write().unwrap();
+        f(&mut store)
+    }
+}
+
 /// Requests shutdown of the active job manager if one is configured.
 pub fn shutdown_job_manager() {
     with_job_manager(|job_manager| {
@@ -275,10 +312,23 @@ pub fn set_test_config(config: Config) -> TestConfigGuard {
 pub struct TestActiveThemeGuard;
 
 #[cfg(test)]
+/// A guard that installs a test-only register store for the current thread.
+pub struct TestRegisterStoreGuard;
+
+#[cfg(test)]
 impl Drop for TestActiveThemeGuard {
     fn drop(&mut self) {
         TEST_ACTIVE_THEME.with(|slot| {
             *slot.borrow_mut() = None;
+        });
+    }
+}
+
+#[cfg(test)]
+impl Drop for TestRegisterStoreGuard {
+    fn drop(&mut self) {
+        TEST_REGISTER_STORE.with(|slot| {
+            *slot.borrow_mut() = RegisterStore::new();
         });
     }
 }
@@ -290,6 +340,15 @@ pub fn set_test_active_theme(theme: Theme) -> TestActiveThemeGuard {
         *slot.borrow_mut() = Some(theme);
     });
     TestActiveThemeGuard
+}
+
+#[cfg(test)]
+/// Installs a register store for the current test thread and clears it when the guard drops.
+pub fn set_test_register_store(store: RegisterStore) -> TestRegisterStoreGuard {
+    TEST_REGISTER_STORE.with(|slot| {
+        *slot.borrow_mut() = store;
+    });
+    TestRegisterStoreGuard
 }
 
 #[cfg(test)]
