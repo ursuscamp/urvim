@@ -44,6 +44,13 @@ fn test_reverse_tab() {
 }
 
 #[test]
+fn test_kitty_csi_u_escape() {
+    let mut terminal = create_terminal(b"\x1b[27u".to_vec());
+    let event = terminal.read_event().unwrap();
+    assert_eq!(event, Event::Key(Key::new(KeyCode::Esc)));
+}
+
+#[test]
 fn test_set_style() {
     let backend = TestBackend::new(Vec::new());
     let output_backend = TestBackend::new(Vec::new());

@@ -219,7 +219,10 @@ pub fn try_parse_csi_u(data: &[u8]) -> Option<(usize, Event)> {
         Modifiers::default()
     };
 
-    // Map key code to KeyCode
+    // Map key code to KeyCode.
+    //
+    // kitty uses `CSI 27 u` for Escape, while arrow/navigation keys are
+    // still reported through legacy CSI/SS3 sequences.
     let key = match key_code {
         0 => return None, // Invalid key code
         1 => KeyCode::Esc,
@@ -245,10 +248,7 @@ pub fn try_parse_csi_u(data: &[u8]) -> Option<(usize, Event)> {
         21 => KeyCode::F11,
         22 => KeyCode::F12,
         // 23 is not Delete in CSI-u (Delete is CSI 3~, not CSI u)
-        24 => KeyCode::Up,
-        25 => KeyCode::Down,
-        26 => KeyCode::Right,
-        27 => KeyCode::Left,
+        27 => KeyCode::Esc,
         // 127 is Backspace in Kitty CSI-u format
         127 => KeyCode::Backspace,
         // ASCII printable characters (33-126)
