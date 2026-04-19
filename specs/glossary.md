@@ -335,6 +335,20 @@ A data structure that maps key sequences to actions. Supports multi-key bindings
 ### Character Scan Keymap
 A stateless keymap that matches two-key sequences for character scan motions (f, F, t, T). The first key is the trigger (f/F/t/T) and the second key is the target character. Returns the corresponding action with the character as a parameter.
 
+### Character Scan Motion
+A single-line motion that searches for a target character on the current line using `f`, `F`, `t`, or `T`. Character scan motions may be used directly in normal mode or as motion targets in operator-pending mode.
+
+**Context:** Normal-mode navigation, operator-pending range resolution, repeat-search behavior
+
+**Related Terms:** Character Scan Keymap, Character Scan Range Motion, Operator-Pending Mode
+
+### Character Scan Range Motion
+An operator-pending motion target based on `f`, `F`, `t`, or `T` that resolves a text range instead of moving the cursor by itself. Character scan range motions preserve the same search target and direction as the matching normal motion while letting an operator consume the resolved span.
+
+**Context:** Operator-pending mode, delete/change/yank/case operations, single-line range targeting
+
+**Related Terms:** Character Scan Motion, Operator-Pending Mode, Operator
+
 ### Chained Keymap
 A keymap wrapper that delegates `get_action` and `is_prefix` calls to multiple sub-keymaps in sequence, trying each until one returns a non-None result. Used to combine trie-based keymaps with character scan keymaps.
 

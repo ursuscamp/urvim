@@ -144,35 +144,9 @@ impl Window {
 
     pub fn move_cursor_till_forward(&mut self, target: char, count: usize) {
         let cursor = self.buffer_view.cursor();
-        let new_cursor = self.buffer_view.with_buffer(|buffer| {
-            let line = buffer
-                .line_at(cursor.line)
-                .map(|l| l.as_ref())
-                .unwrap_or("");
-            let search_start_col = if cursor.col == 0 {
-                0
-            } else {
-                let mut col = cursor.col;
-                for (byte_offset, grapheme) in line.grapheme_indices(true) {
-                    if byte_offset >= cursor.col {
-                        col = byte_offset + grapheme.len();
-                        break;
-                    }
-                }
-                col
-            };
-
-            let search_cursor = Cursor::new(cursor.line, search_start_col);
-            if let Some(new_cursor) = buffer.find_char_forward(search_cursor, target, count) {
-                if let Some(prev_cursor) = buffer.prev_cursor_line(new_cursor) {
-                    Some(prev_cursor)
-                } else {
-                    Some(new_cursor)
-                }
-            } else {
-                None
-            }
-        });
+        let new_cursor = self
+            .buffer_view
+            .with_buffer(|buffer| buffer.find_till_forward(cursor, target, count));
 
         if let Some(new_cursor) = new_cursor.flatten() {
             self.buffer_view.set_cursor(new_cursor);
@@ -181,20 +155,9 @@ impl Window {
 
     pub fn move_cursor_till_backward(&mut self, target: char, count: usize) {
         let cursor = self.buffer_view.cursor();
-        let new_cursor = self.buffer_view.with_buffer(|buffer| {
-            let search_cursor = Cursor::new(cursor.line, cursor.col.saturating_sub(1));
-
-            if let Some(new_cursor) = buffer.find_char_backward(search_cursor, target, count) {
-                if let Some(next_cursor) = buffer.next_cursor_line(new_cursor) {
-                    Some(next_cursor)
-                } else {
-                    let line_len = self.buffer_view.line_len(new_cursor.line);
-                    Some(Cursor::new(new_cursor.line, line_len))
-                }
-            } else {
-                None
-            }
-        });
+        let new_cursor = self
+            .buffer_view
+            .with_buffer(|buffer| buffer.find_till_backward(cursor, target, count));
 
         if let Some(new_cursor) = new_cursor.flatten() {
             self.buffer_view.set_cursor(new_cursor);

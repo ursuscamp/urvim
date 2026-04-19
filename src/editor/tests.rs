@@ -5,6 +5,7 @@ use crate::config::{Config, DefaultRegisters};
 use crate::editor::ActionKind;
 use crate::globals;
 use crate::globals::set_test_config;
+use crate::globals::{Direction, FindKind, FindState};
 use crate::register::RegisterName;
 use crate::terminal::{Key, KeyCode, Modifiers};
 use std::collections::BTreeSet;
@@ -762,6 +763,125 @@ fn test_dw_sequence() {
             Operator::Delete,
             OperatorTarget::BoundaryMotion(BoundaryMotion::WordForward),
         )
+    ));
+}
+
+#[test]
+fn test_dfx_sequence() {
+    let mut mode = NormalMode::new();
+    assert!(matches!(
+        mode.handle_key(&key('d')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert!(matches!(
+        mode.handle_key(&key('f')),
+        HandleKeyResult::WaitForMore
+    ));
+    let result = mode.handle_key(&key('x'));
+    match complete_action_kind(result) {
+        ActionKind::Operation(
+            Operator::Delete,
+            OperatorTarget::CharacterScan(FindState {
+                target_char,
+                kind,
+                direction,
+            }),
+        ) => {
+            assert_eq!(target_char, 'x');
+            assert_eq!(kind, FindKind::Find);
+            assert_eq!(direction, Direction::Forward);
+        }
+        other => panic!("unexpected result: {other:?}"),
+    }
+}
+
+#[test]
+fn test_ct_sequence() {
+    let mut mode = NormalMode::new();
+    assert!(matches!(
+        mode.handle_key(&key('c')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert!(matches!(
+        mode.handle_key(&key('t')),
+        HandleKeyResult::WaitForMore
+    ));
+    let result = mode.handle_key(&key(':'));
+    match result {
+        HandleKeyResult::Complete(action) => {
+            assert_eq!(action.to_mode, Some(ModeKind::Insert));
+            match action.kind.as_ref() {
+                Some(ActionKind::Operation(
+                    Operator::Change,
+                    OperatorTarget::CharacterScan(FindState {
+                        target_char,
+                        kind,
+                        direction,
+                    }),
+                )) => {
+                    assert_eq!(*target_char, ':');
+                    assert_eq!(*kind, FindKind::Till);
+                    assert_eq!(*direction, Direction::Forward);
+                }
+                other => panic!("unexpected result: {other:?}"),
+            }
+        }
+        other => panic!("unexpected result: {other:?}"),
+    }
+}
+
+#[test]
+fn test_gufx_sequence() {
+    let mut mode = NormalMode::new();
+    assert!(matches!(
+        mode.handle_key(&key('g')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert!(matches!(
+        mode.handle_key(&key('u')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert!(matches!(
+        mode.handle_key(&key('f')),
+        HandleKeyResult::WaitForMore
+    ));
+    let result = mode.handle_key(&key('x'));
+    match complete_action_kind(result) {
+        ActionKind::Operation(
+            Operator::Lowercase,
+            OperatorTarget::CharacterScan(FindState {
+                target_char,
+                kind,
+                direction,
+            }),
+        ) => {
+            assert_eq!(target_char, 'x');
+            assert_eq!(kind, FindKind::Find);
+            assert_eq!(direction, Direction::Forward);
+        }
+        other => panic!("unexpected result: {other:?}"),
+    }
+}
+
+#[test]
+fn test_count_dfx_sequence() {
+    let mut mode = NormalMode::new();
+    assert!(matches!(
+        mode.handle_key(&key('2')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert!(matches!(
+        mode.handle_key(&key('d')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert!(matches!(
+        mode.handle_key(&key('f')),
+        HandleKeyResult::WaitForMore
+    ));
+    let result = mode.handle_key(&key('x'));
+    assert!(matches!(
+        complete_action_kind(result),
+        ActionKind::Count(2, _)
     ));
 }
 

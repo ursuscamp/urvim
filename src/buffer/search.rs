@@ -29,4 +29,40 @@ impl Buffer {
         let idx = *occurrences.get(target_idx)?;
         Some(Cursor::new(line_idx, idx))
     }
+
+    /// Moves to the character just before the next forward match.
+    pub fn find_till_forward(&self, cursor: Cursor, target: char, count: usize) -> Option<Cursor> {
+        let search_cursor = self.till_forward_search_cursor(cursor);
+        let found = self.find_char_forward(search_cursor, target, count)?;
+        Some(self.prev_cursor_line(found).unwrap_or(found))
+    }
+
+    /// Moves to the character just after the next backward match.
+    pub fn find_till_backward(&self, cursor: Cursor, target: char, count: usize) -> Option<Cursor> {
+        let search_cursor = Cursor::new(cursor.line, cursor.col.saturating_sub(1));
+        let found = self.find_char_backward(search_cursor, target, count)?;
+        Some(
+            self.next_cursor_line(found)
+                .unwrap_or_else(|| Cursor::new(found.line, self.line_len(found.line))),
+        )
+    }
+
+    fn till_forward_search_cursor(&self, cursor: Cursor) -> Cursor {
+        let Some(line) = self.line_at(cursor.line) else {
+            return cursor;
+        };
+        let line_str = line.as_ref();
+        if cursor.col == 0 {
+            return Cursor::new(cursor.line, 0);
+        }
+
+        let mut col = cursor.col;
+        for (byte_offset, grapheme) in line_str.grapheme_indices(true) {
+            if byte_offset >= cursor.col {
+                col = byte_offset + grapheme.len();
+                break;
+            }
+        }
+        Cursor::new(cursor.line, col)
+    }
 }

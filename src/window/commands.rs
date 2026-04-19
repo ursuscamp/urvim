@@ -837,6 +837,10 @@ impl Window {
             return self.operation_noop_result(operator);
         };
 
+        if let OperatorTarget::CharacterScan(find) = target {
+            globals::set_last_find(find);
+        }
+
         let Some(text) = self
             .buffer_view
             .with_buffer(|buffer| buffer.text_in_range(range.start, range.end))

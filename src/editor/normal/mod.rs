@@ -1,8 +1,12 @@
 use super::keymap::{MAX_COUNT, extract_leading_count};
-use super::{Action, CountParser, HandleKeyResult, Keymap, Mode, ModeKind, TrieKeymap};
-use crate::editor::ActionKind;
+use super::{
+    Action, ActionKind, CountParser, HandleKeyResult, Keymap, Mode, ModeKind, Operator,
+    OperatorTarget, TrieKeymap,
+};
 use crate::globals;
+use crate::globals::FindState;
 use crate::motion::chained_keymap::ChainedKeymap;
+use crate::motion::char_scan_keymap::CharScanKeymap;
 use crate::terminal::{CursorStyle, Key, KeyCode};
 
 mod bindings;
@@ -28,9 +32,7 @@ impl NormalMode {
 
         let mut keymap = ChainedKeymap::new();
         keymap.add(Box::new(trie_keymap));
-        keymap.add(Box::new(
-            crate::motion::char_scan_keymap::CharScanKeymap::new(),
-        ));
+        keymap.add(Box::new(CharScanKeymap::new()));
 
         NormalMode {
             keymap,
@@ -43,6 +45,60 @@ impl NormalMode {
         let defaults =
             globals::with_config(|config| config.default_registers.clone()).unwrap_or_default();
         crate::register::RegisterName::from_prefix(selector, &defaults)
+    }
+
+    fn operator_prefix_for_keys(keys: &[String]) -> Option<(Operator, Option<ModeKind>, usize)> {
+        let first = keys.first()?;
+        match first.as_str() {
+            "d" => Some((Operator::Delete, None, 1)),
+            "y" => Some((Operator::Yank, None, 1)),
+            "c" => Some((Operator::Change, Some(ModeKind::Insert), 1)),
+            "g" => match keys.get(1)?.as_str() {
+                "u" => Some((Operator::Lowercase, None, 2)),
+                "U" => Some((Operator::Uppercase, None, 2)),
+                "~" => Some((Operator::ToggleCase, None, 2)),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    fn character_scan_operator_waits_for_more(keys: &[String]) -> bool {
+        let Some((_, _, prefix_len)) = Self::operator_prefix_for_keys(keys) else {
+            return false;
+        };
+
+        let remainder = &keys[prefix_len..];
+        match remainder.len() {
+            0 => true,
+            1 => matches!(remainder[0].as_str(), "f" | "F" | "t" | "T"),
+            _ => false,
+        }
+    }
+
+    fn character_scan_state(keys: &[String]) -> Option<FindState> {
+        CharScanKeymap::parse_find_state(keys)
+    }
+
+    fn character_scan_operation(
+        &self,
+        keys: &[String],
+        count: usize,
+        register: Option<crate::register::RegisterName>,
+    ) -> Option<Action> {
+        let (operator, to_mode, prefix_len) = Self::operator_prefix_for_keys(keys)?;
+        let scan_state = Self::character_scan_state(&keys[prefix_len..])?;
+        let mut action = Action::operation(operator, OperatorTarget::CharacterScan(scan_state));
+        if let Some(mode) = to_mode {
+            action = action.with_to_mode(mode);
+        }
+        if count > 1 {
+            action = action.with_count(count)?;
+        }
+        if let Some(register) = register {
+            action = action.with_register(register);
+        }
+        Some(action)
     }
 
     fn parse_buffered_action(&self) -> HandleKeyResult {
@@ -101,6 +157,16 @@ impl NormalMode {
             {
                 return HandleKeyResult::Complete(counted_action.with_from_mode(ModeKind::Normal));
             }
+            return HandleKeyResult::Complete(action.with_from_mode(ModeKind::Normal));
+        }
+
+        if Self::character_scan_operator_waits_for_more(&action_keys) {
+            return HandleKeyResult::WaitForMore;
+        }
+
+        if let Some(action) =
+            self.character_scan_operation(&action_keys, total_count, register_prefix)
+        {
             return HandleKeyResult::Complete(action.with_from_mode(ModeKind::Normal));
         }
 

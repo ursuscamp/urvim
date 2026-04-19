@@ -5,6 +5,7 @@ use crate::config::{AutoIndentMode, Config, DefaultRegisters};
 use crate::editor::{Action, ActionKind, BoundaryMotion, BracketKind, LinewiseMotion, ModeKind};
 use crate::editor::{Operator, OperatorTarget, QuoteKind, TextObject};
 use crate::globals;
+use crate::globals::{Direction, FindKind, FindState};
 use crate::job::{Job, JobContext, JobKind, JobManager, JobPriority, JobToken};
 use crate::path::AbsolutePath;
 use crate::register::{RegisterContent, RegisterContentKind, RegisterName, RegisterStore};
@@ -2437,6 +2438,51 @@ fn test_find_backward_skips_current_char_on_duplicate() {
     window.process_action(&Action::find_backward('l'));
     // Should find 2nd 'l' at column 2, not 3rd 'l' at column 3
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 2));
+}
+
+#[test]
+fn test_delete_character_scan_operator_updates_repeat_state() {
+    let buffer = Buffer::from_str("foo:bar");
+    let mut window = Window::new(buffer);
+    let expected = FindState {
+        target_char: ':',
+        kind: FindKind::Find,
+        direction: Direction::Forward,
+    };
+
+    window.buffer_view.set_cursor(Cursor::new(0, 0));
+    window.process_action(&Action::operation(
+        Operator::Delete,
+        OperatorTarget::CharacterScan(expected.clone()),
+    ));
+
+    assert_eq!(buffer_text(window.buffer_view()), "bar");
+    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
+    assert_eq!(globals::get_last_find(), Some(expected));
+}
+
+#[test]
+fn test_counted_character_scan_operator_uses_motion_count() {
+    let buffer = Buffer::from_str("foo:bar:baz");
+    let mut window = Window::new(buffer);
+    let expected = FindState {
+        target_char: ':',
+        kind: FindKind::Find,
+        direction: Direction::Forward,
+    };
+
+    window.buffer_view.set_cursor(Cursor::new(0, 0));
+    window.process_action(&Action::count(
+        2,
+        Box::new(Action::operation(
+            Operator::Delete,
+            OperatorTarget::CharacterScan(expected.clone()),
+        )),
+    ));
+
+    assert_eq!(buffer_text(window.buffer_view()), "baz");
+    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
+    assert_eq!(globals::get_last_find(), Some(expected));
 }
 
 #[test]

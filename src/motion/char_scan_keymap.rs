@@ -5,6 +5,7 @@
 //! and the second key is the target character (a runtime parameter).
 
 use crate::editor::{Action, Keymap};
+use crate::globals::{Direction, FindKind, FindState};
 
 /// A stateless keymap for character scan motions (f, F, t, T).
 ///
@@ -22,28 +23,61 @@ impl CharScanKeymap {
     pub fn new() -> Self {
         Self
     }
-}
 
-impl Keymap for CharScanKeymap {
-    fn get_action(&self, keys: &[String]) -> Option<Action> {
-        if keys.len() != 2 {
-            return None;
-        }
-
+    /// Parses a two-key character scan sequence into its trigger and target.
+    ///
+    /// The trigger determines the motion family and direction, while the target
+    /// is the runtime character to search for.
+    pub fn parse_find_state(keys: &[String]) -> Option<FindState> {
         let [trigger, target] = keys else {
             return None;
         };
 
         let target_char = target.chars().next()?;
-        let key_str = trigger.as_str();
-
-        match key_str {
-            "f" => Some(Action::find_forward(target_char)),
-            "F" => Some(Action::find_backward(target_char)),
-            "t" => Some(Action::till_forward(target_char)),
-            "T" => Some(Action::till_backward(target_char)),
+        match trigger.as_str() {
+            "f" => Some(FindState {
+                target_char,
+                kind: FindKind::Find,
+                direction: Direction::Forward,
+            }),
+            "F" => Some(FindState {
+                target_char,
+                kind: FindKind::Find,
+                direction: Direction::Backward,
+            }),
+            "t" => Some(FindState {
+                target_char,
+                kind: FindKind::Till,
+                direction: Direction::Forward,
+            }),
+            "T" => Some(FindState {
+                target_char,
+                kind: FindKind::Till,
+                direction: Direction::Backward,
+            }),
             _ => None,
         }
+    }
+}
+
+impl Keymap for CharScanKeymap {
+    fn get_action(&self, keys: &[String]) -> Option<Action> {
+        Self::parse_find_state(keys).map(|find_state| {
+            match (find_state.kind, find_state.direction) {
+                (FindKind::Find, Direction::Forward) => {
+                    Action::find_forward(find_state.target_char)
+                }
+                (FindKind::Find, Direction::Backward) => {
+                    Action::find_backward(find_state.target_char)
+                }
+                (FindKind::Till, Direction::Forward) => {
+                    Action::till_forward(find_state.target_char)
+                }
+                (FindKind::Till, Direction::Backward) => {
+                    Action::till_backward(find_state.target_char)
+                }
+            }
+        })
     }
 
     fn is_prefix(&self, keys: &[String]) -> bool {

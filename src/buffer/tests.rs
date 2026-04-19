@@ -5,6 +5,7 @@ use crate::editor::{
     BoundaryMotion, BracketKind, LinewiseMotion, OperatorTarget, QuoteKind, TextObject,
 };
 use crate::globals;
+use crate::globals::{Direction, FindKind, FindState};
 use crate::path::AbsolutePath;
 use crate::theme::Tag;
 use std::fs;
@@ -2423,6 +2424,117 @@ fn test_operator_target_word_backward_range() {
         TextObjectRange {
             start: Cursor::new(0, 0),
             end: Cursor::new(0, 6),
+        }
+    );
+}
+
+#[test]
+fn test_operator_target_character_scan_find_forward_range() {
+    let buf = Buffer::from_str("foo:bar");
+    let range = buf
+        .get_operator_target_range(
+            Cursor::new(0, 0),
+            OperatorTarget::CharacterScan(FindState {
+                target_char: ':',
+                kind: FindKind::Find,
+                direction: Direction::Forward,
+            }),
+        )
+        .unwrap();
+    assert_eq!(
+        range,
+        TextObjectRange {
+            start: Cursor::new(0, 0),
+            end: Cursor::new(0, 4),
+        }
+    );
+}
+
+#[test]
+fn test_operator_target_character_scan_till_forward_range() {
+    let buf = Buffer::from_str("foo:bar");
+    let range = buf
+        .get_operator_target_range(
+            Cursor::new(0, 0),
+            OperatorTarget::CharacterScan(FindState {
+                target_char: ':',
+                kind: FindKind::Till,
+                direction: Direction::Forward,
+            }),
+        )
+        .unwrap();
+    assert_eq!(
+        range,
+        TextObjectRange {
+            start: Cursor::new(0, 0),
+            end: Cursor::new(0, 3),
+        }
+    );
+}
+
+#[test]
+fn test_operator_target_character_scan_find_backward_range() {
+    let buf = Buffer::from_str("abcxdef");
+    let range = buf
+        .get_operator_target_range(
+            Cursor::new(0, 6),
+            OperatorTarget::CharacterScan(FindState {
+                target_char: 'x',
+                kind: FindKind::Find,
+                direction: Direction::Backward,
+            }),
+        )
+        .unwrap();
+    assert_eq!(
+        range,
+        TextObjectRange {
+            start: Cursor::new(0, 3),
+            end: Cursor::new(0, 6),
+        }
+    );
+}
+
+#[test]
+fn test_operator_target_character_scan_till_backward_range() {
+    let buf = Buffer::from_str("abcxdef");
+    let range = buf
+        .get_operator_target_range(
+            Cursor::new(0, 6),
+            OperatorTarget::CharacterScan(FindState {
+                target_char: 'x',
+                kind: FindKind::Till,
+                direction: Direction::Backward,
+            }),
+        )
+        .unwrap();
+    assert_eq!(
+        range,
+        TextObjectRange {
+            start: Cursor::new(0, 4),
+            end: Cursor::new(0, 6),
+        }
+    );
+}
+
+#[test]
+fn test_operator_target_character_scan_counted_range() {
+    let buf = Buffer::from_str("foo:bar:baz");
+    let range = buf
+        .get_operator_target_range_with_count(
+            Cursor::new(0, 0),
+            OperatorTarget::CharacterScan(FindState {
+                target_char: ':',
+                kind: FindKind::Find,
+                direction: Direction::Forward,
+            }),
+            2,
+        )
+        .unwrap();
+    assert_eq!(
+        range,
+        TextObjectRange {
+            start: Cursor::new(0, 0),
+            end: Cursor::new(0, 8),
         }
     );
 }

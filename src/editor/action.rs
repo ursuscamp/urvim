@@ -134,6 +134,8 @@ pub enum OperatorTarget {
     TextObject(TextObject),
     BoundaryMotion(BoundaryMotion),
     LinewiseMotion(LinewiseMotion),
+    /// Character-scan target resolved from `f`, `F`, `t`, or `T`.
+    CharacterScan(globals::FindState),
     /// The active visual selection resolved from the current visual mode.
     Selection,
 }
@@ -159,9 +161,13 @@ pub struct Action {
 /// Intent payload for an action envelope.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ActionKind {
+    /// Move the cursor one character to the left.
     MoveLeft,
+    /// Move the cursor one character down.
     MoveDown,
+    /// Move the cursor one character up.
     MoveUp,
+    /// Move the cursor one character to the right.
     MoveRight,
     /// Shrink the focused pane horizontally.
     ResizePaneLeft,
@@ -173,24 +179,41 @@ pub enum ActionKind {
     ResizePaneDown,
     /// Equalize all split ratios in the layout.
     EqualizeSplits,
+    /// Split the focused pane vertically.
     SplitVertical,
+    /// Split the focused pane horizontally.
     SplitHorizontal,
+    /// Focus the pane to the left.
     FocusPaneLeft,
+    /// Focus the pane below.
     FocusPaneDown,
+    /// Focus the pane above.
     FocusPaneUp,
+    /// Focus the pane to the right.
     FocusPaneRight,
+    /// Close the focused pane.
     ClosePane,
+    /// Insert a single character at the cursor.
     InsertChar(char),
+    /// Insert a string at the cursor.
     InsertText(String),
     /// Insert a newline, letting the window decide whether to auto-indent it.
     InsertNewline,
+    /// Exit the editor.
     Quit,
+    /// Move forward to the next boundary of the requested kind.
     ForwardTo(Boundary),
+    /// Move backward to the previous boundary of the requested kind.
     BackTo(Boundary),
+    /// Move to the end of the current line.
     MoveToLineEnd,
+    /// Move to the start of the current line.
     MoveToLineStart,
+    /// Move to the first non-whitespace character of the current line.
     MoveToLineContentStart,
+    /// Move to the first line of the buffer.
     MoveToFirstLine,
+    /// Move to the last line of the buffer.
     MoveToLastLine,
     /// Move up by one viewport height.
     MovePageUp,
@@ -204,27 +227,47 @@ pub enum ActionKind {
     JumpBackward,
     /// Move forward through the current window's jumplist.
     JumpForward,
+    /// Move to the top of the screen.
     MoveToScreenTop,
+    /// Move to the middle of the screen.
     MoveToScreenMiddle,
+    /// Move to the bottom of the screen.
     MoveToScreenBottom,
+    /// Delete the character before the cursor.
     DeleteBackward,
+    /// Delete the character under the cursor.
     DeleteForward,
+    /// Delete the active visual selection.
     DeleteSelection,
+    /// Join the current line with the next line using a space.
     JoinWithSpace,
+    /// Join the current line with the next line without inserting a space.
     JoinWithoutSpace,
+    /// Delete the current line.
     DeleteLine,
+    /// Yank the current line.
     YankLine,
     /// Copy the active visual selection without mutating the buffer.
     YankSelection,
+    /// Replace the current line and enter insert mode.
     ChangeLine,
+    /// Replace the active visual selection and enter insert mode.
     ChangeSelection,
+    /// Change from the cursor to the end of the line.
     ChangeToLineEnd,
+    /// Paste after the cursor.
     PasteAfter,
+    /// Paste before the cursor.
     PasteBefore,
+    /// Move the cursor after the current character for insert mode.
     AppendAfterCursor,
+    /// Move to the end of the current line for insert mode.
     AppendToLineEnd,
+    /// Move to the start of the current line for insert mode.
     InsertAtLineStart,
+    /// Open a new line below the cursor and enter insert mode.
     OpenLineBelow,
+    /// Open a new line above the cursor and enter insert mode.
     OpenLineAbove,
     /// Shift the current line or line range left by one indentation step.
     IndentDecrease,
@@ -232,23 +275,39 @@ pub enum ActionKind {
     IndentIncrease,
     /// Toggle the current line's comment prefix.
     ToggleLineComment,
+    /// Switch to the previous tab.
     PreviousTab,
+    /// Switch to the next tab.
     NextTab,
+    /// Move to the matching bracket for the one under the cursor.
     MoveToMatchingBracket,
+    /// Move to the previous paragraph.
     MoveToPreviousParagraph,
+    /// Move to the next paragraph.
     MoveToNextParagraph,
+    /// Move to the next occurrence of the given character.
     FindForward(char),
+    /// Move to the previous occurrence of the given character.
     FindBackward(char),
+    /// Move just before the next occurrence of the given character.
     TillForward(char),
+    /// Move just after the previous occurrence of the given character.
     TillBackward(char),
+    /// Repeat the last successful character search in the forward direction.
     RepeatLastFind,
+    /// Repeat the last successful character search in the reverse direction.
     RepeatLastFindReverse,
     /// Repeat the last successful repeatable edit.
     RepeatLastChange,
+    /// Undo the last edit.
     Undo,
+    /// Redo the last undone edit.
     Redo,
+    /// Save the current buffer or a specific buffer when provided.
     SaveBuffer(Option<BufferId>),
+    /// Wrap another action in a repeat count.
     Count(usize, Box<Action>),
+    /// Apply an operator to the given target region.
     Operation(Operator, OperatorTarget),
 }
 

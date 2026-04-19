@@ -31,7 +31,7 @@ pub enum FindKind {
 }
 
 /// State of the last character search motion
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FindState {
     pub target_char: char,
     pub kind: FindKind,

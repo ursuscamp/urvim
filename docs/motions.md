@@ -709,6 +709,21 @@ Examples:
 - **Not found behavior**: If the target character is not found, the cursor stays in place (no movement)
 - **Boundary clamping**: For till motions, if the offset would place the cursor outside the line, it is clamped to the line boundary
 
+### Character Scan Range Motions
+
+When `f`, `F`, `t`, or `T` is entered after an operator, urvim treats the character scan as a range target instead of a standalone motion. This matches Vim-style editing patterns such as `ct:` and `dfx`.
+
+- `dfx` deletes through the next `x`
+- `dtx` deletes up to the next `x` without deleting `x`
+- `dFx` deletes through the previous `x`
+- `dTx` deletes text up to the position after the previous `x`
+- `ct:` changes text up to the next `:`
+- Counts apply the same way they do for the normal character scan motions
+- A failed character scan leaves the buffer unchanged
+- Using a character scan as an operator target still updates the last search state, so `;` and `,` continue to repeat it
+
+Normal-mode navigation for `f`, `F`, `t`, and `T` does not change.
+
 ### Edge Cases
 
 - **Cursor at line start**: `F` and `T` search before the cursor, so starting at column 0 means no characters before to search

@@ -1,5 +1,6 @@
 use super::*;
 use crate::editor::{BoundaryMotion, LinewiseMotion, OperatorTarget, TextObject};
+use crate::globals::{Direction, FindKind, FindState};
 
 /// A whole-line delete range resolved from a linewise motion.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -47,6 +48,7 @@ impl Buffer {
                 self.get_boundary_motion_range(cursor, motion)
             }
             OperatorTarget::LinewiseMotion(_) => None,
+            OperatorTarget::CharacterScan(find) => self.get_character_scan_range(cursor, find, 1),
             OperatorTarget::Selection => None,
         }
     }
@@ -87,6 +89,9 @@ impl Buffer {
                 self.get_boundary_motion_range_with_count(cursor, motion, count)
             }
             OperatorTarget::LinewiseMotion(_) => None,
+            OperatorTarget::CharacterScan(find) => {
+                self.get_character_scan_range(cursor, find, count)
+            }
             OperatorTarget::Selection => None,
         }
     }
@@ -225,6 +230,45 @@ impl Buffer {
         };
         let target = Cursor::new(target_line, target_col);
         Some(self.ordered_text_range(cursor, target))
+    }
+
+    fn get_character_scan_range(
+        &self,
+        cursor: Cursor,
+        find: FindState,
+        count: usize,
+    ) -> Option<TextObjectRange> {
+        if count == 0 {
+            return None;
+        }
+
+        let landing = match (find.kind, find.direction) {
+            (FindKind::Find, Direction::Forward) => {
+                self.find_char_forward(cursor, find.target_char, count)?
+            }
+            (FindKind::Find, Direction::Backward) => {
+                self.find_char_backward(cursor, find.target_char, count)?
+            }
+            (FindKind::Till, Direction::Forward) => {
+                self.find_till_forward(cursor, find.target_char, count)?
+            }
+            (FindKind::Till, Direction::Backward) => {
+                self.find_till_backward(cursor, find.target_char, count)?
+            }
+        };
+
+        match find.direction {
+            Direction::Forward => {
+                let end = self
+                    .next_cursor_line(landing)
+                    .unwrap_or_else(|| Cursor::new(landing.line, self.line_len(landing.line)));
+                Some(TextObjectRange { start: cursor, end })
+            }
+            Direction::Backward => Some(TextObjectRange {
+                start: landing,
+                end: cursor,
+            }),
+        }
     }
 
     fn ordered_text_range(&self, a: Cursor, b: Cursor) -> TextObjectRange {
