@@ -124,6 +124,33 @@ impl BufferView {
         self.visual_selection
     }
 
+    /// Replaces the active character-wise visual selection with the given range.
+    pub fn set_visual_selection_range(&mut self, range: crate::buffer::TextObjectRange) -> bool {
+        let Some(selection) = self.visual_selection else {
+            return false;
+        };
+        if selection.kind != VisualSelectionKind::Character {
+            return false;
+        }
+        if self
+            .visual_selection_range()
+            .is_some_and(|current| current == range)
+        {
+            return false;
+        }
+
+        self.visual_selection = Some(VisualSelection {
+            anchor: range.start,
+            kind: VisualSelectionKind::Character,
+        });
+        self.cursor = self
+            .with_buffer(|buffer| buffer.prev_cursor(range.end))
+            .flatten()
+            .unwrap_or(range.start);
+        self.remembered_visual_col = Some(self.current_visual_col());
+        true
+    }
+
     /// Sets the cursor from stored state after syncing it against the current buffer.
     pub fn set_cursor_synced(&mut self, cursor: Cursor) {
         let synced_cursor = self

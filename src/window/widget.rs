@@ -513,6 +513,13 @@ impl Widget for Window {
                     }
                     ActionResult::Handled
                 }
+                Some(ActionKind::VisualTextObject(text_object)) => {
+                    if action.from_mode != Some(ModeKind::Visual) {
+                        ActionResult::NotHandled
+                    } else {
+                        self.select_visual_text_object(*text_object, 1)
+                    }
+                }
                 Some(ActionKind::Count(count, inner)) => {
                     let mut counted_inner = inner.as_ref().clone();
                     if action.from_mode.is_some() {

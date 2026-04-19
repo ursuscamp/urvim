@@ -376,6 +376,30 @@ fn test_visual_mode_motion_and_exit_bindings() {
 }
 
 #[test]
+fn test_visual_mode_text_object_bindings() {
+    let mut mode = VisualMode::new();
+
+    assert!(matches!(
+        mode.handle_key(&key('i')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert_eq!(
+        handle_and_unwrap(&mut mode, &key('w')),
+        Action::new(ActionKind::VisualTextObject(TextObject::InnerWord))
+    );
+
+    let mut mode = VisualMode::new();
+    assert!(matches!(
+        mode.handle_key(&key('a')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert_eq!(
+        handle_and_unwrap(&mut mode, &key('W')),
+        Action::new(ActionKind::VisualTextObject(TextObject::AroundBigWord))
+    );
+}
+
+#[test]
 fn test_visual_mode_v_exits_to_normal() {
     let mut mode = VisualMode::new();
 

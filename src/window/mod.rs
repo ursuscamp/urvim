@@ -16,8 +16,8 @@ mod widget;
 use crate::action::ActionResult;
 use crate::buffer::{Boundary, Buffer, BufferId, Cursor};
 use crate::editor::{
-    Action, InsertMode, LinewiseMotion, Mode, ModeKind, NormalMode, Operator, OperatorTarget,
-    ResizingMode, VisualLineMode, VisualMode,
+    Action, InsertMode, LinewiseMotion, Mode, ModeKind, NormalMode, Operator, ResizingMode,
+    VisualLineMode, VisualMode,
 };
 use crate::globals;
 use crate::screen::Screen;

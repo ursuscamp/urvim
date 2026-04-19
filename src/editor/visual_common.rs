@@ -1,7 +1,7 @@
 use super::keymap::{MAX_COUNT, extract_leading_count};
 use super::{Action, ActionKind, CountParser, HandleKeyResult, Keymap, ModeKind, TrieKeymap};
 use crate::buffer::Boundary;
-use crate::editor::{Operator, OperatorTarget};
+use crate::editor::{BracketKind, Operator, OperatorTarget, QuoteKind, TextObject};
 use crate::motion::chained_keymap::ChainedKeymap;
 use crate::motion::char_scan_keymap::CharScanKeymap;
 use crate::terminal::{Key, KeyCode};
@@ -232,6 +232,7 @@ fn build_visual_keymap(exit_key: &str, switch_key: &str, switch_to: ModeKind) ->
         "c",
         Action::new(ActionKind::ChangeSelection).with_to_mode(ModeKind::Insert),
     );
+    register_visual_text_object_bindings(&mut trie_keymap);
     trie_keymap.insert_str("<Left>", Action::new(ActionKind::MoveLeft));
     trie_keymap.insert_str("<Down>", Action::new(ActionKind::MoveDown));
     trie_keymap.insert_str("<Up>", Action::new(ActionKind::MoveUp));
@@ -245,4 +246,75 @@ fn build_visual_keymap(exit_key: &str, switch_key: &str, switch_to: ModeKind) ->
     keymap.add(Box::new(trie_keymap));
     keymap.add(Box::new(CharScanKeymap::new()));
     keymap
+}
+
+fn register_visual_text_object_bindings(trie_keymap: &mut TrieKeymap) {
+    trie_keymap.insert_str(
+        "iw",
+        Action::new(ActionKind::VisualTextObject(TextObject::InnerWord)),
+    );
+    trie_keymap.insert_str(
+        "aw",
+        Action::new(ActionKind::VisualTextObject(TextObject::AroundWord)),
+    );
+    trie_keymap.insert_str(
+        "iW",
+        Action::new(ActionKind::VisualTextObject(TextObject::InnerBigWord)),
+    );
+    trie_keymap.insert_str(
+        "aW",
+        Action::new(ActionKind::VisualTextObject(TextObject::AroundBigWord)),
+    );
+
+    for (kind, open, close) in [
+        (BracketKind::Paren, '(', ')'),
+        (BracketKind::Square, '[', ']'),
+        (BracketKind::Curly, '{', '}'),
+        (BracketKind::Angle, '<', '>'),
+    ] {
+        let open_key = match open {
+            '<' => "<LessThan>".to_string(),
+            _ => open.to_string(),
+        };
+        let close_key = match close {
+            '>' => "<GreaterThan>".to_string(),
+            _ => close.to_string(),
+        };
+
+        trie_keymap.insert_str(
+            &format!("i{open_key}"),
+            Action::new(ActionKind::VisualTextObject(TextObject::InnerBracket(kind))),
+        );
+        trie_keymap.insert_str(
+            &format!("a{open_key}"),
+            Action::new(ActionKind::VisualTextObject(TextObject::AroundBracket(
+                kind,
+            ))),
+        );
+        trie_keymap.insert_str(
+            &format!("i{close_key}"),
+            Action::new(ActionKind::VisualTextObject(TextObject::InnerBracket(kind))),
+        );
+        trie_keymap.insert_str(
+            &format!("a{close_key}"),
+            Action::new(ActionKind::VisualTextObject(TextObject::AroundBracket(
+                kind,
+            ))),
+        );
+    }
+
+    for (kind, key) in [
+        (QuoteKind::Single, "'"),
+        (QuoteKind::Double, "\""),
+        (QuoteKind::Backtick, "`"),
+    ] {
+        trie_keymap.insert_str(
+            &format!("i{key}"),
+            Action::new(ActionKind::VisualTextObject(TextObject::InnerQuote(kind))),
+        );
+        trie_keymap.insert_str(
+            &format!("a{key}"),
+            Action::new(ActionKind::VisualTextObject(TextObject::AroundQuote(kind))),
+        );
+    }
 }

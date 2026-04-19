@@ -1,8 +1,8 @@
 use super::*;
 use crate::buffer::IndentDirection;
 use crate::config::DefaultRegisters;
-use crate::editor::ActionKind;
 use crate::editor::pairs;
+use crate::editor::{ActionKind, OperatorTarget, TextObject};
 use crate::register::{
     self, DefaultRegisterRole, RegisterContent, RegisterContentKind, RegisterName,
 };
@@ -48,6 +48,36 @@ impl Window {
         self.buffer_view
             .with_buffer(|buffer| buffer.text_in_range(start, end))
             .flatten()
+    }
+
+    fn resolve_visual_text_object_range(
+        &self,
+        text_object: TextObject,
+        count: usize,
+    ) -> Option<crate::buffer::TextObjectRange> {
+        let cursor = self.buffer_view.cursor();
+        self.buffer_view
+            .with_buffer(|buffer| {
+                buffer.get_operator_target_range_with_count(
+                    cursor,
+                    OperatorTarget::TextObject(text_object),
+                    count,
+                )
+            })
+            .flatten()
+    }
+
+    pub(super) fn select_visual_text_object(
+        &mut self,
+        text_object: TextObject,
+        count: usize,
+    ) -> ActionResult {
+        let Some(range) = self.resolve_visual_text_object_range(text_object, count) else {
+            return ActionResult::Handled;
+        };
+
+        self.buffer_view.set_visual_selection_range(range);
+        ActionResult::Handled
     }
 
     pub(super) fn capture_linewise_text(&self, start_line: usize, count: usize) -> Option<String> {
@@ -483,6 +513,9 @@ impl Window {
                 ActionResult::Handled
             }
             Some(ActionKind::ToggleLineComment) => self.handle_count_toggle_line_comment(count),
+            Some(ActionKind::VisualTextObject(text_object)) => {
+                self.select_visual_text_object(*text_object, count)
+            }
             Some(ActionKind::Operation(_, _)) => self.handle_count_operation(count, inner),
             _ if inner.is_line_action() => self.handle_count_line_action(count, inner),
             _ => self.handle_count_repeatable(count, inner),

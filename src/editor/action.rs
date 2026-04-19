@@ -253,6 +253,8 @@ pub enum ActionKind {
     ChangeLine,
     /// Replace the active visual selection and enter insert mode.
     ChangeSelection,
+    /// Select a text object while in visual mode.
+    VisualTextObject(TextObject),
     /// Change from the cursor to the end of the line.
     ChangeToLineEnd,
     /// Paste after the cursor.
@@ -504,6 +506,7 @@ impl Action {
                 | Some(ActionKind::YankSelection)
                 | Some(ActionKind::ChangeLine)
                 | Some(ActionKind::ChangeSelection)
+                | Some(ActionKind::VisualTextObject(_))
                 | Some(ActionKind::ChangeToLineEnd)
                 | Some(ActionKind::JoinWithSpace)
                 | Some(ActionKind::JoinWithoutSpace)
@@ -570,6 +573,7 @@ impl Action {
                 | Some(ActionKind::IndentIncrease)
                 | Some(ActionKind::DeleteLine)
                 | Some(ActionKind::ChangeLine)
+                | Some(ActionKind::VisualTextObject(_))
                 | Some(ActionKind::ChangeToLineEnd)
                 | Some(ActionKind::YankSelection)
                 | Some(ActionKind::PasteAfter)
@@ -685,6 +689,7 @@ impl Action {
             | Some(ActionKind::MoveToMatchingBracket)
             | Some(ActionKind::MoveToPreviousParagraph)
             | Some(ActionKind::MoveToNextParagraph)
+            | Some(ActionKind::VisualTextObject(_))
             | Some(ActionKind::FindForward(_))
             | Some(ActionKind::FindBackward(_))
             | Some(ActionKind::TillForward(_))
@@ -712,6 +717,7 @@ impl Action {
             | Some(ActionKind::DeleteLine)
             | Some(ActionKind::ChangeLine)
             | Some(ActionKind::ChangeSelection)
+            | Some(ActionKind::VisualTextObject(_))
             | Some(ActionKind::ChangeToLineEnd)
             | Some(ActionKind::PasteAfter)
             | Some(ActionKind::PasteBefore)

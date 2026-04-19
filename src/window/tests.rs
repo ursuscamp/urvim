@@ -1787,6 +1787,75 @@ fn test_visual_change_undo_restores_original_text() {
 }
 
 #[test]
+fn test_visual_text_object_repeats_are_idempotent() {
+    let buffer = Buffer::from_str("hello world");
+    let mut window = Window::new(buffer);
+    window.buffer_view_mut().set_cursor(Cursor::new(0, 1));
+    window
+        .buffer_view_mut()
+        .begin_visual_selection(VisualSelectionKind::Character);
+
+    let action = Action::new(ActionKind::VisualTextObject(TextObject::InnerWord))
+        .with_from_mode(ModeKind::Visual);
+    assert_eq!(window.process_action(&action), ActionResult::Handled);
+    let expected = Some(crate::buffer::TextObjectRange {
+        start: Cursor::new(0, 0),
+        end: Cursor::new(0, 5),
+    });
+    assert_eq!(window.buffer_view().visual_selection_range(), expected);
+    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 4));
+
+    assert_eq!(window.process_action(&action), ActionResult::Handled);
+    assert_eq!(window.buffer_view().visual_selection_range(), expected);
+    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 4));
+}
+
+#[test]
+fn test_visual_text_object_can_retarget_selection() {
+    let buffer = Buffer::from_str("hello world");
+    let mut window = Window::new(buffer);
+    window.buffer_view_mut().set_cursor(Cursor::new(0, 1));
+    window
+        .buffer_view_mut()
+        .begin_visual_selection(VisualSelectionKind::Character);
+
+    let inner_word = Action::new(ActionKind::VisualTextObject(TextObject::InnerWord))
+        .with_from_mode(ModeKind::Visual);
+    assert_eq!(window.process_action(&inner_word), ActionResult::Handled);
+
+    let around_word = Action::new(ActionKind::VisualTextObject(TextObject::AroundWord))
+        .with_from_mode(ModeKind::Visual);
+    assert_eq!(window.process_action(&around_word), ActionResult::Handled);
+    assert_eq!(
+        window.buffer_view().visual_selection_range(),
+        Some(crate::buffer::TextObjectRange {
+            start: Cursor::new(0, 0),
+            end: Cursor::new(0, 6),
+        })
+    );
+    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 5));
+}
+
+#[test]
+fn test_visual_text_object_invalid_location_leaves_selection_unchanged() {
+    let buffer = Buffer::from_str("hello");
+    let mut window = Window::new(buffer);
+    window.buffer_view_mut().set_cursor(Cursor::new(0, 0));
+    window
+        .buffer_view_mut()
+        .begin_visual_selection(VisualSelectionKind::Character);
+
+    let before = window.buffer_view().visual_selection_range();
+    let action = Action::new(ActionKind::VisualTextObject(TextObject::InnerBracket(
+        BracketKind::Paren,
+    )))
+    .with_from_mode(ModeKind::Visual);
+
+    assert_eq!(window.process_action(&action), ActionResult::Handled);
+    assert_eq!(window.buffer_view().visual_selection_range(), before);
+}
+
+#[test]
 fn test_visual_case_lowercases_selection_and_exits_to_normal() {
     let theme = themed_window();
     let _theme_guard = globals::set_test_active_theme(theme);

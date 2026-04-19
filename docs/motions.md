@@ -885,6 +885,8 @@ When you press an operator key (like `d`), urvim enters **operator-pending mode*
 
 The case operators `gu`, `gU`, and `g~` also work on active visual selections, including linewise visual selections. They use Rust's Unicode-aware casing behavior where available, so non-ASCII text follows the standard library's case mappings.
 
+In character-wise visual mode, text objects can also be used directly to retarget the active selection. The supported text object families are the same as normal mode, but repeating the same text object on an already-matching selection leaves the selection unchanged.
+
 ### Count Support with Text Objects
 
 Counts multiply when used with text objects:
