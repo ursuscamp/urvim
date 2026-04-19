@@ -860,10 +860,15 @@ Text objects allow targeted text selection combined with operators. They are tri
 | Operator | Action |
 |----------|--------|
 | `d` | Delete |
+| `gu` | Lowercase the target text |
+| `gU` | Uppercase the target text |
+| `g~` | Toggle the target text's case |
 
 ### How Text Objects Work
 
 When you press an operator key (like `d`), urvim enters **operator-pending mode** - it waits for a motion or text object to define the target region. Pressing Escape cancels the operation.
+
+The case operators `gu`, `gU`, and `g~` also work on active visual selections, including linewise visual selections. They use Rust's Unicode-aware casing behavior where available, so non-ASCII text follows the standard library's case mappings.
 
 ### Count Support with Text Objects
 

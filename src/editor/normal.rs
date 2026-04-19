@@ -23,6 +23,44 @@ impl Default for NormalMode {
     }
 }
 
+#[derive(Clone, Copy)]
+struct OperatorSequenceSpec {
+    suffix: &'static str,
+    target: OperatorTarget,
+    to_mode: Option<ModeKind>,
+}
+
+fn insert_operator_sequence(
+    trie_keymap: &mut TrieKeymap,
+    sequence: String,
+    operator: Operator,
+    target: OperatorTarget,
+    to_mode: Option<ModeKind>,
+) {
+    let action = match to_mode {
+        Some(mode) => Action::operation(operator, target).with_to_mode(mode),
+        None => Action::operation(operator, target),
+    };
+    trie_keymap.insert_str(&sequence, action);
+}
+
+fn insert_operator_sequences(
+    trie_keymap: &mut TrieKeymap,
+    prefix: &str,
+    operator: Operator,
+    sequences: &[OperatorSequenceSpec],
+) {
+    for spec in sequences {
+        insert_operator_sequence(
+            trie_keymap,
+            format!("{prefix}{}", spec.suffix),
+            operator,
+            spec.target,
+            spec.to_mode,
+        );
+    }
+}
+
 impl NormalMode {
     pub fn new() -> Self {
         let mut trie_keymap = TrieKeymap::new();
@@ -131,49 +169,49 @@ impl NormalMode {
                 OperatorTarget::TextObject(TextObject::AroundBigWord),
             ),
         );
-        trie_keymap.insert_str(
-            "yiw",
-            Action::operation(
-                Operator::Yank,
-                OperatorTarget::TextObject(TextObject::InnerWord),
-            ),
+        insert_operator_sequences(
+            &mut trie_keymap,
+            "y",
+            Operator::Yank,
+            &[
+                OperatorSequenceSpec {
+                    suffix: "iw",
+                    target: OperatorTarget::TextObject(TextObject::InnerWord),
+                    to_mode: None,
+                },
+                OperatorSequenceSpec {
+                    suffix: "aw",
+                    target: OperatorTarget::TextObject(TextObject::AroundWord),
+                    to_mode: None,
+                },
+                OperatorSequenceSpec {
+                    suffix: "iW",
+                    target: OperatorTarget::TextObject(TextObject::InnerBigWord),
+                    to_mode: None,
+                },
+                OperatorSequenceSpec {
+                    suffix: "aW",
+                    target: OperatorTarget::TextObject(TextObject::AroundBigWord),
+                    to_mode: None,
+                },
+            ],
         );
-        trie_keymap.insert_str(
-            "yaw",
-            Action::operation(
-                Operator::Yank,
-                OperatorTarget::TextObject(TextObject::AroundWord),
-            ),
-        );
-        trie_keymap.insert_str(
-            "yiW",
-            Action::operation(
-                Operator::Yank,
-                OperatorTarget::TextObject(TextObject::InnerBigWord),
-            ),
-        );
-        trie_keymap.insert_str(
-            "yaW",
-            Action::operation(
-                Operator::Yank,
-                OperatorTarget::TextObject(TextObject::AroundBigWord),
-            ),
-        );
-        trie_keymap.insert_str(
-            "ciW",
-            Action::operation(
-                Operator::Change,
-                OperatorTarget::TextObject(TextObject::InnerBigWord),
-            )
-            .with_to_mode(ModeKind::Insert),
-        );
-        trie_keymap.insert_str(
-            "caW",
-            Action::operation(
-                Operator::Change,
-                OperatorTarget::TextObject(TextObject::AroundBigWord),
-            )
-            .with_to_mode(ModeKind::Insert),
+        insert_operator_sequences(
+            &mut trie_keymap,
+            "c",
+            Operator::Change,
+            &[
+                OperatorSequenceSpec {
+                    suffix: "iW",
+                    target: OperatorTarget::TextObject(TextObject::InnerBigWord),
+                    to_mode: Some(ModeKind::Insert),
+                },
+                OperatorSequenceSpec {
+                    suffix: "aW",
+                    target: OperatorTarget::TextObject(TextObject::AroundBigWord),
+                    to_mode: Some(ModeKind::Insert),
+                },
+            ],
         );
         for (kind, key) in [
             (QuoteKind::Single, "'"),
@@ -509,6 +547,91 @@ impl NormalMode {
                 Operator::Yank,
                 OperatorTarget::LinewiseMotion(LinewiseMotion::LastLine),
             ),
+        );
+        let case_sequences = [
+            OperatorSequenceSpec {
+                suffix: "w",
+                target: OperatorTarget::BoundaryMotion(BoundaryMotion::WordForward),
+                to_mode: None,
+            },
+            OperatorSequenceSpec {
+                suffix: "e",
+                target: OperatorTarget::BoundaryMotion(BoundaryMotion::WordEnd),
+                to_mode: None,
+            },
+            OperatorSequenceSpec {
+                suffix: "b",
+                target: OperatorTarget::BoundaryMotion(BoundaryMotion::WordBackward),
+                to_mode: None,
+            },
+            OperatorSequenceSpec {
+                suffix: "W",
+                target: OperatorTarget::BoundaryMotion(BoundaryMotion::BigWordForward),
+                to_mode: None,
+            },
+            OperatorSequenceSpec {
+                suffix: "E",
+                target: OperatorTarget::BoundaryMotion(BoundaryMotion::BigWordEnd),
+                to_mode: None,
+            },
+            OperatorSequenceSpec {
+                suffix: "B",
+                target: OperatorTarget::BoundaryMotion(BoundaryMotion::BigWordBackward),
+                to_mode: None,
+            },
+            OperatorSequenceSpec {
+                suffix: "$",
+                target: OperatorTarget::BoundaryMotion(BoundaryMotion::LineEnd),
+                to_mode: None,
+            },
+            OperatorSequenceSpec {
+                suffix: "0",
+                target: OperatorTarget::BoundaryMotion(BoundaryMotion::LineStart),
+                to_mode: None,
+            },
+            OperatorSequenceSpec {
+                suffix: "^",
+                target: OperatorTarget::BoundaryMotion(BoundaryMotion::LineContentStart),
+                to_mode: None,
+            },
+            OperatorSequenceSpec {
+                suffix: "gg",
+                target: OperatorTarget::LinewiseMotion(LinewiseMotion::FirstLine),
+                to_mode: None,
+            },
+            OperatorSequenceSpec {
+                suffix: "G",
+                target: OperatorTarget::LinewiseMotion(LinewiseMotion::LastLine),
+                to_mode: None,
+            },
+            OperatorSequenceSpec {
+                suffix: "iw",
+                target: OperatorTarget::TextObject(TextObject::InnerWord),
+                to_mode: None,
+            },
+            OperatorSequenceSpec {
+                suffix: "aw",
+                target: OperatorTarget::TextObject(TextObject::AroundWord),
+                to_mode: None,
+            },
+            OperatorSequenceSpec {
+                suffix: "iW",
+                target: OperatorTarget::TextObject(TextObject::InnerBigWord),
+                to_mode: None,
+            },
+            OperatorSequenceSpec {
+                suffix: "aW",
+                target: OperatorTarget::TextObject(TextObject::AroundBigWord),
+                to_mode: None,
+            },
+        ];
+        insert_operator_sequences(&mut trie_keymap, "gu", Operator::Lowercase, &case_sequences);
+        insert_operator_sequences(&mut trie_keymap, "gU", Operator::Uppercase, &case_sequences);
+        insert_operator_sequences(
+            &mut trie_keymap,
+            "g~",
+            Operator::ToggleCase,
+            &case_sequences,
         );
         trie_keymap.insert_str("p", Action::new(ActionKind::PasteAfter));
         trie_keymap.insert_str("P", Action::new(ActionKind::PasteBefore));

@@ -47,6 +47,7 @@ impl Buffer {
                 self.get_boundary_motion_range(cursor, motion)
             }
             OperatorTarget::LinewiseMotion(_) => None,
+            OperatorTarget::Selection => None,
         }
     }
 
@@ -86,6 +87,7 @@ impl Buffer {
                 self.get_boundary_motion_range_with_count(cursor, motion, count)
             }
             OperatorTarget::LinewiseMotion(_) => None,
+            OperatorTarget::Selection => None,
         }
     }
 

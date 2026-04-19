@@ -11,6 +11,12 @@ pub enum Operator {
     Change,
     /// Copy text into a register without mutating the buffer.
     Yank,
+    /// Lowercase the targeted text.
+    Lowercase,
+    /// Uppercase the targeted text.
+    Uppercase,
+    /// Toggle the case of the targeted text.
+    ToggleCase,
 }
 
 /// Boundary-based delete targets that mirror motion families.
@@ -128,6 +134,8 @@ pub enum OperatorTarget {
     TextObject(TextObject),
     BoundaryMotion(BoundaryMotion),
     LinewiseMotion(LinewiseMotion),
+    /// The active visual selection resolved from the current visual mode.
+    Selection,
 }
 
 /// Linewise operator targets for whole-line deletion.
@@ -582,6 +590,9 @@ impl Action {
             Some(ActionKind::Operation(Operator::Delete, _)) => true,
             Some(ActionKind::Operation(Operator::Change, _)) => false,
             Some(ActionKind::Operation(Operator::Yank, _)) => false,
+            Some(ActionKind::Operation(Operator::Lowercase, _))
+            | Some(ActionKind::Operation(Operator::Uppercase, _))
+            | Some(ActionKind::Operation(Operator::ToggleCase, _)) => true,
             _ => false,
         }
     }
@@ -622,6 +633,10 @@ impl Action {
             | Some(ActionKind::RepeatLastFind)
             | Some(ActionKind::RepeatLastFindReverse) => true,
             Some(ActionKind::Count(_, inner)) => inner.updates_snapshot_cursor(),
+            Some(ActionKind::Operation(
+                Operator::Lowercase | Operator::Uppercase | Operator::ToggleCase,
+                _,
+            )) => false,
             Some(ActionKind::Operation(_, _)) => false,
             _ => false,
         }
@@ -650,7 +665,10 @@ impl Action {
             | Some(ActionKind::OpenLineAbove)
             | Some(ActionKind::ToggleLineComment)
             | Some(ActionKind::Operation(Operator::Delete, _))
-            | Some(ActionKind::Operation(Operator::Change, _)) => true,
+            | Some(ActionKind::Operation(Operator::Change, _))
+            | Some(ActionKind::Operation(Operator::Lowercase, _))
+            | Some(ActionKind::Operation(Operator::Uppercase, _))
+            | Some(ActionKind::Operation(Operator::ToggleCase, _)) => true,
             Some(ActionKind::Count(_, inner)) => inner.is_dot_repeat_source(),
             _ => false,
         }

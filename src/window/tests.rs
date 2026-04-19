@@ -1786,6 +1786,83 @@ fn test_visual_change_undo_restores_original_text() {
 }
 
 #[test]
+fn test_visual_case_lowercases_selection_and_exits_to_normal() {
+    let theme = themed_window();
+    let _theme_guard = globals::set_test_active_theme(theme);
+    let _config_guard = globals::set_test_config(Config {
+        theme: "demo".to_string(),
+        insert_escape: None,
+        syntax: true,
+        auto_close_pairs: true,
+        auto_indent: AutoIndentMode::Off,
+        advanced_glyphs: BTreeSet::new(),
+        ..Default::default()
+    });
+
+    let buffer = Buffer::from_str("AbC");
+    let mut window = Window::new(buffer);
+    window
+        .buffer_view_mut()
+        .begin_visual_selection(VisualSelectionKind::Character);
+    window.buffer_view_mut().set_cursor(Cursor::new(0, 3));
+
+    let action = Action::operation(Operator::Lowercase, OperatorTarget::Selection)
+        .with_from_mode(ModeKind::Visual)
+        .with_to_mode(ModeKind::Normal);
+    assert_eq!(window.process_action(&action), ActionResult::Handled);
+    assert_eq!(buffer_text(window.buffer_view()), "abc");
+    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 0));
+    assert_eq!(window.mode_kind(), ModeKind::Normal);
+}
+
+#[test]
+fn test_case_uppercase_operator_handles_unicode_expansion() {
+    let buffer = Buffer::from_str("straße");
+    let mut window = Window::new(buffer);
+
+    window.buffer_view_mut().set_cursor(Cursor::new(0, 0));
+    let result = window.process_action(&Action::operation(
+        Operator::Uppercase,
+        OperatorTarget::TextObject(TextObject::InnerBigWord),
+    ));
+
+    assert_eq!(result, ActionResult::Handled);
+    assert_eq!(buffer_text(window.buffer_view()), "STRASSE");
+    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 0));
+}
+
+#[test]
+fn test_visual_line_toggle_case_handles_unicode_and_exits_to_normal() {
+    let theme = themed_window();
+    let _theme_guard = globals::set_test_active_theme(theme);
+    let _config_guard = globals::set_test_config(Config {
+        theme: "demo".to_string(),
+        insert_escape: None,
+        syntax: true,
+        auto_close_pairs: true,
+        auto_indent: AutoIndentMode::Off,
+        advanced_glyphs: BTreeSet::new(),
+        ..Default::default()
+    });
+
+    let buffer = Buffer::from_str("foo\nßa");
+    let mut window = Window::new(buffer);
+    window.buffer_view_mut().set_cursor(Cursor::new(0, 0));
+    window
+        .buffer_view_mut()
+        .begin_visual_selection(VisualSelectionKind::Line);
+    window.buffer_view_mut().set_cursor(Cursor::new(1, 0));
+
+    let action = Action::operation(Operator::ToggleCase, OperatorTarget::Selection)
+        .with_from_mode(ModeKind::VisualLine)
+        .with_to_mode(ModeKind::Normal);
+    assert_eq!(window.process_action(&action), ActionResult::Handled);
+    assert_eq!(buffer_text(window.buffer_view()), "FOO\nSSA");
+    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 0));
+    assert_eq!(window.mode_kind(), ModeKind::Normal);
+}
+
+#[test]
 fn test_visual_yank_copies_selection_without_mutating_buffer() {
     let _register_guard = globals::set_test_register_store(RegisterStore::new());
     let buffer = Buffer::from_str("abc");

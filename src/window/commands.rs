@@ -491,7 +491,13 @@ impl Window {
 
     fn handle_count_operation(&mut self, count: usize, action: &Action) -> ActionResult {
         if let Some(ActionKind::Operation(op, target)) = action.kind.as_ref() {
-            return self.handle_operation_with_count(*op, *target, count, action.register);
+            return self.handle_operation_with_count(
+                *op,
+                *target,
+                count,
+                action.from_mode,
+                action.register,
+            );
         }
         ActionResult::Handled
     }
@@ -720,14 +726,92 @@ impl Window {
         ActionResult::Handled
     }
 
+    fn transform_case_text(text: &str, operator: Operator) -> String {
+        let mut transformed = String::with_capacity(text.len());
+        for ch in text.chars() {
+            match operator {
+                Operator::Lowercase => transformed.extend(ch.to_lowercase()),
+                Operator::Uppercase => transformed.extend(ch.to_uppercase()),
+                Operator::ToggleCase => {
+                    if ch.is_lowercase() {
+                        transformed.extend(ch.to_uppercase());
+                    } else if ch.is_uppercase() {
+                        transformed.extend(ch.to_lowercase());
+                    } else {
+                        transformed.push(ch);
+                    }
+                }
+                Operator::Delete | Operator::Change | Operator::Yank => transformed.push(ch),
+            }
+        }
+        transformed
+    }
+
+    fn handle_case_selection(
+        &mut self,
+        operator: Operator,
+        from_mode: Option<ModeKind>,
+    ) -> ActionResult {
+        match from_mode {
+            Some(ModeKind::VisualLine) => {
+                let Some((start_line, count)) = self.buffer_view.visual_line_selection_range()
+                else {
+                    return self.operation_noop_result(operator);
+                };
+                let Some(text) = self.capture_linewise_text(start_line, count) else {
+                    return self.operation_noop_result(operator);
+                };
+                let transformed = Self::transform_case_text(&text, operator);
+                let Some(new_cursor) = self
+                    .buffer_view
+                    .with_buffer_mut(|buffer| {
+                        let cursor = buffer.delete_lines(start_line, count)?;
+                        buffer.insert_text(Cursor::new(start_line, 0), &transformed);
+                        Some(cursor)
+                    })
+                    .flatten()
+                else {
+                    return self.operation_noop_result(operator);
+                };
+                self.buffer_view.set_cursor(new_cursor);
+                ActionResult::Handled
+            }
+            Some(ModeKind::Visual) => {
+                let Some(range) = self.buffer_view.visual_selection_range() else {
+                    return self.operation_noop_result(operator);
+                };
+                let Some(text) = self.capture_characterwise_text(range.start, range.end) else {
+                    return self.operation_noop_result(operator);
+                };
+                let transformed = Self::transform_case_text(&text, operator);
+                let Some(new_cursor) = self
+                    .buffer_view
+                    .with_buffer_mut(|buffer| {
+                        let cursor = buffer.delete_range(range)?;
+                        buffer.insert_text(range.start, &transformed);
+                        Some(cursor)
+                    })
+                    .flatten()
+                else {
+                    return self.operation_noop_result(operator);
+                };
+                self.buffer_view.set_cursor(new_cursor);
+                ActionResult::Handled
+            }
+            _ => self.operation_noop_result(operator),
+        }
+    }
+
     fn handle_operation_with_count(
         &mut self,
         operator: Operator,
         target: OperatorTarget,
         count: usize,
+        from_mode: Option<ModeKind>,
         register: Option<RegisterName>,
     ) -> ActionResult {
         match target {
+            OperatorTarget::Selection => self.handle_case_selection(operator, from_mode),
             OperatorTarget::LinewiseMotion(motion) => {
                 self.handle_linewise_operation_with_count(operator, motion, count, register)
             }
@@ -781,6 +865,25 @@ impl Window {
                     text,
                     RegisterContentKind::Characterwise,
                 );
+                return ActionResult::Handled;
+            }
+            Operator::Lowercase | Operator::Uppercase | Operator::ToggleCase => {
+                let transformed = Self::transform_case_text(&text, operator);
+                if range.start == range.end {
+                    return ActionResult::Handled;
+                }
+                let Some(new_cursor) = self
+                    .buffer_view
+                    .with_buffer_mut(|buffer| {
+                        let cursor = buffer.delete_range(range)?;
+                        buffer.insert_text(range.start, &transformed);
+                        Some(cursor)
+                    })
+                    .flatten()
+                else {
+                    return self.operation_noop_result(operator);
+                };
+                self.buffer_view.set_cursor(new_cursor);
                 return ActionResult::Handled;
             }
         }
@@ -850,6 +953,25 @@ impl Window {
                 );
                 return ActionResult::Handled;
             }
+            Operator::Lowercase | Operator::Uppercase | Operator::ToggleCase => {
+                let transformed = Self::transform_case_text(&text, operator);
+                if range.count == 0 {
+                    return ActionResult::Handled;
+                }
+                let Some(new_cursor) = self
+                    .buffer_view
+                    .with_buffer_mut(|buffer| {
+                        let cursor = buffer.delete_lines(range.start_line, range.count)?;
+                        buffer.insert_text(Cursor::new(range.start_line, 0), &transformed);
+                        Some(cursor)
+                    })
+                    .flatten()
+                else {
+                    return self.operation_noop_result(operator);
+                };
+                self.buffer_view.set_cursor(new_cursor);
+                return ActionResult::Handled;
+            }
         }
 
         if range.count == 0 {
@@ -860,7 +982,9 @@ impl Window {
             Operator::Delete | Operator::Change => {
                 buffer.delete_lines(range.start_line, range.count)
             }
-            Operator::Yank => None,
+            Operator::Yank | Operator::Lowercase | Operator::Uppercase | Operator::ToggleCase => {
+                None
+            }
         });
         let Some(Some(new_cursor)) = result else {
             return self.operation_noop_result(operator);
@@ -873,9 +997,11 @@ impl Window {
         &mut self,
         operator: &Operator,
         target: &OperatorTarget,
+        from_mode: Option<ModeKind>,
         register: Option<RegisterName>,
     ) -> ActionResult {
         match target {
+            OperatorTarget::Selection => self.handle_case_selection(*operator, from_mode),
             OperatorTarget::LinewiseMotion(motion) => {
                 self.handle_linewise_operation(*operator, *motion, register)
             }
@@ -928,6 +1054,25 @@ impl Window {
                 );
                 return ActionResult::Handled;
             }
+            Operator::Lowercase | Operator::Uppercase | Operator::ToggleCase => {
+                let transformed = Self::transform_case_text(&text, operator);
+                if range.count == 0 {
+                    return ActionResult::Handled;
+                }
+                let Some(new_cursor) = self
+                    .buffer_view
+                    .with_buffer_mut(|buffer| {
+                        let cursor = buffer.delete_lines(range.start_line, range.count)?;
+                        buffer.insert_text(Cursor::new(range.start_line, 0), &transformed);
+                        Some(cursor)
+                    })
+                    .flatten()
+                else {
+                    return self.operation_noop_result(operator);
+                };
+                self.buffer_view.set_cursor(new_cursor);
+                return ActionResult::Handled;
+            }
         }
 
         if range.count == 0 {
@@ -938,7 +1083,9 @@ impl Window {
             Operator::Delete | Operator::Change => {
                 buffer.delete_lines(range.start_line, range.count)
             }
-            Operator::Yank => None,
+            Operator::Yank | Operator::Lowercase | Operator::Uppercase | Operator::ToggleCase => {
+                None
+            }
         });
         let Some(Some(new_cursor)) = result else {
             return self.operation_noop_result(operator);
@@ -951,7 +1098,9 @@ impl Window {
         match operator {
             Operator::Delete => ActionResult::Handled,
             Operator::Change => ActionResult::NotHandled,
-            Operator::Yank => ActionResult::Handled,
+            Operator::Yank | Operator::Lowercase | Operator::Uppercase | Operator::ToggleCase => {
+                ActionResult::Handled
+            }
         }
     }
 }

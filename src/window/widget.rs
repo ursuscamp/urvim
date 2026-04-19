@@ -521,7 +521,7 @@ impl Widget for Window {
                     self.handle_count(*count, &counted_inner)
                 }
                 Some(ActionKind::Operation(op, target)) => {
-                    return self.handle_operation(op, target, action.register);
+                    return self.handle_operation(op, target, action.from_mode, action.register);
                 }
                 Some(ActionKind::Quit)
                 | Some(ActionKind::Undo)

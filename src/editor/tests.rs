@@ -362,6 +362,12 @@ fn test_visual_mode_motion_and_exit_bindings() {
         handle_and_unwrap(&mut mode, &key('c')),
         Action::new(ActionKind::ChangeSelection).with_to_mode(ModeKind::Insert)
     );
+    assert_eq!(handle_and_unwrap(&mut mode, &key('g')), Action::none());
+    assert_eq!(
+        handle_and_unwrap(&mut mode, &key('u')),
+        Action::operation(Operator::Lowercase, OperatorTarget::Selection)
+            .with_to_mode(ModeKind::Normal)
+    );
     assert_eq!(
         handle_and_unwrap(&mut mode, &Key::new(crate::terminal::KeyCode::Esc)),
         Action::mode_transition(ModeKind::Normal)
@@ -401,6 +407,12 @@ fn test_visual_line_mode_motion_and_exit_bindings() {
     assert_eq!(
         handle_and_unwrap(&mut mode, &key('c')),
         Action::new(ActionKind::ChangeSelection).with_to_mode(ModeKind::Insert)
+    );
+    assert_eq!(handle_and_unwrap(&mut mode, &key('g')), Action::none());
+    assert_eq!(
+        handle_and_unwrap(&mut mode, &key('U')),
+        Action::operation(Operator::Uppercase, OperatorTarget::Selection)
+            .with_to_mode(ModeKind::Normal)
     );
     assert_eq!(
         handle_and_unwrap(&mut mode, &Key::new(crate::terminal::KeyCode::Esc)),
@@ -1051,6 +1063,69 @@ fn test_cgg_sequence() {
 }
 
 #[test]
+fn test_gu_sequence() {
+    let mut mode = NormalMode::new();
+    assert!(matches!(
+        mode.handle_key(&key('g')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert!(matches!(
+        mode.handle_key(&key('u')),
+        HandleKeyResult::WaitForMore
+    ));
+    let result = mode.handle_key(&key('w'));
+    assert!(matches!(
+        complete_action_kind(result),
+        ActionKind::Operation(
+            Operator::Lowercase,
+            OperatorTarget::BoundaryMotion(BoundaryMotion::WordForward),
+        )
+    ));
+}
+
+#[test]
+fn test_g_upper_sequence() {
+    let mut mode = NormalMode::new();
+    assert!(matches!(
+        mode.handle_key(&key('g')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert!(matches!(
+        mode.handle_key(&key('U')),
+        HandleKeyResult::WaitForMore
+    ));
+    let result = mode.handle_key(&key('w'));
+    assert!(matches!(
+        complete_action_kind(result),
+        ActionKind::Operation(
+            Operator::Uppercase,
+            OperatorTarget::BoundaryMotion(BoundaryMotion::WordForward),
+        )
+    ));
+}
+
+#[test]
+fn test_g_tilde_sequence() {
+    let mut mode = NormalMode::new();
+    assert!(matches!(
+        mode.handle_key(&key('g')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert!(matches!(
+        mode.handle_key(&key('~')),
+        HandleKeyResult::WaitForMore
+    ));
+    let result = mode.handle_key(&key('w'));
+    assert!(matches!(
+        complete_action_kind(result),
+        ActionKind::Operation(
+            Operator::ToggleCase,
+            OperatorTarget::BoundaryMotion(BoundaryMotion::WordForward),
+        )
+    ));
+}
+
+#[test]
 fn test_dollar_sequence() {
     let mut mode = NormalMode::new();
     assert!(matches!(
@@ -1268,6 +1343,9 @@ fn test_dot_repeat_source_classification() {
     assert!(Action::new(ActionKind::DeleteLine).is_dot_repeat_source());
     assert!(Action::new(ActionKind::IndentDecrease).is_dot_repeat_source());
     assert!(Action::new(ActionKind::IndentIncrease).is_dot_repeat_source());
+    assert!(
+        Action::operation(Operator::Lowercase, OperatorTarget::Selection,).is_dot_repeat_source()
+    );
     assert!(!Action::mode_transition(ModeKind::Insert).is_dot_repeat_source());
     assert!(
         Action::operation(
@@ -1291,6 +1369,7 @@ fn test_indent_action_traits() {
     assert!(increase.is_line_action());
     assert!(decrease.is_snapshottable());
     assert!(increase.is_snapshottable());
+    assert!(Action::operation(Operator::ToggleCase, OperatorTarget::Selection,).is_snapshottable());
 }
 
 #[test]

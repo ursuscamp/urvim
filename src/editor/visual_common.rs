@@ -1,6 +1,7 @@
 use super::keymap::{MAX_COUNT, extract_leading_count};
 use super::{Action, ActionKind, CountParser, HandleKeyResult, Keymap, ModeKind, TrieKeymap};
 use crate::buffer::Boundary;
+use crate::editor::{Operator, OperatorTarget};
 use crate::motion::chained_keymap::ChainedKeymap;
 use crate::motion::char_scan_keymap::CharScanKeymap;
 use crate::terminal::{Key, KeyCode};
@@ -92,6 +93,18 @@ impl VisualModeState {
             Some(ActionKind::DeleteSelection)
                 | Some(ActionKind::ChangeSelection)
                 | Some(ActionKind::YankSelection)
+                | Some(ActionKind::Operation(
+                    Operator::Lowercase,
+                    OperatorTarget::Selection,
+                ))
+                | Some(ActionKind::Operation(
+                    Operator::Uppercase,
+                    OperatorTarget::Selection,
+                ))
+                | Some(ActionKind::Operation(
+                    Operator::ToggleCase,
+                    OperatorTarget::Selection,
+                ))
         ) || (action.kind.is_none() && action.to_mode == Some(ModeKind::Normal))
     }
 
@@ -185,6 +198,21 @@ fn build_visual_keymap(exit_key: &str, switch_key: &str, switch_to: ModeKind) ->
     trie_keymap.insert_str("H", Action::new(ActionKind::MoveToScreenTop));
     trie_keymap.insert_str("M", Action::new(ActionKind::MoveToScreenMiddle));
     trie_keymap.insert_str("L", Action::new(ActionKind::MoveToScreenBottom));
+    trie_keymap.insert_str(
+        "gu",
+        Action::operation(Operator::Lowercase, OperatorTarget::Selection)
+            .with_to_mode(ModeKind::Normal),
+    );
+    trie_keymap.insert_str(
+        "gU",
+        Action::operation(Operator::Uppercase, OperatorTarget::Selection)
+            .with_to_mode(ModeKind::Normal),
+    );
+    trie_keymap.insert_str(
+        "g~",
+        Action::operation(Operator::ToggleCase, OperatorTarget::Selection)
+            .with_to_mode(ModeKind::Normal),
+    );
     trie_keymap.insert_str("{", Action::new(ActionKind::MoveToPreviousParagraph));
     trie_keymap.insert_str("}", Action::new(ActionKind::MoveToNextParagraph));
     trie_keymap.insert_str("%", Action::new(ActionKind::MoveToMatchingBracket));
