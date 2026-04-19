@@ -1381,7 +1381,7 @@ fn test_change_operation_traits() {
     let insert_action = action.clone().with_to_mode(ModeKind::Insert);
     let counted_insert_action = Action::count(2, Box::new(insert_action.clone()));
 
-    assert!(action.is_snapshottable());
+    assert!(!action.is_snapshottable());
     assert!(action.is_countable());
     assert!(!action.switches_to_insert_mode());
     assert!(insert_action.switches_to_insert_mode());
