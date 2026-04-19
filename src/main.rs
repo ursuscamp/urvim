@@ -277,6 +277,12 @@ fn main() -> io::Result<()> {
                                 }
 
                                 if handled {
+                                    if dispatch_action.from_mode == Some(ModeKind::Insert)
+                                        && dispatch_action.to_mode == Some(ModeKind::Normal)
+                                    {
+                                        commit_insert_exit_snapshot(&mut layout);
+                                    }
+
                                     // Snapshot after the edit so undo can restore the pre-change state.
                                     if dispatch_action.is_snapshottable() {
                                         let cursor = layout.active_buffer_view().cursor();
@@ -389,6 +395,21 @@ fn apply_undo_redo(layout: &mut Layout, redo: bool) -> bool {
     layout.active_buffer_view_mut().set_cursor_synced(cursor);
     layout.active_window_group_mut().record_cursor_position();
     true
+}
+
+fn commit_insert_exit_snapshot(layout: &mut Layout) {
+    let cursor = layout.active_buffer_view().cursor();
+    let should_snapshot = layout
+        .active_buffer_view()
+        .with_buffer(|buffer| !buffer.current_text_matches_undo_head())
+        .unwrap_or(false);
+
+    if should_snapshot {
+        layout
+            .active_buffer_view()
+            .with_buffer_mut(|buffer| buffer.push_snapshot(cursor))
+            .unwrap_or(());
+    }
 }
 
 fn render_frame<I: io::Read + AsFd, O: io::Write + AsFd>(
@@ -600,6 +621,58 @@ mod tests {
                 .active_buffer_view()
                 .with_buffer(|buffer| buffer.as_str().to_string()),
             Some("hello".to_string())
+        );
+    }
+
+    #[test]
+    fn insert_exit_commits_single_undo_snapshot_when_text_changes() {
+        let mut layout = Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("world")]));
+
+        assert!(
+            layout
+                .active_buffer_view_mut()
+                .with_buffer_mut(|buffer| buffer.insert_text(Cursor::new(0, 0), "hello"))
+                .is_some()
+        );
+        layout
+            .active_buffer_view_mut()
+            .set_cursor(Cursor::new(0, 5));
+
+        commit_insert_exit_snapshot(&mut layout);
+
+        assert!(
+            layout
+                .active_buffer_view()
+                .with_buffer(|buffer| buffer.can_undo())
+                .unwrap_or(false)
+        );
+
+        assert_eq!(
+            layout
+                .active_buffer_view_mut()
+                .with_buffer_mut(|buffer| buffer.undo())
+                .flatten(),
+            Some(Cursor::new(0, 0))
+        );
+        assert_eq!(
+            layout
+                .active_buffer_view()
+                .with_buffer(|buffer| buffer.as_str().to_string()),
+            Some("world".to_string())
+        );
+    }
+
+    #[test]
+    fn insert_exit_does_not_commit_snapshot_without_text_changes() {
+        let mut layout = Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("world")]));
+
+        commit_insert_exit_snapshot(&mut layout);
+
+        assert!(
+            !layout
+                .active_buffer_view()
+                .with_buffer(|buffer| buffer.can_undo())
+                .unwrap_or(true)
         );
     }
 

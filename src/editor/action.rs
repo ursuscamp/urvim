@@ -569,28 +569,18 @@ impl Action {
             | Some(ActionKind::DeleteForward)
             | Some(ActionKind::DeleteSelection)
             | Some(ActionKind::DeleteLine)
-            | Some(ActionKind::ChangeLine)
-            | Some(ActionKind::ChangeSelection)
-            | Some(ActionKind::ChangeToLineEnd)
             | Some(ActionKind::PasteAfter)
             | Some(ActionKind::PasteBefore)
             | Some(ActionKind::JoinWithSpace)
             | Some(ActionKind::JoinWithoutSpace)
             | Some(ActionKind::IndentDecrease)
             | Some(ActionKind::IndentIncrease)
-            | Some(ActionKind::AppendAfterCursor)
-            | Some(ActionKind::AppendToLineEnd)
-            | Some(ActionKind::InsertAtLineStart)
-            | Some(ActionKind::OpenLineBelow)
-            | Some(ActionKind::OpenLineAbove)
-            | Some(ActionKind::ToggleLineComment)
-            | Some(ActionKind::InsertText(_))
-            | Some(ActionKind::InsertNewline) => true,
+            | Some(ActionKind::ToggleLineComment) => true,
             Some(ActionKind::InsertChar(_)) => false,
             Some(ActionKind::Undo) | Some(ActionKind::Redo) => false,
             Some(ActionKind::Count(_, inner)) => inner.is_snapshottable(),
-            Some(ActionKind::Operation(Operator::Delete, _))
-            | Some(ActionKind::Operation(Operator::Change, _)) => true,
+            Some(ActionKind::Operation(Operator::Delete, _)) => true,
+            Some(ActionKind::Operation(Operator::Change, _)) => false,
             Some(ActionKind::Operation(Operator::Yank, _)) => false,
             _ => false,
         }

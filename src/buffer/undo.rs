@@ -59,6 +59,12 @@ impl UndoState {
     fn can_redo(&self) -> bool {
         self.position < self.history.len() - 1
     }
+
+    fn current_snapshot_matches(&self, lines: &Vector<Arc<str>>) -> bool {
+        self.history
+            .get(self.position)
+            .is_some_and(|active| active.lines == *lines)
+    }
 }
 
 impl Buffer {
@@ -98,5 +104,10 @@ impl Buffer {
 
     pub fn can_redo(&self) -> bool {
         self.undo_state.can_redo()
+    }
+
+    /// Returns true when the current buffer text matches the active undo snapshot.
+    pub fn current_text_matches_undo_head(&self) -> bool {
+        self.undo_state.current_snapshot_matches(&self.lines)
     }
 }

@@ -28,6 +28,21 @@ fn process_action_and_snapshot(window: &mut Window, action: &Action) {
     }
 }
 
+fn commit_insert_exit_snapshot(window: &mut Window) {
+    let cursor = window.buffer_view.cursor();
+    let should_snapshot = window
+        .buffer_view
+        .with_buffer(|buffer| !buffer.current_text_matches_undo_head())
+        .unwrap_or(false);
+
+    if should_snapshot {
+        window
+            .buffer_view
+            .with_buffer_mut(|buffer| buffer.push_snapshot(cursor))
+            .unwrap_or(());
+    }
+}
+
 fn buffer_text(view: &BufferView) -> String {
     view.with_buffer(|buffer| buffer.as_str())
         .unwrap_or_default()
@@ -1058,6 +1073,42 @@ fn test_open_line_above_uses_neighbor_indent() {
 }
 
 #[test]
+fn test_open_line_below_undo_restores_original_text() {
+    let mut window = Window::new(Buffer::from_str("hello"));
+    window.set_cursor(Cursor::new(0, 5));
+
+    assert_eq!(
+        window
+            .process_action(&Action::new(ActionKind::OpenLineBelow).with_to_mode(ModeKind::Insert)),
+        ActionResult::Handled
+    );
+    assert_eq!(buffer_text(window.buffer_view()), "hello\n");
+    assert_eq!(window.buffer_view().cursor(), Cursor::new(1, 0));
+
+    assert_eq!(
+        window.process_action(
+            &Action::insert_text("world".to_string()).with_from_mode(ModeKind::Insert)
+        ),
+        ActionResult::Handled
+    );
+    assert_eq!(buffer_text(window.buffer_view()), "hello\nworld");
+    assert_eq!(window.buffer_view().cursor(), Cursor::new(1, 5));
+
+    commit_insert_exit_snapshot(&mut window);
+
+    if let Some(cursor) = window
+        .buffer_view
+        .with_buffer_mut(|buffer| buffer.undo())
+        .flatten()
+    {
+        window.buffer_view.set_cursor(cursor);
+    }
+
+    assert_eq!(buffer_text(window.buffer_view()), "hello");
+    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 0));
+}
+
+#[test]
 fn test_insert_newline_uses_neighbor_indent_and_reports_suffix() {
     let mut window = Window::new(Buffer::from_str(
         "    fn main() {\n  println!(\"hi\");\n    }",
@@ -1094,6 +1145,87 @@ fn test_change_line_preserves_current_indentation_when_auto_indent_is_enabled() 
     );
     assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 4));
     assert_eq!(window.take_pending_repeat_suffix().as_deref(), Some("    "));
+}
+
+#[test]
+fn test_change_line_undo_restores_original_text() {
+    let mut window = Window::new(Buffer::from_str("    fn main() {\n  println!(\"hi\");"));
+    let _config_guard = globals::set_test_config(auto_indent_test_config(AutoIndentMode::Neighbor));
+    window.set_cursor(Cursor::new(0, 4));
+
+    assert_eq!(
+        window.process_action(&Action::new(ActionKind::ChangeLine).with_to_mode(ModeKind::Insert)),
+        ActionResult::Handled
+    );
+    assert_eq!(
+        buffer_text(window.buffer_view()),
+        "    \n  println!(\"hi\");"
+    );
+    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 4));
+    assert_eq!(window.take_pending_repeat_suffix().as_deref(), Some("    "));
+
+    assert_eq!(
+        window
+            .process_action(&Action::insert_text("x".to_string()).with_from_mode(ModeKind::Insert)),
+        ActionResult::Handled
+    );
+    assert_eq!(
+        buffer_text(window.buffer_view()),
+        "    x\n  println!(\"hi\");"
+    );
+    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 5));
+
+    commit_insert_exit_snapshot(&mut window);
+
+    if let Some(cursor) = window
+        .buffer_view
+        .with_buffer_mut(|buffer| buffer.undo())
+        .flatten()
+    {
+        window.buffer_view.set_cursor(cursor);
+    }
+
+    assert_eq!(
+        buffer_text(window.buffer_view()),
+        "    fn main() {\n  println!(\"hi\");"
+    );
+    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 0));
+}
+
+#[test]
+fn test_change_to_line_end_undo_restores_original_text() {
+    let mut window = Window::new(Buffer::from_str("hello world"));
+    window.set_cursor(Cursor::new(0, 3));
+
+    assert_eq!(
+        window.process_action(
+            &Action::new(ActionKind::ChangeToLineEnd).with_to_mode(ModeKind::Insert)
+        ),
+        ActionResult::Handled
+    );
+    assert_eq!(buffer_text(window.buffer_view()), "hel");
+    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 3));
+
+    assert_eq!(
+        window
+            .process_action(&Action::insert_text("p".to_string()).with_from_mode(ModeKind::Insert)),
+        ActionResult::Handled
+    );
+    assert_eq!(buffer_text(window.buffer_view()), "help");
+    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 4));
+
+    commit_insert_exit_snapshot(&mut window);
+
+    if let Some(cursor) = window
+        .buffer_view
+        .with_buffer_mut(|buffer| buffer.undo())
+        .flatten()
+    {
+        window.buffer_view.set_cursor(cursor);
+    }
+
+    assert_eq!(buffer_text(window.buffer_view()), "hello world");
+    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 0));
 }
 
 #[test]
@@ -1600,6 +1732,56 @@ fn test_visual_change_leaves_cursor_at_selection_start() {
         .with_to_mode(ModeKind::Insert);
     assert_eq!(window.process_action(&action), ActionResult::Handled);
     assert_eq!(buffer_text(window.buffer_view()), "c");
+    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 0));
+}
+
+#[test]
+fn test_visual_change_undo_restores_original_text() {
+    let theme = themed_window();
+    let _theme_guard = globals::set_test_active_theme(theme);
+    let _config_guard = globals::set_test_config(Config {
+        theme: "demo".to_string(),
+        insert_escape: None,
+        syntax: true,
+        auto_close_pairs: true,
+        auto_indent: AutoIndentMode::Off,
+        advanced_glyphs: BTreeSet::new(),
+        ..Default::default()
+    });
+
+    let buffer = Buffer::from_str("abc");
+    let mut window = Window::new(buffer);
+    window
+        .buffer_view_mut()
+        .begin_visual_selection(VisualSelectionKind::Character);
+    window.buffer_view_mut().set_cursor(Cursor::new(0, 1));
+
+    let action = Action::new(ActionKind::ChangeSelection)
+        .with_from_mode(ModeKind::Visual)
+        .with_to_mode(ModeKind::Insert);
+    assert_eq!(window.process_action(&action), ActionResult::Handled);
+    assert_eq!(buffer_text(window.buffer_view()), "c");
+    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 0));
+
+    assert_eq!(
+        window
+            .process_action(&Action::insert_text("x".to_string()).with_from_mode(ModeKind::Insert)),
+        ActionResult::Handled
+    );
+    assert_eq!(buffer_text(window.buffer_view()), "xc");
+    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 1));
+
+    commit_insert_exit_snapshot(&mut window);
+
+    if let Some(cursor) = window
+        .buffer_view
+        .with_buffer_mut(|buffer| buffer.undo())
+        .flatten()
+    {
+        window.buffer_view.set_cursor(cursor);
+    }
+
+    assert_eq!(buffer_text(window.buffer_view()), "abc");
     assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 0));
 }
 
@@ -2268,6 +2450,8 @@ fn test_cw_undo_restores_original_text() {
     );
     assert_eq!(buffer_text(window.buffer_view()), "hiworld");
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 2));
+
+    commit_insert_exit_snapshot(&mut window);
 
     if let Some(cursor) = window
         .buffer_view
