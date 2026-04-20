@@ -303,6 +303,7 @@ impl BufferView {
                         buffer_line: buffer_line_idx,
                         byte_offset,
                         width_offset,
+                        base_style: Style::default(),
                         chunks,
                     };
                     render_data.line_data.push(line_data);
@@ -311,12 +312,6 @@ impl BufferView {
                 }
             }
         });
-
-        for line_data in &mut render_data.line_data {
-            for chunk in &mut line_data.chunks {
-                chunk.style = default_style.overlay(chunk.style);
-            }
-        }
 
         if let Some(selection_style) = selection_style {
             self.apply_visual_selection(&mut render_data, selection_style);
@@ -390,11 +385,11 @@ impl BufferView {
         visible_text: &str,
         syntax_spans: &[crate::buffer::SyntaxSpan],
         todo_markers: &Vector<SmolStr>,
-        default_style: Style,
+        _default_style: Style,
         syntax_styles: Option<&crate::theme::HighlightStyles>,
     ) -> Vec<RenderChunk> {
         if visible_text.is_empty() {
-            return vec![RenderChunk::new("", default_style)];
+            return vec![RenderChunk::new("", Style::default())];
         }
 
         let visible_end = line_text.len();
@@ -419,7 +414,7 @@ impl BufferView {
             if chunk_start < span_start {
                 chunks.push(RenderChunk::new(
                     &line_text[chunk_start..span_start],
-                    default_style,
+                    Style::default(),
                 ));
             }
 
@@ -432,7 +427,7 @@ impl BufferView {
                         visible_start,
                         visible_end,
                         todo_markers,
-                        default_style,
+                        Style::default(),
                         syntax_styles,
                     )
                     .into_iter()
@@ -440,11 +435,11 @@ impl BufferView {
                 } else {
                     // Convert the syntax category into the active theme's concrete style.
                     let syntax_style = syntax_styles
-                        .map(|styles| styles.style_for_tag(&span.style, default_style))
+                        .map(|styles| styles.style_for_tag(&span.style, Style::default()))
                         .unwrap_or_default();
                     chunks.push(RenderChunk::new(
                         &line_text[span_start..span_end],
-                        default_style.overlay(syntax_style),
+                        syntax_style,
                     ));
                 }
                 // Advance past the highlighted region so the next gap is computed correctly.
@@ -456,13 +451,13 @@ impl BufferView {
         if chunk_start < visible_end {
             chunks.push(RenderChunk::new(
                 &line_text[chunk_start..visible_end],
-                default_style,
+                Style::default(),
             ));
         }
 
         // If no spans applied, fall back to a single plain chunk.
         if chunks.is_empty() {
-            chunks.push(RenderChunk::new(visible_text, default_style));
+            chunks.push(RenderChunk::new(visible_text, Style::default()));
         }
 
         chunks
@@ -475,7 +470,7 @@ impl BufferView {
         visible_start: usize,
         visible_end: usize,
         todo_markers: &Vector<SmolStr>,
-        default_style: Style,
+        _default_style: Style,
         syntax_styles: Option<&crate::theme::HighlightStyles>,
     ) -> Vec<RenderChunk> {
         let Some((render_start, render_end)) =
@@ -489,7 +484,7 @@ impl BufferView {
         // middle of a comment.
         let comment_text = &line_text[span_start..span_end];
         let comment_style = syntax_styles
-            .map(|styles| styles.style_for_tag(&comment_tag(), default_style))
+            .map(|styles| styles.style_for_tag(&comment_tag(), Style::default()))
             .unwrap_or_default();
         // Marker matches are computed in comment-local coordinates, then
         // shifted back into line coordinates so the visible slice can be
@@ -505,7 +500,7 @@ impl BufferView {
         if matches.is_empty() {
             return vec![RenderChunk::new(
                 &line_text[render_start..render_end],
-                default_style.overlay(comment_style),
+                comment_style,
             )];
         }
 
@@ -522,7 +517,7 @@ impl BufferView {
             };
             let marker_tag = todo_marker_tag(&marker_match.marker);
             let marker_style = syntax_styles
-                .map(|styles| styles.style_for_tag(&marker_tag, default_style))
+                .map(|styles| styles.style_for_tag(&marker_tag, Style::default()))
                 .unwrap_or_default();
             let segment_text = &line_text[chunk_start..marker_end];
             Self::push_split_render_chunk(
@@ -531,8 +526,8 @@ impl BufferView {
                 chunk_start,
                 marker_start,
                 marker_end,
-                default_style.overlay(comment_style),
-                default_style.overlay(marker_style),
+                comment_style,
+                marker_style,
             );
             chunk_start = marker_end;
         }
@@ -542,7 +537,7 @@ impl BufferView {
         if chunk_start < render_end {
             chunks.push(RenderChunk::new(
                 &line_text[chunk_start..render_end],
-                default_style.overlay(comment_style),
+                comment_style,
             ));
         }
 
@@ -551,7 +546,7 @@ impl BufferView {
         if chunks.is_empty() {
             chunks.push(RenderChunk::new(
                 &line_text[render_start..render_end],
-                default_style.overlay(comment_style),
+                comment_style,
             ));
         }
 
@@ -960,11 +955,7 @@ mod tests {
         let view = BufferView::new(buffer);
         let theme = comment_only_theme();
         let theme_default_style = theme.default_style();
-        let expected_comment_style = theme
-            .default_style()
-            .overlay(
-                theme.highlight_style_for_tag(&Tag::parse("comment").expect("valid tag")),
-            );
+        let expected_comment_style = theme.highlight_style_for_tag(&Tag::parse("comment").expect("valid tag"));
         let _theme_guard = globals::set_test_active_theme(theme);
         let _config_guard = globals::set_test_config(Config {
             theme: "comment-only".to_string(),
@@ -990,7 +981,7 @@ mod tests {
         let view = BufferView::new(buffer);
         let theme = marker_theme();
         let theme_default_style = theme.default_style();
-        let expected_default_style = theme.default_style();
+        let expected_default_style = Style::default();
         let _theme_guard = globals::set_test_active_theme(theme);
         let _config_guard = globals::set_test_config(Config {
             theme: "marker-demo".to_string(),

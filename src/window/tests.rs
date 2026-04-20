@@ -409,8 +409,8 @@ fn test_window_render_highlights_active_line_in_normal_mode() {
         .overlay(theme.highlight_style_for_name("ui.window.active_line"));
     let expected_keyword_style = theme
         .default_style()
-        .overlay(theme.highlight_style_for_tag(&tag("keyword")))
-        .overlay(theme.highlight_style_for_name("ui.window.active_line"));
+        .overlay(theme.highlight_style_for_name("ui.window.active_line"))
+        .overlay(theme.highlight_style_for_tag(&tag("keyword")));
     let _theme_guard = globals::set_test_active_theme(theme);
     let _config_guard = globals::set_test_config(Config {
         active_line: true,
@@ -429,6 +429,33 @@ fn test_window_render_highlights_active_line_in_normal_mode() {
         screen.get_cell_mut(0, 18).unwrap().style,
         expected_line_fill_style
     );
+}
+
+#[test]
+fn test_window_render_keeps_todo_marker_above_active_line_base_style() {
+    let path = temp_path_with_ext("todo-active-line", "rs");
+    let buffer = Buffer::from_str_with_path("fn main() { // TODO FIXME }", path);
+    let mut window = Window::new(buffer);
+    let theme = todo_marker_themed_window();
+    let expected_todo_style = theme
+        .default_style()
+        .overlay(theme.highlight_style_for_name("ui.window.active_line"))
+        .overlay(theme.highlight_style_for_tag(&tag("comment.todo")));
+    let _theme_guard = globals::set_test_active_theme(theme);
+    let _config_guard = globals::set_test_config(Config {
+        theme: "demo-syntax".to_string(),
+        active_line: true,
+        syntax: true,
+        auto_close_pairs: true,
+        auto_indent: AutoIndentMode::Off,
+        advanced_glyphs: BTreeSet::new(),
+        ..Default::default()
+    });
+
+    let mut screen = crate::screen::Screen::new(1, 80);
+    window.render(&mut screen, Position::new(0, 0), Size::new(1, 80));
+
+    assert_eq!(screen.get_cell_mut(0, 18).unwrap().style, expected_todo_style);
 }
 
 #[test]
@@ -541,10 +568,7 @@ fn test_window_render_refreshes_scrolled_visible_syntax_after_edit() {
     );
     let mut window = Window::new(buffer);
     let theme = syntax_themed_window();
-    let expected_default_style = theme.default_style();
-    let expected_comment_style = expected_default_style.overlay(
-        theme.highlight_style_for_tag(&tag("comment")),
-    );
+    let expected_comment_style = theme.highlight_style_for_tag(&tag("comment"));
     let _theme_guard = globals::set_test_active_theme(theme);
     let _config_guard = globals::set_test_config(Config {
         theme: "demo-syntax".to_string(),
@@ -673,24 +697,12 @@ fn test_window_render_uses_syntax_styles_for_supported_filetypes() {
     );
     let mut window = Window::new(buffer);
     let theme = syntax_themed_window();
-    let expected_keyword_style = theme
-        .default_style()
-        .overlay(theme.highlight_style_for_tag(&tag("keyword")));
-    let expected_constant_style = theme
-        .default_style()
-        .overlay(theme.highlight_style_for_tag(&tag("constant")));
-    let expected_type_style = theme
-        .default_style()
-        .overlay(theme.highlight_style_for_tag(&tag("type")));
-    let expected_variable_style = theme
-        .default_style()
-        .overlay(theme.highlight_style_for_tag(&tag("variable")));
-    let expected_string_style = theme
-        .default_style()
-        .overlay(theme.highlight_style_for_tag(&tag("string")));
-    let expected_comment_style = theme
-        .default_style()
-        .overlay(theme.highlight_style_for_tag(&tag("comment")));
+    let expected_keyword_style = theme.highlight_style_for_tag(&tag("keyword"));
+    let expected_constant_style = theme.highlight_style_for_tag(&tag("constant"));
+    let expected_type_style = theme.highlight_style_for_tag(&tag("type"));
+    let expected_variable_style = theme.highlight_style_for_tag(&tag("variable"));
+    let expected_string_style = theme.highlight_style_for_tag(&tag("string"));
+    let expected_comment_style = theme.highlight_style_for_tag(&tag("comment"));
     let _theme_guard = globals::set_test_active_theme(theme);
 
     let mut screen = crate::screen::Screen::new(1, 80);
@@ -735,7 +747,7 @@ fn test_window_render_omits_syntax_styles_when_disabled() {
     );
     let mut window = Window::new(buffer);
     let theme = syntax_themed_window();
-    let expected_default_style = theme.default_style();
+    let expected_default_style = Style::default();
     let _theme_guard = globals::set_test_active_theme(theme);
     let _config_guard = globals::set_test_config(Config {
         theme: "demo-syntax".to_string(),
@@ -846,25 +858,13 @@ fn test_window_render_uses_background_syntax_after_tick() {
         temp_path_with_ext("background-syntax", "rs"),
     );
     let mut window = Window::new(buffer);
-    let expected_keyword_style = theme
-        .default_style()
-        .overlay(theme.highlight_style_for_tag(&tag("keyword")));
-    let expected_constant_style = theme
-        .default_style()
-        .overlay(theme.highlight_style_for_tag(&tag("constant")));
-    let expected_type_style = theme
-        .default_style()
-        .overlay(theme.highlight_style_for_tag(&tag("type")));
-    let expected_variable_style = theme
-        .default_style()
-        .overlay(theme.highlight_style_for_tag(&tag("variable")));
-    let expected_string_style = theme
-        .default_style()
-        .overlay(theme.highlight_style_for_tag(&tag("string")));
-    let expected_comment_style = theme
-        .default_style()
-        .overlay(theme.highlight_style_for_tag(&tag("comment")));
-    let _expected_default_style = theme.default_style();
+    let expected_keyword_style = theme.highlight_style_for_tag(&tag("keyword"));
+    let expected_constant_style = theme.highlight_style_for_tag(&tag("constant"));
+    let expected_type_style = theme.highlight_style_for_tag(&tag("type"));
+    let expected_variable_style = theme.highlight_style_for_tag(&tag("variable"));
+    let expected_string_style = theme.highlight_style_for_tag(&tag("string"));
+    let expected_comment_style = theme.highlight_style_for_tag(&tag("comment"));
+    let _expected_default_style = Style::default();
 
     let mut screen = crate::screen::Screen::new(1, 80);
     window.render(&mut screen, Position::new(0, 0), Size::new(1, 80));
@@ -959,12 +959,8 @@ fn test_window_render_distinguishes_rust_format_string_escapes() {
     let buffer = Buffer::from_str_with_path("let msg = format!(\"{{literal}}\");", path);
     let mut window = Window::new(buffer);
     let theme = syntax_themed_window();
-    let expected_string_style = theme
-        .default_style()
-        .overlay(theme.highlight_style_for_tag(&tag("string")));
-    let expected_escape_style = theme
-        .default_style()
-        .overlay(theme.highlight_style_for_tag(&tag("string.escape")));
+    let expected_string_style = theme.highlight_style_for_tag(&tag("string"));
+    let expected_escape_style = theme.highlight_style_for_tag(&tag("string.escape"));
     let _theme_guard = globals::set_test_active_theme(theme);
 
     let mut screen = crate::screen::Screen::new(1, 80);
@@ -995,18 +991,10 @@ fn test_window_render_highlights_todo_markers_inside_comments() {
     let buffer = Buffer::from_str_with_path("fn main() { let value = 1; // TODO FIXME }", path);
     let mut window = Window::new(buffer);
     let theme = todo_marker_themed_window();
-    let expected_keyword_style = theme
-        .default_style()
-        .overlay(theme.highlight_style_for_tag(&tag("keyword")));
-    let expected_comment_style = theme
-        .default_style()
-        .overlay(theme.highlight_style_for_tag(&tag("comment")));
-    let expected_todo_style = theme
-        .default_style()
-        .overlay(theme.highlight_style_for_tag(&tag("comment.todo")));
-    let expected_fixme_style = theme
-        .default_style()
-        .overlay(theme.highlight_style_for_tag(&tag("comment.fixme")));
+    let expected_keyword_style = theme.highlight_style_for_tag(&tag("keyword"));
+    let expected_comment_style = theme.highlight_style_for_tag(&tag("comment"));
+    let expected_todo_style = theme.highlight_style_for_tag(&tag("comment.todo"));
+    let expected_fixme_style = theme.highlight_style_for_tag(&tag("comment.fixme"));
     let _theme_guard = globals::set_test_active_theme(theme);
     let _config_guard = globals::set_test_config(Config {
         theme: "demo-syntax".to_string(),
@@ -1053,7 +1041,7 @@ fn test_window_render_skips_todo_markers_when_syntax_is_disabled() {
     let buffer = Buffer::from_str_with_path("fn main() { // TODO FIXME }", path);
     let mut window = Window::new(buffer);
     let theme = todo_marker_themed_window();
-    let expected_default_style = theme.default_style();
+    let expected_default_style = Style::default();
     let _theme_guard = globals::set_test_active_theme(theme);
     let _config_guard = globals::set_test_config(Config {
         theme: "demo-syntax".to_string(),
@@ -1601,9 +1589,7 @@ fn test_visual_selection_is_rendered() {
         Tag::parse("ui.selection").expect("valid tag"),
         Style::new().bg(Color::ansi(99)),
     );
-    let expected_style = theme
-        .default_style()
-        .overlay(theme.highlight_style_for_name("ui.selection"));
+    let expected_style = theme.highlight_style_for_name("ui.selection");
     let _theme_guard = globals::set_test_active_theme(theme);
     let _config_guard = globals::set_test_config(Config {
         theme: "demo".to_string(),
@@ -1642,9 +1628,7 @@ fn test_visual_line_selection_is_rendered() {
         Tag::parse("ui.selection").expect("valid tag"),
         Style::new().bg(Color::ansi(99)),
     );
-    let expected_style = theme
-        .default_style()
-        .overlay(theme.highlight_style_for_name("ui.selection"));
+    let expected_style = theme.highlight_style_for_name("ui.selection");
     let _theme_guard = globals::set_test_active_theme(theme);
     let _config_guard = globals::set_test_config(Config {
         theme: "demo".to_string(),

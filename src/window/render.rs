@@ -46,17 +46,36 @@ impl RenderData {
     /// Renders the buffer content using a supplied base style.
     pub fn render_with_base_style(&self, screen: &mut Screen, origin: Position, base_style: Style) {
         let tab_width = configured_tab_width();
+        let (_, screen_cols) = screen.size();
         for (row_offset, line_data) in self.line_data.iter().enumerate() {
             let mut line_visual_col = line_data.width_offset;
             let mut col_offset = origin.col;
             for chunk in &line_data.chunks {
-                let style = base_style.overlay(chunk.style);
+                let style = base_style.overlay(line_data.base_style).overlay(chunk.style);
                 let rendered = expand_tabs(&chunk.text, line_visual_col, tab_width);
                 screen.write_string(origin.row + row_offset as u16, col_offset, style, &rendered);
                 let chunk_width = display_width_at(&chunk.text, line_visual_col, tab_width);
                 line_visual_col += chunk_width;
                 col_offset += chunk_width as u16;
             }
+
+            if line_data.base_style != Style::default() && col_offset < screen_cols {
+                let fill_style = base_style.overlay(line_data.base_style);
+                screen.fill_region(
+                    origin.row + row_offset as u16,
+                    col_offset,
+                    1,
+                    screen_cols - col_offset,
+                    fill_style,
+                );
+            }
+        }
+    }
+
+    /// Applies an extra base style to one rendered line.
+    pub fn set_line_base_style(&mut self, screen_line: usize, style: Style) {
+        if let Some(line_data) = self.line_data.get_mut(screen_line) {
+            line_data.base_style = style;
         }
     }
 

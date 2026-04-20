@@ -74,6 +74,8 @@ pub struct LineData {
     pub buffer_line: usize,
     pub byte_offset: usize,
     pub width_offset: usize,
+    /// Extra base style applied before this line's chunks are rendered.
+    pub base_style: Style,
     pub chunks: Vec<RenderChunk>,
 }
 
@@ -279,8 +281,6 @@ impl Window {
         self.render_data = self
             .buffer_view
             .build_render_data_with_style(content_size, default_style);
-        self.render_data.render(screen, content_origin);
-
         let active_line_enabled =
             globals::with_config(|config| config.active_line).unwrap_or(false);
         let is_normal_mode = self.mode.kind() == ModeKind::Normal;
@@ -293,14 +293,12 @@ impl Window {
                 theme.map(|theme| theme.highlight_style_for_name("ui.window.active_line"))
             })
         {
-            screen.overlay_region(
-                content_origin.row + cursor_position.row,
-                content_origin.col,
-                1,
-                content_size.cols,
-                active_line_style,
-            );
+            self.render_data
+                .set_line_base_style(cursor_position.row as usize, active_line_style);
         }
+
+        self.render_data
+            .render_with_base_style(screen, content_origin, default_style);
     }
 
     pub fn set_cursor(&mut self, cursor: Cursor) {
