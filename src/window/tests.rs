@@ -388,7 +388,7 @@ fn test_window_render_uses_theme_styles() {
     let buffer = Buffer::from_str("line1");
     let mut window = Window::new(buffer);
     let theme = themed_window();
-    let expected_gutter_style = theme.highlight_style_for_name("ui.window.gutter");
+    let expected_gutter_style = theme.resolve_name_with_default("ui.window.gutter");
     let expected_default_style = theme.default_style();
     let _theme_guard = globals::set_test_active_theme(theme);
 
@@ -705,7 +705,7 @@ fn test_window_render_fills_empty_content_rows_with_theme_default() {
     let buffer = Buffer::from_str("line1");
     let mut window = Window::new(buffer);
     let theme = themed_window();
-    let expected_gutter_style = theme.highlight_style_for_name("ui.window.gutter");
+    let expected_gutter_style = theme.resolve_name_with_default("ui.window.gutter");
     let expected_default_style = theme.default_style();
     let _theme_guard = globals::set_test_active_theme(theme);
 

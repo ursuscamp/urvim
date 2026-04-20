@@ -339,10 +339,10 @@ impl WindowGroup {
                 theme
                     .map(|theme| {
                         (
-                            theme.highlight_style_for_name("ui.tab.inactive"),
-                            theme.highlight_style_for_name("ui.tab.active"),
-                            theme.highlight_style_for_name("ui.tab.scroll_indicator"),
-                            theme.highlight_style_for_name("ui.status_bar.modified_marker"),
+                            theme.resolve_name_with_default("ui.tab.inactive"),
+                            theme.resolve_name_with_default("ui.tab.active"),
+                            theme.resolve_name_with_default("ui.tab.scroll_indicator"),
+                            theme.resolve_name_with_default("ui.status_bar.modified_marker"),
                         )
                     })
                     .unwrap_or_else(|| {

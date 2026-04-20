@@ -39,8 +39,7 @@ pub fn resolve_theme(raw: RawTheme) -> Result<Theme, ThemeLoadError> {
         &raw.default,
         &palette,
     )?;
-    let highlights =
-        resolve_highlight_styles(theme_name, &raw.highlights, default_style, &palette)?;
+    let highlights = resolve_highlight_styles(theme_name, &raw.highlights, &palette)?;
 
     Ok(Theme::new(theme_name, kind, default_style, highlights))
 }
@@ -80,7 +79,6 @@ fn parse_rgb(theme_name: &str, key: &str, value: &str) -> Result<Color, ThemeLoa
 fn resolve_highlight_styles(
     theme_name: &str,
     raw: &std::collections::BTreeMap<String, RawStyle>,
-    default_style: Style,
     palette: &BTreeMap<String, Color>,
 ) -> Result<HighlightStyles, ThemeLoadError> {
     let mut styles = HighlightStyles::default();
@@ -90,16 +88,11 @@ fn resolve_highlight_styles(
             section: "highlights",
             tag: highlight.to_string(),
         })?;
-        let base = if tag.as_str().starts_with("syntax.") {
-            Style::default()
-        } else {
-            default_style
-        };
         let resolved = resolve_style(
             theme_name,
             "highlights",
             tag.as_str(),
-            base,
+            Style::default(),
             raw_style,
             palette,
         )?;
@@ -270,44 +263,24 @@ mod tests {
 
     fn split_border_style(theme: &str) -> Style {
         match theme {
-            "Friday Night" => Style::new().fg(Color::ansi(244)).bg(Color::ansi(16)),
-            "Saturday Morning" => Style::new().fg(Color::ansi(241)).bg(Color::ansi(231)),
-            "Rose Pine" => Style::new()
-                .fg(Color::Rgb(Rgb::new(110, 106, 134)))
-                .bg(Color::Rgb(Rgb::new(25, 23, 36))),
-            "Dracula" => Style::new()
-                .fg(Color::Rgb(Rgb::new(98, 114, 164)))
-                .bg(Color::Rgb(Rgb::new(40, 42, 54))),
-            "Tokyo Night" => Style::new()
-                .fg(Color::Rgb(Rgb::new(86, 95, 137)))
-                .bg(Color::Rgb(Rgb::new(26, 27, 38))),
-            "Catppuccin" => Style::new()
-                .fg(Color::Rgb(Rgb::new(108, 112, 134)))
-                .bg(Color::Rgb(Rgb::new(30, 30, 46))),
+            "Friday Night" => Style::new().fg(Color::ansi(244)),
+            "Saturday Morning" => Style::new().fg(Color::ansi(241)),
+            "Rose Pine" => Style::new().fg(Color::Rgb(Rgb::new(110, 106, 134))),
+            "Dracula" => Style::new().fg(Color::Rgb(Rgb::new(98, 114, 164))),
+            "Tokyo Night" => Style::new().fg(Color::Rgb(Rgb::new(86, 95, 137))),
+            "Catppuccin" => Style::new().fg(Color::Rgb(Rgb::new(108, 112, 134))),
             other => panic!("unexpected theme {other}"),
         }
     }
 
     fn split_border_resize_style(theme: &str) -> Style {
         match theme {
-            "Friday Night" => Style::new().fg(Color::ansi(75)).bg(Color::ansi(16)).bold(),
-            "Saturday Morning" => Style::new().fg(Color::ansi(24)).bg(Color::ansi(231)).bold(),
-            "Rose Pine" => Style::new()
-                .fg(Color::Rgb(Rgb::new(196, 167, 231)))
-                .bg(Color::Rgb(Rgb::new(25, 23, 36)))
-                .bold(),
-            "Dracula" => Style::new()
-                .fg(Color::Rgb(Rgb::new(189, 147, 249)))
-                .bg(Color::Rgb(Rgb::new(40, 42, 54)))
-                .bold(),
-            "Tokyo Night" => Style::new()
-                .fg(Color::Rgb(Rgb::new(122, 162, 247)))
-                .bg(Color::Rgb(Rgb::new(26, 27, 38)))
-                .bold(),
-            "Catppuccin" => Style::new()
-                .fg(Color::Rgb(Rgb::new(203, 166, 247)))
-                .bg(Color::Rgb(Rgb::new(30, 30, 46)))
-                .bold(),
+            "Friday Night" => Style::new().fg(Color::ansi(75)).bold(),
+            "Saturday Morning" => Style::new().fg(Color::ansi(24)).bold(),
+            "Rose Pine" => Style::new().fg(Color::Rgb(Rgb::new(196, 167, 231))).bold(),
+            "Dracula" => Style::new().fg(Color::Rgb(Rgb::new(189, 147, 249))).bold(),
+            "Tokyo Night" => Style::new().fg(Color::Rgb(Rgb::new(122, 162, 247))).bold(),
+            "Catppuccin" => Style::new().fg(Color::Rgb(Rgb::new(203, 166, 247))).bold(),
             other => panic!("unexpected theme {other}"),
         }
     }
@@ -356,10 +329,7 @@ bold = true
         assert_eq!(theme.kind(), ThemeKind::TrueColor);
         assert_eq!(
             theme.highlight_style_for_name("ui.status_bar"),
-            Style::new()
-                .fg(Color::Rgb(Rgb::new(17, 34, 51)))
-                .bg(Color::Rgb(Rgb::new(17, 34, 51)))
-                .bold()
+            Style::new().fg(Color::Rgb(Rgb::new(17, 34, 51)))
         );
         assert_eq!(
             theme.highlight_style_for_tag(&tag("syntax.keyword")),
@@ -371,17 +341,11 @@ bold = true
         );
         assert_eq!(
             theme.highlight_style_for_name("ui.window.split_border"),
-            Style::new()
-                .fg(Color::ansi(0))
-                .bg(Color::Rgb(Rgb::new(17, 34, 51)))
-                .bold()
+            Style::new().fg(Color::ansi(0))
         );
         assert_eq!(
             theme.highlight_style_for_name("ui.window.split_border.resize"),
-            Style::new()
-                .fg(Color::Rgb(Rgb::new(17, 34, 51)))
-                .bg(Color::Rgb(Rgb::new(17, 34, 51)))
-                .bold()
+            Style::new().fg(Color::Rgb(Rgb::new(17, 34, 51))).bold()
         );
     }
 
@@ -546,7 +510,7 @@ bold = true
         let theme = resolve_theme_from_str("sample", theme).expect("theme should resolve");
         assert_eq!(
             theme.highlight_style_for_name("ui.status_bar"),
-            Style::new().fg(Color::ansi(1)).bg(Color::ansi(1)).bold()
+            Style::new().fg(Color::ansi(1))
         );
         assert_eq!(
             theme.highlight_style_for_tag(&tag("syntax.keyword")),

@@ -262,7 +262,7 @@ impl Window {
             theme
                 .map(|theme| {
                     (
-                        theme.highlight_style_for_name("ui.window.gutter"),
+                        theme.resolve_name_with_default("ui.window.gutter"),
                         theme.default_style(),
                     )
                 })
@@ -311,7 +311,7 @@ impl Window {
                 .render_data
                 .cursor_screen_position(self.buffer_view.cursor())
             && let Some(active_line_style) = globals::with_active_theme(|theme| {
-                theme.map(|theme| theme.highlight_style_for_name("ui.window.active_line"))
+                theme.map(|theme| theme.resolve_name_with_default("ui.window.active_line"))
             })
         {
             self.render_data

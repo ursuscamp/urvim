@@ -91,7 +91,7 @@ impl StyleOverlay {
     }
 }
 
-/// Fully resolved styles keyed by hierarchical highlight names.
+/// Overlay styles keyed by hierarchical highlight names.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct HighlightStyles {
     styles: BTreeMap<Tag, Style>,
@@ -103,7 +103,7 @@ impl HighlightStyles {
         Self { styles }
     }
 
-    /// Returns the resolved style for a tag after specificity fallback.
+    /// Returns the overlay style for a tag after specificity fallback.
     pub fn style_for_tag(&self, tag: &Tag, default_style: Style) -> Style {
         if let Some(style) = self.try_style_for_tag(tag) {
             return style;
@@ -118,14 +118,14 @@ impl HighlightStyles {
         default_style
     }
 
-    /// Returns the resolved style for a dot-separated highlight name.
+    /// Returns the overlay style for a dot-separated highlight name.
     pub fn style_for_name(&self, name: &str, default_style: Style) -> Style {
         Tag::parse(name)
             .map(|tag| self.style_for_tag(&tag, default_style))
             .unwrap_or(default_style)
     }
 
-    /// Inserts a resolved style for a tag.
+    /// Inserts an overlay style for a tag.
     pub fn insert(&mut self, tag: Tag, style: Style) {
         self.styles.insert(tag, style);
     }
@@ -158,7 +158,7 @@ fn prefixed_syntax_tag(tag: &Tag) -> Option<Tag> {
     Tag::parse(&format!("syntax.{value}")).ok()
 }
 
-/// A fully resolved theme ready for rendering.
+/// A resolved theme ready for rendering.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Theme {
     /// Resolved highlight styles used by rendering and syntax highlighting code.
@@ -199,14 +199,26 @@ impl Theme {
         self.default_style
     }
 
-    /// Returns the resolved style for a tag.
+    /// Returns the overlay style for a tag.
     pub fn highlight_style_for_tag(&self, tag: &Tag) -> Style {
-        self.highlights.style_for_tag(tag, self.default_style)
+        self.highlights.style_for_tag(tag, Style::default())
     }
 
-    /// Returns the resolved style for a dot-separated highlight name.
+    /// Returns the overlay style for a dot-separated highlight name.
     pub fn highlight_style_for_name(&self, name: &str) -> Style {
-        self.highlights.style_for_name(name, self.default_style)
+        self.highlights.style_for_name(name, Style::default())
+    }
+
+    /// Resolves a full style for a tag by overlaying it on the theme default.
+    pub fn resolve_tag_with_default(&self, tag: &Tag) -> Style {
+        self.default_style
+            .overlay(self.highlight_style_for_tag(tag))
+    }
+
+    /// Resolves a full style for a dot-separated highlight name by overlaying it on the theme default.
+    pub fn resolve_name_with_default(&self, name: &str) -> Style {
+        self.default_style
+            .overlay(self.highlight_style_for_name(name))
     }
 }
 

@@ -79,9 +79,9 @@ impl StatusBar {
         let (style, modified_style) = globals::with_active_theme(|theme| {
             theme
                 .map(|theme| {
-                    let status_bar = theme.highlight_style_for_name("ui.status_bar");
+                    let status_bar = theme.resolve_name_with_default("ui.status_bar");
                     let modified_marker =
-                        theme.highlight_style_for_name("ui.status_bar.modified_marker");
+                        theme.resolve_name_with_default("ui.status_bar.modified_marker");
                     (status_bar, status_bar.accent(modified_marker))
                 })
                 .unwrap_or_else(|| (Default::default(), Default::default()))
@@ -381,7 +381,7 @@ mod tests {
     fn test_render_uses_theme_status_bar_style() {
         let status_bar = StatusBar::new();
         let theme = themed_status_bar();
-        let expected_style = theme.highlight_style_for_name("ui.status_bar");
+        let expected_style = theme.resolve_name_with_default("ui.status_bar");
         let _theme_guard = globals::set_test_active_theme(theme);
 
         let mut screen = Screen::new(1, 12);
@@ -399,7 +399,7 @@ mod tests {
     fn test_render_uses_theme_modified_marker_style() {
         let status_bar = StatusBar::new();
         let theme = themed_status_bar();
-        let expected_style = theme.highlight_style_for_name("ui.status_bar");
+        let expected_style = theme.resolve_name_with_default("ui.status_bar");
         let expected_marker_style =
             expected_style.accent(theme.highlight_style_for_name("ui.status_bar.modified_marker"));
         let _theme_guard = globals::set_test_active_theme(theme);

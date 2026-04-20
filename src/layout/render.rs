@@ -147,9 +147,9 @@ impl Layout {
             theme
                 .map(|theme| {
                     if mode == ModeKind::Resizing {
-                        theme.highlight_style_for_name("ui.window.split_border.resize")
+                        theme.resolve_name_with_default("ui.window.split_border.resize")
                     } else {
-                        theme.highlight_style_for_name("ui.window.split_border")
+                        theme.resolve_name_with_default("ui.window.split_border")
                     }
                 })
                 .unwrap_or_default()
