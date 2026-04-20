@@ -4,6 +4,7 @@ use crate::buffer::{configured_tab_width, display_grapheme_width, display_width_
 use crate::theme::Tag;
 use imbl::Vector;
 use smol_str::SmolStr;
+use std::ops::Range;
 
 impl BufferView {
     /// Creates a new view and registers the buffer in the global pool.
@@ -256,10 +257,9 @@ impl BufferView {
         let mut render_data = RenderData::new(size.rows);
         let syntax_styles =
             globals::with_active_theme(|theme| theme.map(|theme| theme.highlights.clone()));
-        let selection_style =
-            globals::with_active_theme(|theme| {
-                theme.map(|theme| theme.highlight_style_for_name("ui.selection"))
-            });
+        let selection_style = globals::with_active_theme(|theme| {
+            theme.map(|theme| theme.highlight_style_for_name("ui.selection"))
+        });
         let syntax_enabled = globals::with_config(|config| config.syntax).unwrap_or(true);
         let todo_markers: Vector<SmolStr> = if syntax_enabled {
             globals::with_config(|config| config.todo_markers.clone()).unwrap_or_default()
@@ -422,12 +422,9 @@ impl BufferView {
                 if is_comment_tag(&span.style) && !todo_markers.is_empty() {
                     Self::build_comment_chunks(
                         line_text,
-                        span.start_byte,
-                        span.end_byte,
-                        visible_start,
-                        visible_end,
+                        span.start_byte..span.end_byte,
+                        visible_start..visible_end,
                         todo_markers,
-                        Style::default(),
                         syntax_styles,
                     )
                     .into_iter()
@@ -465,16 +462,13 @@ impl BufferView {
 
     fn build_comment_chunks(
         line_text: &str,
-        span_start: usize,
-        span_end: usize,
-        visible_start: usize,
-        visible_end: usize,
+        span: Range<usize>,
+        visible: Range<usize>,
         todo_markers: &Vector<SmolStr>,
-        _default_style: Style,
         syntax_styles: Option<&crate::theme::HighlightStyles>,
     ) -> Vec<RenderChunk> {
         let Some((render_start, render_end)) =
-            Self::intersect_byte_ranges(span_start, span_end, visible_start, visible_end)
+            Self::intersect_byte_ranges(span.start, span.end, visible.start, visible.end)
         else {
             return Vec::new();
         };
@@ -482,7 +476,7 @@ impl BufferView {
         // Scan the full comment span first so offscreen markers still
         // contribute to the final split points when the viewport clips in the
         // middle of a comment.
-        let comment_text = &line_text[span_start..span_end];
+        let comment_text = &line_text[span.start..span.end];
         let comment_style = syntax_styles
             .map(|styles| styles.style_for_tag(&comment_tag(), Style::default()))
             .unwrap_or_default();
@@ -492,8 +486,8 @@ impl BufferView {
         let matches = Self::find_todo_matches(comment_text, todo_markers.iter())
             .into_iter()
             .map(|marker_match| TodoMatch {
-                start_byte: span_start + marker_match.start_byte,
-                end_byte: span_start + marker_match.end_byte,
+                start_byte: span.start + marker_match.start_byte,
+                end_byte: span.start + marker_match.end_byte,
                 marker: marker_match.marker,
             })
             .collect::<Vec<_>>();
@@ -848,7 +842,12 @@ mod tests {
             Style::new().fg(Color::ansi(20)),
         );
 
-        Theme::new("comment-only", ThemeKind::Ansi256, default_style, highlights)
+        Theme::new(
+            "comment-only",
+            ThemeKind::Ansi256,
+            default_style,
+            highlights,
+        )
     }
 
     fn marker_theme() -> Theme {
@@ -955,7 +954,8 @@ mod tests {
         let view = BufferView::new(buffer);
         let theme = comment_only_theme();
         let theme_default_style = theme.default_style();
-        let expected_comment_style = theme.highlight_style_for_tag(&Tag::parse("comment").expect("valid tag"));
+        let expected_comment_style =
+            theme.highlight_style_for_tag(&Tag::parse("comment").expect("valid tag"));
         let _theme_guard = globals::set_test_active_theme(theme);
         let _config_guard = globals::set_test_config(Config {
             theme: "comment-only".to_string(),

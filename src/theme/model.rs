@@ -109,10 +109,10 @@ impl HighlightStyles {
             return style;
         }
 
-        if let Some(prefixed_tag) = prefixed_syntax_tag(tag) {
-            if let Some(style) = self.try_style_for_tag(&prefixed_tag) {
-                return style;
-            }
+        if let Some(prefixed_tag) = prefixed_syntax_tag(tag)
+            && let Some(style) = self.try_style_for_tag(&prefixed_tag)
+        {
+            return style;
         }
 
         default_style
@@ -337,7 +337,10 @@ mod tests {
             Style::new().fg(Color::ansi(2)),
         );
         highlights.insert(tag("ui.selection"), Style::new().reverse());
-        highlights.insert(tag("ui.window.active_line"), Style::new().bg(Color::ansi(21)));
+        highlights.insert(
+            tag("ui.window.active_line"),
+            Style::new().bg(Color::ansi(21)),
+        );
         highlights.insert(tag("ui.tab.active"), Style::new().fg(Color::ansi(3)));
         highlights.insert(tag("ui.tab.inactive"), Style::new().fg(Color::ansi(4)));
         highlights.insert(
@@ -346,25 +349,55 @@ mod tests {
         );
         highlights.insert(tag("ui.window.gutter"), Style::new().fg(Color::ansi(6)));
         highlights.insert(tag("ui.window"), Style::new().fg(Color::ansi(7)));
-        highlights.insert(tag("ui.window.split_border"), Style::new().fg(Color::ansi(8)));
+        highlights.insert(
+            tag("ui.window.split_border"),
+            Style::new().fg(Color::ansi(8)),
+        );
         highlights.insert(
             tag("ui.window.split_border.resize"),
             Style::new().fg(Color::ansi(9)),
         );
-        highlights.insert(tag("syntax.comment"), Style::new().bold().fg(Color::ansi(10)));
-        highlights.insert(tag("syntax.constant"), Style::new().bold().fg(Color::ansi(11)));
-        highlights.insert(tag("syntax.function"), Style::new().bold().fg(Color::ansi(12)));
-        highlights.insert(tag("syntax.keyword"), Style::new().bold().fg(Color::ansi(13)));
-        highlights.insert(tag("syntax.markup.code"), Style::new().bold().fg(Color::ansi(20)));
-        highlights.insert(tag("syntax.operator"), Style::new().bold().fg(Color::ansi(15)));
-        highlights.insert(tag("syntax.punctuation"), Style::new().bold().fg(Color::ansi(16)));
-        highlights.insert(tag("syntax.string"), Style::new().bold().fg(Color::ansi(17)));
+        highlights.insert(
+            tag("syntax.comment"),
+            Style::new().bold().fg(Color::ansi(10)),
+        );
+        highlights.insert(
+            tag("syntax.constant"),
+            Style::new().bold().fg(Color::ansi(11)),
+        );
+        highlights.insert(
+            tag("syntax.function"),
+            Style::new().bold().fg(Color::ansi(12)),
+        );
+        highlights.insert(
+            tag("syntax.keyword"),
+            Style::new().bold().fg(Color::ansi(13)),
+        );
+        highlights.insert(
+            tag("syntax.markup.code"),
+            Style::new().bold().fg(Color::ansi(20)),
+        );
+        highlights.insert(
+            tag("syntax.operator"),
+            Style::new().bold().fg(Color::ansi(15)),
+        );
+        highlights.insert(
+            tag("syntax.punctuation"),
+            Style::new().bold().fg(Color::ansi(16)),
+        );
+        highlights.insert(
+            tag("syntax.string"),
+            Style::new().bold().fg(Color::ansi(17)),
+        );
         highlights.insert(
             tag("syntax.string.interpolation"),
             Style::new().bold().fg(Color::ansi(21)),
         );
         highlights.insert(tag("syntax.type"), Style::new().bold().fg(Color::ansi(18)));
-        highlights.insert(tag("syntax.variable"), Style::new().bold().fg(Color::ansi(19)));
+        highlights.insert(
+            tag("syntax.variable"),
+            Style::new().bold().fg(Color::ansi(19)),
+        );
         highlights.insert(
             tag("syntax.constant.integer"),
             Style::new().bold().fg(Color::ansi(14)),
@@ -435,9 +468,10 @@ mod tests {
         theme
             .highlights
             .insert(tag("syntax.comment.todo"), Style::new().fg(Color::ansi(22)));
-        theme
-            .highlights
-            .insert(tag("syntax.comment.fixme"), Style::new().fg(Color::ansi(23)));
+        theme.highlights.insert(
+            tag("syntax.comment.fixme"),
+            Style::new().fg(Color::ansi(23)),
+        );
 
         assert_eq!(
             theme.highlight_style_for_tag(&tag("syntax.comment.todo")),

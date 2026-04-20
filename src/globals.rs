@@ -75,7 +75,7 @@ pub fn set_last_find(state: FindState) {
 /// Get the last character search state
 pub fn get_last_find() -> Option<FindState> {
     let last = LAST_FIND.lock().unwrap();
-    last.clone()
+    *last
 }
 
 /// Set the last repeatable edit state used by dot repeat.
@@ -186,7 +186,7 @@ pub fn with_config<R>(f: impl FnOnce(&Config) -> R) -> Option<R> {
     #[cfg(test)]
     {
         let test_config = TEST_CONFIG.with(|slot| slot.borrow().clone());
-        return test_config.as_ref().map(f);
+        test_config.as_ref().map(f)
     }
 
     #[cfg(not(test))]
@@ -429,7 +429,7 @@ mod tests {
             kind: FindKind::Find,
             direction: Direction::Forward,
         };
-        set_last_find(state.clone());
+        set_last_find(state);
         assert_eq!(get_last_find(), Some(state));
     }
 

@@ -28,6 +28,15 @@ struct TabBarLayout {
     right_arrow: bool,
 }
 
+#[derive(Clone, Copy, Debug)]
+struct TabEntryRenderOptions {
+    style: Style,
+    modified_style: Style,
+    available: u16,
+    nerdfont_enabled: bool,
+    clip_label: bool,
+}
+
 /// Root window-group container for urvim.
 ///
 /// A window group owns multiple editor windows, keeps track of the active tab,
@@ -348,14 +357,15 @@ impl WindowGroup {
             let available = content_limit.saturating_sub(current_col);
             self.render_tab_entry(
                 screen,
-                origin.row,
-                current_col,
-                active_style,
-                modified_style,
+                Position::new(origin.row, current_col),
                 active_index,
-                available,
-                nerdfont_enabled,
-                true,
+                TabEntryRenderOptions {
+                    style: active_style,
+                    modified_style,
+                    available,
+                    nerdfont_enabled,
+                    clip_label: true,
+                },
             );
         } else {
             for index in layout.start..layout.end {
@@ -372,14 +382,15 @@ impl WindowGroup {
 
                 let width = self.render_tab_entry(
                     screen,
-                    origin.row,
-                    current_col,
-                    style,
-                    modified_style,
+                    Position::new(origin.row, current_col),
                     index,
-                    available,
-                    nerdfont_enabled,
-                    false,
+                    TabEntryRenderOptions {
+                        style,
+                        modified_style,
+                        available,
+                        nerdfont_enabled,
+                        clip_label: false,
+                    },
                 );
                 current_col += width;
             }
@@ -536,22 +547,17 @@ impl WindowGroup {
     fn render_tab_entry(
         &self,
         screen: &mut Screen,
-        row: u16,
-        col: u16,
-        style: Style,
-        modified_style: Style,
+        origin: Position,
         index: usize,
-        available: u16,
-        nerdfont_enabled: bool,
-        clip_label: bool,
+        options: TabEntryRenderOptions,
     ) -> u16 {
-        if available == 0 {
+        if options.available == 0 {
             return 0;
         }
 
         let label = self.tab_label(index);
         let metadata = self.tab_metadata(index);
-        let glyph = if nerdfont_enabled {
+        let glyph = if options.nerdfont_enabled {
             metadata
                 .as_ref()
                 .and_then(|metadata| metadata.glyph.as_deref())
@@ -562,36 +568,43 @@ impl WindowGroup {
         let glyph_width = glyph.map(UnicodeWidthStr::width).unwrap_or(0);
         let prefix_width = if glyph.is_some() { glyph_width + 2 } else { 1 };
         let label_width_budget = if glyph.is_some() {
-            usize::from(available).saturating_sub(glyph_width + 3)
+            usize::from(options.available).saturating_sub(glyph_width + 3)
         } else {
-            usize::from(available).saturating_sub(2)
+            usize::from(options.available).saturating_sub(2)
         };
-        let rendered_label = if clip_label {
+        let rendered_label = if options.clip_label {
             self.clip_to_width(&label, label_width_budget)
         } else {
             label.clone()
         };
         let rendered_label_width = UnicodeWidthStr::width(rendered_label.as_str());
 
-        screen.write_string(row, col, style, " ");
-        let mut current_col = col + 1;
+        screen.write_string(origin.row, origin.col, options.style, " ");
+        let mut current_col = origin.col + 1;
 
         if let Some(glyph) = glyph {
-            let glyph_style = glyph_color.map(|color| style.fg(color)).unwrap_or(style);
-            screen.write_string(row, current_col, glyph_style, glyph);
+            let glyph_style = glyph_color
+                .map(|color| options.style.fg(color))
+                .unwrap_or(options.style);
+            screen.write_string(origin.row, current_col, glyph_style, glyph);
             current_col += glyph_width as u16;
-            screen.write_string(row, current_col, style, " ");
+            screen.write_string(origin.row, current_col, options.style, " ");
             current_col += 1;
         }
 
-        screen.write_string(row, current_col, style, rendered_label.as_str());
+        screen.write_string(
+            origin.row,
+            current_col,
+            options.style,
+            rendered_label.as_str(),
+        );
         current_col += rendered_label_width as u16;
-        screen.write_string(row, current_col, style, " ");
+        screen.write_string(origin.row, current_col, options.style, " ");
 
         if self.tabs[index].buffer_view().is_modified() {
-            let marker_col = col + prefix_width as u16 + rendered_label_width as u16;
-            let marker_style = style.accent(modified_style);
-            screen.write_string(row, marker_col, marker_style, "*");
+            let marker_col = origin.col + prefix_width as u16 + rendered_label_width as u16;
+            let marker_style = options.style.accent(options.modified_style);
+            screen.write_string(origin.row, marker_col, marker_style, "*");
         }
 
         prefix_width as u16 + rendered_label_width as u16 + 1

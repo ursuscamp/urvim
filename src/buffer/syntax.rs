@@ -444,8 +444,7 @@ fn tokenize_rule_list_line(
                     let is_closing = context
                         .as_ref()
                         .is_some_and(|context| !context.pop.is_empty() && context.push.is_empty());
-                    let should_replace = chosen.as_ref().map_or(
-                        true,
+                    let should_replace = chosen.as_ref().is_none_or(
                         |candidate: &(
                             usize,
                             usize,
@@ -1063,11 +1062,12 @@ mod tests {
     #[test]
     fn background_catch_up_job_populates_offscreen_spans() {
         let path = temp_path_with_ext("background-catch-up", "rs");
-        let text =
-            std::iter::repeat("fn main() { let value: Option<String> = Some(\"hi\"); } // note")
-                .take(64)
-                .collect::<Vec<_>>()
-                .join("\n");
+        let text = std::iter::repeat_n(
+            "fn main() { let value: Option<String> = Some(\"hi\"); } // note",
+            64,
+        )
+        .collect::<Vec<_>>()
+        .join("\n");
         let buffer = Buffer::from_str_with_path(&text, path);
         let handle = JobHandle::new();
         let token = JobToken::new(buffer.syntax_generation());
@@ -1137,11 +1137,12 @@ mod tests {
         let old_path = temp_path_with_ext("latest-only-old", "rs");
         let old_buffer = Buffer::from_str_with_path("fn main() { let old = 1; }", old_path);
         let new_path = temp_path_with_ext("latest-only-new", "rs");
-        let new_text =
-            std::iter::repeat("fn main() { let value: Option<String> = Some(\"hi\"); } // note")
-                .take(32)
-                .collect::<Vec<_>>()
-                .join("\n");
+        let new_text = std::iter::repeat_n(
+            "fn main() { let value: Option<String> = Some(\"hi\"); } // note",
+            32,
+        )
+        .collect::<Vec<_>>()
+        .join("\n");
         let new_buffer = Buffer::from_str_with_path(&new_text, new_path);
 
         handle

@@ -522,8 +522,8 @@ impl Widget for Window {
                 }
                 Some(ActionKind::Count(count, inner)) => {
                     let mut counted_inner = inner.as_ref().clone();
-                    if action.from_mode.is_some() {
-                        counted_inner = counted_inner.with_from_mode(action.from_mode.unwrap());
+                    if let Some(from_mode) = action.from_mode {
+                        counted_inner = counted_inner.with_from_mode(from_mode);
                     }
                     self.handle_count(*count, &counted_inner)
                 }

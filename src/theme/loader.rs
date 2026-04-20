@@ -39,7 +39,8 @@ pub fn resolve_theme(raw: RawTheme) -> Result<Theme, ThemeLoadError> {
         &raw.default,
         &palette,
     )?;
-    let highlights = resolve_highlight_styles(theme_name, &raw.highlights, default_style, &palette)?;
+    let highlights =
+        resolve_highlight_styles(theme_name, &raw.highlights, default_style, &palette)?;
 
     Ok(Theme::new(theme_name, kind, default_style, highlights))
 }
@@ -686,9 +687,8 @@ bg = "base"
             );
         }
         assert_eq!(
-            friday_night.highlight_style_for_tag(
-                &Tag::parse("syntax.string.interpolation").unwrap()
-            ),
+            friday_night
+                .highlight_style_for_tag(&Tag::parse("syntax.string.interpolation").unwrap()),
             Style::new().fg(Color::ansi(75)).bg(Color::ansi(16))
         );
     }
@@ -707,7 +707,8 @@ bg = "base"
             let theme = registry.get(name).expect("theme should exist");
             let comment_style = theme.highlight_style_for_tag(&tag("syntax.comment"));
             for marker in ["todo", "fixme", "bug", "note"] {
-                let style = theme.highlight_style_for_tag(&tag(&format!("syntax.comment.{marker}")));
+                let style =
+                    theme.highlight_style_for_tag(&tag(&format!("syntax.comment.{marker}")));
                 assert_ne!(
                     style, comment_style,
                     "{name} should expose a distinct {marker} style"

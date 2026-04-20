@@ -99,8 +99,7 @@ impl StatusBar {
         current_col = self.write_segment(screen, origin.row, current_col, style, " | ");
         current_col = self.write_syntax_segment(
             screen,
-            origin.row,
-            current_col,
+            Position::new(origin.row, current_col),
             style,
             syntax_metadata.as_ref(),
             nerdfont_enabled,
@@ -173,8 +172,7 @@ impl StatusBar {
     fn write_syntax_segment(
         &self,
         screen: &mut Screen,
-        row: u16,
-        col: u16,
+        origin: Position,
         style: Style,
         metadata: Option<&crate::syntax::SyntaxMetadata>,
         nerdfont_enabled: bool,
@@ -188,15 +186,15 @@ impl StatusBar {
                 .glyph_color
                 .map(|color| style.fg(color))
                 .unwrap_or(style);
-            screen.write_string(row, col, glyph_style, glyph);
-            let mut next_col = col + UnicodeWidthStr::width(glyph) as u16;
-            screen.write_string(row, next_col, style, " ");
+            screen.write_string(origin.row, origin.col, glyph_style, glyph);
+            let mut next_col = origin.col + UnicodeWidthStr::width(glyph) as u16;
+            screen.write_string(origin.row, next_col, style, " ");
             next_col += 1;
-            screen.write_string(row, next_col, style, syntax_label);
+            screen.write_string(origin.row, next_col, style, syntax_label);
             return next_col + UnicodeWidthStr::width(syntax_label) as u16;
         }
 
-        self.write_segment(screen, row, col, style, syntax_label)
+        self.write_segment(screen, origin.row, origin.col, style, syntax_label)
     }
 }
 
@@ -211,15 +209,27 @@ mod tests {
     use std::collections::BTreeSet;
 
     fn context<'a>(
-        mode_label: &'a str,
-        modified: bool,
-        syntax_name: &'a str,
-        syntax_label: &'a str,
-        buffer_name: &'a str,
-        cursor_line: usize,
-        cursor_byte_col: usize,
-        line_count: usize,
+        parts: (
+            &'a str,
+            bool,
+            &'a str,
+            &'a str,
+            &'a str,
+            usize,
+            usize,
+            usize,
+        ),
     ) -> StatusBarContext<'a> {
+        let (
+            mode_label,
+            modified,
+            syntax_name,
+            syntax_label,
+            buffer_name,
+            cursor_line,
+            cursor_byte_col,
+            line_count,
+        ) = parts;
         StatusBarContext {
             mode_label,
             modified,
@@ -286,7 +296,7 @@ mod tests {
     #[test]
     fn test_text_formats_footer_fields() {
         let status_bar = StatusBar::new();
-        let text = status_bar.text(&context(
+        let text = status_bar.text(&context((
             "NORMAL",
             false,
             "rust",
@@ -295,7 +305,7 @@ mod tests {
             2,
             7,
             10,
-        ));
+        )));
 
         assert_eq!(text, "NORMAL | Rust | notes.txt | 3:7 | 22%");
     }
@@ -303,7 +313,7 @@ mod tests {
     #[test]
     fn test_text_formats_modified_footer_fields() {
         let status_bar = StatusBar::new();
-        let text = status_bar.text(&context(
+        let text = status_bar.text(&context((
             "NORMAL",
             true,
             "rust",
@@ -312,7 +322,7 @@ mod tests {
             2,
             7,
             10,
-        ));
+        )));
 
         assert_eq!(text, "NORMAL | Rust | notes.txt* | 3:7 | 22%");
     }
@@ -320,7 +330,7 @@ mod tests {
     #[test]
     fn test_text_reports_hundred_percent_on_last_line() {
         let status_bar = StatusBar::new();
-        let text = status_bar.text(&context(
+        let text = status_bar.text(&context((
             "INSERT",
             false,
             "python",
@@ -329,7 +339,7 @@ mod tests {
             4,
             0,
             5,
-        ));
+        )));
 
         assert!(text.ends_with("100%"));
     }
@@ -337,7 +347,7 @@ mod tests {
     #[test]
     fn test_text_reports_hundred_percent_for_single_line() {
         let status_bar = StatusBar::new();
-        let text = status_bar.text(&context(
+        let text = status_bar.text(&context((
             "NORMAL",
             false,
             "plaintext",
@@ -346,7 +356,7 @@ mod tests {
             0,
             0,
             1,
-        ));
+        )));
 
         assert!(text.ends_with("100%"));
     }
@@ -360,7 +370,7 @@ mod tests {
             &mut screen,
             Position::new(0, 0),
             Size::new(1, 8),
-            &context("NORMAL", false, "rust", "Rust", "notes.txt", 0, 0, 10),
+            &context(("NORMAL", false, "rust", "Rust", "notes.txt", 0, 0, 10)),
         );
 
         let cell = screen.get_cell_mut(0, 0).unwrap();
@@ -379,7 +389,7 @@ mod tests {
             &mut screen,
             Position::new(0, 0),
             Size::new(1, 12),
-            &context("NORMAL", false, "rust", "Rust", "notes.txt", 0, 0, 10),
+            &context(("NORMAL", false, "rust", "Rust", "notes.txt", 0, 0, 10)),
         );
 
         assert_eq!(screen.get_cell_mut(0, 0).unwrap().style, expected_style);
@@ -390,9 +400,8 @@ mod tests {
         let status_bar = StatusBar::new();
         let theme = themed_status_bar();
         let expected_style = theme.highlight_style_for_name("ui.status_bar");
-        let expected_marker_style = expected_style.accent(
-            theme.highlight_style_for_name("ui.status_bar.modified_marker"),
-        );
+        let expected_marker_style =
+            expected_style.accent(theme.highlight_style_for_name("ui.status_bar.modified_marker"));
         let _theme_guard = globals::set_test_active_theme(theme);
 
         let mut screen = Screen::new(1, 32);
@@ -400,7 +409,7 @@ mod tests {
             &mut screen,
             Position::new(0, 0),
             Size::new(1, 32),
-            &context("NORMAL", true, "rust", "Rust", "a", 0, 0, 10),
+            &context(("NORMAL", true, "rust", "Rust", "a", 0, 0, 10)),
         );
 
         assert_eq!(screen.get_cell_mut(0, 17).unwrap().text, "*");
@@ -427,7 +436,7 @@ mod tests {
             &mut screen,
             Position::new(0, 0),
             Size::new(1, 32),
-            &context("NORMAL", false, "rust", "Rust", "notes.txt", 0, 0, 10),
+            &context(("NORMAL", false, "rust", "Rust", "notes.txt", 0, 0, 10)),
         );
 
         assert_eq!(screen.get_cell_mut(0, 9).unwrap().text, "");

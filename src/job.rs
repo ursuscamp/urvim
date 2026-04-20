@@ -1014,7 +1014,7 @@ mod tests {
 
         let mut accepted = Vec::new();
         let deadline = Instant::now() + Duration::from_secs(2);
-        while accepted.len() < 1 {
+        while accepted.is_empty() {
             let _ = manager.process_completed(|event| accepted.push(event));
             assert!(
                 Instant::now() < deadline,

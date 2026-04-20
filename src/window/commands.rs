@@ -200,10 +200,10 @@ impl Window {
         let prefix = self.inferred_newline_prefix(cursor);
         self.insert_char('\n');
 
-        if let Some(prefix) = prefix.as_deref() {
-            if let Some(new_cursor) = self.insert_prefix_on_line_range(cursor.line + 1, 1, prefix) {
-                self.buffer_view.set_cursor(new_cursor);
-            }
+        if let Some(prefix) = prefix.as_deref()
+            && let Some(new_cursor) = self.insert_prefix_on_line_range(cursor.line + 1, 1, prefix)
+        {
+            self.buffer_view.set_cursor(new_cursor);
         }
 
         prefix

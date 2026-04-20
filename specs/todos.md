@@ -12,5 +12,4 @@ This is a list, in no particular order, of things that need to be addressed whic
 
 # Bugs
 
-- todo highlight is overwritten by active line
 - "cw" at the end of the line joins the next line, but it shouldn't

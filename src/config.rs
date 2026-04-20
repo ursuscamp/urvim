@@ -32,51 +32,36 @@ pub enum AdvancedGlyphCapability {
 }
 
 /// How insert-mode tab presses should insert text.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum TabInsertion {
     /// Insert literal tab characters.
     Tabs,
     /// Insert spaces instead of literal tab characters.
+    #[default]
     Spaces,
 }
 
-impl Default for TabInsertion {
-    fn default() -> Self {
-        Self::Spaces
-    }
-}
-
 /// How insert-mode tab presses should resolve the insertion style.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum TabBehavior {
     /// Always use the configured tab insertion setting.
+    #[default]
     Simple,
     /// Infer indentation style from the active buffer when possible.
     Smart,
 }
 
-impl Default for TabBehavior {
-    fn default() -> Self {
-        Self::Simple
-    }
-}
-
 /// How insert-mode newline creation should resolve indentation.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum AutoIndentMode {
     /// Do not add automatic indentation to new lines.
+    #[default]
     Off,
     /// Reuse nearby indentation from the active buffer when possible.
     Neighbor,
-}
-
-impl Default for AutoIndentMode {
-    fn default() -> Self {
-        Self::Off
-    }
 }
 
 /// The resolved default register selectors used by yank, delete, and change.
@@ -452,9 +437,7 @@ fn validate_default_register_value(field: &str, value: &str) -> Result<(), Confi
 
 fn parse_default_register(value: &str) -> Option<char> {
     let mut chars = value.chars();
-    let Some(ch) = chars.next() else {
-        return None;
-    };
+    let ch = chars.next()?;
     if chars.next().is_some() || !ch.is_ascii_lowercase() {
         return None;
     }

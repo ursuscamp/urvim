@@ -309,9 +309,8 @@ fn test_tab_bar_uses_theme_modified_marker_style() {
     let mut group = WindowGroup::from_buffers(vec![buffer]);
     let theme = themed_group();
     let expected_style = theme.highlight_style_for_name("ui.tab.active");
-    let expected_marker_style = expected_style.accent(
-        theme.highlight_style_for_name("ui.status_bar.modified_marker"),
-    );
+    let expected_marker_style =
+        expected_style.accent(theme.highlight_style_for_name("ui.status_bar.modified_marker"));
     let _theme_guard = globals::set_test_active_theme(theme);
 
     let mut screen = crate::screen::Screen::new(2, 20);

@@ -51,7 +51,9 @@ impl RenderData {
             let mut line_visual_col = line_data.width_offset;
             let mut col_offset = origin.col;
             for chunk in &line_data.chunks {
-                let style = base_style.overlay(line_data.base_style).overlay(chunk.style);
+                let style = base_style
+                    .overlay(line_data.base_style)
+                    .overlay(chunk.style);
                 let rendered = expand_tabs(&chunk.text, line_visual_col, tab_width);
                 screen.write_string(origin.row + row_offset as u16, col_offset, style, &rendered);
                 let chunk_width = display_width_at(&chunk.text, line_visual_col, tab_width);

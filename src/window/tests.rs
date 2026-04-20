@@ -205,10 +205,12 @@ fn syntax_worker_lock() -> std::sync::MutexGuard<'static, ()> {
 }
 
 fn repeated_rust_buffer(lines: usize) -> String {
-    std::iter::repeat("fn main() { let value: Option<String> = Some(\"hi\"); } // note")
-        .take(lines)
-        .collect::<Vec<_>>()
-        .join("\n")
+    std::iter::repeat_n(
+        "fn main() { let value: Option<String> = Some(\"hi\"); } // note",
+        lines,
+    )
+    .collect::<Vec<_>>()
+    .join("\n")
 }
 
 struct GateJob {
@@ -455,7 +457,10 @@ fn test_window_render_keeps_todo_marker_above_active_line_base_style() {
     let mut screen = crate::screen::Screen::new(1, 80);
     window.render(&mut screen, Position::new(0, 0), Size::new(1, 80));
 
-    assert_eq!(screen.get_cell_mut(0, 18).unwrap().style, expected_todo_style);
+    assert_eq!(
+        screen.get_cell_mut(0, 18).unwrap().style,
+        expected_todo_style
+    );
 }
 
 #[test]
@@ -515,9 +520,8 @@ fn test_window_render_refreshes_visible_syntax_after_edit() {
 
     let theme = syntax_themed_window();
     let expected_default_style = theme.default_style();
-    let expected_comment_style = expected_default_style.overlay(
-        theme.highlight_style_for_tag(&tag("comment")),
-    );
+    let expected_comment_style =
+        expected_default_style.overlay(theme.highlight_style_for_tag(&tag("comment")));
     let _theme_guard = globals::set_test_active_theme(theme);
     let _config_guard = globals::set_test_config(Config {
         theme: "demo-syntax".to_string(),
@@ -2561,7 +2565,7 @@ fn test_delete_character_scan_operator_updates_repeat_state() {
     window.buffer_view.set_cursor(Cursor::new(0, 0));
     window.process_action(&Action::operation(
         Operator::Delete,
-        OperatorTarget::CharacterScan(expected.clone()),
+        OperatorTarget::CharacterScan(expected),
     ));
 
     assert_eq!(buffer_text(window.buffer_view()), "bar");
@@ -2584,7 +2588,7 @@ fn test_counted_character_scan_operator_uses_motion_count() {
         2,
         Box::new(Action::operation(
             Operator::Delete,
-            OperatorTarget::CharacterScan(expected.clone()),
+            OperatorTarget::CharacterScan(expected),
         )),
     ));
 

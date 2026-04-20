@@ -174,11 +174,7 @@ impl NormalMode {
             return HandleKeyResult::WaitForMore;
         }
 
-        if leading_count > 0 || register_prefix.is_some() {
-            HandleKeyResult::InvalidSequence
-        } else {
-            HandleKeyResult::InvalidSequence
-        }
+        HandleKeyResult::InvalidSequence
     }
 
     // These are mode commands rather than motions, so we never wrap them in a
