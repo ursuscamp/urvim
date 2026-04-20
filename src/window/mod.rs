@@ -237,7 +237,12 @@ impl Window {
         self.size = size;
         let (gutter_style, default_style) = globals::with_active_theme(|theme| {
             theme
-                .map(|theme| (theme.ui.gutter, theme.default_style()))
+                .map(|theme| {
+                    (
+                        theme.highlight_style_for_name("ui.window.gutter"),
+                        theme.default_style(),
+                    )
+                })
                 .unwrap_or_else(|| {
                     (
                         Style::new().bg(Color::ansi(236)).fg(Color::ansi(245)),
@@ -284,8 +289,9 @@ impl Window {
             && let Some(cursor_position) = self
                 .render_data
                 .cursor_screen_position(self.buffer_view.cursor())
-            && let Some(active_line_style) =
-                globals::with_active_theme(|theme| theme.map(|theme| theme.ui.active_line))
+            && let Some(active_line_style) = globals::with_active_theme(|theme| {
+                theme.map(|theme| theme.highlight_style_for_name("ui.window.active_line"))
+            })
         {
             screen.overlay_region(
                 content_origin.row + cursor_position.row,

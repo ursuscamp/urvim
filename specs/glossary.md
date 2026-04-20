@@ -166,11 +166,11 @@ The user-triggered save action, bound to `<C-s>`, that persists the active path-
 **Related Terms:** Buffer, Modified Buffer, Filetype
 
 ### Theme
-A resolved styling configuration that defines the editor's default style plus named UI and syntax styles. Themes determine how buffers, gutters, tab bars, and status bars inherit colors and text attributes during rendering.
+A resolved styling configuration that defines the editor's default style plus named hierarchical highlights. Themes determine how buffers, gutters, tab bars, status bars, and syntax spans inherit colors and text attributes during rendering.
 
 **Context:** Theme loading, window rendering, status bar rendering, and future syntax highlighting
 
-**Example:** `theme.default_style()` provides the base style that buffer content should inherit before any element-specific overlay is applied.
+**Example:** `theme.highlight_style_for_name("ui.window.active_line")` resolves a named highlight using hierarchical parent fallback before the renderer overlays it onto the current base style.
 
 **Related Terms:** Default Style, Window, Gutter, Status Bar, Layout
 
@@ -184,7 +184,7 @@ A hierarchical syntax label emitted by a grammar rule and consumed by a theme du
 **Related Terms:** Syntax Highlighting, Syntax Definition, Theme
 
 ### Todo Marker
-A literal, case-sensitive word token such as `TODO` or `FIXME` that appears inside a comment and receives marker-specific styling. Todo markers are matched only as standalone words, and each marker resolves to a theme tag under the `comment.*` hierarchy so the active theme can style it independently.
+A literal, case-sensitive word token such as `TODO` or `FIXME` that appears inside a comment and receives marker-specific styling. Todo markers are matched only as standalone words, and each marker resolves to a theme highlight under the `syntax.comment.*` hierarchy so the active theme can style it independently.
 
 **Context:** Comment highlighting, syntax-aware rendering, theme syntax style lookup
 
@@ -193,7 +193,7 @@ A literal, case-sensitive word token such as `TODO` or `FIXME` that appears insi
 **Related Terms:** Comment Prefix, Syntax Highlighting, Tag, Theme, Configuration
 
 ### Syntax Highlighting
-A buffer-derived visual styling layer that classifies text spans by filetype-aware syntax categories such as comments, keywords, strings, numbers, and types. Syntax highlighting is expected to update when the underlying buffer text changes and to inherit colors from the active theme.
+A buffer-derived visual styling layer that classifies text spans by filetype-aware syntax categories such as comments, keywords, strings, numbers, and types. Syntax highlighting is expected to update when the underlying buffer text changes and to inherit colors from the active theme's unified highlight map.
 
 **Context:** Buffer rendering, filetype-aware styling, theme syntax styles
 

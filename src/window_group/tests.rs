@@ -5,8 +5,7 @@ use crate::config::{AdvancedGlyphCapability, Config};
 use crate::editor::{Action, ActionKind, ModeKind};
 use crate::globals;
 use crate::terminal::{Color, Style};
-use crate::theme::{SyntaxTagStyles, Tag, Theme, ThemeKind, UiStyles};
-use std::collections::BTreeMap;
+use crate::theme::{HighlightStyles, Tag, Theme, ThemeKind};
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
@@ -39,42 +38,66 @@ fn window_group_with_labels(labels: &[&str]) -> WindowGroup {
 
 fn themed_group() -> Theme {
     let default_style = Style::new().fg(Color::ansi(10)).bg(Color::ansi(20));
-    let ui_styles = UiStyles::new(
+    let mut highlights = HighlightStyles::default();
+    highlights.insert(
+        Tag::parse("ui.status_bar").expect("valid tag"),
         Style::new().fg(Color::ansi(1)).bg(Color::ansi(2)),
+    );
+    highlights.insert(
+        Tag::parse("ui.status_bar.modified_marker").expect("valid tag"),
         Style::new().fg(Color::ansi(3)).bg(Color::ansi(4)).bold(),
+    );
+    highlights.insert(
+        Tag::parse("ui.selection").expect("valid tag"),
         Style::new().reverse(),
+    );
+    highlights.insert(
+        Tag::parse("ui.window.active_line").expect("valid tag"),
         Style::new().bg(Color::ansi(21)),
+    );
+    highlights.insert(
+        Tag::parse("ui.tab.active").expect("valid tag"),
         Style::new().fg(Color::ansi(5)).bg(Color::ansi(6)),
+    );
+    highlights.insert(
+        Tag::parse("ui.tab.inactive").expect("valid tag"),
         Style::new().fg(Color::ansi(7)).bg(Color::ansi(8)),
+    );
+    highlights.insert(
+        Tag::parse("ui.tab.scroll_indicator").expect("valid tag"),
         Style::new().fg(Color::ansi(9)).bg(Color::ansi(10)),
+    );
+    highlights.insert(
+        Tag::parse("ui.window.gutter").expect("valid tag"),
         Style::new().fg(Color::ansi(11)).bg(Color::ansi(12)),
+    );
+    highlights.insert(
+        Tag::parse("ui.window").expect("valid tag"),
         Style::new().fg(Color::ansi(13)).bg(Color::ansi(14)),
+    );
+    highlights.insert(
+        Tag::parse("ui.window.split_border").expect("valid tag"),
         Style::new().fg(Color::ansi(15)).bg(Color::ansi(16)),
+    );
+    highlights.insert(
+        Tag::parse("ui.window.split_border.resize").expect("valid tag"),
         Style::new().fg(Color::ansi(17)).bg(Color::ansi(18)),
     );
-    let mut syntax_map = BTreeMap::new();
     for tag_name in [
-        "comment",
-        "constant",
-        "function",
-        "keyword",
-        "operator",
-        "punctuation",
-        "string",
-        "type",
-        "variable",
+        "syntax.comment",
+        "syntax.constant",
+        "syntax.function",
+        "syntax.keyword",
+        "syntax.operator",
+        "syntax.punctuation",
+        "syntax.string",
+        "syntax.type",
+        "syntax.variable",
     ] {
-        syntax_map.insert(Tag::parse(tag_name).expect("valid tag"), Style::new());
+        highlights.insert(Tag::parse(tag_name).expect("valid tag"), Style::new());
     }
-    let syntax_styles = SyntaxTagStyles::new(syntax_map);
 
-    Theme::new(
-        "demo",
-        ThemeKind::Ansi256,
-        default_style,
-        ui_styles,
-        syntax_styles,
-    )
+    Theme::new("demo", ThemeKind::Ansi256, default_style, highlights)
 }
 
 fn buffer_line_count(view: &BufferView) -> usize {
@@ -285,8 +308,10 @@ fn test_tab_bar_uses_theme_modified_marker_style() {
 
     let mut group = WindowGroup::from_buffers(vec![buffer]);
     let theme = themed_group();
-    let expected_style = theme.ui.tab_active;
-    let expected_marker_style = expected_style.accent(theme.ui.modified_marker);
+    let expected_style = theme.highlight_style_for_name("ui.tab.active");
+    let expected_marker_style = expected_style.accent(
+        theme.highlight_style_for_name("ui.status_bar.modified_marker"),
+    );
     let _theme_guard = globals::set_test_active_theme(theme);
 
     let mut screen = crate::screen::Screen::new(2, 20);
@@ -304,7 +329,7 @@ fn test_tab_bar_uses_theme_modified_marker_style() {
 fn test_tab_bar_uses_theme_styles() {
     let mut group = window_group_with_labels(&["demo"]);
     let theme = themed_group();
-    let expected_style = theme.ui.tab_active;
+    let expected_style = theme.highlight_style_for_name("ui.tab.active");
     let _theme_guard = globals::set_test_active_theme(theme);
 
     let mut screen = crate::screen::Screen::new(2, 16);
@@ -319,7 +344,7 @@ fn test_tab_bar_renders_glyph_when_enabled() {
     let buffer = Buffer::from_str_with_path("fn main() {}", abs_path(&path));
     let mut group = WindowGroup::from_buffers(vec![buffer]);
     let theme = themed_group();
-    let expected_tab_style = theme.ui.tab_active;
+    let expected_tab_style = theme.highlight_style_for_name("ui.tab.active");
     let expected_glyph_style = expected_tab_style.fg(Color::rgb(222, 165, 132));
     let _theme_guard = globals::set_test_active_theme(theme);
     let _config_guard = globals::set_test_config(Config {

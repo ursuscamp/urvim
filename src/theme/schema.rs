@@ -24,13 +24,12 @@ pub struct RawTheme {
     pub palette: BTreeMap<String, RawColorValue>,
     /// The theme default style.
     pub default: RawStyle,
-    /// Predefined UI styles.
-    pub ui: RawUiStyles,
-    /// Syntax tag styles.
-    pub syntax: BTreeMap<String, RawStyle>,
+    /// The unified map of hierarchical highlight names.
+    #[serde(default)]
+    pub highlights: BTreeMap<String, RawStyle>,
 }
 
-/// A raw style definition used by the default, UI, and syntax sections.
+/// A raw style definition used by the default and highlight sections.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RawStyle {
@@ -61,36 +60,4 @@ pub struct RawStyle {
     /// Whether this raw style should overlay a blank style instead of the theme default.
     #[serde(rename = "overlay", default)]
     pub overlay: bool,
-}
-
-/// Closed raw UI style definitions.
-#[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct RawUiStyles {
-    /// The editor status bar.
-    pub status_bar: RawStyle,
-    /// The modified-buffer marker.
-    pub modified_marker: RawStyle,
-    /// The active visual selection.
-    #[serde(default)]
-    pub selection: RawStyle,
-    /// The highlighted active line in the focused window.
-    #[serde(default)]
-    pub active_line: RawStyle,
-    /// The currently active tab.
-    pub tab_active: RawStyle,
-    /// A non-active tab.
-    pub tab_inactive: RawStyle,
-    /// A scroll indicator shown in the tab bar.
-    pub tab_scroll_indicator: RawStyle,
-    /// The gutter beside the buffer text.
-    pub gutter: RawStyle,
-    /// The main buffer viewport.
-    pub window: RawStyle,
-    /// The standard split border.
-    #[serde(default)]
-    pub split_border: RawStyle,
-    /// The split border used while resizing.
-    #[serde(default)]
-    pub split_border_resize: RawStyle,
 }

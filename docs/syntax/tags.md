@@ -3,12 +3,15 @@
 This document describes the standard syntax tag vocabulary used by urvim's syntax system.
 Grammar authors may define additional valid tags, but the tags below are the recommended base set for common syntax concepts.
 
+Theme authors should use these tags under the `syntax.` highlight namespace when styling them in a theme file.
+
 ## Resolution Rules
 
 - Tags are hierarchical and dot-separated.
 - Themes should try the most specific tag first.
 - If an exact tag is not defined, theme lookup should fall back to the nearest parent tag.
 - If no parent tag is defined, the theme default style applies.
+- Theme highlight names use the same parent fallback rules whether they live under `ui.` or `syntax.`.
 
 ## Canonical Top-Level Tags
 

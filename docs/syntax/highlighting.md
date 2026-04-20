@@ -15,7 +15,7 @@ urvim does not parse source code into an AST. Instead, it chooses a syntax defin
 | `src/buffer/syntax.rs` | Tokenizes lines, caches syntax state, and computes highlight spans. |
 | `docs/background-jobs.md` | Describes the internal deferred-work framework that syntax catch-up uses. |
 | `src/window/view.rs` | Requests spans for visible lines and converts tags into theme styles. |
-| `src/theme/model.rs` | Defines theme style data, including the syntax tag-to-style mapping. |
+| `src/theme/model.rs` | Defines theme style data, including the unified highlight-name mapping. |
 | `src/window/render.rs` | Writes styled chunks to the terminal screen. |
 
 ## Core Concepts
@@ -105,9 +105,17 @@ The tokenizer returns spans tagged with semantic labels like `keyword`, `string`
 
 After the syntax spans are available, urvim can layer comment-scoped todo highlighting on top of them during rendering. That overlay scans only comment spans, looks for configured standalone markers such as `TODO` and `FIXME`, and applies marker-specific tags like `comment.todo` without changing the underlying buffer text.
 
+Theme highlights use the unified hierarchical naming model:
+
+- UI chrome uses `ui.*` names such as `ui.status_bar` and `ui.window.active_line`
+- syntax styling uses `syntax.*` names such as `syntax.comment` and `syntax.string.interpolation`
+- the lookup rules are hierarchical, so the nearest defined parent wins when a specific highlight is missing
+
+When a syntax tag is resolved, urvim maps the raw tag into the syntax highlight namespace before asking the theme for a style. That keeps the grammar vocabulary and the theme vocabulary aligned without requiring the grammar tags themselves to be renamed.
+
 So the pipeline is:
 
-`grammar -> tags -> theme styles -> terminal output`
+`grammar -> tags -> unified theme highlights -> terminal output`
 
 ## After An Edit
 

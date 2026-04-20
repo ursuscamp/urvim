@@ -91,88 +91,38 @@ impl StyleOverlay {
     }
 }
 
-/// Fully resolved UI styles for the closed urvim schema.
+/// Fully resolved styles keyed by hierarchical highlight names.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct UiStyles {
-    /// Style used by the status bar.
-    pub status_bar: Style,
-    /// Style used by modified-buffer markers.
-    pub modified_marker: Style,
-    /// Style used by the active visual selection.
-    pub selection: Style,
-    /// Style used by the active line in the focused window.
-    pub active_line: Style,
-    /// Style used by the active tab.
-    pub tab_active: Style,
-    /// Style used by inactive tabs.
-    pub tab_inactive: Style,
-    /// Style used by the tab bar scroll indicators.
-    pub tab_scroll_indicator: Style,
-    /// Style used by the window gutter.
-    pub gutter: Style,
-    /// Style used by the main window background.
-    pub window: Style,
-    /// Style used by split borders during normal editing.
-    pub split_border: Style,
-    /// Style used by split borders while resizing.
-    pub split_border_resize: Style,
-}
-
-impl UiStyles {
-    /// Creates a new set of fully resolved UI styles.
-    pub fn new(
-        status_bar: Style,
-        modified_marker: Style,
-        selection: Style,
-        active_line: Style,
-        tab_active: Style,
-        tab_inactive: Style,
-        tab_scroll_indicator: Style,
-        gutter: Style,
-        window: Style,
-        split_border: Style,
-        split_border_resize: Style,
-    ) -> Self {
-        Self {
-            status_bar,
-            modified_marker,
-            selection,
-            active_line,
-            tab_active,
-            tab_inactive,
-            tab_scroll_indicator,
-            gutter,
-            window,
-            split_border,
-            split_border_resize,
-        }
-    }
-}
-
-/// Fully resolved syntax styles keyed by hierarchical syntax tags.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct SyntaxTagStyles {
+pub struct HighlightStyles {
     styles: BTreeMap<Tag, Style>,
 }
 
-impl SyntaxTagStyles {
-    /// Creates a new syntax tag style map.
+impl HighlightStyles {
+    /// Creates a new highlight style map.
     pub fn new(styles: BTreeMap<Tag, Style>) -> Self {
         Self { styles }
     }
 
     /// Returns the resolved style for a tag after specificity fallback.
     pub fn style_for_tag(&self, tag: &Tag, default_style: Style) -> Style {
-        for candidate in tag.parent_chain() {
-            if let Some(style) = self
-                .styles
-                .get(&Tag::parse(candidate).expect("parent chain must yield valid tags"))
-            {
-                return *style;
+        if let Some(style) = self.try_style_for_tag(tag) {
+            return style;
+        }
+
+        if let Some(prefixed_tag) = prefixed_syntax_tag(tag) {
+            if let Some(style) = self.try_style_for_tag(&prefixed_tag) {
+                return style;
             }
         }
 
         default_style
+    }
+
+    /// Returns the resolved style for a dot-separated highlight name.
+    pub fn style_for_name(&self, name: &str, default_style: Style) -> Style {
+        Tag::parse(name)
+            .map(|tag| self.style_for_tag(&tag, default_style))
+            .unwrap_or(default_style)
     }
 
     /// Inserts a resolved style for a tag.
@@ -184,15 +134,35 @@ impl SyntaxTagStyles {
     pub fn iter(&self) -> impl Iterator<Item = (&Tag, &Style)> {
         self.styles.iter()
     }
+
+    fn try_style_for_tag(&self, tag: &Tag) -> Option<Style> {
+        for candidate in tag.parent_chain() {
+            if let Some(style) = self
+                .styles
+                .get(&Tag::parse(candidate).expect("parent chain must yield valid tags"))
+            {
+                return Some(*style);
+            }
+        }
+
+        None
+    }
+}
+
+fn prefixed_syntax_tag(tag: &Tag) -> Option<Tag> {
+    let value = tag.as_str();
+    if value.starts_with("ui.") || value.starts_with("syntax.") {
+        return None;
+    }
+
+    Tag::parse(&format!("syntax.{value}")).ok()
 }
 
 /// A fully resolved theme ready for rendering.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Theme {
-    /// Resolved UI styles used by rendering code.
-    pub ui: UiStyles,
-    /// Resolved syntax styles used by highlighting code.
-    pub syntax: SyntaxTagStyles,
+    /// Resolved highlight styles used by rendering and syntax highlighting code.
+    pub highlights: HighlightStyles,
     name: String,
     kind: ThemeKind,
     default_style: Style,
@@ -204,15 +174,13 @@ impl Theme {
         name: impl Into<String>,
         kind: ThemeKind,
         default_style: Style,
-        ui: UiStyles,
-        syntax: SyntaxTagStyles,
+        highlights: HighlightStyles,
     ) -> Self {
         Self {
             name: name.into(),
             kind,
             default_style,
-            ui,
-            syntax,
+            highlights,
         }
     }
 
@@ -231,9 +199,14 @@ impl Theme {
         self.default_style
     }
 
-    /// Returns the resolved syntax style for a tag.
-    pub fn syntax_style_for_tag(&self, tag: &Tag) -> Style {
-        self.syntax.style_for_tag(tag, self.default_style)
+    /// Returns the resolved style for a tag.
+    pub fn highlight_style_for_tag(&self, tag: &Tag) -> Style {
+        self.highlights.style_for_tag(tag, self.default_style)
+    }
+
+    /// Returns the resolved style for a dot-separated highlight name.
+    pub fn highlight_style_for_name(&self, name: &str) -> Style {
+        self.highlights.style_for_name(name, self.default_style)
     }
 }
 
@@ -357,88 +330,101 @@ mod tests {
 
     fn theme(name: &str) -> Theme {
         let default_style = Style::new().bold();
-        let ui_styles = UiStyles::new(
-            Style::new().fg(Color::ansi(1)),
+        let mut highlights = HighlightStyles::default();
+        highlights.insert(tag("ui.status_bar"), Style::new().fg(Color::ansi(1)));
+        highlights.insert(
+            tag("ui.status_bar.modified_marker"),
             Style::new().fg(Color::ansi(2)),
-            Style::new().reverse(),
-            Style::new().bg(Color::ansi(21)),
-            Style::new().fg(Color::ansi(3)),
-            Style::new().fg(Color::ansi(4)),
+        );
+        highlights.insert(tag("ui.selection"), Style::new().reverse());
+        highlights.insert(tag("ui.window.active_line"), Style::new().bg(Color::ansi(21)));
+        highlights.insert(tag("ui.tab.active"), Style::new().fg(Color::ansi(3)));
+        highlights.insert(tag("ui.tab.inactive"), Style::new().fg(Color::ansi(4)));
+        highlights.insert(
+            tag("ui.tab.scroll_indicator"),
             Style::new().fg(Color::ansi(5)),
-            Style::new().fg(Color::ansi(6)),
-            Style::new().fg(Color::ansi(7)),
-            Style::new().fg(Color::ansi(8)),
+        );
+        highlights.insert(tag("ui.window.gutter"), Style::new().fg(Color::ansi(6)));
+        highlights.insert(tag("ui.window"), Style::new().fg(Color::ansi(7)));
+        highlights.insert(tag("ui.window.split_border"), Style::new().fg(Color::ansi(8)));
+        highlights.insert(
+            tag("ui.window.split_border.resize"),
             Style::new().fg(Color::ansi(9)),
         );
-        let mut syntax_styles = SyntaxTagStyles::default();
-        syntax_styles.insert(tag("comment"), Style::new().bold().fg(Color::ansi(10)));
-        syntax_styles.insert(tag("constant"), Style::new().bold().fg(Color::ansi(11)));
-        syntax_styles.insert(tag("function"), Style::new().bold().fg(Color::ansi(12)));
-        syntax_styles.insert(tag("keyword"), Style::new().bold().fg(Color::ansi(13)));
-        syntax_styles.insert(tag("markup.code"), Style::new().bold().fg(Color::ansi(20)));
-        syntax_styles.insert(tag("operator"), Style::new().bold().fg(Color::ansi(15)));
-        syntax_styles.insert(tag("punctuation"), Style::new().bold().fg(Color::ansi(16)));
-        syntax_styles.insert(tag("string"), Style::new().bold().fg(Color::ansi(17)));
-        syntax_styles.insert(
-            tag("string.interpolation"),
+        highlights.insert(tag("syntax.comment"), Style::new().bold().fg(Color::ansi(10)));
+        highlights.insert(tag("syntax.constant"), Style::new().bold().fg(Color::ansi(11)));
+        highlights.insert(tag("syntax.function"), Style::new().bold().fg(Color::ansi(12)));
+        highlights.insert(tag("syntax.keyword"), Style::new().bold().fg(Color::ansi(13)));
+        highlights.insert(tag("syntax.markup.code"), Style::new().bold().fg(Color::ansi(20)));
+        highlights.insert(tag("syntax.operator"), Style::new().bold().fg(Color::ansi(15)));
+        highlights.insert(tag("syntax.punctuation"), Style::new().bold().fg(Color::ansi(16)));
+        highlights.insert(tag("syntax.string"), Style::new().bold().fg(Color::ansi(17)));
+        highlights.insert(
+            tag("syntax.string.interpolation"),
             Style::new().bold().fg(Color::ansi(21)),
         );
-        syntax_styles.insert(tag("type"), Style::new().bold().fg(Color::ansi(18)));
-        syntax_styles.insert(tag("variable"), Style::new().bold().fg(Color::ansi(19)));
-        syntax_styles.insert(
-            tag("constant.integer"),
+        highlights.insert(tag("syntax.type"), Style::new().bold().fg(Color::ansi(18)));
+        highlights.insert(tag("syntax.variable"), Style::new().bold().fg(Color::ansi(19)));
+        highlights.insert(
+            tag("syntax.constant.integer"),
             Style::new().bold().fg(Color::ansi(14)),
         );
 
-        Theme::new(
-            name,
-            ThemeKind::Ansi256,
-            default_style,
-            ui_styles,
-            syntax_styles,
-        )
+        Theme::new(name, ThemeKind::Ansi256, default_style, highlights)
     }
 
     #[test]
-    fn theme_returns_predefined_ui_styles() {
-        let theme = theme("demo");
-
-        assert_eq!(theme.ui.status_bar, Style::new().fg(Color::ansi(1)));
-        assert_eq!(theme.ui.modified_marker, Style::new().fg(Color::ansi(2)));
-        assert_eq!(theme.ui.active_line, Style::new().bg(Color::ansi(21)));
-        assert_eq!(theme.ui.window, Style::new().fg(Color::ansi(7)));
-    }
-
-    #[test]
-    fn theme_returns_tag_styles() {
+    fn theme_returns_predefined_highlight_styles() {
         let theme = theme("demo");
 
         assert_eq!(
-            theme.syntax_style_for_tag(&tag("comment")),
+            theme.highlight_style_for_name("ui.status_bar"),
+            Style::new().fg(Color::ansi(1))
+        );
+        assert_eq!(
+            theme.highlight_style_for_name("ui.status_bar.modified_marker"),
+            Style::new().fg(Color::ansi(2))
+        );
+        assert_eq!(
+            theme.highlight_style_for_name("ui.window.active_line"),
+            Style::new().bg(Color::ansi(21))
+        );
+        assert_eq!(
+            theme.highlight_style_for_name("ui.window"),
+            Style::new().fg(Color::ansi(7))
+        );
+    }
+
+    #[test]
+    fn theme_returns_highlight_styles() {
+        let theme = theme("demo");
+
+        assert_eq!(
+            theme.highlight_style_for_tag(&tag("syntax.comment")),
             Style::new().bold().fg(Color::ansi(10))
         );
         assert_eq!(
-            theme.syntax_style_for_tag(&tag("constant.integer")),
+            theme.highlight_style_for_tag(&tag("syntax.constant.integer")),
             Style::new().bold().fg(Color::ansi(14))
         );
         assert_eq!(
-            theme.syntax_style_for_tag(&tag("constant.float")),
+            theme.highlight_style_for_tag(&tag("syntax.constant.float")),
             Style::new().bold().fg(Color::ansi(11))
         );
         assert_eq!(
-            theme.syntax_style_for_tag(&tag("markup.code.inline")),
+            theme.highlight_style_for_tag(&tag("syntax.markup.code.inline")),
             Style::new().bold().fg(Color::ansi(20))
         );
         assert_eq!(
-            theme.syntax_style_for_tag(&tag("string.interpolation")),
+            theme.highlight_style_for_tag(&tag("syntax.string.interpolation")),
             Style::new().bold().fg(Color::ansi(21))
         );
         assert_eq!(
-            theme.syntax_style_for_tag(&tag("comment.todo")),
+            theme.highlight_style_for_tag(&tag("syntax.comment.todo")),
             Style::new().bold().fg(Color::ansi(10))
         );
         assert_eq!(
-            theme.syntax_style_for_tag(&tag("comment.fixme")),
+            theme.highlight_style_for_tag(&tag("syntax.comment.fixme")),
             Style::new().bold().fg(Color::ansi(10))
         );
     }
@@ -447,22 +433,22 @@ mod tests {
     fn theme_returns_marker_specific_comment_styles() {
         let mut theme = theme("demo");
         theme
-            .syntax
-            .insert(tag("comment.todo"), Style::new().fg(Color::ansi(22)));
+            .highlights
+            .insert(tag("syntax.comment.todo"), Style::new().fg(Color::ansi(22)));
         theme
-            .syntax
-            .insert(tag("comment.fixme"), Style::new().fg(Color::ansi(23)));
+            .highlights
+            .insert(tag("syntax.comment.fixme"), Style::new().fg(Color::ansi(23)));
 
         assert_eq!(
-            theme.syntax_style_for_tag(&tag("comment.todo")),
+            theme.highlight_style_for_tag(&tag("syntax.comment.todo")),
             Style::new().fg(Color::ansi(22))
         );
         assert_eq!(
-            theme.syntax_style_for_tag(&tag("comment.fixme")),
+            theme.highlight_style_for_tag(&tag("syntax.comment.fixme")),
             Style::new().fg(Color::ansi(23))
         );
         assert_eq!(
-            theme.syntax_style_for_tag(&tag("comment.note")),
+            theme.highlight_style_for_tag(&tag("syntax.comment.note")),
             Style::new().bold().fg(Color::ansi(10))
         );
     }

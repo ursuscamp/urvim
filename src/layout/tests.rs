@@ -6,10 +6,10 @@ use crate::editor::{Action, ActionKind, ModeKind};
 use crate::globals;
 use crate::path::AbsolutePath;
 use crate::terminal::{Color, Style};
-use crate::theme::{SyntaxTagStyles, Theme, ThemeKind, UiStyles};
+use crate::theme::{HighlightStyles, Tag, Theme, ThemeKind};
 use crate::window::{Position, Size};
 use crate::window_group::WindowGroup;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 fn layout_with_buffers(buffers: Vec<Buffer>) -> Layout {
     Layout::new(WindowGroup::from_buffers(buffers))
@@ -17,28 +17,53 @@ fn layout_with_buffers(buffers: Vec<Buffer>) -> Layout {
 
 fn border_theme() -> Theme {
     let default_style = Style::new().fg(Color::ansi(15)).bg(Color::ansi(30));
-    let ui_styles = UiStyles::new(
+    let mut highlights = HighlightStyles::default();
+    highlights.insert(
+        Tag::parse("ui.status_bar").expect("valid tag"),
         Style::new().fg(Color::ansi(1)).bg(Color::ansi(2)),
+    );
+    highlights.insert(
+        Tag::parse("ui.status_bar.modified_marker").expect("valid tag"),
         Style::new().fg(Color::ansi(3)).bg(Color::ansi(4)),
+    );
+    highlights.insert(
+        Tag::parse("ui.selection").expect("valid tag"),
         Style::new().reverse(),
+    );
+    highlights.insert(
+        Tag::parse("ui.window.active_line").expect("valid tag"),
         Style::new().bg(Color::ansi(21)),
+    );
+    highlights.insert(
+        Tag::parse("ui.tab.active").expect("valid tag"),
         Style::new().fg(Color::ansi(5)).bg(Color::ansi(6)),
+    );
+    highlights.insert(
+        Tag::parse("ui.tab.inactive").expect("valid tag"),
         Style::new().fg(Color::ansi(7)).bg(Color::ansi(8)),
+    );
+    highlights.insert(
+        Tag::parse("ui.tab.scroll_indicator").expect("valid tag"),
         Style::new().fg(Color::ansi(9)).bg(Color::ansi(10)),
+    );
+    highlights.insert(
+        Tag::parse("ui.window.gutter").expect("valid tag"),
         Style::new().fg(Color::ansi(11)).bg(Color::ansi(12)),
+    );
+    highlights.insert(
+        Tag::parse("ui.window").expect("valid tag"),
         Style::new().fg(Color::ansi(13)).bg(Color::ansi(14)),
+    );
+    highlights.insert(
+        Tag::parse("ui.window.split_border").expect("valid tag"),
         Style::new().fg(Color::ansi(33)),
+    );
+    highlights.insert(
+        Tag::parse("ui.window.split_border.resize").expect("valid tag"),
         Style::new().fg(Color::ansi(160)).bold(),
     );
-    let syntax_styles = SyntaxTagStyles::new(BTreeMap::new());
 
-    Theme::new(
-        "demo",
-        ThemeKind::Ansi256,
-        default_style,
-        ui_styles,
-        syntax_styles,
-    )
+    Theme::new("demo", ThemeKind::Ansi256, default_style, highlights)
 }
 
 fn border_config(unicode_borders: bool) -> Config {
@@ -582,6 +607,7 @@ fn test_layout_render_keeps_syntax_label_when_syntax_disabled() {
     let buffer = Buffer::from_str_with_path("fn main() {}", path);
     let mut layout = layout_with_buffers(vec![buffer]);
     let mut screen = crate::screen::Screen::new(3, 40);
+    let _theme_guard = globals::set_test_active_theme(border_theme());
     let _config_guard = globals::set_test_config(Config {
         theme: "Friday Night".to_string(),
         insert_escape: None,
@@ -594,7 +620,10 @@ fn test_layout_render_keeps_syntax_label_when_syntax_disabled() {
     layout.render(&mut screen, Position::new(0, 0), Size::new(3, 40));
 
     assert_eq!(screen.get_cell_mut(1, 3).unwrap().text, "f");
-    assert_eq!(screen.get_cell_mut(1, 3).unwrap().style, Default::default());
+    assert_eq!(
+        screen.get_cell_mut(1, 3).unwrap().style,
+        border_theme().default_style()
+    );
     assert_eq!(screen.get_cell_mut(2, 9).unwrap().text, "R");
 }
 
@@ -605,7 +634,7 @@ fn test_layout_render_omits_split_borders_for_single_pane_layouts() {
     let mut layout = layout_with_buffers(vec![buffer]);
     let mut screen = crate::screen::Screen::new(4, 20);
     let theme = border_theme();
-    let border_style = theme.ui.split_border;
+    let border_style = theme.highlight_style_for_name("ui.window.split_border");
     let _theme_guard = globals::set_test_active_theme(theme);
     let _config_guard = globals::set_test_config(border_config(true));
 

@@ -255,9 +255,11 @@ impl BufferView {
 
         let mut render_data = RenderData::new(size.rows);
         let syntax_styles =
-            globals::with_active_theme(|theme| theme.map(|theme| theme.syntax.clone()));
+            globals::with_active_theme(|theme| theme.map(|theme| theme.highlights.clone()));
         let selection_style =
-            globals::with_active_theme(|theme| theme.map(|theme| theme.ui.selection));
+            globals::with_active_theme(|theme| {
+                theme.map(|theme| theme.highlight_style_for_name("ui.selection"))
+            });
         let syntax_enabled = globals::with_config(|config| config.syntax).unwrap_or(true);
         let todo_markers: Vector<SmolStr> = if syntax_enabled {
             globals::with_config(|config| config.todo_markers.clone()).unwrap_or_default()
@@ -389,7 +391,7 @@ impl BufferView {
         syntax_spans: &[crate::buffer::SyntaxSpan],
         todo_markers: &Vector<SmolStr>,
         default_style: Style,
-        syntax_styles: Option<&crate::theme::SyntaxTagStyles>,
+        syntax_styles: Option<&crate::theme::HighlightStyles>,
     ) -> Vec<RenderChunk> {
         if visible_text.is_empty() {
             return vec![RenderChunk::new("", default_style)];
@@ -474,7 +476,7 @@ impl BufferView {
         visible_end: usize,
         todo_markers: &Vector<SmolStr>,
         default_style: Style,
-        syntax_styles: Option<&crate::theme::SyntaxTagStyles>,
+        syntax_styles: Option<&crate::theme::HighlightStyles>,
     ) -> Vec<RenderChunk> {
         let Some((render_start, render_end)) =
             Self::intersect_byte_ranges(span_start, span_end, visible_start, visible_end)
@@ -781,8 +783,7 @@ mod tests {
     use crate::globals;
     use crate::path::AbsolutePath;
     use crate::terminal::{Color, Style};
-    use crate::theme::{SyntaxTagStyles, Theme, ThemeKind, UiStyles};
-    use std::collections::BTreeMap;
+    use crate::theme::{HighlightStyles, Theme, ThemeKind};
     use std::collections::BTreeSet;
 
     fn temp_path_with_ext(name: &str, ext: &str) -> AbsolutePath {
@@ -802,78 +803,128 @@ mod tests {
 
     fn comment_only_theme() -> Theme {
         let default_style = Style::new().fg(Color::ansi(15)).bg(Color::ansi(30));
-        let ui_styles = UiStyles::new(
-            Style::new().fg(Color::ansi(1)).bg(Color::ansi(2)),
-            Style::new().fg(Color::ansi(3)).bg(Color::ansi(4)),
+        let mut highlights = HighlightStyles::default();
+        highlights.insert(
+            Tag::parse("ui.selection").expect("valid tag"),
             Style::new().fg(Color::ansi(5)).bg(Color::ansi(6)),
+        );
+        highlights.insert(
+            Tag::parse("ui.status_bar").expect("valid tag"),
+            Style::new().fg(Color::ansi(1)).bg(Color::ansi(2)),
+        );
+        highlights.insert(
+            Tag::parse("ui.status_bar.modified_marker").expect("valid tag"),
+            Style::new().fg(Color::ansi(3)).bg(Color::ansi(4)),
+        );
+        highlights.insert(
+            Tag::parse("ui.window.active_line").expect("valid tag"),
             Style::new().bg(Color::ansi(21)),
+        );
+        highlights.insert(
+            Tag::parse("ui.tab.active").expect("valid tag"),
             Style::new().fg(Color::ansi(7)).bg(Color::ansi(8)),
+        );
+        highlights.insert(
+            Tag::parse("ui.tab.inactive").expect("valid tag"),
             Style::new().fg(Color::ansi(9)).bg(Color::ansi(10)),
+        );
+        highlights.insert(
+            Tag::parse("ui.tab.scroll_indicator").expect("valid tag"),
             Style::new().fg(Color::ansi(11)).bg(Color::ansi(12)),
+        );
+        highlights.insert(
+            Tag::parse("ui.window.gutter").expect("valid tag"),
             Style::new().fg(Color::ansi(13)).bg(Color::ansi(14)),
+        );
+        highlights.insert(
+            Tag::parse("ui.window").expect("valid tag"),
             Style::new().fg(Color::ansi(15)).bg(Color::ansi(16)),
+        );
+        highlights.insert(
+            Tag::parse("ui.window.split_border").expect("valid tag"),
             Style::new().fg(Color::ansi(17)).bg(Color::ansi(18)),
+        );
+        highlights.insert(
+            Tag::parse("ui.window.split_border.resize").expect("valid tag"),
             Style::new().fg(Color::ansi(19)).bg(Color::ansi(20)),
         );
-        let mut syntax_map = BTreeMap::new();
-        syntax_map.insert(
-            Tag::parse("comment").expect("valid tag"),
+        highlights.insert(
+            Tag::parse("syntax.comment").expect("valid tag"),
             Style::new().fg(Color::ansi(20)),
         );
 
-        Theme::new(
-            "comment-only",
-            ThemeKind::Ansi256,
-            default_style,
-            ui_styles,
-            SyntaxTagStyles::new(syntax_map),
-        )
+        Theme::new("comment-only", ThemeKind::Ansi256, default_style, highlights)
     }
 
     fn marker_theme() -> Theme {
         let default_style = Style::new().fg(Color::ansi(15)).bg(Color::ansi(30));
-        let ui_styles = UiStyles::new(
-            Style::new().fg(Color::ansi(1)).bg(Color::ansi(2)),
-            Style::new().fg(Color::ansi(3)).bg(Color::ansi(4)),
+        let mut highlights = HighlightStyles::default();
+        highlights.insert(
+            Tag::parse("ui.selection").expect("valid tag"),
             Style::new().fg(Color::ansi(5)).bg(Color::ansi(6)),
+        );
+        highlights.insert(
+            Tag::parse("ui.status_bar").expect("valid tag"),
+            Style::new().fg(Color::ansi(1)).bg(Color::ansi(2)),
+        );
+        highlights.insert(
+            Tag::parse("ui.status_bar.modified_marker").expect("valid tag"),
+            Style::new().fg(Color::ansi(3)).bg(Color::ansi(4)),
+        );
+        highlights.insert(
+            Tag::parse("ui.window.active_line").expect("valid tag"),
             Style::new().bg(Color::ansi(21)),
+        );
+        highlights.insert(
+            Tag::parse("ui.tab.active").expect("valid tag"),
             Style::new().fg(Color::ansi(7)).bg(Color::ansi(8)),
+        );
+        highlights.insert(
+            Tag::parse("ui.tab.inactive").expect("valid tag"),
             Style::new().fg(Color::ansi(9)).bg(Color::ansi(10)),
+        );
+        highlights.insert(
+            Tag::parse("ui.tab.scroll_indicator").expect("valid tag"),
             Style::new().fg(Color::ansi(11)).bg(Color::ansi(12)),
+        );
+        highlights.insert(
+            Tag::parse("ui.window.gutter").expect("valid tag"),
             Style::new().fg(Color::ansi(13)).bg(Color::ansi(14)),
+        );
+        highlights.insert(
+            Tag::parse("ui.window").expect("valid tag"),
             Style::new().fg(Color::ansi(15)).bg(Color::ansi(16)),
+        );
+        highlights.insert(
+            Tag::parse("ui.window.split_border").expect("valid tag"),
             Style::new().fg(Color::ansi(17)).bg(Color::ansi(18)),
+        );
+        highlights.insert(
+            Tag::parse("ui.window.split_border.resize").expect("valid tag"),
             Style::new().fg(Color::ansi(19)).bg(Color::ansi(20)),
         );
-        let mut syntax_map = BTreeMap::new();
-        syntax_map.insert(
-            Tag::parse("comment").expect("valid tag"),
+        highlights.insert(
+            Tag::parse("syntax.comment").expect("valid tag"),
             Style::new().fg(Color::ansi(20)),
         );
-        syntax_map.insert(
-            Tag::parse("comment.todo").expect("valid tag"),
+        highlights.insert(
+            Tag::parse("syntax.comment.todo").expect("valid tag"),
             Style::new().fg(Color::ansi(31)),
         );
-        syntax_map.insert(
-            Tag::parse("comment.fixme").expect("valid tag"),
+        highlights.insert(
+            Tag::parse("syntax.comment.fixme").expect("valid tag"),
             Style::new().fg(Color::ansi(32)),
         );
-        syntax_map.insert(
-            Tag::parse("comment.bug").expect("valid tag"),
+        highlights.insert(
+            Tag::parse("syntax.comment.bug").expect("valid tag"),
             Style::new().fg(Color::ansi(33)),
         );
-        syntax_map.insert(
-            Tag::parse("comment.note").expect("valid tag"),
+        highlights.insert(
+            Tag::parse("syntax.comment.note").expect("valid tag"),
             Style::new().fg(Color::ansi(34)),
         );
 
-        Theme::new(
-            "marker-demo",
-            ThemeKind::Ansi256,
-            default_style,
-            ui_styles,
-            SyntaxTagStyles::new(syntax_map),
-        )
+        Theme::new("marker-demo", ThemeKind::Ansi256, default_style, highlights)
     }
 
     #[test]
@@ -911,7 +962,9 @@ mod tests {
         let theme_default_style = theme.default_style();
         let expected_comment_style = theme
             .default_style()
-            .overlay(theme.syntax_style_for_tag(&Tag::parse("comment").expect("valid tag")));
+            .overlay(
+                theme.highlight_style_for_tag(&Tag::parse("comment").expect("valid tag")),
+            );
         let _theme_guard = globals::set_test_active_theme(theme);
         let _config_guard = globals::set_test_config(Config {
             theme: "comment-only".to_string(),

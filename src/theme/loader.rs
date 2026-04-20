@@ -6,9 +6,9 @@ use crate::terminal::{Color, Rgb, Style};
 
 use super::Tag;
 use super::error::ThemeLoadError;
-use super::model::{StyleOverlay, SyntaxTagStyles, Theme, ThemeKind, UiStyles};
+use super::model::{HighlightStyles, StyleOverlay, Theme, ThemeKind};
 use super::parser::parse_theme;
-use super::schema::{RawColorValue, RawStyle, RawTheme, RawUiStyles};
+use super::schema::{RawColorValue, RawStyle, RawTheme};
 
 /// Parses and resolves a TOML theme document in one step.
 pub fn resolve_theme_from_str(source: &str, input: &str) -> Result<Theme, ThemeLoadError> {
@@ -39,16 +39,9 @@ pub fn resolve_theme(raw: RawTheme) -> Result<Theme, ThemeLoadError> {
         &raw.default,
         &palette,
     )?;
-    let ui_styles = resolve_ui_styles(theme_name, &raw.ui, default_style, &palette)?;
-    let syntax_styles = resolve_syntax_styles(theme_name, &raw.syntax, default_style, &palette)?;
+    let highlights = resolve_highlight_styles(theme_name, &raw.highlights, default_style, &palette)?;
 
-    Ok(Theme::new(
-        theme_name,
-        kind,
-        default_style,
-        ui_styles,
-        syntax_styles,
-    ))
+    Ok(Theme::new(theme_name, kind, default_style, highlights))
 }
 
 fn resolve_palette(
@@ -83,120 +76,22 @@ fn parse_rgb(theme_name: &str, key: &str, value: &str) -> Result<Color, ThemeLoa
         })
 }
 
-fn resolve_ui_styles(
-    theme_name: &str,
-    raw: &RawUiStyles,
-    default_style: Style,
-    palette: &BTreeMap<String, Color>,
-) -> Result<UiStyles, ThemeLoadError> {
-    Ok(UiStyles::new(
-        resolve_style(
-            theme_name,
-            "ui",
-            "status_bar",
-            default_style,
-            &raw.status_bar,
-            palette,
-        )?,
-        resolve_style(
-            theme_name,
-            "ui",
-            "modified_marker",
-            default_style,
-            &raw.modified_marker,
-            palette,
-        )?,
-        resolve_style(
-            theme_name,
-            "ui",
-            "selection",
-            default_style,
-            &raw.selection,
-            palette,
-        )?,
-        resolve_style(
-            theme_name,
-            "ui",
-            "active_line",
-            Style::default(),
-            &raw.active_line,
-            palette,
-        )?,
-        resolve_style(
-            theme_name,
-            "ui",
-            "tab_active",
-            default_style,
-            &raw.tab_active,
-            palette,
-        )?,
-        resolve_style(
-            theme_name,
-            "ui",
-            "tab_inactive",
-            default_style,
-            &raw.tab_inactive,
-            palette,
-        )?,
-        resolve_style(
-            theme_name,
-            "ui",
-            "tab_scroll_indicator",
-            default_style,
-            &raw.tab_scroll_indicator,
-            palette,
-        )?,
-        resolve_style(
-            theme_name,
-            "ui",
-            "gutter",
-            default_style,
-            &raw.gutter,
-            palette,
-        )?,
-        resolve_style(
-            theme_name,
-            "ui",
-            "window",
-            default_style,
-            &raw.window,
-            palette,
-        )?,
-        resolve_style(
-            theme_name,
-            "ui",
-            "split_border",
-            default_style,
-            &raw.split_border,
-            palette,
-        )?,
-        resolve_style(
-            theme_name,
-            "ui",
-            "split_border_resize",
-            default_style,
-            &raw.split_border_resize,
-            palette,
-        )?,
-    ))
-}
-
-fn resolve_syntax_styles(
+fn resolve_highlight_styles(
     theme_name: &str,
     raw: &std::collections::BTreeMap<String, RawStyle>,
     default_style: Style,
     palette: &BTreeMap<String, Color>,
-) -> Result<SyntaxTagStyles, ThemeLoadError> {
-    let mut styles = SyntaxTagStyles::default();
-    for (tag, raw_style) in raw {
-        let tag = Tag::parse(tag).map_err(|_| ThemeLoadError::InvalidTag {
+) -> Result<HighlightStyles, ThemeLoadError> {
+    let mut styles = HighlightStyles::default();
+    for (highlight, raw_style) in raw {
+        let tag = Tag::parse(highlight).map_err(|_| ThemeLoadError::InvalidTag {
             theme: theme_name.to_string(),
-            section: "syntax",
-            tag: tag.to_string(),
+            section: "highlights",
+            tag: highlight.to_string(),
         })?;
         let resolved = resolve_style(
             theme_name,
-            "syntax",
+            "highlights",
             tag.as_str(),
             default_style,
             raw_style,
@@ -424,29 +319,27 @@ fg = "base"
 bg = "accent"
 bold = true
 
-[ui]
-status_bar = { fg = "accent" }
-modified_marker = { fg = "base", bold = true }
-active_line = { bg = "base", overlay = true }
-tab_active = { fg = "base" }
-tab_inactive = { fg = "base" }
-tab_scroll_indicator = { fg = "base" }
-gutter = { fg = "base" }
-window = { fg = "base" }
-split_border = { fg = "base" }
-split_border_resize = { fg = "accent", bold = true }
-
-[syntax]
-comment = { fg = "base" }
-constant = { fg = "base" }
-function = { fg = "base" }
-keyword = { fg = "accent" }
-number = { fg = "base" }
-operator = { fg = "base" }
-punctuation = { fg = "base" }
-string = { fg = "accent" }
-type = { fg = "base" }
-variable = { fg = "base" }
+ [highlights]
+"ui.status_bar" = { fg = "accent" }
+"ui.status_bar.modified_marker" = { fg = "base", bold = true }
+"ui.window.active_line" = { bg = "base", overlay = true }
+"ui.tab.active" = { fg = "base" }
+"ui.tab.inactive" = { fg = "base" }
+"ui.tab.scroll_indicator" = { fg = "base" }
+"ui.window.gutter" = { fg = "base" }
+"ui.window" = { fg = "base" }
+"ui.window.split_border" = { fg = "base" }
+"ui.window.split_border.resize" = { fg = "accent", bold = true }
+"syntax.comment" = { fg = "base" }
+"syntax.constant" = { fg = "base" }
+"syntax.function" = { fg = "base" }
+"syntax.keyword" = { fg = "accent" }
+"syntax.number" = { fg = "base" }
+"syntax.operator" = { fg = "base" }
+"syntax.punctuation" = { fg = "base" }
+"syntax.string" = { fg = "accent" }
+"syntax.type" = { fg = "base" }
+"syntax.variable" = { fg = "base" }
 "##
     }
 
@@ -456,29 +349,32 @@ variable = { fg = "base" }
         assert_eq!(theme.name(), "demo");
         assert_eq!(theme.kind(), ThemeKind::TrueColor);
         assert_eq!(
-            theme.ui.status_bar,
+            theme.highlight_style_for_name("ui.status_bar"),
             Style::new()
                 .fg(Color::Rgb(Rgb::new(17, 34, 51)))
                 .bg(Color::Rgb(Rgb::new(17, 34, 51)))
                 .bold()
         );
         assert_eq!(
-            theme.syntax_style_for_tag(&tag("keyword")),
+            theme.highlight_style_for_tag(&tag("syntax.keyword")),
             Style::new()
                 .fg(Color::Rgb(Rgb::new(17, 34, 51)))
                 .bg(Color::Rgb(Rgb::new(17, 34, 51)))
                 .bold()
         );
-        assert_eq!(theme.ui.active_line, Style::new().bg(Color::ansi(0)));
         assert_eq!(
-            theme.ui.split_border,
+            theme.highlight_style_for_name("ui.window.active_line"),
+            Style::new().bg(Color::ansi(0))
+        );
+        assert_eq!(
+            theme.highlight_style_for_name("ui.window.split_border"),
             Style::new()
                 .fg(Color::ansi(0))
                 .bg(Color::Rgb(Rgb::new(17, 34, 51)))
                 .bold()
         );
         assert_eq!(
-            theme.ui.split_border_resize,
+            theme.highlight_style_for_name("ui.window.split_border.resize"),
             Style::new()
                 .fg(Color::Rgb(Rgb::new(17, 34, 51)))
                 .bg(Color::Rgb(Rgb::new(17, 34, 51)))
@@ -489,13 +385,13 @@ variable = { fg = "base" }
     #[test]
     fn resolves_comment_marker_tags_through_parent_lookup() {
         let theme = sample_theme().replace(
-            "comment = { fg = \"base\" }\n",
-            "comment = { fg = \"base\" }\n\"comment.todo\" = { fg = \"accent\" }\n",
+            "\"syntax.comment\" = { fg = \"base\" }\n",
+            "\"syntax.comment\" = { fg = \"base\" }\n\"syntax.comment.todo\" = { fg = \"accent\" }\n",
         );
         let theme = resolve_theme_from_str("sample", &theme).expect("theme should resolve");
 
         assert_eq!(
-            theme.syntax_style_for_tag(&tag("comment.todo")),
+            theme.highlight_style_for_tag(&tag("syntax.comment.todo")),
             Style::new()
                 .fg(Color::Rgb(Rgb::new(17, 34, 51)))
                 .bg(Color::Rgb(Rgb::new(17, 34, 51)))
@@ -514,26 +410,24 @@ base = 0
 [default]
 fg = "base"
 
-[ui]
-status_bar = { fg = "missing" }
-modified_marker = { fg = "base" }
-tab_active = { fg = "base" }
-tab_inactive = { fg = "base" }
-tab_scroll_indicator = { fg = "base" }
-gutter = { fg = "base" }
-window = { fg = "base" }
-
-[syntax]
-comment = { fg = "base" }
-constant = { fg = "base" }
-function = { fg = "base" }
-keyword = { fg = "base" }
-number = { fg = "base" }
-operator = { fg = "base" }
-punctuation = { fg = "base" }
-string = { fg = "base" }
-type = { fg = "base" }
-variable = { fg = "base" }
+[highlights]
+"ui.status_bar" = { fg = "missing" }
+"ui.status_bar.modified_marker" = { fg = "base" }
+"ui.tab.active" = { fg = "base" }
+"ui.tab.inactive" = { fg = "base" }
+"ui.tab.scroll_indicator" = { fg = "base" }
+"ui.window.gutter" = { fg = "base" }
+"ui.window" = { fg = "base" }
+"syntax.comment" = { fg = "base" }
+"syntax.constant" = { fg = "base" }
+"syntax.function" = { fg = "base" }
+"syntax.keyword" = { fg = "base" }
+"syntax.number" = { fg = "base" }
+"syntax.operator" = { fg = "base" }
+"syntax.punctuation" = { fg = "base" }
+"syntax.string" = { fg = "base" }
+"syntax.type" = { fg = "base" }
+"syntax.variable" = { fg = "base" }
 "#;
 
         let err = resolve_theme_from_str("sample", theme).expect_err("resolution should fail");
@@ -544,7 +438,7 @@ variable = { fg = "base" }
     }
 
     #[test]
-    fn rejects_unknown_ui_key() {
+    fn rejects_invalid_highlight_name() {
         let theme = r#"
 name = "demo"
 
@@ -554,40 +448,33 @@ base = 0
 [default]
 fg = "base"
 
-[ui]
-status_bar = { fg = "base" }
-modified_marker = { fg = "base" }
-tab_active = { fg = "base" }
-tab_inactive = { fg = "base" }
-tab_scroll_indicator = { fg = "base" }
-gutter = { fg = "base" }
-window = { fg = "base" }
-extra = { fg = "base" }
-
-[syntax]
-comment = { fg = "base" }
-constant = { fg = "base" }
-function = { fg = "base" }
-keyword = { fg = "base" }
-number = { fg = "base" }
-operator = { fg = "base" }
-punctuation = { fg = "base" }
-string = { fg = "base" }
-type = { fg = "base" }
-variable = { fg = "base" }
+[highlights]
+"ui.status_bar" = { fg = "base" }
+"ui.status_bar.modified_marker" = { fg = "base" }
+"ui.tab.active" = { fg = "base" }
+"ui.tab.inactive" = { fg = "base" }
+"ui.tab.scroll_indicator" = { fg = "base" }
+"ui.window.gutter" = { fg = "base" }
+"ui.window" = { fg = "base" }
+"ui.Extra" = { fg = "base" }
+"syntax.comment" = { fg = "base" }
+"syntax.constant" = { fg = "base" }
+"syntax.function" = { fg = "base" }
+"syntax.keyword" = { fg = "base" }
+"syntax.number" = { fg = "base" }
+"syntax.operator" = { fg = "base" }
+"syntax.punctuation" = { fg = "base" }
+"syntax.string" = { fg = "base" }
+"syntax.type" = { fg = "base" }
+"syntax.variable" = { fg = "base" }
 "#;
 
         let err = resolve_theme_from_str("sample", theme).expect_err("validation should fail");
-        match err {
-            ThemeLoadError::Parse { message, .. } => {
-                assert!(message.contains("extra"));
-            }
-            other => panic!("unexpected error: {other:?}"),
-        }
+        assert!(matches!(err, ThemeLoadError::InvalidTag { .. }));
     }
 
     #[test]
-    fn rejects_invalid_syntax_tag() {
+    fn rejects_invalid_highlight_name_in_theme_document() {
         let theme = r#"
 name = "demo"
 
@@ -597,27 +484,25 @@ base = 0
 [default]
 fg = "base"
 
-[ui]
-status_bar = { fg = "base" }
-modified_marker = { fg = "base" }
-tab_active = { fg = "base" }
-tab_inactive = { fg = "base" }
-tab_scroll_indicator = { fg = "base" }
-gutter = { fg = "base" }
-window = { fg = "base" }
-
-[syntax]
-comment = { fg = "base" }
-constant = { fg = "base" }
-function = { fg = "base" }
-keyword = { fg = "base" }
-number = { fg = "base" }
-operator = { fg = "base" }
-punctuation = { fg = "base" }
-string = { fg = "base" }
-type = { fg = "base" }
-variable = { fg = "base" }
-Extra = { fg = "base" }
+[highlights]
+"ui.status_bar" = { fg = "base" }
+"ui.status_bar.modified_marker" = { fg = "base" }
+"ui.tab.active" = { fg = "base" }
+"ui.tab.inactive" = { fg = "base" }
+"ui.tab.scroll_indicator" = { fg = "base" }
+"ui.window.gutter" = { fg = "base" }
+"ui.window" = { fg = "base" }
+"syntax.comment" = { fg = "base" }
+"syntax.constant" = { fg = "base" }
+"syntax.function" = { fg = "base" }
+"syntax.keyword" = { fg = "base" }
+"syntax.number" = { fg = "base" }
+"syntax.operator" = { fg = "base" }
+"syntax.punctuation" = { fg = "base" }
+"syntax.string" = { fg = "base" }
+"syntax.type" = { fg = "base" }
+"syntax.variable" = { fg = "base" }
+"ui.Extra" = { fg = "base" }
 "#;
 
         let err = resolve_theme_from_str("sample", theme).expect_err("validation should fail");
@@ -638,35 +523,33 @@ fg = "base"
 bg = "accent"
 bold = true
 
-[ui]
-status_bar = { fg = "accent" }
-modified_marker = { fg = "base", bold = true }
-tab_active = { fg = "base" }
-tab_inactive = { fg = "base" }
-tab_scroll_indicator = { fg = "base" }
-gutter = { fg = "base" }
-window = { fg = "base" }
-
-[syntax]
-comment = { fg = "base" }
-constant = { fg = "base" }
-function = { fg = "base" }
-keyword = { fg = "accent" }
-number = { fg = "base" }
-operator = { fg = "base" }
-punctuation = { fg = "base" }
-string = { fg = "base" }
-type = { fg = "base" }
-variable = { fg = "base" }
+[highlights]
+"ui.status_bar" = { fg = "accent" }
+"ui.status_bar.modified_marker" = { fg = "base", bold = true }
+"ui.tab.active" = { fg = "base" }
+"ui.tab.inactive" = { fg = "base" }
+"ui.tab.scroll_indicator" = { fg = "base" }
+"ui.window.gutter" = { fg = "base" }
+"ui.window" = { fg = "base" }
+"syntax.comment" = { fg = "base" }
+"syntax.constant" = { fg = "base" }
+"syntax.function" = { fg = "base" }
+"syntax.keyword" = { fg = "accent" }
+"syntax.number" = { fg = "base" }
+"syntax.operator" = { fg = "base" }
+"syntax.punctuation" = { fg = "base" }
+"syntax.string" = { fg = "base" }
+"syntax.type" = { fg = "base" }
+"syntax.variable" = { fg = "base" }
 "#;
 
         let theme = resolve_theme_from_str("sample", theme).expect("theme should resolve");
         assert_eq!(
-            theme.ui.status_bar,
+            theme.highlight_style_for_name("ui.status_bar"),
             Style::new().fg(Color::ansi(1)).bg(Color::ansi(1)).bold()
         );
         assert_eq!(
-            theme.syntax_style_for_tag(&tag("keyword")),
+            theme.highlight_style_for_tag(&tag("syntax.keyword")),
             Style::new().fg(Color::ansi(1)).bg(Color::ansi(1)).bold()
         );
     }
@@ -685,31 +568,32 @@ fg = "base"
 bg = "accent"
 bold = true
 
-[ui]
-status_bar = { fg = "accent" }
-modified_marker = { fg = "base", bold = true }
-active_line = { bg = "base", overlay = true }
-tab_active = { fg = "base" }
-tab_inactive = { fg = "base" }
-tab_scroll_indicator = { fg = "base" }
-gutter = { fg = "base" }
-window = { fg = "base" }
-
-[syntax]
-comment = { fg = "base" }
-constant = { fg = "base" }
-function = { fg = "base" }
-keyword = { fg = "accent" }
-number = { fg = "base" }
-operator = { fg = "base" }
-punctuation = { fg = "base" }
-string = { fg = "base" }
-type = { fg = "base" }
-variable = { fg = "base" }
+[highlights]
+"ui.status_bar" = { fg = "accent" }
+"ui.status_bar.modified_marker" = { fg = "base", bold = true }
+"ui.window.active_line" = { bg = "base", overlay = true }
+"ui.tab.active" = { fg = "base" }
+"ui.tab.inactive" = { fg = "base" }
+"ui.tab.scroll_indicator" = { fg = "base" }
+"ui.window.gutter" = { fg = "base" }
+"ui.window" = { fg = "base" }
+"syntax.comment" = { fg = "base" }
+"syntax.constant" = { fg = "base" }
+"syntax.function" = { fg = "base" }
+"syntax.keyword" = { fg = "accent" }
+"syntax.number" = { fg = "base" }
+"syntax.operator" = { fg = "base" }
+"syntax.punctuation" = { fg = "base" }
+"syntax.string" = { fg = "base" }
+"syntax.type" = { fg = "base" }
+"syntax.variable" = { fg = "base" }
 "#;
 
         let theme = resolve_theme_from_str("sample", theme).expect("theme should resolve");
-        assert_eq!(theme.ui.active_line, Style::new().bg(Color::ansi(0)));
+        assert_eq!(
+            theme.highlight_style_for_name("ui.window.active_line"),
+            Style::new().bg(Color::ansi(0))
+        );
     }
 
     #[test]
@@ -724,26 +608,24 @@ base = "#zzzzzz"
 fg = "base"
 bg = "base"
 
-[ui]
-status_bar = { fg = "base" }
-modified_marker = { fg = "base" }
-tab_active = { fg = "base" }
-tab_inactive = { fg = "base" }
-tab_scroll_indicator = { fg = "base" }
-gutter = { fg = "base" }
-window = { fg = "base" }
-
-[syntax]
-comment = { fg = "base" }
-constant = { fg = "base" }
-function = { fg = "base" }
-keyword = { fg = "base" }
-number = { fg = "base" }
-operator = { fg = "base" }
-punctuation = { fg = "base" }
-string = { fg = "base" }
-type = { fg = "base" }
-variable = { fg = "base" }
+[highlights]
+"ui.status_bar" = { fg = "base" }
+"ui.status_bar.modified_marker" = { fg = "base" }
+"ui.tab.active" = { fg = "base" }
+"ui.tab.inactive" = { fg = "base" }
+"ui.tab.scroll_indicator" = { fg = "base" }
+"ui.window.gutter" = { fg = "base" }
+"ui.window" = { fg = "base" }
+"syntax.comment" = { fg = "base" }
+"syntax.constant" = { fg = "base" }
+"syntax.function" = { fg = "base" }
+"syntax.keyword" = { fg = "base" }
+"syntax.number" = { fg = "base" }
+"syntax.operator" = { fg = "base" }
+"syntax.punctuation" = { fg = "base" }
+"syntax.string" = { fg = "base" }
+"syntax.type" = { fg = "base" }
+"syntax.variable" = { fg = "base" }
 "##;
 
         let err = resolve_theme_from_str("sample", theme).expect_err("invalid palette should fail");
@@ -783,28 +665,30 @@ variable = { fg = "base" }
         for name in registry.names() {
             let theme = registry.get(name).unwrap();
             assert_eq!(
-                theme.ui.selection,
+                theme.highlight_style_for_name("ui.selection"),
                 selection_style(name),
                 "theme {name} should define a visible visual selection style"
             );
             assert_eq!(
-                theme.ui.active_line,
+                theme.highlight_style_for_name("ui.window.active_line"),
                 active_line_style(name),
                 "theme {name} should define an active line style"
             );
             assert_eq!(
-                theme.ui.split_border,
+                theme.highlight_style_for_name("ui.window.split_border"),
                 split_border_style(name),
                 "theme {name} should define a normal split border style"
             );
             assert_eq!(
-                theme.ui.split_border_resize,
+                theme.highlight_style_for_name("ui.window.split_border.resize"),
                 split_border_resize_style(name),
                 "theme {name} should define a resize split border style"
             );
         }
         assert_eq!(
-            friday_night.syntax_style_for_tag(&Tag::parse("string.interpolation").unwrap()),
+            friday_night.highlight_style_for_tag(
+                &Tag::parse("syntax.string.interpolation").unwrap()
+            ),
             Style::new().fg(Color::ansi(75)).bg(Color::ansi(16))
         );
     }
@@ -821,9 +705,9 @@ variable = { fg = "base" }
             "Catppuccin",
         ] {
             let theme = registry.get(name).expect("theme should exist");
-            let comment_style = theme.syntax_style_for_tag(&tag("comment"));
+            let comment_style = theme.highlight_style_for_tag(&tag("syntax.comment"));
             for marker in ["todo", "fixme", "bug", "note"] {
-                let style = theme.syntax_style_for_tag(&tag(&format!("comment.{marker}")));
+                let style = theme.highlight_style_for_tag(&tag(&format!("syntax.comment.{marker}")));
                 assert_ne!(
                     style, comment_style,
                     "{name} should expose a distinct {marker} style"

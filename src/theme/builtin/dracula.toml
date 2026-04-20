@@ -19,43 +19,44 @@ orange = "#ffb86c"
 fg = "fg"
 bg = "bg"
 
-[ui]
-status_bar = { fg = "fg", bg = "panel", bold = true }
-modified_marker = { fg = "orange", bold = true }
-selection = { fg = "bg", bg = "fg" }
-active_line = { bg = "panel", overlay = true }
-tab_active = { fg = "bg", bg = "accent", bold = true }
-tab_inactive = { fg = "fg", bg = "panel" }
-tab_scroll_indicator = { fg = "muted", bg = "bg" }
-gutter = { fg = "muted", bg = "bg" }
-window = { fg = "fg", bg = "bg" }
-split_border = { fg = "muted" }
-split_border_resize = { fg = "accent", bold = true }
+[highlights]
+# UI
+"ui.status_bar" = { fg = "fg", bg = "panel", bold = true }
+"ui.status_bar.modified_marker" = { fg = "orange", bold = true }
+"ui.selection" = { fg = "bg", bg = "fg" }
+"ui.window.active_line" = { bg = "panel", overlay = true }
+"ui.tab.active" = { fg = "bg", bg = "accent", bold = true }
+"ui.tab.inactive" = { fg = "fg", bg = "panel" }
+"ui.tab.scroll_indicator" = { fg = "muted", bg = "bg" }
+"ui.window.gutter" = { fg = "muted", bg = "bg" }
+"ui.window" = { fg = "fg", bg = "bg" }
+"ui.window.split_border" = { fg = "muted" }
+"ui.window.split_border.resize" = { fg = "accent", bold = true }
 
-[syntax]
-comment = { fg = "comment" }
-"comment.todo" = { fg = "bg", bg = "accent", bold = true }
-"comment.fixme" = { fg = "bg", bg = "red", bold = true }
-"comment.bug" = { fg = "bg", bg = "orange", bold = true }
-"comment.note" = { fg = "bg", bg = "cyan", bold = true }
-constant = { fg = "orange" }
-function = { fg = "blue" }
-keyword = { fg = "magenta" }
-markup = { fg = "accent" }
-"markup.code" = { fg = "orange" }
-"markup.code.inline" = { fg = "orange" }
-"markup.emphasis" = { fg = "accent", italic = true }
-"markup.heading" = { fg = "blue", bold = true }
-"markup.link" = { fg = "cyan", underline = true }
-"markup.list" = { fg = "magenta" }
-"markup.quote" = { fg = "comment", italic = true }
-"markup.strong" = { fg = "accent", bold = true }
-"markup.thematic_break" = { fg = "muted" }
-number = { fg = "yellow" }
-operator = { fg = "fg" }
-punctuation = { fg = "muted" }
-string = { fg = "green" }
-"string.escape" = { fg = "muted" }
-"string.interpolation" = { fg = "accent" }
-type = { fg = "cyan" }
-variable = { fg = "fg" }
+# Syntax
+"syntax.comment" = { fg = "comment" }
+"syntax.comment.todo" = { fg = "bg", bg = "accent", bold = true }
+"syntax.comment.fixme" = { fg = "bg", bg = "red", bold = true }
+"syntax.comment.bug" = { fg = "bg", bg = "orange", bold = true }
+"syntax.comment.note" = { fg = "bg", bg = "cyan", bold = true }
+"syntax.constant" = { fg = "orange" }
+"syntax.function" = { fg = "blue" }
+"syntax.keyword" = { fg = "magenta" }
+"syntax.markup" = { fg = "accent" }
+"syntax.markup.code" = { fg = "orange" }
+"syntax.markup.code.inline" = { fg = "orange" }
+"syntax.markup.emphasis" = { fg = "accent", italic = true }
+"syntax.markup.heading" = { fg = "blue", bold = true }
+"syntax.markup.link" = { fg = "cyan", underline = true }
+"syntax.markup.list" = { fg = "magenta" }
+"syntax.markup.quote" = { fg = "comment", italic = true }
+"syntax.markup.strong" = { fg = "accent", bold = true }
+"syntax.markup.thematic_break" = { fg = "muted" }
+"syntax.number" = { fg = "yellow" }
+"syntax.operator" = { fg = "fg" }
+"syntax.punctuation" = { fg = "muted" }
+"syntax.string" = { fg = "green" }
+"syntax.string.escape" = { fg = "muted" }
+"syntax.string.interpolation" = { fg = "accent" }
+"syntax.type" = { fg = "cyan" }
+"syntax.variable" = { fg = "fg" }

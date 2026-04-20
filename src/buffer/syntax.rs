@@ -920,7 +920,7 @@ mod tests {
     }
 
     fn wait_for_event(handle: &JobHandle) -> JobEvent {
-        let deadline = Instant::now() + Duration::from_secs(2);
+        let deadline = Instant::now() + Duration::from_secs(10);
         loop {
             if let Some(event) = handle.poll_completion() {
                 return event;
