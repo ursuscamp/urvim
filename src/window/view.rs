@@ -5,6 +5,7 @@ use crate::theme::Tag;
 use imbl::Vector;
 use smol_str::SmolStr;
 use std::ops::Range;
+use std::time::{Duration, Instant};
 
 impl BufferView {
     /// Creates a new view and registers the buffer in the global pool.
@@ -21,6 +22,7 @@ impl BufferView {
             cursor: Cursor::new(0, 0),
             remembered_visual_col: None,
             visual_selection: None,
+            yank_flash: None,
         }
     }
 
@@ -118,6 +120,38 @@ impl BufferView {
     /// Clears the active visual selection.
     pub fn clear_visual_selection(&mut self) {
         self.visual_selection = None;
+    }
+
+    /// Starts a transient yank flash anchored at the supplied selection.
+    pub fn begin_yank_flash(&mut self, selection: YankFlashSelection, duration: Duration) {
+        self.yank_flash = Some(YankFlash {
+            selection,
+            expires_at: Instant::now() + duration,
+        });
+    }
+
+    /// Clears the active yank flash, if any.
+    pub fn clear_yank_flash(&mut self) {
+        self.yank_flash = None;
+    }
+
+    /// Returns the active yank flash, if any.
+    pub fn yank_flash(&self) -> Option<YankFlash> {
+        self.yank_flash
+    }
+
+    /// Clears the active yank flash once it expires.
+    pub fn prune_yank_flash(&mut self, now: Instant) -> bool {
+        let Some(flash) = self.yank_flash else {
+            return false;
+        };
+
+        if now >= flash.expires_at {
+            self.yank_flash = None;
+            return true;
+        }
+
+        false
     }
 
     /// Returns the active visual selection record, if any.
@@ -315,6 +349,7 @@ impl BufferView {
 
         if let Some(selection_style) = selection_style {
             self.apply_visual_selection(&mut render_data, selection_style);
+            self.apply_yank_flash(&mut render_data, selection_style);
         }
 
         render_data
@@ -330,51 +365,82 @@ impl BufferView {
                 let Some(selection) = self.visual_selection_range() else {
                     return;
                 };
-
-                for line_data in &mut render_data.line_data {
-                    let Some((line_start, line_end)) = Self::intersect_line_range(
-                        selection.start,
-                        selection.end,
-                        line_data.buffer_line,
-                    ) else {
-                        continue;
-                    };
-
-                    let mut selected_chunks = Vec::with_capacity(line_data.chunks.len());
-                    let mut chunk_start = line_data.byte_offset;
-                    for chunk in line_data.chunks.drain(..) {
-                        let selected_style = chunk.style.overlay(selection_style);
-                        Self::push_split_render_chunk(
-                            &mut selected_chunks,
-                            &chunk.text,
-                            chunk_start,
-                            line_start,
-                            line_end,
-                            chunk.style,
-                            selected_style,
-                        );
-
-                        chunk_start += chunk.text.len();
-                    }
-
-                    line_data.chunks = selected_chunks;
-                }
+                self.apply_characterwise_selection(render_data, selection_style, selection);
             }
             VisualSelectionKind::Line => {
                 let Some((start_line, count)) = self.visual_line_selection_range() else {
                     return;
                 };
-                let end_line = start_line.saturating_add(count.saturating_sub(1));
+                self.apply_linewise_selection(render_data, selection_style, start_line, count);
+            }
+        }
+    }
 
-                for line_data in &mut render_data.line_data {
-                    if line_data.buffer_line < start_line || line_data.buffer_line > end_line {
-                        continue;
-                    }
+    fn apply_yank_flash(&self, render_data: &mut RenderData, selection_style: Style) {
+        let Some(flash) = self.yank_flash() else {
+            return;
+        };
 
-                    for chunk in &mut line_data.chunks {
-                        chunk.style = chunk.style.overlay(selection_style);
-                    }
-                }
+        match flash.selection {
+            YankFlashSelection::Character(selection) => {
+                self.apply_characterwise_selection(render_data, selection_style, selection)
+            }
+            YankFlashSelection::Line { start_line, count } => {
+                self.apply_linewise_selection(render_data, selection_style, start_line, count)
+            }
+        }
+    }
+
+    fn apply_characterwise_selection(
+        &self,
+        render_data: &mut RenderData,
+        selection_style: Style,
+        selection: crate::buffer::TextObjectRange,
+    ) {
+        for line_data in &mut render_data.line_data {
+            let Some((line_start, line_end)) =
+                Self::intersect_line_range(selection.start, selection.end, line_data.buffer_line)
+            else {
+                continue;
+            };
+
+            let mut selected_chunks = Vec::with_capacity(line_data.chunks.len());
+            let mut chunk_start = line_data.byte_offset;
+            for chunk in line_data.chunks.drain(..) {
+                let selected_style = chunk.style.overlay(selection_style);
+                Self::push_split_render_chunk(
+                    &mut selected_chunks,
+                    &chunk.text,
+                    chunk_start,
+                    line_start,
+                    line_end,
+                    chunk.style,
+                    selected_style,
+                );
+
+                chunk_start += chunk.text.len();
+            }
+
+            line_data.chunks = selected_chunks;
+        }
+    }
+
+    fn apply_linewise_selection(
+        &self,
+        render_data: &mut RenderData,
+        selection_style: Style,
+        start_line: usize,
+        count: usize,
+    ) {
+        let end_line = start_line.saturating_add(count.saturating_sub(1));
+
+        for line_data in &mut render_data.line_data {
+            if line_data.buffer_line < start_line || line_data.buffer_line > end_line {
+                continue;
+            }
+
+            for chunk in &mut line_data.chunks {
+                chunk.style = chunk.style.overlay(selection_style);
             }
         }
     }

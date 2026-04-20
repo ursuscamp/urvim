@@ -1675,6 +1675,220 @@ fn test_visual_line_selection_is_rendered() {
 }
 
 #[test]
+fn test_normal_yank_characterwise_flashes_selection() {
+    let theme = themed_window();
+    let expected_style = theme.highlight_style_for_name("ui.selection");
+    let _theme_guard = globals::set_test_active_theme(theme);
+    let _config_guard = globals::set_test_config(Config {
+        theme: "demo".to_string(),
+        insert_escape: None,
+        syntax: true,
+        auto_close_pairs: true,
+        auto_indent: AutoIndentMode::Off,
+        advanced_glyphs: BTreeSet::new(),
+        ..Default::default()
+    });
+
+    let buffer = Buffer::from_str("hello world");
+    let mut window = Window::new(buffer);
+    window.buffer_view_mut().set_cursor(Cursor::new(0, 0));
+
+    let action = Action::operation(
+        Operator::Yank,
+        OperatorTarget::TextObject(TextObject::InnerWord),
+    );
+    assert_eq!(window.process_action(&action), ActionResult::Handled);
+
+    let mut screen = crate::screen::Screen::new(1, 20);
+    window.render(&mut screen, Position::new(0, 0), Size::new(1, 20));
+
+    let line = window
+        .render_data()
+        .get_line(0)
+        .expect("rendered line should exist");
+    assert!(
+        line.iter()
+            .any(|chunk| chunk.text == "hello" && chunk.style == expected_style)
+    );
+}
+
+#[test]
+fn test_normal_yank_line_flashes_selection() {
+    let theme = themed_window();
+    let expected_style = theme.highlight_style_for_name("ui.selection");
+    let _theme_guard = globals::set_test_active_theme(theme);
+    let _config_guard = globals::set_test_config(Config {
+        theme: "demo".to_string(),
+        insert_escape: None,
+        syntax: true,
+        auto_close_pairs: true,
+        auto_indent: AutoIndentMode::Off,
+        advanced_glyphs: BTreeSet::new(),
+        ..Default::default()
+    });
+
+    let buffer = Buffer::from_str("alpha\nbeta");
+    let mut window = Window::new(buffer);
+    window.buffer_view_mut().set_cursor(Cursor::new(0, 0));
+
+    assert_eq!(
+        window.process_action(&Action::new(ActionKind::YankLine)),
+        ActionResult::Handled
+    );
+
+    let mut screen = crate::screen::Screen::new(2, 20);
+    window.render(&mut screen, Position::new(0, 0), Size::new(2, 20));
+
+    let first = window
+        .render_data()
+        .get_line(0)
+        .expect("first rendered line should exist");
+    assert!(
+        first
+            .iter()
+            .any(|chunk| chunk.text == "alpha" && chunk.style == expected_style)
+    );
+    let second = window
+        .render_data()
+        .get_line(1)
+        .expect("second rendered line should exist");
+    assert!(!second.iter().any(|chunk| chunk.style == expected_style));
+}
+
+#[test]
+fn test_normal_counted_linewise_yank_motion_flashes_selection() {
+    let theme = themed_window();
+    let expected_style = theme.highlight_style_for_name("ui.selection");
+    let _theme_guard = globals::set_test_active_theme(theme);
+    let _config_guard = globals::set_test_config(Config {
+        theme: "demo".to_string(),
+        insert_escape: None,
+        syntax: true,
+        auto_close_pairs: true,
+        auto_indent: AutoIndentMode::Off,
+        advanced_glyphs: BTreeSet::new(),
+        ..Default::default()
+    });
+
+    let buffer = Buffer::from_str("one\ntwo\nthree\nfour");
+    let mut window = Window::new(buffer);
+    window.buffer_view_mut().set_cursor(Cursor::new(3, 0));
+
+    // Equivalent to y2gg in Vim: yank from the current line to line 2.
+    let action = Action::count(
+        2,
+        Box::new(Action::operation(
+            Operator::Yank,
+            OperatorTarget::LinewiseMotion(LinewiseMotion::FirstLine),
+        )),
+    );
+    assert_eq!(window.process_action(&action), ActionResult::Handled);
+
+    let mut screen = crate::screen::Screen::new(4, 20);
+    window.render(&mut screen, Position::new(0, 0), Size::new(4, 20));
+
+    // Yank should include lines 2-4 (0-based lines 1..=3).
+    for line_idx in 1..=3 {
+        let line = window
+            .render_data()
+            .get_line(line_idx)
+            .expect("rendered line should exist");
+        assert!(
+            line.iter().any(|chunk| chunk.style == expected_style),
+            "expected yank flash on line {}",
+            line_idx
+        );
+    }
+
+    let first = window
+        .render_data()
+        .get_line(0)
+        .expect("first rendered line should exist");
+    assert!(!first.iter().any(|chunk| chunk.style == expected_style));
+}
+
+#[test]
+fn test_normal_yank_restarts_flash_on_subsequent_yank() {
+    let theme = themed_window();
+    let expected_style = theme.highlight_style_for_name("ui.selection");
+    let _theme_guard = globals::set_test_active_theme(theme);
+    let _config_guard = globals::set_test_config(Config {
+        theme: "demo".to_string(),
+        insert_escape: None,
+        syntax: true,
+        auto_close_pairs: true,
+        auto_indent: AutoIndentMode::Off,
+        advanced_glyphs: BTreeSet::new(),
+        ..Default::default()
+    });
+
+    let buffer = Buffer::from_str("alpha\nbeta");
+    let mut window = Window::new(buffer);
+
+    assert_eq!(
+        window.process_action(&Action::new(ActionKind::YankLine)),
+        ActionResult::Handled
+    );
+    window.buffer_view_mut().set_cursor(Cursor::new(1, 0));
+    assert_eq!(
+        window.process_action(&Action::new(ActionKind::YankLine)),
+        ActionResult::Handled
+    );
+
+    let mut screen = crate::screen::Screen::new(2, 20);
+    window.render(&mut screen, Position::new(0, 0), Size::new(2, 20));
+
+    let first = window
+        .render_data()
+        .get_line(0)
+        .expect("first rendered line should exist");
+    assert!(!first.iter().any(|chunk| chunk.style == expected_style));
+    let second = window
+        .render_data()
+        .get_line(1)
+        .expect("second rendered line should exist");
+    assert!(
+        second
+            .iter()
+            .any(|chunk| chunk.text == "beta" && chunk.style == expected_style)
+    );
+}
+
+#[test]
+fn test_normal_yank_flash_expires_and_is_cleared_on_render() {
+    let theme = themed_window();
+    let expected_style = theme.highlight_style_for_name("ui.selection");
+    let _theme_guard = globals::set_test_active_theme(theme);
+    let _config_guard = globals::set_test_config(Config {
+        theme: "demo".to_string(),
+        insert_escape: None,
+        syntax: true,
+        auto_close_pairs: true,
+        auto_indent: AutoIndentMode::Off,
+        advanced_glyphs: BTreeSet::new(),
+        ..Default::default()
+    });
+
+    let buffer = Buffer::from_str("alpha");
+    let mut window = Window::new(buffer);
+    assert_eq!(
+        window.process_action(&Action::new(ActionKind::YankLine)),
+        ActionResult::Handled
+    );
+
+    thread::sleep(Duration::from_millis(220));
+
+    let mut screen = crate::screen::Screen::new(1, 20);
+    window.render(&mut screen, Position::new(0, 0), Size::new(1, 20));
+
+    let line = window
+        .render_data()
+        .get_line(0)
+        .expect("rendered line should exist");
+    assert!(!line.iter().any(|chunk| chunk.style == expected_style));
+}
+
+#[test]
 fn test_visual_repeated_motion_matches_counted_motion() {
     let theme = themed_window();
     let _theme_guard = globals::set_test_active_theme(theme);

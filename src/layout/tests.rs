@@ -10,6 +10,8 @@ use crate::theme::{HighlightStyles, Tag, Theme, ThemeKind};
 use crate::window::{Position, Size};
 use crate::window_group::WindowGroup;
 use std::collections::BTreeSet;
+use std::thread;
+use std::time::Duration;
 
 fn layout_with_buffers(buffers: Vec<Buffer>) -> Layout {
     Layout::new(WindowGroup::from_buffers(buffers))
@@ -818,6 +820,47 @@ fn test_layout_prunes_empty_window_group_during_render() {
         .as_ref()
         .expect("layout should keep surviving pane");
     assert_eq!(pane_count(root), 1);
+}
+
+#[test]
+fn test_layout_prunes_expired_yank_flash_during_tick() {
+    let theme = border_theme();
+    let expected_style = theme.highlight_style_for_name("ui.selection");
+    let _theme_guard = globals::set_test_active_theme(theme);
+    let _config_guard = globals::set_test_config(Config {
+        theme: "demo".to_string(),
+        insert_escape: None,
+        syntax: true,
+        auto_close_pairs: true,
+        auto_indent: crate::config::AutoIndentMode::Off,
+        advanced_glyphs: BTreeSet::new(),
+        ..Default::default()
+    });
+
+    let buffer = Buffer::from_str("alpha");
+    let mut layout = layout_with_buffers(vec![buffer]);
+    assert_eq!(
+        layout
+            .active_window_group_mut()
+            .active_window_mut()
+            .process_action(&Action::new(ActionKind::YankLine)),
+        ActionResult::Handled
+    );
+
+    thread::sleep(Duration::from_millis(220));
+
+    assert!(layout.prune_expired_yank_flashes());
+
+    let mut screen = crate::screen::Screen::new(3, 20);
+    layout.render(&mut screen, Position::new(0, 0), Size::new(3, 20));
+
+    let line = layout
+        .active_window_group()
+        .active_window()
+        .render_data()
+        .get_line(0)
+        .expect("rendered line should exist");
+    assert!(!line.iter().any(|chunk| chunk.style == expected_style));
 }
 
 #[test]

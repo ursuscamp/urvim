@@ -118,7 +118,12 @@ fn main() -> io::Result<()> {
         let event = terminal.read_event()?;
 
         match event {
-            Event::Tick => continue,
+            Event::Tick => {
+                if layout.prune_expired_yank_flashes() {
+                    needs_redraw = true;
+                }
+                continue;
+            }
             Event::Paste(text) => {
                 tracing::debug!(
                     len = text.len(),

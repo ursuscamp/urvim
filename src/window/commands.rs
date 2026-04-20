@@ -32,6 +32,11 @@ impl Window {
         });
     }
 
+    fn flash_yank_selection(&mut self, selection: YankFlashSelection) {
+        self.buffer_view
+            .begin_yank_flash(selection, std::time::Duration::from_millis(200));
+    }
+
     pub(super) fn store_register_text(
         &self,
         explicit: Option<RegisterName>,
@@ -695,6 +700,10 @@ impl Window {
                 text,
                 RegisterContentKind::Linewise,
             );
+            self.flash_yank_selection(YankFlashSelection::Line {
+                start_line: cursor.line,
+                count,
+            });
         }
         ActionResult::Handled
     }
@@ -902,6 +911,7 @@ impl Window {
                     text,
                     RegisterContentKind::Characterwise,
                 );
+                self.flash_yank_selection(YankFlashSelection::Character(range));
                 return ActionResult::Handled;
             }
             Operator::Lowercase | Operator::Uppercase | Operator::ToggleCase => {
@@ -988,6 +998,10 @@ impl Window {
                     text,
                     RegisterContentKind::Linewise,
                 );
+                self.flash_yank_selection(YankFlashSelection::Line {
+                    start_line: range.start_line,
+                    count: range.count,
+                });
                 return ActionResult::Handled;
             }
             Operator::Lowercase | Operator::Uppercase | Operator::ToggleCase => {
@@ -1089,6 +1103,10 @@ impl Window {
                     text,
                     RegisterContentKind::Linewise,
                 );
+                self.flash_yank_selection(YankFlashSelection::Line {
+                    start_line: range.start_line,
+                    count: range.count,
+                });
                 return ActionResult::Handled;
             }
             Operator::Lowercase | Operator::Uppercase | Operator::ToggleCase => {

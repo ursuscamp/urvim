@@ -306,6 +306,13 @@ impl Widget for Window {
                         self.capture_linewise_text(cursor.line, 1),
                         RegisterContentKind::Linewise,
                     );
+                    self.buffer_view.begin_yank_flash(
+                        YankFlashSelection::Line {
+                            start_line: cursor.line,
+                            count: 1,
+                        },
+                        std::time::Duration::from_millis(200),
+                    );
                     ActionResult::Handled
                 }
                 Some(ActionKind::AppendAfterCursor) => {

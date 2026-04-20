@@ -27,6 +27,7 @@ use crate::terminal::Key;
 use crate::terminal::Style;
 use crate::widget::Widget;
 use std::fmt;
+use std::time::Instant;
 use unicode_segmentation::UnicodeSegmentation;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
@@ -93,6 +94,7 @@ pub struct BufferView {
     cursor: Cursor,
     remembered_visual_col: Option<usize>,
     visual_selection: Option<VisualSelection>,
+    yank_flash: Option<YankFlash>,
 }
 
 /// Kind of visual selection currently active in a buffer view.
@@ -111,6 +113,24 @@ pub struct VisualSelection {
     pub anchor: Cursor,
     /// Selection granularity.
     pub kind: VisualSelectionKind,
+}
+
+/// A transient yank flash selection used for brief normal-mode feedback.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum YankFlashSelection {
+    /// Characterwise selection range.
+    Character(crate::buffer::TextObjectRange),
+    /// Linewise selection span.
+    Line { start_line: usize, count: usize },
+}
+
+/// A transient yank flash with an expiration time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct YankFlash {
+    /// The flashed region.
+    pub selection: YankFlashSelection,
+    /// Time when the flash should expire.
+    pub expires_at: Instant,
 }
 
 pub struct Window {
@@ -236,6 +256,7 @@ impl Window {
     }
 
     pub fn render(&mut self, screen: &mut Screen, origin: Position, size: Size) {
+        self.buffer_view.prune_yank_flash(std::time::Instant::now());
         self.size = size;
         let (gutter_style, default_style) = globals::with_active_theme(|theme| {
             theme

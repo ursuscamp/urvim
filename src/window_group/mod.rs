@@ -17,6 +17,7 @@ use crate::window::{BufferView, Position, Size, Window};
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::path::PathBuf;
+use std::time::Instant;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
@@ -164,6 +165,17 @@ impl WindowGroup {
     /// Returns and clears any repeat-text suffix produced by the active window.
     pub fn take_pending_repeat_suffix(&mut self) -> Option<String> {
         self.active_window_mut().take_pending_repeat_suffix()
+    }
+
+    /// Clears the active window's yank flash once it expires.
+    pub fn prune_expired_yank_flash(&mut self, now: Instant) -> bool {
+        if self.tabs.is_empty() {
+            return false;
+        }
+
+        self.active_window_mut()
+            .buffer_view_mut()
+            .prune_yank_flash(now)
     }
 
     fn active_cursor_snapshot(&self) -> (BufferId, Cursor) {

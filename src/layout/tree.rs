@@ -6,6 +6,7 @@ use super::{Layout, PaneId};
 use crate::window::Window;
 use crate::window::{Position, Size};
 use crate::window_group::WindowGroup;
+use std::time::Instant;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ChildSide {
@@ -607,6 +608,27 @@ impl Layout {
                     Self::split_regions(origin, size, split.axis, split.split_size);
                 Self::collect_pane_regions(&split.first, first_origin, first_size, regions);
                 Self::collect_pane_regions(&split.second, second_origin, second_size, regions);
+            }
+        }
+    }
+
+    pub(super) fn prune_expired_yank_flashes_at(&mut self, now: Instant) -> bool {
+        Self::prune_expired_yank_flashes_in_node(self.root.as_mut(), now)
+    }
+
+    fn prune_expired_yank_flashes_in_node(node: Option<&mut LayoutNode>, now: Instant) -> bool {
+        let Some(node) = node else {
+            return false;
+        };
+
+        match node {
+            LayoutNode::Pane(pane) => pane.window_group.prune_expired_yank_flash(now),
+            LayoutNode::Split(split) => {
+                let first =
+                    Self::prune_expired_yank_flashes_in_node(Some(split.first.as_mut()), now);
+                let second =
+                    Self::prune_expired_yank_flashes_in_node(Some(split.second.as_mut()), now);
+                first || second
             }
         }
     }

@@ -128,6 +128,11 @@ impl Layout {
         self.active_window_group_mut().active_buffer_view_mut()
     }
 
+    /// Clears expired yank-flash highlights from all visible panes.
+    pub fn prune_expired_yank_flashes(&mut self) -> bool {
+        self.prune_expired_yank_flashes_at(std::time::Instant::now())
+    }
+
     /// Returns and clears any repeat-text suffix produced by the active child window.
     pub fn take_pending_repeat_suffix(&mut self) -> Option<String> {
         if self.should_exit() {

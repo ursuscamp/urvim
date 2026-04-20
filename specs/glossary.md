@@ -115,7 +115,7 @@ A session-scoped storage slot that holds copied or removed text along with wheth
 
 **Context:** Yank, delete, change, paste workflows
 
-**Related Terms:** Buffer, Visual Mode, Visual Line Mode, Change Operator
+**Related Terms:** Buffer, Visual Mode, Visual Line Mode, Yank Flash, Change Operator
 
 ### Resizing Mode
 A user-facing editor mode that lets the focused pane be resized with directional keys instead of editing text. In urvim, resizing mode is entered with `Ctrl-w r`, uses `h/j/k/l` for pane resizing, and exits with `Esc`.
@@ -566,6 +566,13 @@ A quote text object that selects only the text between matching quote delimiters
 
 ### Around Quote Text Object
 A quote text object that selects the matching quote delimiters together with the enclosed text. It follows Vim-compatible quote-object matching rules for the supported quote delimiters. Related terms: Quote Text Object, Inner Quote Text Object.
+
+### Yank Flash
+A brief, non-modal visual confirmation that highlights the region most recently yanked in Normal Mode using the editor's visual selection style.
+
+**Context:** Yank confirmation, normal-mode feedback, selection rendering
+
+**Related Terms:** Register, Visual Mode, Window
 
 ## Spec-Related Terms
 
