@@ -163,13 +163,20 @@ impl Layout {
 
         for row_offset in 0..size.rows {
             for col_offset in 0..size.cols {
-                let index = self.border_index(size, row_offset, col_offset);
+                let index = Self::border_index(size, row_offset, col_offset);
                 let cell = cells[index];
                 if !(cell.horizontal || cell.vertical) {
                     continue;
                 }
 
-                let glyph = Self::border_glyph(unicode_borders, cell.horizontal, cell.vertical);
+                let glyph = Self::border_glyph(
+                    unicode_borders,
+                    &cells,
+                    size,
+                    origin,
+                    row_offset,
+                    col_offset,
+                );
                 screen.write_string(
                     origin.row + row_offset,
                     origin.col + col_offset,
@@ -207,7 +214,7 @@ impl Layout {
             {
                 let top = region.top().max(other.top()).max(origin.row);
                 let bottom = region.bottom().min(other.bottom()).min(content_row_end);
-                for row in top..bottom {
+                for row in top..=bottom {
                     if let Some(cell) = self.border_cell_mut(cells, origin, size, row, border_col) {
                         cell.vertical = true;
                     }
@@ -223,7 +230,7 @@ impl Layout {
             {
                 let left = region.left().max(other.left()).max(origin.col);
                 let right = region.right().min(other.right()).min(content_col_end);
-                for col in left..right {
+                for col in left..=right {
                     if let Some(cell) = self.border_cell_mut(cells, origin, size, border_row, col) {
                         cell.horizontal = true;
                     }
@@ -248,24 +255,97 @@ impl Layout {
             return None;
         }
 
-        let index = self.border_index(size, row - origin.row, col - origin.col);
+        let index = Self::border_index(size, row - origin.row, col - origin.col);
         cells.get_mut(index)
     }
 
-    fn border_index(&self, size: Size, row: u16, col: u16) -> usize {
+    fn border_index(size: Size, row: u16, col: u16) -> usize {
         usize::from(row) * usize::from(size.cols) + usize::from(col)
     }
 
-    fn border_glyph(unicode: bool, horizontal: bool, vertical: bool) -> &'static str {
-        match (horizontal, vertical, unicode) {
-            (true, true, true) => "┼",
-            (true, true, false) => "+",
-            (true, false, true) => "─",
-            (false, true, true) => "│",
-            (true, false, false) => "-",
-            (false, true, false) => "|",
-            _ => " ",
+    fn border_glyph(
+        unicode: bool,
+        cells: &[BorderCell],
+        size: Size,
+        origin: Position,
+        row: u16,
+        col: u16,
+    ) -> &'static str {
+        let cell_index = Self::border_index(size, row, col);
+        let cell = cells[cell_index];
+        let north = Self::border_cell_occupied(cells, size, origin, row.saturating_sub(1), col);
+        let south = Self::border_cell_occupied(cells, size, origin, row.saturating_add(1), col);
+        let west = Self::border_cell_occupied(cells, size, origin, row, col.saturating_sub(1));
+        let east = Self::border_cell_occupied(cells, size, origin, row, col.saturating_add(1));
+
+        if unicode {
+            let vertical = north || south || cell.vertical;
+            let horizontal = west || east || cell.horizontal;
+
+            if vertical && horizontal {
+                if north && south && west && east {
+                    "┼"
+                } else if north && south && west {
+                    "┤"
+                } else if north && south && east {
+                    "├"
+                } else if north && west && east {
+                    "┴"
+                } else if south && west && east {
+                    "┬"
+                } else if north && east {
+                    "└"
+                } else if north && west {
+                    "┘"
+                } else if south && east {
+                    "┌"
+                } else if south && west {
+                    "┐"
+                } else {
+                    "┼"
+                }
+            } else if vertical {
+                "│"
+            } else if horizontal {
+                "─"
+            } else if cell.vertical {
+                "│"
+            } else if cell.horizontal {
+                "─"
+            } else {
+                " "
+            }
+        } else if (north || south || cell.vertical) && (west || east || cell.horizontal) {
+            "+"
+        } else if north || south || cell.vertical {
+            "|"
+        } else if west || east || cell.horizontal {
+            "-"
+        } else {
+            " "
         }
+    }
+
+    fn border_cell_occupied(
+        cells: &[BorderCell],
+        size: Size,
+        origin: Position,
+        row: u16,
+        col: u16,
+    ) -> bool {
+        if row < origin.row
+            || col < origin.col
+            || row >= origin.row.saturating_add(size.rows)
+            || col >= origin.col.saturating_add(size.cols)
+        {
+            return false;
+        }
+
+        let index = Self::border_index(size, row - origin.row, col - origin.col);
+        cells
+            .get(index)
+            .map(|cell| cell.horizontal || cell.vertical)
+            .unwrap_or(false)
     }
 
     pub(super) fn render_node(

@@ -646,7 +646,7 @@ fn test_layout_render_omits_split_borders_for_single_pane_layouts() {
 }
 
 #[test]
-fn test_layout_render_draws_flattened_split_borders() {
+fn test_layout_render_draws_split_border_junction_in_unicode_mode() {
     let mut layout = layout_with_buffers(vec![Buffer::from_str("alpha")]);
     layout.process_action(&Action::new(ActionKind::SplitVertical));
 
@@ -662,7 +662,67 @@ fn test_layout_render_draws_flattened_split_borders() {
 
     assert_eq!(screen.get_cell_mut(0, 9).unwrap().text, "│");
     assert_eq!(screen.get_cell_mut(1, 8).unwrap().text, "─");
-    assert_eq!(screen.get_cell_mut(1, 9).unwrap().text, "│");
+    assert_eq!(screen.get_cell_mut(1, 9).unwrap().text, "┤");
+}
+
+#[test]
+fn test_layout_render_draws_split_border_junction_in_ascii_mode() {
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("alpha")]);
+    layout.process_action(&Action::new(ActionKind::SplitVertical));
+
+    let mut screen = crate::screen::Screen::new(5, 20);
+    let _theme_guard = globals::set_test_active_theme(border_theme());
+    let _config_guard = globals::set_test_config(border_config(false));
+
+    layout.render(&mut screen, Position::new(0, 0), Size::new(5, 20));
+    layout.process_action(&Action::new(ActionKind::FocusPaneLeft));
+    layout.process_action(&Action::new(ActionKind::SplitHorizontal));
+
+    layout.render(&mut screen, Position::new(0, 0), Size::new(5, 20));
+
+    assert_eq!(screen.get_cell_mut(0, 9).unwrap().text, "|");
+    assert_eq!(screen.get_cell_mut(1, 8).unwrap().text, "-");
+    assert_eq!(screen.get_cell_mut(1, 9).unwrap().text, "+");
+}
+
+#[test]
+fn test_layout_render_draws_four_way_split_junction_in_unicode_mode() {
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("alpha")]);
+    layout.process_action(&Action::new(ActionKind::SplitVertical));
+
+    let mut screen = crate::screen::Screen::new(5, 20);
+    let _theme_guard = globals::set_test_active_theme(border_theme());
+    let _config_guard = globals::set_test_config(border_config(true));
+
+    layout.render(&mut screen, Position::new(0, 0), Size::new(5, 20));
+    layout.process_action(&Action::new(ActionKind::FocusPaneLeft));
+    layout.process_action(&Action::new(ActionKind::SplitHorizontal));
+    layout.process_action(&Action::new(ActionKind::FocusPaneRight));
+    layout.process_action(&Action::new(ActionKind::SplitHorizontal));
+
+    layout.render(&mut screen, Position::new(0, 0), Size::new(5, 20));
+
+    assert_eq!(screen.get_cell_mut(1, 9).unwrap().text, "┼");
+}
+
+#[test]
+fn test_layout_render_draws_four_way_split_junction_in_ascii_mode() {
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("alpha")]);
+    layout.process_action(&Action::new(ActionKind::SplitVertical));
+
+    let mut screen = crate::screen::Screen::new(5, 20);
+    let _theme_guard = globals::set_test_active_theme(border_theme());
+    let _config_guard = globals::set_test_config(border_config(false));
+
+    layout.render(&mut screen, Position::new(0, 0), Size::new(5, 20));
+    layout.process_action(&Action::new(ActionKind::FocusPaneLeft));
+    layout.process_action(&Action::new(ActionKind::SplitHorizontal));
+    layout.process_action(&Action::new(ActionKind::FocusPaneRight));
+    layout.process_action(&Action::new(ActionKind::SplitHorizontal));
+
+    layout.render(&mut screen, Position::new(0, 0), Size::new(5, 20));
+
+    assert_eq!(screen.get_cell_mut(1, 9).unwrap().text, "+");
 }
 
 #[test]
