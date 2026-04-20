@@ -820,6 +820,114 @@ fn test_dfx_sequence() {
 }
 
 #[test]
+fn test_space_character_scan_bindings() {
+    let mut mode = NormalMode::new();
+
+    assert!(matches!(
+        mode.handle_key(&key('f')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert_eq!(
+        complete_action_kind(mode.handle_key(&key(' '))),
+        ActionKind::FindForward(' ')
+    );
+
+    assert!(matches!(
+        mode.handle_key(&key('F')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert_eq!(
+        complete_action_kind(mode.handle_key(&key(' '))),
+        ActionKind::FindBackward(' ')
+    );
+
+    assert!(matches!(
+        mode.handle_key(&key('t')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert_eq!(
+        complete_action_kind(mode.handle_key(&key(' '))),
+        ActionKind::TillForward(' ')
+    );
+
+    assert!(matches!(
+        mode.handle_key(&key('T')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert_eq!(
+        complete_action_kind(mode.handle_key(&key(' '))),
+        ActionKind::TillBackward(' ')
+    );
+}
+
+#[test]
+fn test_df_space_sequence() {
+    let mut mode = NormalMode::new();
+
+    assert!(matches!(
+        mode.handle_key(&key('d')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert!(matches!(
+        mode.handle_key(&key('f')),
+        HandleKeyResult::WaitForMore
+    ));
+
+    match complete_action_kind(mode.handle_key(&key(' '))) {
+        ActionKind::Operation(
+            Operator::Delete,
+            OperatorTarget::CharacterScan(FindState {
+                target_char,
+                kind,
+                direction,
+            }),
+        ) => {
+            assert_eq!(target_char, ' ');
+            assert_eq!(kind, FindKind::Find);
+            assert_eq!(direction, Direction::Forward);
+        }
+        other => panic!("unexpected result: {other:?}"),
+    }
+}
+
+#[test]
+fn test_cf_space_sequence_enters_insert_mode() {
+    let mut mode = NormalMode::new();
+
+    assert!(matches!(
+        mode.handle_key(&key('c')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert!(matches!(
+        mode.handle_key(&key('f')),
+        HandleKeyResult::WaitForMore
+    ));
+
+    let result = mode.handle_key(&key(' '));
+    match result {
+        HandleKeyResult::Complete(action) => {
+            assert_eq!(action.to_mode, Some(ModeKind::Insert));
+            match action.kind.as_ref() {
+                Some(ActionKind::Operation(
+                    Operator::Change,
+                    OperatorTarget::CharacterScan(FindState {
+                        target_char,
+                        kind,
+                        direction,
+                    }),
+                )) => {
+                    assert_eq!(*target_char, ' ');
+                    assert_eq!(*kind, FindKind::Find);
+                    assert_eq!(*direction, Direction::Forward);
+                }
+                other => panic!("unexpected result: {other:?}"),
+            }
+        }
+        other => panic!("unexpected result: {other:?}"),
+    }
+}
+
+#[test]
 fn test_ct_sequence() {
     let mut mode = NormalMode::new();
     assert!(matches!(

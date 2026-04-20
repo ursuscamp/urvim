@@ -77,7 +77,30 @@ impl NormalMode {
     }
 
     fn character_scan_state(keys: &[String]) -> Option<FindState> {
+        if let [trigger, target] = keys
+            && target == "<Space>"
+            && let Some(state) = Self::character_scan_space_state(trigger)
+        {
+            return Some(state);
+        }
+
         CharScanKeymap::parse_find_state(keys)
+    }
+
+    fn character_scan_space_state(trigger: &str) -> Option<FindState> {
+        let (kind, direction) = match trigger {
+            "f" => (globals::FindKind::Find, globals::Direction::Forward),
+            "F" => (globals::FindKind::Find, globals::Direction::Backward),
+            "t" => (globals::FindKind::Till, globals::Direction::Forward),
+            "T" => (globals::FindKind::Till, globals::Direction::Backward),
+            _ => return None,
+        };
+
+        Some(FindState {
+            target_char: ' ',
+            kind,
+            direction,
+        })
     }
 
     fn character_scan_operation(

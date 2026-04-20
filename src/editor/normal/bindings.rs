@@ -14,6 +14,7 @@ struct OperatorSequenceSpec {
 pub(super) fn register(trie_keymap: &mut TrieKeymap) {
     register_cursor_bindings(trie_keymap);
     register_motion_bindings(trie_keymap);
+    register_character_scan_bindings(trie_keymap);
     register_mode_bindings(trie_keymap);
     register_window_bindings(trie_keymap);
     register_edit_bindings(trie_keymap);
@@ -81,6 +82,13 @@ fn register_motion_bindings(trie_keymap: &mut TrieKeymap) {
     trie_keymap.insert_str("}", Action::new(ActionKind::MoveToNextParagraph));
     trie_keymap.insert_str("J", Action::new(ActionKind::JoinWithSpace));
     trie_keymap.insert_str("gJ", Action::new(ActionKind::JoinWithoutSpace));
+}
+
+fn register_character_scan_bindings(trie_keymap: &mut TrieKeymap) {
+    trie_keymap.insert_str("f<Space>", Action::find_forward(' '));
+    trie_keymap.insert_str("F<Space>", Action::find_backward(' '));
+    trie_keymap.insert_str("t<Space>", Action::till_forward(' '));
+    trie_keymap.insert_str("T<Space>", Action::till_backward(' '));
 }
 
 fn register_mode_bindings(trie_keymap: &mut TrieKeymap) {
