@@ -90,11 +90,16 @@ fn resolve_highlight_styles(
             section: "highlights",
             tag: highlight.to_string(),
         })?;
+        let base = if tag.as_str().starts_with("syntax.") {
+            Style::default()
+        } else {
+            default_style
+        };
         let resolved = resolve_style(
             theme_name,
             "highlights",
             tag.as_str(),
-            default_style,
+            base,
             raw_style,
             palette,
         )?;
@@ -358,10 +363,7 @@ bold = true
         );
         assert_eq!(
             theme.highlight_style_for_tag(&tag("syntax.keyword")),
-            Style::new()
-                .fg(Color::Rgb(Rgb::new(17, 34, 51)))
-                .bg(Color::Rgb(Rgb::new(17, 34, 51)))
-                .bold()
+            Style::new().fg(Color::Rgb(Rgb::new(17, 34, 51)))
         );
         assert_eq!(
             theme.highlight_style_for_name("ui.window.active_line"),
@@ -393,10 +395,7 @@ bold = true
 
         assert_eq!(
             theme.highlight_style_for_tag(&tag("syntax.comment.todo")),
-            Style::new()
-                .fg(Color::Rgb(Rgb::new(17, 34, 51)))
-                .bg(Color::Rgb(Rgb::new(17, 34, 51)))
-                .bold()
+            Style::new().fg(Color::Rgb(Rgb::new(17, 34, 51)))
         );
     }
 
@@ -551,7 +550,7 @@ bold = true
         );
         assert_eq!(
             theme.highlight_style_for_tag(&tag("syntax.keyword")),
-            Style::new().fg(Color::ansi(1)).bg(Color::ansi(1)).bold()
+            Style::new().fg(Color::ansi(1))
         );
     }
 
@@ -689,7 +688,7 @@ bg = "base"
         assert_eq!(
             friday_night
                 .highlight_style_for_tag(&Tag::parse("syntax.string.interpolation").unwrap()),
-            Style::new().fg(Color::ansi(75)).bg(Color::ansi(16))
+            Style::new().fg(Color::ansi(75))
         );
     }
 

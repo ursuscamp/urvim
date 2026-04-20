@@ -199,6 +199,15 @@ fn syntax_themed_window() -> Theme {
     Theme::new("demo-syntax", ThemeKind::Ansi256, default_style, highlights)
 }
 
+fn syntax_themed_window_with_string_background() -> Theme {
+    let mut theme = syntax_themed_window();
+    theme.highlights.insert(
+        Tag::parse("syntax.string").expect("valid tag"),
+        Style::new().fg(Color::ansi(27)).bg(Color::ansi(40)),
+    );
+    theme
+}
+
 fn syntax_worker_lock() -> std::sync::MutexGuard<'static, ()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
     LOCK.get_or_init(|| Mutex::new(())).lock().unwrap()
@@ -409,10 +418,7 @@ fn test_window_render_highlights_active_line_in_normal_mode() {
     let expected_line_fill_style = theme
         .default_style()
         .overlay(theme.highlight_style_for_name("ui.window.active_line"));
-    let expected_keyword_style = theme
-        .default_style()
-        .overlay(theme.highlight_style_for_name("ui.window.active_line"))
-        .overlay(theme.highlight_style_for_tag(&tag("keyword")));
+    let expected_keyword_style = Style::new().fg(Color::ansi(23)).bg(Color::ansi(21));
     let _theme_guard = globals::set_test_active_theme(theme);
     let _config_guard = globals::set_test_config(Config {
         active_line: true,
@@ -430,6 +436,34 @@ fn test_window_render_highlights_active_line_in_normal_mode() {
     assert_eq!(
         screen.get_cell_mut(0, 18).unwrap().style,
         expected_line_fill_style
+    );
+}
+
+#[test]
+fn test_window_render_keeps_explicit_token_background_on_active_line() {
+    let path = temp_path_with_ext("active-line-background", "rs");
+    let buffer = Buffer::from_str_with_path("let s = \"hi\";", path);
+    let mut window = Window::new(buffer);
+    let theme = syntax_themed_window_with_string_background();
+    let expected_keyword_style = Style::new().fg(Color::ansi(23)).bg(Color::ansi(21));
+    let expected_string_style = Style::new().fg(Color::ansi(27)).bg(Color::ansi(40));
+    let _theme_guard = globals::set_test_active_theme(theme);
+    let _config_guard = globals::set_test_config(Config {
+        active_line: true,
+        syntax: true,
+        ..Default::default()
+    });
+
+    let mut screen = crate::screen::Screen::new(1, 20);
+    window.render(&mut screen, Position::new(0, 0), Size::new(1, 20));
+
+    assert_eq!(
+        screen.get_cell_mut(0, 3).unwrap().style,
+        expected_keyword_style
+    );
+    assert_eq!(
+        screen.get_cell_mut(0, 12).unwrap().style,
+        expected_string_style
     );
 }
 

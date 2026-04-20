@@ -48,12 +48,11 @@ impl RenderData {
         let tab_width = configured_tab_width();
         let (_, screen_cols) = screen.size();
         for (row_offset, line_data) in self.line_data.iter().enumerate() {
+            let line_base_style = base_style.overlay(line_data.base_style);
             let mut line_visual_col = line_data.width_offset;
             let mut col_offset = origin.col;
             for chunk in &line_data.chunks {
-                let style = base_style
-                    .overlay(line_data.base_style)
-                    .overlay(chunk.style);
+                let style = line_base_style.overlay(chunk.style);
                 let rendered = expand_tabs(&chunk.text, line_visual_col, tab_width);
                 screen.write_string(origin.row + row_offset as u16, col_offset, style, &rendered);
                 let chunk_width = display_width_at(&chunk.text, line_visual_col, tab_width);
@@ -62,13 +61,12 @@ impl RenderData {
             }
 
             if line_data.base_style != Style::default() && col_offset < screen_cols {
-                let fill_style = base_style.overlay(line_data.base_style);
                 screen.fill_region(
                     origin.row + row_offset as u16,
                     col_offset,
                     1,
                     screen_cols - col_offset,
-                    fill_style,
+                    line_base_style,
                 );
             }
         }
