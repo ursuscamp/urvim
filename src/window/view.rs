@@ -107,6 +107,7 @@ impl BufferView {
 
     pub fn set_cursor(&mut self, cursor: Cursor) {
         self.cursor = cursor;
+        self.log_cursor_indent_scopes(cursor);
     }
 
     /// Starts a new visual selection anchored at the current cursor.
@@ -193,6 +194,7 @@ impl BufferView {
             .unwrap_or(cursor);
         self.cursor = synced_cursor;
         self.remembered_visual_col = Some(self.current_visual_col());
+        self.log_cursor_indent_scopes(synced_cursor);
     }
 
     pub fn get_or_compute_target_col(&self) -> usize {
@@ -208,6 +210,50 @@ impl BufferView {
 
     pub fn set_remembered_visual_col(&mut self, col: usize) {
         self.remembered_visual_col = Some(col);
+    }
+
+    fn log_cursor_indent_scopes(&self, cursor: Cursor) {
+        if !tracing::enabled!(tracing::Level::DEBUG) {
+            return;
+        }
+
+        let Some((stale, scope_dump)) = self.with_buffer_mut(|buffer| {
+            buffer.ensure_syntax_through(cursor.line);
+            let stale = buffer.indent_scope_cache_stale();
+            let scope_dump = buffer
+                .cached_line_indent_scope_ids(cursor.line)
+                .map(|scope_ids| {
+                    scope_ids
+                        .iter()
+                        .filter_map(|scope_id| buffer.cached_indent_scopes().get(*scope_id))
+                        .map(|scope| {
+                            format!(
+                                "#{}:{}-{}@{}",
+                                scope.id, scope.start_line, scope.end_line, scope.indent_width
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            (stale, scope_dump)
+        }) else {
+            tracing::debug!(
+                buffer_id = self.buffer_id.get(),
+                line = cursor.line,
+                col = cursor.col,
+                "cursor moved but buffer is unavailable for indent scope logging"
+            );
+            return;
+        };
+
+        tracing::debug!(
+            buffer_id = self.buffer_id.get(),
+            line = cursor.line,
+            col = cursor.col,
+            indent_scope_cache_stale = stale,
+            indent_scopes = %scope_dump.join(", "),
+            "cursor line indent scopes"
+        );
     }
 
     /// Returns the active visual selection as a normalized range.

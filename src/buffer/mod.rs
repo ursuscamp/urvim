@@ -53,7 +53,7 @@ mod unicode;
 
 pub use indent::IndentDirection;
 pub use pool::{BufferId, BufferPool};
-pub use syntax::{SyntaxCatchUpResult, SyntaxSpan};
+pub use syntax::{IndentScope, IndentScopeId, SyntaxCatchUpResult, SyntaxSpan};
 pub use unicode::{
     char_width, configured_tab_width, display_char_width, display_grapheme_width, display_width_at,
     expand_tabs, grapheme_width, str_width, to_byte_index,

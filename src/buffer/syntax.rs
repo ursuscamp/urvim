@@ -52,6 +52,8 @@ impl SyntaxLine {
 pub struct SyntaxCache {
     syntax_name: SmolStr,
     lines: Vec<SyntaxLine>,
+    indent_scope_cache: IndentScopeCache,
+    indent_scope_cache_stale: bool,
 }
 
 impl SyntaxCache {
@@ -60,6 +62,8 @@ impl SyntaxCache {
         Self {
             syntax_name: syntax_name.into(),
             lines: Vec::new(),
+            indent_scope_cache: IndentScopeCache::empty(),
+            indent_scope_cache_stale: true,
         }
     }
 
@@ -69,6 +73,8 @@ impl SyntaxCache {
         if self.syntax_name != syntax_name {
             self.syntax_name = syntax_name;
             self.lines.clear();
+            self.indent_scope_cache = IndentScopeCache::empty();
+            self.indent_scope_cache_stale = true;
         }
     }
 
@@ -80,6 +86,8 @@ impl SyntaxCache {
     /// Invalidates cached syntax data from the provided line onward.
     pub fn invalidate_from(&mut self, line: usize) {
         self.lines.truncate(line.min(self.lines.len()));
+        self.indent_scope_cache = IndentScopeCache::empty();
+        self.indent_scope_cache_stale = true;
     }
 
     /// Returns cached spans for a line without computing any missing prefix.
@@ -132,6 +140,34 @@ impl SyntaxCache {
             self.lines.push(SyntaxLine::new(spans, next_state.clone()));
             state = next_state;
         }
+
+        self.rebuild_indent_scopes(line_texts);
+    }
+
+    /// Returns true when the indent-scope cache needs rebuilding.
+    pub fn indent_scope_cache_stale(&self) -> bool {
+        self.indent_scope_cache_stale
+    }
+
+    /// Returns all cached indent scopes for this buffer snapshot.
+    pub fn indent_scopes(&self) -> &[IndentScope] {
+        &self.indent_scope_cache.scopes
+    }
+
+    /// Returns cached containing indent scope ids for a line.
+    pub fn line_indent_scope_ids(&self, line: usize) -> Option<&[IndentScopeId]> {
+        self.indent_scope_cache
+            .line_to_scopes
+            .get(line)
+            .map(|scope_ids| scope_ids.as_slice())
+    }
+
+    fn rebuild_indent_scopes(&mut self, line_texts: &[&str]) {
+        let tab_width = globals::with_config(|config| config.tab_width)
+            .unwrap_or(4)
+            .max(1);
+        self.indent_scope_cache = IndentScopeCache::build(line_texts, tab_width);
+        self.indent_scope_cache_stale = false;
     }
 }
 
@@ -144,6 +180,152 @@ pub struct SyntaxCatchUpResult {
     pub generation: u64,
     /// Completed syntax cache snapshot.
     pub cache: SyntaxCache,
+    /// Completed indent-scope cache snapshot aligned with syntax cache.
+    pub(crate) indent_scope_cache: IndentScopeCache,
+}
+
+/// A stable identifier for one indent scope inside a cache generation.
+pub type IndentScopeId = usize;
+
+/// A line-based indentation range derived from visual indentation width.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IndentScope {
+    /// Stable scope id for this cache generation.
+    pub id: IndentScopeId,
+    /// Inclusive starting line index.
+    pub start_line: usize,
+    /// Inclusive ending line index.
+    pub end_line: usize,
+    /// Normalized visual indentation width for boundary lines.
+    pub indent_width: usize,
+}
+
+impl IndentScope {
+    fn new(id: IndentScopeId, start_line: usize, end_line: usize, indent_width: usize) -> Self {
+        Self {
+            id,
+            start_line,
+            end_line,
+            indent_width,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct IndentScopeCache {
+    scopes: Vec<IndentScope>,
+    line_to_scopes: Vec<Vec<IndentScopeId>>,
+}
+
+impl IndentScopeCache {
+    fn empty() -> Self {
+        Self::default()
+    }
+
+    fn build(line_texts: &[&str], tab_width: usize) -> Self {
+        let normalized_tab_width = tab_width.max(1);
+        let mut line_to_scopes: Vec<Vec<IndentScopeId>> = vec![Vec::new(); line_texts.len()];
+        let mut scopes: Vec<IndentScope> = Vec::new();
+        let mut open_scopes: Vec<OpenIndentScope> = Vec::new();
+
+        for (line_idx, line_text) in line_texts.iter().enumerate() {
+            let indent_width = leading_indent_width(line_text, normalized_tab_width);
+
+            while let Some(open_scope) = open_scopes.last() {
+                if open_scope.indent_width > indent_width {
+                    close_scope(
+                        &mut scopes,
+                        &mut line_to_scopes,
+                        open_scopes.pop().expect("scope should exist"),
+                        line_idx.saturating_sub(1),
+                    );
+                } else {
+                    break;
+                }
+            }
+
+            if let Some(open_scope) = open_scopes.last()
+                && open_scope.indent_width == indent_width
+            {
+                close_scope(
+                    &mut scopes,
+                    &mut line_to_scopes,
+                    open_scopes.pop().expect("scope should exist"),
+                    line_idx,
+                );
+            }
+
+            for open_scope in &mut open_scopes {
+                if line_idx > open_scope.start_line && !line_text.is_empty() {
+                    open_scope.has_non_empty_inside = true;
+                }
+            }
+
+            open_scopes.push(OpenIndentScope {
+                start_line: line_idx,
+                indent_width,
+                has_non_empty_inside: false,
+            });
+        }
+
+        if let Some(last_line) = line_texts.len().checked_sub(1) {
+            while let Some(open_scope) = open_scopes.pop() {
+                close_scope(&mut scopes, &mut line_to_scopes, open_scope, last_line);
+            }
+        }
+
+        // Keep containing scopes in deterministic outer-to-inner order.
+        for scope_ids in &mut line_to_scopes {
+            scope_ids.sort_by_key(|scope_id| {
+                let scope = &scopes[*scope_id];
+                (scope.start_line, std::cmp::Reverse(scope.end_line))
+            });
+        }
+
+        Self {
+            scopes,
+            line_to_scopes,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct OpenIndentScope {
+    start_line: usize,
+    indent_width: usize,
+    has_non_empty_inside: bool,
+}
+
+fn close_scope(
+    scopes: &mut Vec<IndentScope>,
+    line_to_scopes: &mut [Vec<IndentScopeId>],
+    scope: OpenIndentScope,
+    end_line: usize,
+) {
+    if end_line <= scope.start_line + 1 || !scope.has_non_empty_inside {
+        return;
+    }
+
+    let scope_id = scopes.len();
+    scopes.push(IndentScope::new(
+        scope_id,
+        scope.start_line,
+        end_line,
+        scope.indent_width,
+    ));
+    for containing in line_to_scopes
+        .iter_mut()
+        .take(end_line + 1)
+        .skip(scope.start_line)
+    {
+        containing.push(scope_id);
+    }
+}
+
+fn leading_indent_width(line: &str, tab_width: usize) -> usize {
+    line.chars()
+        .take_while(|ch| matches!(*ch, ' ' | '\t'))
+        .fold(0, |acc, ch| acc + if ch == '\t' { tab_width } else { 1 })
 }
 
 struct SyntaxCatchUpJob {
@@ -211,10 +393,16 @@ impl Job for SyntaxCatchUpJob {
             self.cache.set_syntax_name(self.syntax_name.as_str());
         }
 
+        let tab_width = globals::with_config(|config| config.tab_width)
+            .unwrap_or(4)
+            .max(1);
+        let indent_scope_cache = IndentScopeCache::build(&line_refs, tab_width);
+
         SyntaxCatchUpResult {
             buffer_id: self.buffer_id,
             generation: self.generation,
             cache: self.cache,
+            indent_scope_cache,
         }
     }
 }
@@ -801,6 +989,21 @@ impl Buffer {
         self.syntax_cache.cached_spans_for_line(line)
     }
 
+    /// Returns true when the indent-scope cache needs rebuilding.
+    pub fn indent_scope_cache_stale(&self) -> bool {
+        self.syntax_cache.indent_scope_cache_stale()
+    }
+
+    /// Returns all cached indent scopes for the current buffer snapshot.
+    pub fn cached_indent_scopes(&self) -> &[IndentScope] {
+        self.syntax_cache.indent_scopes()
+    }
+
+    /// Returns cached containing indent scope ids for the requested line.
+    pub fn cached_line_indent_scope_ids(&self, line: usize) -> Option<&[IndentScopeId]> {
+        self.syntax_cache.line_indent_scope_ids(line)
+    }
+
     /// Returns true when all buffer lines currently have cached syntax data.
     pub fn syntax_cache_complete(&self) -> bool {
         self.syntax_cache
@@ -832,6 +1035,8 @@ impl Buffer {
         }
 
         self.syntax_cache.replace_with(result.cache);
+        self.syntax_cache.indent_scope_cache = result.indent_scope_cache;
+        self.syntax_cache.indent_scope_cache_stale = false;
         if self.syntax_background_generation == Some(result.generation) {
             self.syntax_background_generation = None;
         }
@@ -898,6 +1103,8 @@ impl Buffer {
 mod tests {
     use super::*;
     use crate::buffer::BufferId;
+    use crate::config::Config;
+    use crate::globals;
     use crate::job::{JobEvent, JobHandle, JobKind, JobPriority, JobToken};
     use crate::path::AbsolutePath;
     use std::sync::Mutex;
@@ -927,6 +1134,14 @@ mod tests {
             assert!(Instant::now() < deadline, "timed out waiting for job event");
             thread::sleep(Duration::from_millis(5));
         }
+    }
+
+    fn scope_tuples(buffer: &Buffer) -> Vec<(usize, usize, usize)> {
+        buffer
+            .cached_indent_scopes()
+            .iter()
+            .map(|scope| (scope.start_line, scope.end_line, scope.indent_width))
+            .collect()
     }
 
     #[test]
@@ -1031,6 +1246,70 @@ mod tests {
             .expect("replacement cache should have line 1");
         assert_eq!(cached.len(), 1);
         assert_eq!(cached[0].style, tag("text.replaced"));
+    }
+
+    #[test]
+    fn indent_scope_cache_is_invalidated_with_syntax_invalidation() {
+        let mut buffer = Buffer::from_str("a\n  b\na");
+        buffer.ensure_syntax_through(2);
+        assert!(!buffer.indent_scope_cache_stale());
+        assert_eq!(scope_tuples(&buffer), vec![(0, 2, 0)]);
+
+        buffer.invalidate_syntax_from(1);
+
+        assert!(buffer.indent_scope_cache_stale());
+        assert!(buffer.cached_indent_scopes().is_empty());
+    }
+
+    #[test]
+    fn indent_scope_builder_matches_visual_width_for_tabs_and_spaces() {
+        let _config_guard = globals::set_test_config(Config {
+            tab_width: 4,
+            ..Config::default()
+        });
+        let mut buffer = Buffer::from_str("\tstart\n\t\tbody\n    close");
+
+        buffer.ensure_syntax_through(2);
+
+        assert_eq!(scope_tuples(&buffer), vec![(0, 2, 4)]);
+    }
+
+    #[test]
+    fn indent_scope_builder_supports_nested_scopes() {
+        let mut buffer =
+            Buffer::from_str("root\n  inner-open\n    inner-body\n  inner-close\nroot-close");
+
+        buffer.ensure_syntax_through(4);
+
+        assert_eq!(scope_tuples(&buffer), vec![(1, 3, 2), (0, 4, 0)]);
+        let containing = buffer
+            .cached_line_indent_scope_ids(2)
+            .expect("line 2 should have containing scopes");
+        assert_eq!(containing.len(), 2);
+        let first = &buffer.cached_indent_scopes()[containing[0]];
+        let second = &buffer.cached_indent_scopes()[containing[1]];
+        assert_eq!((first.start_line, first.end_line), (0, 4));
+        assert_eq!((second.start_line, second.end_line), (1, 3));
+    }
+
+    #[test]
+    fn indent_scope_builder_closes_unmatched_scopes_at_eof() {
+        let mut buffer = Buffer::from_str("outer\n  body\n    tail");
+
+        buffer.ensure_syntax_through(2);
+
+        assert_eq!(scope_tuples(&buffer), vec![(0, 2, 0)]);
+    }
+
+    #[test]
+    fn indent_scope_builder_treats_whitespace_only_lines_as_non_empty() {
+        let mut with_whitespace = Buffer::from_str("start\n   \nstart");
+        with_whitespace.ensure_syntax_through(2);
+        assert_eq!(scope_tuples(&with_whitespace), vec![(0, 2, 0)]);
+
+        let mut with_empty = Buffer::from_str("start\n\nstart");
+        with_empty.ensure_syntax_through(2);
+        assert!(scope_tuples(&with_empty).is_empty());
     }
 
     #[test]
@@ -1203,6 +1482,7 @@ mod tests {
             buffer_id: BufferId::new(1),
             generation: buffer.syntax_generation(),
             cache: buffer.syntax_cache.clone(),
+            indent_scope_cache: buffer.syntax_cache.indent_scope_cache.clone(),
         };
 
         buffer.invalidate_syntax_from(0);

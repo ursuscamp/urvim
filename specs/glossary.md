@@ -91,6 +91,20 @@ A user-facing insert-mode setting that selects how new lines should inherit inde
 
 **Related Terms:** Insert Mode, Configuration, Buffer, Tab Behavior
 
+### Indent Scope
+A line-based structural range that starts at a line and closes at the next line with the same normalized visual indentation width, inclusive. Indent scopes may be nested and can close at end-of-file when no later matching-indent line exists.
+
+**Context:** Syntax rebuild, indentation analysis, future fold and indent-guide features
+
+**Related Terms:** Indent Scope Cache, Syntax Highlighting, Buffer, Tab Behavior
+
+### Indent Scope Cache
+A buffer-owned cached index of computed indent scopes and per-line scope membership. The cache is invalidated and rebuilt with the same lifecycle as syntax highlighting cache updates so indentation structure stays synchronized with buffer edits.
+
+**Context:** Buffer caching, syntax invalidation/rebuild, fold and guide feature infrastructure
+
+**Related Terms:** Indent Scope, Syntax Highlighting, Buffer
+
 ### Change Operator
 The `c` operator in operator-pending mode. It removes the resolved text range and then places the editor in insert mode when the operation succeeds. Examples include `cw`, `ciw`, `c$`, and `cG`.
 

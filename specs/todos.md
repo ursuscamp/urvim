@@ -10,3 +10,5 @@ This is a list, in no particular order, of things that need to be addressed whic
 
 # Bugs
 
+- still cannot scan immediately to end of long file
+
