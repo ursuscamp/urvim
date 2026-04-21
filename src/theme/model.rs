@@ -361,12 +361,9 @@ mod tests {
         );
         highlights.insert(tag("ui.window.gutter"), Style::new().fg(Color::ansi(6)));
         highlights.insert(tag("ui.window"), Style::new().fg(Color::ansi(7)));
+        highlights.insert(tag("ui.window.lines"), Style::new().fg(Color::ansi(8)));
         highlights.insert(
-            tag("ui.window.split_border"),
-            Style::new().fg(Color::ansi(8)),
-        );
-        highlights.insert(
-            tag("ui.window.split_border.resize"),
+            tag("ui.window.lines.resize"),
             Style::new().fg(Color::ansi(9)),
         );
         highlights.insert(

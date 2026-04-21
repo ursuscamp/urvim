@@ -57,11 +57,11 @@ fn border_theme() -> Theme {
         Style::new().fg(Color::ansi(13)).bg(Color::ansi(14)),
     );
     highlights.insert(
-        Tag::parse("ui.window.split_border").expect("valid tag"),
+        Tag::parse("ui.window.lines").expect("valid tag"),
         Style::new().fg(Color::ansi(33)),
     );
     highlights.insert(
-        Tag::parse("ui.window.split_border.resize").expect("valid tag"),
+        Tag::parse("ui.window.lines.resize").expect("valid tag"),
         Style::new().fg(Color::ansi(160)).bold(),
     );
 
@@ -636,7 +636,7 @@ fn test_layout_render_omits_split_borders_for_single_pane_layouts() {
     let mut layout = layout_with_buffers(vec![buffer]);
     let mut screen = crate::screen::Screen::new(4, 20);
     let theme = border_theme();
-    let border_style = theme.resolve_name_with_default("ui.window.split_border");
+    let border_style = theme.resolve_name_with_default("ui.window.lines.border");
     let _theme_guard = globals::set_test_active_theme(theme);
     let _config_guard = globals::set_test_config(border_config(true));
 

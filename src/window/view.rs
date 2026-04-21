@@ -93,6 +93,55 @@ impl BufferView {
             .unwrap_or(0)
     }
 
+    /// Returns the active indent guide as `(column, start_exclusive, end_exclusive)`.
+    ///
+    /// The returned line bounds are exclusive boundary lines, so callers render
+    /// on `start_exclusive + 1..end_exclusive`.
+    pub(super) fn active_indent_guide(&self) -> Option<(usize, usize, usize)> {
+        self.with_buffer_mut(|buffer| {
+            if buffer.line_count() == 0 {
+                return None;
+            }
+
+            let cursor_line = self.cursor.line.min(buffer.line_count().saturating_sub(1));
+            buffer.ensure_syntax_through(cursor_line);
+            let cursor_visual_col = buffer.visual_col_at(self.cursor);
+            let scope_ids = buffer.cached_line_indent_scope_ids(cursor_line)?;
+            let scopes = buffer.cached_indent_scopes();
+
+            let active_scope = scope_ids
+                .iter()
+                .filter_map(|scope_id| scopes.get(*scope_id))
+                .filter(|scope| scope.is_active() && scope.indent_width <= cursor_visual_col)
+                .max_by_key(|scope| (scope.indent_width, scope.start_line))?;
+
+            let start_exclusive = active_scope.start_line;
+            let line_count = buffer.line_count();
+            let eof_line = line_count.saturating_sub(1);
+            let end_exclusive = match active_scope.end_line {
+                Some(end_line)
+                    if end_line == eof_line
+                        && buffer
+                            .line_at(eof_line)
+                            .map(|line| {
+                                leading_indent_width(line.as_ref()) != active_scope.indent_width
+                            })
+                            .unwrap_or(false) =>
+                {
+                    line_count
+                }
+                Some(end_line) => end_line,
+                None => line_count,
+            };
+            if start_exclusive.saturating_add(1) >= end_exclusive {
+                return None;
+            }
+
+            Some((active_scope.indent_width, start_exclusive, end_exclusive))
+        })
+        .flatten()
+    }
+
     pub fn scroll_offset(&self) -> Position {
         self.scroll_offset
     }
@@ -851,6 +900,14 @@ impl BufferView {
     }
 }
 
+fn leading_indent_width(line: &str) -> usize {
+    let tab_width = configured_tab_width();
+    line.chars()
+        .take_while(|ch| *ch == ' ' || *ch == '\t')
+        .map(|ch| if ch == '\t' { tab_width } else { 1 })
+        .sum()
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct TodoMatch {
     start_byte: usize,
@@ -947,11 +1004,11 @@ mod tests {
             Style::new().fg(Color::ansi(15)).bg(Color::ansi(16)),
         );
         highlights.insert(
-            Tag::parse("ui.window.split_border").expect("valid tag"),
+            Tag::parse("ui.window.lines").expect("valid tag"),
             Style::new().fg(Color::ansi(17)).bg(Color::ansi(18)),
         );
         highlights.insert(
-            Tag::parse("ui.window.split_border.resize").expect("valid tag"),
+            Tag::parse("ui.window.lines.resize").expect("valid tag"),
             Style::new().fg(Color::ansi(19)).bg(Color::ansi(20)),
         );
         highlights.insert(
@@ -1007,11 +1064,11 @@ mod tests {
             Style::new().fg(Color::ansi(15)).bg(Color::ansi(16)),
         );
         highlights.insert(
-            Tag::parse("ui.window.split_border").expect("valid tag"),
+            Tag::parse("ui.window.lines").expect("valid tag"),
             Style::new().fg(Color::ansi(17)).bg(Color::ansi(18)),
         );
         highlights.insert(
-            Tag::parse("ui.window.split_border.resize").expect("valid tag"),
+            Tag::parse("ui.window.lines.resize").expect("valid tag"),
             Style::new().fg(Color::ansi(19)).bg(Color::ansi(20)),
         );
         highlights.insert(

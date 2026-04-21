@@ -399,11 +399,11 @@ mod tests {
             Style::new().fg(Color::ansi(13)).bg(Color::ansi(14)),
         );
         highlights.insert(
-            Tag::parse("ui.window.split_border").expect("valid tag"),
+            Tag::parse("ui.window.lines").expect("valid tag"),
             Style::new().fg(Color::ansi(15)).bg(Color::ansi(16)),
         );
         highlights.insert(
-            Tag::parse("ui.window.split_border.resize").expect("valid tag"),
+            Tag::parse("ui.window.lines.resize").expect("valid tag"),
             Style::new().fg(Color::ansi(17)).bg(Color::ansi(18)),
         );
 

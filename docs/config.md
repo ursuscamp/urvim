@@ -23,7 +23,7 @@ Command-line flags override config file values.
 
 ## Current Schema
 
-The canonical config values are `theme`, `insert_escape`, `default_registers`, `syntax`, `todo_markers`, `auto_close_pairs`, `active_line`, `auto_indent`, `advanced_glyphs`, `tab_insertion`, `tab_behavior`, and `tab_width`.
+The canonical config values are `theme`, `insert_escape`, `default_registers`, `syntax`, `todo_markers`, `auto_close_pairs`, `active_line`, `indent_guides`, `auto_indent`, `advanced_glyphs`, `tab_insertion`, `tab_behavior`, and `tab_width`.
 
 ```toml
 theme = "Friday Night"
@@ -33,6 +33,7 @@ syntax = true
 todo_markers = ["TODO", "FIXME", "BUG", "NOTE"]
 auto_close_pairs = true
 active_line = false
+indent_guides = true
 auto_indent = "off"
 advanced_glyphs = ["nerdfont"]
 tab_insertion = "spaces"
@@ -108,6 +109,15 @@ Controls whether the focused window highlights the cursor line in normal mode.
 - Behavior: when `true`, the current line in the focused window receives the theme's active-line UI style while the editor is in normal mode; when `false`, the editor keeps its current rendering behavior
 - Scope: focused window only, normal mode only
 
+### `indent_guides`
+
+Controls whether the focused window renders the active indent scope guide.
+
+- Type: boolean
+- Default: `true`
+- Behavior: when `true`, the editor renders a vertical guide for the active indent scope at the cursor's current visual indentation depth; when `false`, indent guides are not rendered
+- Scope: focused window rendering
+
 ### `auto_indent`
 
 Controls how insert mode chooses indentation when creating a new line.
@@ -125,8 +135,10 @@ Controls optional glyph rendering capabilities used by the editor UI.
 
 - Type: array of strings
 - Default: empty
-- Supported values: `nerdfont`
+- Supported values: `nerdfont`, `unicode_borders`, `unicode_indent`
 - Behavior: when `nerdfont` is enabled, filetypes with glyph metadata can render icons in the tab bar and status bar; when it is not enabled, the UI stays text-only
+- Behavior: when `unicode_borders` is enabled, split borders render with Unicode box-drawing glyphs
+- Behavior: when `unicode_indent` is enabled, indent guides render with Unicode line-drawing glyphs
 - Validation: unknown capability names are rejected at startup
 
 ### `tab_insertion`

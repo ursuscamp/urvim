@@ -307,8 +307,8 @@ bold = true
 "ui.tab.scroll_indicator" = { fg = "base" }
 "ui.window.gutter" = { fg = "base" }
 "ui.window" = { fg = "base" }
-"ui.window.split_border" = { fg = "base" }
-"ui.window.split_border.resize" = { fg = "accent", bold = true }
+"ui.window.lines" = { fg = "base" }
+"ui.window.lines.resize" = { fg = "accent", bold = true }
 "syntax.comment" = { fg = "base" }
 "syntax.constant" = { fg = "base" }
 "syntax.function" = { fg = "base" }
@@ -340,11 +340,11 @@ bold = true
             Style::new().bg(Color::ansi(0))
         );
         assert_eq!(
-            theme.highlight_style_for_name("ui.window.split_border"),
+            theme.highlight_style_for_name("ui.window.lines.border"),
             Style::new().fg(Color::ansi(0))
         );
         assert_eq!(
-            theme.highlight_style_for_name("ui.window.split_border.resize"),
+            theme.highlight_style_for_name("ui.window.lines.resize"),
             Style::new().fg(Color::Rgb(Rgb::new(17, 34, 51))).bold()
         );
     }
@@ -639,12 +639,12 @@ bg = "base"
                 "theme {name} should define an active line style"
             );
             assert_eq!(
-                theme.highlight_style_for_name("ui.window.split_border"),
+                theme.highlight_style_for_name("ui.window.lines.border"),
                 split_border_style(name),
                 "theme {name} should define a normal split border style"
             );
             assert_eq!(
-                theme.highlight_style_for_name("ui.window.split_border.resize"),
+                theme.highlight_style_for_name("ui.window.lines.resize"),
                 split_border_resize_style(name),
                 "theme {name} should define a resize split border style"
             );

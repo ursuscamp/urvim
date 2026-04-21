@@ -31,8 +31,8 @@ bg = "bg"
 "ui.tab.scroll_indicator" = { fg = "muted", bg = "bg" }
 "ui.window.gutter" = { fg = "muted", bg = "bg" }
 "ui.window" = { fg = "fg", bg = "bg" }
-"ui.window.split_border" = { fg = "muted" }
-"ui.window.split_border.resize" = { fg = "accent", bold = true }
+"ui.window.lines" = { fg = "muted" }
+"ui.window.lines.resize" = { fg = "accent", bold = true }
 
 # Syntax
 "syntax.comment" = { fg = "comment" }

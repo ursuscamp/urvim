@@ -1,7 +1,7 @@
 use super::*;
 use crate::action::ActionResult;
 use crate::buffer::{BufferId, Cursor};
-use crate::config::{AutoIndentMode, Config, DefaultRegisters};
+use crate::config::{AdvancedGlyphCapability, AutoIndentMode, Config, DefaultRegisters};
 use crate::editor::{Action, ActionKind, BoundaryMotion, BracketKind, LinewiseMotion, ModeKind};
 use crate::editor::{Operator, OperatorTarget, QuoteKind, TextObject};
 use crate::globals;
@@ -103,11 +103,11 @@ fn themed_window() -> Theme {
         Style::new().fg(Color::ansi(13)).bg(Color::ansi(14)),
     );
     highlights.insert(
-        Tag::parse("ui.window.split_border").expect("valid tag"),
+        Tag::parse("ui.window.lines").expect("valid tag"),
         Style::new().fg(Color::ansi(15)).bg(Color::ansi(16)),
     );
     highlights.insert(
-        Tag::parse("ui.window.split_border.resize").expect("valid tag"),
+        Tag::parse("ui.window.lines.resize").expect("valid tag"),
         Style::new().fg(Color::ansi(17)).bg(Color::ansi(18)),
     );
     for tag_name in [
@@ -167,11 +167,11 @@ fn syntax_themed_window() -> Theme {
         Style::new().fg(Color::ansi(13)).bg(Color::ansi(14)),
     );
     highlights.insert(
-        Tag::parse("ui.window.split_border").expect("valid tag"),
+        Tag::parse("ui.window.lines").expect("valid tag"),
         Style::new().fg(Color::ansi(15)).bg(Color::ansi(16)),
     );
     highlights.insert(
-        Tag::parse("ui.window.split_border.resize").expect("valid tag"),
+        Tag::parse("ui.window.lines.resize").expect("valid tag"),
         Style::new().fg(Color::ansi(17)).bg(Color::ansi(18)),
     );
     for (tag_name, color) in [
@@ -698,6 +698,117 @@ fn test_window_render_expands_leading_tabs_after_gutter() {
     assert_eq!(screen.get_cell_mut(0, 5).unwrap().text, " ");
     assert_eq!(screen.get_cell_mut(0, 6).unwrap().text, " ");
     assert_eq!(screen.get_cell_mut(0, 7).unwrap().text, "X");
+}
+
+#[test]
+fn test_window_render_draws_indent_guide_between_scope_boundaries() {
+    let buffer = Buffer::from_str("  outer\n    inner1\n\n    inner2\n  close\nafter");
+    let mut window = Window::new(buffer);
+    window.set_cursor(Cursor::new(1, 2));
+    let _config_guard = globals::set_test_config(Config {
+        indent_guides: true,
+        ..Default::default()
+    });
+
+    let mut screen = crate::screen::Screen::new(6, 24);
+    window.render(&mut screen, Position::new(0, 0), Size::new(6, 24));
+
+    assert_ne!(screen.get_cell_mut(0, 5).unwrap().text, "|");
+    assert_eq!(screen.get_cell_mut(1, 5).unwrap().text, "|");
+    assert_eq!(screen.get_cell_mut(2, 5).unwrap().text, "|");
+    assert_eq!(screen.get_cell_mut(3, 5).unwrap().text, "|");
+    assert_ne!(screen.get_cell_mut(4, 5).unwrap().text, "|");
+}
+
+#[test]
+fn test_window_render_skips_indent_guide_when_disabled() {
+    let buffer = Buffer::from_str("  outer\n    inner1\n\n    inner2\n  close\nafter");
+    let mut window = Window::new(buffer);
+    window.set_cursor(Cursor::new(1, 2));
+    let _config_guard = globals::set_test_config(Config {
+        indent_guides: false,
+        ..Default::default()
+    });
+
+    let mut screen = crate::screen::Screen::new(6, 24);
+    window.render(&mut screen, Position::new(0, 0), Size::new(6, 24));
+
+    assert_ne!(screen.get_cell_mut(1, 5).unwrap().text, "|");
+    assert_ne!(screen.get_cell_mut(2, 5).unwrap().text, "|");
+    assert_ne!(screen.get_cell_mut(3, 5).unwrap().text, "|");
+}
+
+#[test]
+fn test_window_render_uses_unicode_indent_glyph_when_capability_enabled() {
+    let buffer = Buffer::from_str("  outer\n    inner1\n\n    inner2\n  close\nafter");
+    let mut window = Window::new(buffer);
+    window.set_cursor(Cursor::new(1, 2));
+    let _config_guard = globals::set_test_config(Config {
+        indent_guides: true,
+        advanced_glyphs: BTreeSet::from([AdvancedGlyphCapability::UnicodeIndent]),
+        ..Default::default()
+    });
+
+    let mut screen = crate::screen::Screen::new(6, 24);
+    window.render(&mut screen, Position::new(0, 0), Size::new(6, 24));
+
+    assert_eq!(screen.get_cell_mut(2, 5).unwrap().text, "│");
+}
+
+#[test]
+fn test_window_render_indent_guide_uses_split_border_style() {
+    let buffer = Buffer::from_str("  outer\n    inner1\n\n    inner2\n  close\nafter");
+    let mut window = Window::new(buffer);
+    window.set_cursor(Cursor::new(1, 2));
+    let theme = themed_window();
+    let expected_style = theme.resolve_name_with_default("ui.window.lines.indent");
+    let _theme_guard = globals::set_test_active_theme(theme);
+    let _config_guard = globals::set_test_config(Config {
+        indent_guides: true,
+        ..Default::default()
+    });
+
+    let mut screen = crate::screen::Screen::new(6, 24);
+    window.render(&mut screen, Position::new(0, 0), Size::new(6, 24));
+
+    let cell = screen.get_cell_mut(2, 5).unwrap();
+    assert_eq!(cell.text, "|");
+    assert_eq!(cell.style, expected_style);
+}
+
+#[test]
+fn test_window_render_indent_guide_uses_visual_column_for_tabs() {
+    let buffer = Buffer::from_str(" \touter\n \t\tinner\n\n \t\tclose\n \tend\nend");
+    let mut window = Window::new(buffer);
+    window.set_cursor(Cursor::new(1, 2));
+    let _config_guard = globals::set_test_config(Config {
+        indent_guides: true,
+        tab_width: 4,
+        ..Default::default()
+    });
+
+    let mut screen = crate::screen::Screen::new(6, 24);
+    window.render(&mut screen, Position::new(0, 0), Size::new(6, 24));
+
+    assert_eq!(screen.get_cell_mut(2, 8).unwrap().text, "|");
+}
+
+#[test]
+fn test_window_render_skips_indent_guide_without_eligible_scope() {
+    let buffer = Buffer::from_str("  outer\n    inner1\n\n    inner2\n  close\nafter");
+    let mut window = Window::new(buffer);
+    window.set_cursor(Cursor::new(1, 0));
+    let _config_guard = globals::set_test_config(Config {
+        indent_guides: true,
+        ..Default::default()
+    });
+
+    let mut screen = crate::screen::Screen::new(6, 24);
+    window.render(&mut screen, Position::new(0, 0), Size::new(6, 24));
+
+    assert_ne!(screen.get_cell_mut(1, 5).unwrap().text, "|");
+    assert_ne!(screen.get_cell_mut(2, 5).unwrap().text, "|");
+    assert_ne!(screen.get_cell_mut(3, 5).unwrap().text, "|");
 }
 
 #[test]

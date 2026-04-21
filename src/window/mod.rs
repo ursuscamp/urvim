@@ -320,6 +320,7 @@ impl Window {
 
         self.render_data
             .render_with_base_style(screen, content_origin, default_style);
+        self.render_indent_guides(screen, content_origin, content_size);
     }
 
     pub fn set_cursor(&mut self, cursor: Cursor) {
@@ -329,6 +330,88 @@ impl Window {
     /// Sets the cursor from stored state after syncing it to the current buffer.
     pub fn set_cursor_synced(&mut self, cursor: Cursor) {
         self.buffer_view.set_cursor_synced(cursor);
+    }
+
+    fn render_indent_guides(
+        &self,
+        screen: &mut Screen,
+        content_origin: Position,
+        content_size: Size,
+    ) {
+        let indent_guides_enabled =
+            globals::with_config(|config| config.indent_guides).unwrap_or(true);
+        if !indent_guides_enabled {
+            return;
+        }
+
+        let Some((guide_column, start_exclusive, end_exclusive)) =
+            self.buffer_view.active_indent_guide()
+        else {
+            return;
+        };
+
+        let unicode_indent =
+            globals::with_config(|config| config.unicode_indent_enabled()).unwrap_or(false);
+        let glyph = Self::indent_guide_glyph(unicode_indent);
+        let guide_style = globals::with_active_theme(|theme| {
+            theme
+                .map(|theme| theme.resolve_name_with_default("ui.window.lines.indent"))
+                .unwrap_or_default()
+        });
+        self.overlay_indent_guide(
+            screen,
+            content_origin,
+            content_size,
+            guide_column,
+            start_exclusive,
+            end_exclusive,
+            glyph,
+            guide_style,
+        );
+    }
+
+    fn overlay_indent_guide(
+        &self,
+        screen: &mut Screen,
+        content_origin: Position,
+        content_size: Size,
+        guide_column: usize,
+        start_exclusive: usize,
+        end_exclusive: usize,
+        glyph: &str,
+        guide_style: Style,
+    ) {
+        if content_size.rows == 0 || content_size.cols == 0 {
+            return;
+        }
+
+        for (screen_row, line_data) in self.render_data.line_data.iter().enumerate() {
+            let buffer_line = line_data.buffer_line;
+            if buffer_line <= start_exclusive || buffer_line >= end_exclusive {
+                continue;
+            }
+
+            if guide_column < line_data.width_offset {
+                continue;
+            }
+
+            let relative_col = guide_column - line_data.width_offset;
+            if relative_col >= content_size.cols as usize {
+                continue;
+            }
+
+            let row = content_origin.row + screen_row as u16;
+            let col = content_origin.col + relative_col as u16;
+            if let Some(cell) = screen.get_cell_mut(row, col) {
+                cell.text.clear();
+                cell.text.push_str(glyph);
+                cell.style = guide_style;
+            }
+        }
+    }
+
+    fn indent_guide_glyph(unicode_indent: bool) -> &'static str {
+        if unicode_indent { "│" } else { "|" }
     }
 }
 

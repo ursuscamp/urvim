@@ -282,11 +282,11 @@ mod tests {
             Style::new().fg(Color::ansi(8)),
         );
         highlights.insert(
-            Tag::parse("ui.window.split_border").expect("valid tag"),
+            Tag::parse("ui.window.lines").expect("valid tag"),
             Style::new().fg(Color::ansi(9)),
         );
         highlights.insert(
-            Tag::parse("ui.window.split_border.resize").expect("valid tag"),
+            Tag::parse("ui.window.lines.resize").expect("valid tag"),
             Style::new().fg(Color::ansi(10)),
         );
 

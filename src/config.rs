@@ -29,6 +29,8 @@ pub enum AdvancedGlyphCapability {
     Nerdfont,
     /// Enable Unicode line-drawing split borders.
     UnicodeBorders,
+    /// Enable Unicode line-drawing indent guides.
+    UnicodeIndent,
 }
 
 /// How insert-mode tab presses should insert text.
@@ -115,6 +117,8 @@ pub struct Config {
     pub auto_close_pairs: bool,
     /// Whether the active line should be highlighted in the focused window.
     pub active_line: bool,
+    /// Whether to render the active indent scope guide.
+    pub indent_guides: bool,
     /// The configured comment todo markers used for highlighting.
     pub todo_markers: Vector<SmolStr>,
     /// How insert mode should resolve indentation for newly created lines.
@@ -145,6 +149,8 @@ pub struct PartialConfig {
     pub auto_close_pairs: Option<bool>,
     /// Whether the active line should be highlighted in the focused window.
     pub active_line: Option<bool>,
+    /// Whether to render the active indent scope guide.
+    pub indent_guides: Option<bool>,
     /// The todo marker list stored in the config file.
     pub todo_markers: Option<Vec<String>>,
     /// How insert mode should resolve indentation for newly created lines.
@@ -222,6 +228,7 @@ impl Config {
             .and_then(|config| config.auto_close_pairs)
             .unwrap_or(true);
         let active_line = file.and_then(|config| config.active_line).unwrap_or(false);
+        let indent_guides = file.and_then(|config| config.indent_guides).unwrap_or(true);
         let todo_markers = file
             .and_then(|config| config.todo_markers.clone())
             .map(|markers| markers.into_iter().map(SmolStr::new).collect())
@@ -250,6 +257,7 @@ impl Config {
             syntax,
             auto_close_pairs,
             active_line,
+            indent_guides,
             todo_markers,
             auto_indent,
             advanced_glyphs,
@@ -270,6 +278,12 @@ impl Config {
         self.advanced_glyphs
             .contains(&AdvancedGlyphCapability::UnicodeBorders)
     }
+
+    /// Returns whether Unicode indent-guide glyph rendering is enabled.
+    pub fn unicode_indent_enabled(&self) -> bool {
+        self.advanced_glyphs
+            .contains(&AdvancedGlyphCapability::UnicodeIndent)
+    }
 }
 
 impl ConfigLoadError {
@@ -289,6 +303,7 @@ impl Default for Config {
             syntax: true,
             auto_close_pairs: true,
             active_line: false,
+            indent_guides: true,
             todo_markers: default_todo_markers(),
             auto_indent: AutoIndentMode::default(),
             advanced_glyphs: BTreeSet::new(),
@@ -545,11 +560,13 @@ mod tests {
             syntax: Some(false),
             auto_close_pairs: Some(false),
             active_line: Some(true),
+            indent_guides: Some(false),
             todo_markers: Some(todo_marker_strings(&["TASK", "FIXME"])),
             auto_indent: Some(AutoIndentMode::Neighbor),
             advanced_glyphs: Some(vec![
                 AdvancedGlyphCapability::Nerdfont,
                 AdvancedGlyphCapability::UnicodeBorders,
+                AdvancedGlyphCapability::UnicodeIndent,
             ]),
             ..Default::default()
         };
@@ -576,6 +593,7 @@ mod tests {
         assert!(!Config::resolve(Some(&file), None, None).syntax);
         assert!(!Config::resolve(Some(&file), None, None).auto_close_pairs);
         assert!(Config::resolve(Some(&file), None, None).active_line);
+        assert!(!Config::resolve(Some(&file), None, None).indent_guides);
         assert_eq!(
             Config::resolve(Some(&file), None, None).todo_markers,
             resolved_todo_markers(&["TASK", "FIXME"])
@@ -587,6 +605,7 @@ mod tests {
         assert!(Config::resolve(None, None, None).syntax);
         assert!(Config::resolve(None, None, None).auto_close_pairs);
         assert!(!Config::resolve(None, None, None).active_line);
+        assert!(Config::resolve(None, None, None).indent_guides);
         assert_eq!(
             Config::resolve(None, None, None).auto_indent,
             AutoIndentMode::Off
@@ -618,7 +637,8 @@ mod tests {
             Config::resolve(Some(&file), None, None).advanced_glyphs,
             glyph_caps(&[
                 AdvancedGlyphCapability::Nerdfont,
-                AdvancedGlyphCapability::UnicodeBorders
+                AdvancedGlyphCapability::UnicodeBorders,
+                AdvancedGlyphCapability::UnicodeIndent
             ])
         );
     }
@@ -645,6 +665,18 @@ mod tests {
         };
 
         assert!(Config::resolve(Some(&file), None, None).unicode_borders_enabled());
+    }
+
+    #[test]
+    fn unicode_indent_enabled_checks_resolved_advanced_glyphs() {
+        assert!(!Config::resolve(None, None, None).unicode_indent_enabled());
+
+        let file = PartialConfig {
+            advanced_glyphs: Some(vec![AdvancedGlyphCapability::UnicodeIndent]),
+            ..Default::default()
+        };
+
+        assert!(Config::resolve(Some(&file), None, None).unicode_indent_enabled());
     }
 
     #[test]
@@ -888,6 +920,25 @@ mod tests {
     }
 
     #[test]
+    fn load_from_locations_loads_indent_guides_flag() {
+        let home = unique_temp_dir("indent-guides-home");
+        write_config(&home, "indent_guides = false");
+
+        let config = Config::load_from_locations(home, vec![], None, None).expect("should load");
+
+        assert!(!config.indent_guides);
+    }
+
+    #[test]
+    fn load_from_locations_defaults_indent_guides_to_true() {
+        let home = unique_temp_dir("indent-guides-default-home");
+
+        let config = Config::load_from_locations(home, vec![], None, None).expect("should load");
+
+        assert!(config.indent_guides);
+    }
+
+    #[test]
     fn load_from_locations_loads_todo_markers() {
         let home = unique_temp_dir("todo-markers-home");
         write_config(&home, "todo_markers = [\"TASK\", \"BUG\"]");
@@ -929,7 +980,7 @@ mod tests {
         let home = unique_temp_dir("glyph-home");
         write_config(
             &home,
-            "advanced_glyphs = [\"nerdfont\", \"unicode_borders\", \"nerdfont\"]",
+            "advanced_glyphs = [\"nerdfont\", \"unicode_borders\", \"unicode_indent\", \"nerdfont\"]",
         );
 
         let config = Config::load_from_locations(home, vec![], None, None).expect("should load");
@@ -938,7 +989,8 @@ mod tests {
             config.advanced_glyphs,
             glyph_caps(&[
                 AdvancedGlyphCapability::Nerdfont,
-                AdvancedGlyphCapability::UnicodeBorders
+                AdvancedGlyphCapability::UnicodeBorders,
+                AdvancedGlyphCapability::UnicodeIndent
             ])
         );
     }
