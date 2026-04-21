@@ -85,8 +85,11 @@ impl SyntaxCache {
 
     /// Invalidates cached syntax data from the provided line onward.
     pub fn invalidate_from(&mut self, line: usize) {
+        if line >= self.lines.len() {
+            return;
+        }
         self.lines.truncate(line.min(self.lines.len()));
-        self.indent_scope_cache = IndentScopeCache::empty();
+        self.indent_scope_cache.invalidate_from(line);
         self.indent_scope_cache_stale = true;
     }
 
@@ -120,28 +123,38 @@ impl SyntaxCache {
     pub fn ensure_through(&mut self, syntax_name: &str, line_texts: &[&str], line: usize) {
         self.set_syntax_name(syntax_name);
 
+        if line_texts.is_empty() {
+            self.indent_scope_cache_stale = false;
+            return;
+        }
+
         let target_line = line.min(line_texts.len().saturating_sub(1));
         if self.lines.len() > line_texts.len() {
             self.lines.truncate(line_texts.len());
         }
-        if target_line < self.lines.len() {
-            return;
+
+        if target_line >= self.lines.len() {
+            let mut state = self
+                .lines
+                .last()
+                .map(|line| line.state.clone())
+                .unwrap_or_default();
+            let start_line = self.lines.len();
+
+            for line_text in line_texts.iter().take(target_line + 1).skip(start_line) {
+                let (spans, next_state) = tokenize_line(syntax_name, line_text, state);
+                self.lines.push(SyntaxLine::new(spans, next_state.clone()));
+                state = next_state;
+            }
         }
 
-        let mut state = self
-            .lines
-            .last()
-            .map(|line| line.state.clone())
-            .unwrap_or_default();
-        let start_line = self.lines.len();
-
-        for line_text in line_texts.iter().take(target_line + 1).skip(start_line) {
-            let (spans, next_state) = tokenize_line(syntax_name, line_text, state);
-            self.lines.push(SyntaxLine::new(spans, next_state.clone()));
-            state = next_state;
-        }
-
-        self.rebuild_indent_scopes(line_texts);
+        let tab_width = globals::with_config(|config| config.tab_width)
+            .unwrap_or(4)
+            .max(1);
+        self.indent_scope_cache_stale =
+            !self
+                .indent_scope_cache
+                .ensure_through(line_texts, target_line, tab_width);
     }
 
     /// Returns true when the indent-scope cache needs rebuilding.
@@ -160,14 +173,6 @@ impl SyntaxCache {
             .line_to_scopes
             .get(line)
             .map(|scope_ids| scope_ids.as_slice())
-    }
-
-    fn rebuild_indent_scopes(&mut self, line_texts: &[&str]) {
-        let tab_width = globals::with_config(|config| config.tab_width)
-            .unwrap_or(4)
-            .max(1);
-        self.indent_scope_cache = IndentScopeCache::build(line_texts, tab_width);
-        self.indent_scope_cache_stale = false;
     }
 }
 
@@ -194,20 +199,45 @@ pub struct IndentScope {
     pub id: IndentScopeId,
     /// Inclusive starting line index.
     pub start_line: usize,
-    /// Inclusive ending line index.
-    pub end_line: usize,
+    /// Inclusive ending line index, or `None` while the scope is open.
+    pub end_line: Option<usize>,
     /// Normalized visual indentation width for boundary lines.
     pub indent_width: usize,
+    has_non_empty_inside: bool,
 }
 
 impl IndentScope {
-    fn new(id: IndentScopeId, start_line: usize, end_line: usize, indent_width: usize) -> Self {
+    fn open(id: IndentScopeId, start_line: usize, indent_width: usize) -> Self {
         Self {
             id,
             start_line,
-            end_line,
+            end_line: None,
             indent_width,
+            has_non_empty_inside: false,
         }
+    }
+
+    fn finalize(&mut self, end_line: usize) {
+        self.end_line = Some(end_line);
+    }
+
+    fn invalidate(&mut self) {
+        self.end_line = None;
+        self.has_non_empty_inside = false;
+    }
+
+    fn mark_non_empty_inside(&mut self) {
+        self.has_non_empty_inside = true;
+    }
+
+    /// Returns true when the scope is still tracked by the cache.
+    pub fn is_active(&self) -> bool {
+        self.end_line.is_some() || self.is_open()
+    }
+
+    /// Returns true when the scope is open at the current cache frontier.
+    pub fn is_open(&self) -> bool {
+        self.end_line.is_none()
     }
 }
 
@@ -215,6 +245,8 @@ impl IndentScope {
 pub(crate) struct IndentScopeCache {
     scopes: Vec<IndentScope>,
     line_to_scopes: Vec<Vec<IndentScopeId>>,
+    open_scope_stack: Vec<IndentScopeId>,
+    scanned_through_line: usize,
 }
 
 impl IndentScopeCache {
@@ -222,103 +254,229 @@ impl IndentScopeCache {
         Self::default()
     }
 
-    fn build(line_texts: &[&str], tab_width: usize) -> Self {
+    fn invalidate_from(&mut self, line: usize) {
+        let boundary = line.min(self.line_to_scopes.len());
+        let sync_point = self.previous_sync_point(boundary);
+
+        self.line_to_scopes.truncate(sync_point);
+        self.scanned_through_line = sync_point;
+        self.open_scope_stack.clear();
+
+        let prefix_len = self
+            .scopes
+            .partition_point(|scope| scope.start_line < sync_point);
+        self.scopes.truncate(prefix_len);
+    }
+
+    fn previous_sync_point(&self, boundary: usize) -> usize {
+        if boundary == 0 {
+            return 0;
+        }
+
+        for line_idx in (0..boundary).rev() {
+            if !self.line_has_open_scopes(line_idx) {
+                return line_idx + 1;
+            }
+        }
+
+        0
+    }
+
+    fn line_has_open_scopes(&self, line_idx: usize) -> bool {
+        self.line_to_scopes.get(line_idx).is_some_and(|scope_ids| {
+            scope_ids.iter().any(|scope_id| {
+                self.scopes
+                    .get(*scope_id)
+                    .is_some_and(|scope| scope.is_open())
+            })
+        })
+    }
+
+    fn ensure_through(
+        &mut self,
+        line_texts: &[&str],
+        target_line: usize,
+        tab_width: usize,
+    ) -> bool {
+        if line_texts.is_empty() {
+            self.scanned_through_line = 0;
+            self.open_scope_stack.clear();
+            return true;
+        }
+
         let normalized_tab_width = tab_width.max(1);
-        let mut line_to_scopes: Vec<Vec<IndentScopeId>> = vec![Vec::new(); line_texts.len()];
-        let mut scopes: Vec<IndentScope> = Vec::new();
-        let mut open_scopes: Vec<OpenIndentScope> = Vec::new();
+        let target_line = target_line.min(line_texts.len() - 1);
+        if target_line < self.scanned_through_line {
+            return self.scanned_through_line >= line_texts.len();
+        }
 
-        for (line_idx, line_text) in line_texts.iter().enumerate() {
+        if self.line_to_scopes.len() > line_texts.len() {
+            self.line_to_scopes.truncate(line_texts.len());
+        }
+
+        for (line_idx, line_text) in line_texts
+            .iter()
+            .enumerate()
+            .take(target_line + 1)
+            .skip(self.scanned_through_line)
+        {
+            self.ensure_row_for_line(line_idx);
+            // Empty lines should not open or close scopes; they inherit the current stack.
+            if line_text.is_empty() {
+                self.commit_row(line_idx, self.open_scope_stack.clone());
+                continue;
+            }
             let indent_width = leading_indent_width(line_text, normalized_tab_width);
+            let mut invalid_branch_start = None;
+            let mut closed_scope_on_line = None;
 
-            while let Some(open_scope) = open_scopes.last() {
-                if open_scope.indent_width > indent_width {
-                    close_scope(
-                        &mut scopes,
-                        &mut line_to_scopes,
-                        open_scopes.pop().expect("scope should exist"),
-                        line_idx.saturating_sub(1),
-                    );
-                } else {
-                    break;
+            while let Some(&scope_id) = self.open_scope_stack.last() {
+                let scope_indent = self.scopes[scope_id].indent_width;
+                if scope_indent > indent_width {
+                    invalid_branch_start = Some(self.scopes[scope_id].start_line);
+                    self.close_scope_invalid(scope_id, line_idx.saturating_sub(1));
+                    continue;
                 }
+                break;
             }
 
-            if let Some(open_scope) = open_scopes.last()
-                && open_scope.indent_width == indent_width
+            if let Some(&scope_id) = self.open_scope_stack.last()
+                && self.scopes[scope_id].indent_width == indent_width
             {
-                close_scope(
-                    &mut scopes,
-                    &mut line_to_scopes,
-                    open_scopes.pop().expect("scope should exist"),
-                    line_idx,
-                );
+                if self.close_scope_line(scope_id, line_idx) {
+                    closed_scope_on_line = Some(scope_id);
+                } else {
+                    invalid_branch_start = Some(self.scopes[scope_id].start_line);
+                }
+                self.open_scope_stack.pop();
             }
 
-            for open_scope in &mut open_scopes {
-                if line_idx > open_scope.start_line && !line_text.is_empty() {
-                    open_scope.has_non_empty_inside = true;
+            if let Some(branch_start) = invalid_branch_start {
+                self.trim_invalid_branch(branch_start, line_idx);
+                if closed_scope_on_line.is_some_and(|scope_id| scope_id >= self.scopes.len()) {
+                    closed_scope_on_line = None;
                 }
             }
 
-            open_scopes.push(OpenIndentScope {
-                start_line: line_idx,
-                indent_width,
-                has_non_empty_inside: false,
-            });
-        }
-
-        if let Some(last_line) = line_texts.len().checked_sub(1) {
-            while let Some(open_scope) = open_scopes.pop() {
-                close_scope(&mut scopes, &mut line_to_scopes, open_scope, last_line);
+            let mut row_members = self.open_scope_stack.clone();
+            if let Some(scope_id) = closed_scope_on_line {
+                row_members.push(scope_id);
             }
+
+            if !line_text.is_empty() {
+                for scope_id in &row_members {
+                    if let Some(scope) = self.scopes.get_mut(*scope_id)
+                        && line_idx > scope.start_line
+                    {
+                        scope.mark_non_empty_inside();
+                    }
+                }
+            }
+
+            let new_scope_id = self.scopes.len();
+            self.scopes
+                .push(IndentScope::open(new_scope_id, line_idx, indent_width));
+            row_members.push(new_scope_id);
+            self.open_scope_stack.push(new_scope_id);
+
+            self.commit_row(line_idx, row_members);
         }
 
-        // Keep containing scopes in deterministic outer-to-inner order.
-        for scope_ids in &mut line_to_scopes {
-            scope_ids.sort_by_key(|scope_id| {
-                let scope = &scopes[*scope_id];
-                (scope.start_line, std::cmp::Reverse(scope.end_line))
-            });
+        self.scanned_through_line = target_line + 1;
+        if target_line == line_texts.len() - 1 {
+            self.finalize_to_eof(line_texts);
+            return true;
         }
 
-        Self {
-            scopes,
-            line_to_scopes,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-struct OpenIndentScope {
-    start_line: usize,
-    indent_width: usize,
-    has_non_empty_inside: bool,
-}
-
-fn close_scope(
-    scopes: &mut Vec<IndentScope>,
-    line_to_scopes: &mut [Vec<IndentScopeId>],
-    scope: OpenIndentScope,
-    end_line: usize,
-) {
-    if end_line <= scope.start_line + 1 || !scope.has_non_empty_inside {
-        return;
+        false
     }
 
-    let scope_id = scopes.len();
-    scopes.push(IndentScope::new(
-        scope_id,
-        scope.start_line,
-        end_line,
-        scope.indent_width,
-    ));
-    for containing in line_to_scopes
-        .iter_mut()
-        .take(end_line + 1)
-        .skip(scope.start_line)
-    {
-        containing.push(scope_id);
+    fn ensure_row_for_line(&mut self, line_idx: usize) {
+        if self.line_to_scopes.len() <= line_idx {
+            self.line_to_scopes.resize_with(line_idx + 1, Vec::new);
+        } else {
+            self.line_to_scopes[line_idx].clear();
+        }
+    }
+
+    fn commit_row(&mut self, line_idx: usize, mut scope_ids: Vec<IndentScopeId>) {
+        scope_ids.sort_by_key(|scope_id| {
+            let scope = &self.scopes[*scope_id];
+            (
+                scope.start_line,
+                std::cmp::Reverse(scope.end_line.unwrap_or(usize::MAX)),
+            )
+        });
+        self.line_to_scopes[line_idx] = scope_ids;
+    }
+
+    fn close_scope_line(&mut self, scope_id: IndentScopeId, end_line: usize) -> bool {
+        if let Some(scope) = self.scopes.get_mut(scope_id) {
+            if scope.has_non_empty_inside && end_line > scope.start_line + 1 {
+                scope.finalize(end_line);
+                return true;
+            }
+            scope.invalidate();
+        }
+        false
+    }
+
+    fn close_scope_invalid(&mut self, scope_id: IndentScopeId, end_line: usize) {
+        if let Some(scope) = self.scopes.get(scope_id) {
+            self.remove_scope_memberships(scope.start_line, end_line, scope_id);
+        }
+        self.open_scope_stack.pop();
+    }
+
+    fn trim_invalid_branch(&mut self, branch_start: usize, end_line: usize) {
+        let prefix_len = self
+            .scopes
+            .partition_point(|scope| scope.start_line < branch_start);
+        self.scopes.truncate(prefix_len);
+        self.open_scope_stack
+            .retain(|scope_id| *scope_id < prefix_len);
+        for row in self
+            .line_to_scopes
+            .iter_mut()
+            .take(end_line + 1)
+            .skip(branch_start)
+        {
+            row.retain(|scope_id| *scope_id < prefix_len);
+        }
+    }
+
+    fn finalize_to_eof(&mut self, line_texts: &[&str]) {
+        if line_texts.is_empty() {
+            return;
+        }
+
+        let last_line = line_texts.len() - 1;
+        while let Some(&scope_id) = self.open_scope_stack.last() {
+            if self.close_scope_line(scope_id, last_line) {
+                self.open_scope_stack.pop();
+                continue;
+            }
+
+            let branch_start = self.scopes[scope_id].start_line;
+            self.close_scope_invalid(scope_id, last_line);
+            self.trim_invalid_branch(branch_start, last_line);
+        }
+    }
+
+    fn remove_scope_memberships(
+        &mut self,
+        start_line: usize,
+        end_line: usize,
+        scope_id: IndentScopeId,
+    ) {
+        for row in self
+            .line_to_scopes
+            .iter_mut()
+            .take(end_line + 1)
+            .skip(start_line)
+        {
+            row.retain(|existing| *existing != scope_id);
+        }
     }
 }
 
@@ -396,7 +554,14 @@ impl Job for SyntaxCatchUpJob {
         let tab_width = globals::with_config(|config| config.tab_width)
             .unwrap_or(4)
             .max(1);
-        let indent_scope_cache = IndentScopeCache::build(&line_refs, tab_width);
+        let indent_scope_cache = {
+            let target_line = line_refs.len().saturating_sub(1);
+            let _ =
+                self.cache
+                    .indent_scope_cache
+                    .ensure_through(&line_refs, target_line, tab_width);
+            self.cache.indent_scope_cache.clone()
+        };
 
         SyntaxCatchUpResult {
             buffer_id: self.buffer_id,
@@ -1136,10 +1301,11 @@ mod tests {
         }
     }
 
-    fn scope_tuples(buffer: &Buffer) -> Vec<(usize, usize, usize)> {
+    fn scope_tuples(buffer: &Buffer) -> Vec<(usize, Option<usize>, usize)> {
         buffer
             .cached_indent_scopes()
             .iter()
+            .filter(|scope| scope.is_active())
             .map(|scope| (scope.start_line, scope.end_line, scope.indent_width))
             .collect()
     }
@@ -1253,12 +1419,14 @@ mod tests {
         let mut buffer = Buffer::from_str("a\n  b\na");
         buffer.ensure_syntax_through(2);
         assert!(!buffer.indent_scope_cache_stale());
-        assert_eq!(scope_tuples(&buffer), vec![(0, 2, 0)]);
+        assert_eq!(scope_tuples(&buffer), vec![(0, Some(2), 0)]);
 
         buffer.invalidate_syntax_from(1);
 
         assert!(buffer.indent_scope_cache_stale());
-        assert!(buffer.cached_indent_scopes().is_empty());
+        assert_eq!(scope_tuples(&buffer), vec![(0, Some(2), 0)]);
+        assert!(buffer.cached_line_indent_scope_ids(0).is_some());
+        assert!(buffer.cached_line_indent_scope_ids(1).is_none());
     }
 
     #[test]
@@ -1271,7 +1439,7 @@ mod tests {
 
         buffer.ensure_syntax_through(2);
 
-        assert_eq!(scope_tuples(&buffer), vec![(0, 2, 4)]);
+        assert_eq!(scope_tuples(&buffer), vec![(0, Some(2), 4)]);
     }
 
     #[test]
@@ -1281,15 +1449,18 @@ mod tests {
 
         buffer.ensure_syntax_through(4);
 
-        assert_eq!(scope_tuples(&buffer), vec![(1, 3, 2), (0, 4, 0)]);
+        assert_eq!(
+            scope_tuples(&buffer),
+            vec![(0, Some(4), 0), (1, Some(3), 2)]
+        );
         let containing = buffer
             .cached_line_indent_scope_ids(2)
             .expect("line 2 should have containing scopes");
         assert_eq!(containing.len(), 2);
         let first = &buffer.cached_indent_scopes()[containing[0]];
         let second = &buffer.cached_indent_scopes()[containing[1]];
-        assert_eq!((first.start_line, first.end_line), (0, 4));
-        assert_eq!((second.start_line, second.end_line), (1, 3));
+        assert_eq!((first.start_line, first.end_line), (0, Some(4)));
+        assert_eq!((second.start_line, second.end_line), (1, Some(3)));
     }
 
     #[test]
@@ -1298,18 +1469,146 @@ mod tests {
 
         buffer.ensure_syntax_through(2);
 
-        assert_eq!(scope_tuples(&buffer), vec![(0, 2, 0)]);
+        assert_eq!(scope_tuples(&buffer), vec![(0, Some(2), 0)]);
     }
 
     #[test]
     fn indent_scope_builder_treats_whitespace_only_lines_as_non_empty() {
         let mut with_whitespace = Buffer::from_str("start\n   \nstart");
         with_whitespace.ensure_syntax_through(2);
-        assert_eq!(scope_tuples(&with_whitespace), vec![(0, 2, 0)]);
+        assert_eq!(scope_tuples(&with_whitespace), vec![(0, Some(2), 0)]);
 
         let mut with_empty = Buffer::from_str("start\n\nstart");
         with_empty.ensure_syntax_through(2);
         assert!(scope_tuples(&with_empty).is_empty());
+    }
+
+    #[test]
+    fn viewport_scope_ensure_establishes_only_the_visible_prefix() {
+        let mut buffer = Buffer::from_str("root\n  child\n    leaf\n  child-close\nroot-close");
+
+        buffer.ensure_syntax_through(2);
+
+        assert!(buffer.indent_scope_cache_stale());
+        assert!(buffer.cached_line_indent_scope_ids(2).is_some());
+        assert!(buffer.cached_line_indent_scope_ids(3).is_none());
+        assert!(buffer.cached_line_indent_scope_ids(4).is_none());
+        assert_eq!(
+            scope_tuples(&buffer),
+            vec![(0, None, 0), (1, None, 2), (2, None, 4)]
+        );
+    }
+
+    #[test]
+    fn invalidated_suffix_rescans_from_the_saved_frontier() {
+        let mut buffer = Buffer::from_str("root\n  child\n    leaf\n  child-close\nroot-close");
+
+        buffer.ensure_syntax_through(2);
+        buffer.invalidate_syntax_from(1);
+
+        assert!(buffer.indent_scope_cache_stale());
+        assert!(scope_tuples(&buffer).is_empty());
+        assert!(buffer.cached_line_indent_scope_ids(0).is_none());
+        assert!(buffer.cached_line_indent_scope_ids(1).is_none());
+
+        buffer.ensure_syntax_through(4);
+
+        assert!(!buffer.indent_scope_cache_stale());
+        assert_eq!(
+            scope_tuples(&buffer),
+            vec![(0, Some(4), 0), (1, Some(3), 2)]
+        );
+    }
+
+    #[test]
+    fn closing_line_scope_ids_do_not_duplicate() {
+        let mut buffer = Buffer::from_str("outer\n  body\nouter");
+        buffer.ensure_syntax_through(2);
+
+        let scope_ids = buffer
+            .cached_line_indent_scope_ids(2)
+            .expect("closing line should have containing scopes");
+        assert_eq!(scope_ids, &[0]);
+    }
+
+    #[test]
+    fn nested_scope_survives_dedent_to_sibling_line() {
+        let mut buffer = Buffer::from_str("root\n  a\n    body\n  b\nroot-close");
+        buffer.ensure_syntax_through(4);
+
+        assert_eq!(
+            scope_tuples(&buffer),
+            vec![(0, Some(4), 0), (1, Some(3), 2)]
+        );
+    }
+
+    #[test]
+    fn empty_lines_do_not_close_outer_scope_early() {
+        let mut buffer = Buffer::from_str("fn main() {\n    let x = 1;\n\n    let y = 2;\n}");
+        buffer.ensure_syntax_through(4);
+
+        assert_eq!(scope_tuples(&buffer), vec![(0, Some(4), 0)]);
+    }
+
+    #[test]
+    fn empty_line_inherits_containing_scopes() {
+        let mut buffer =
+            Buffer::from_str("root\n  inner-open\n    body\n\n  inner-close\nroot-close");
+        buffer.ensure_syntax_through(5);
+
+        let empty_line_scope_ids = buffer
+            .cached_line_indent_scope_ids(3)
+            .expect("empty line should have containing scopes");
+        assert_eq!(empty_line_scope_ids.len(), 2);
+        let outer = &buffer.cached_indent_scopes()[empty_line_scope_ids[0]];
+        let inner = &buffer.cached_indent_scopes()[empty_line_scope_ids[1]];
+        assert_eq!((outer.start_line, outer.end_line), (0, Some(5)));
+        assert_eq!((inner.start_line, inner.end_line), (1, Some(4)));
+    }
+
+    #[test]
+    fn dedent_popping_multiple_levels_preserves_outer_and_sibling_scopes() {
+        let mut buffer = Buffer::from_str(
+            "root\n  lvl1-open\n    lvl2-open\n      deep\n  sibling-open\n    sibling-body\n  sibling-close\nroot-close",
+        );
+        buffer.ensure_syntax_through(7);
+
+        assert_eq!(
+            scope_tuples(&buffer),
+            vec![(0, Some(7), 0), (1, Some(4), 2), (4, Some(6), 2)]
+        );
+    }
+
+    #[test]
+    fn partial_then_complete_ensure_preserves_function_scope_end() {
+        let mut buffer = Buffer::from_str(
+            "fn helper() {}\n\nfn main() {\n    let x = 1;\n\n    if x > 0 {\n        println!(\"x\");\n    }\n\n    let y = 2;\n}\n\nfn after() {}\n",
+        );
+
+        buffer.ensure_syntax_through(6);
+        assert!(buffer.indent_scope_cache_stale());
+
+        buffer.ensure_syntax_through(buffer.line_count().saturating_sub(1));
+        assert!(!buffer.indent_scope_cache_stale());
+
+        let main_scope = buffer
+            .cached_indent_scopes()
+            .iter()
+            .find(|scope| scope.start_line == 2)
+            .expect("main scope should exist after complete ensure");
+        assert_eq!(main_scope.end_line, Some(10));
+    }
+
+    #[test]
+    fn invalidate_from_eof_keeps_cache_complete() {
+        let mut buffer = Buffer::from_str("one\ntwo\nthree");
+        buffer.ensure_syntax_through(2);
+        assert!(!buffer.indent_scope_cache_stale());
+
+        buffer.invalidate_syntax_from(buffer.line_count());
+
+        assert!(buffer.syntax_cache_complete());
+        assert!(!buffer.indent_scope_cache_stale());
     }
 
     #[test]

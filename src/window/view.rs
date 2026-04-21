@@ -226,10 +226,15 @@ impl BufferView {
                     scope_ids
                         .iter()
                         .filter_map(|scope_id| buffer.cached_indent_scopes().get(*scope_id))
+                        .filter(|scope| scope.is_active())
                         .map(|scope| {
+                            let end_line = scope
+                                .end_line
+                                .map(|end| end.to_string())
+                                .unwrap_or_else(|| String::from("open"));
                             format!(
                                 "#{}:{}-{}@{}",
-                                scope.id, scope.start_line, scope.end_line, scope.indent_width
+                                scope.id, scope.start_line, end_line, scope.indent_width
                             )
                         })
                         .collect::<Vec<_>>()
