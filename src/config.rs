@@ -27,6 +27,8 @@ const DEFAULT_XDG_CONFIG_DIRS: &str = "/etc/xdg";
 pub enum AdvancedGlyphCapability {
     /// Enable nerdfont glyph rendering.
     Nerdfont,
+    /// Enable all Unicode advanced glyph capabilities.
+    Unicode,
     /// Enable Unicode line-drawing split borders.
     UnicodeBorders,
     /// Enable Unicode line-drawing indent guides.
@@ -238,7 +240,7 @@ impl Config {
             .unwrap_or_default();
         let advanced_glyphs = file
             .and_then(|config| config.advanced_glyphs.as_ref())
-            .map(|glyphs| glyphs.iter().cloned().collect::<BTreeSet<_>>())
+            .map(|glyphs| resolve_advanced_glyphs(glyphs))
             .unwrap_or_default();
         let tab_insertion = file
             .and_then(|config| config.tab_insertion)
@@ -485,6 +487,33 @@ fn validate_todo_marker(marker: &str) -> Result<(), ConfigLoadError> {
     Ok(())
 }
 
+fn resolve_advanced_glyphs(
+    glyphs: &[AdvancedGlyphCapability],
+) -> BTreeSet<AdvancedGlyphCapability> {
+    let mut resolved = BTreeSet::new();
+    for capability in glyphs {
+        match capability {
+            AdvancedGlyphCapability::Unicode => {
+                for unicode_capability in all_unicode_advanced_glyph_capabilities() {
+                    resolved.insert(unicode_capability);
+                }
+            }
+            other => {
+                resolved.insert(other.clone());
+            }
+        }
+    }
+
+    resolved
+}
+
+fn all_unicode_advanced_glyph_capabilities() -> [AdvancedGlyphCapability; 2] {
+    [
+        AdvancedGlyphCapability::UnicodeBorders,
+        AdvancedGlyphCapability::UnicodeIndent,
+    ]
+}
+
 fn xdg_config_home() -> Result<PathBuf, ConfigLoadError> {
     if let Some(config_home) = env::var_os("XDG_CONFIG_HOME")
         && !config_home.is_empty()
@@ -565,6 +594,7 @@ mod tests {
             auto_indent: Some(AutoIndentMode::Neighbor),
             advanced_glyphs: Some(vec![
                 AdvancedGlyphCapability::Nerdfont,
+                AdvancedGlyphCapability::Unicode,
                 AdvancedGlyphCapability::UnicodeBorders,
                 AdvancedGlyphCapability::UnicodeIndent,
             ]),
@@ -637,6 +667,22 @@ mod tests {
             Config::resolve(Some(&file), None, None).advanced_glyphs,
             glyph_caps(&[
                 AdvancedGlyphCapability::Nerdfont,
+                AdvancedGlyphCapability::UnicodeBorders,
+                AdvancedGlyphCapability::UnicodeIndent
+            ])
+        );
+    }
+
+    #[test]
+    fn resolve_expands_unicode_alias_advanced_glyph_capability() {
+        let file = PartialConfig {
+            advanced_glyphs: Some(vec![AdvancedGlyphCapability::Unicode]),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            Config::resolve(Some(&file), None, None).advanced_glyphs,
+            glyph_caps(&[
                 AdvancedGlyphCapability::UnicodeBorders,
                 AdvancedGlyphCapability::UnicodeIndent
             ])
@@ -980,7 +1026,7 @@ mod tests {
         let home = unique_temp_dir("glyph-home");
         write_config(
             &home,
-            "advanced_glyphs = [\"nerdfont\", \"unicode_borders\", \"unicode_indent\", \"nerdfont\"]",
+            "advanced_glyphs = [\"nerdfont\", \"unicode\", \"unicode_borders\", \"unicode_indent\", \"nerdfont\"]",
         );
 
         let config = Config::load_from_locations(home, vec![], None, None).expect("should load");

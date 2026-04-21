@@ -135,8 +135,9 @@ Controls optional glyph rendering capabilities used by the editor UI.
 
 - Type: array of strings
 - Default: empty
-- Supported values: `nerdfont`, `unicode_borders`, `unicode_indent`
+- Supported values: `nerdfont`, `unicode`, `unicode_borders`, `unicode_indent`
 - Behavior: when `nerdfont` is enabled, filetypes with glyph metadata can render icons in the tab bar and status bar; when it is not enabled, the UI stays text-only
+- Behavior: when `unicode` is enabled, all Unicode glyph capabilities are enabled (`unicode_borders` and `unicode_indent`)
 - Behavior: when `unicode_borders` is enabled, split borders render with Unicode box-drawing glyphs
 - Behavior: when `unicode_indent` is enabled, indent guides render with Unicode line-drawing glyphs
 - Validation: unknown capability names are rejected at startup
