@@ -23,7 +23,7 @@ Command-line flags override config file values.
 
 ## Current Schema
 
-The canonical config values are `theme`, `insert_escape`, `default_registers`, `syntax`, `todo_markers`, `auto_close_pairs`, `active_line`, `indent_guides`, `auto_indent`, `advanced_glyphs`, `tab_insertion`, `tab_behavior`, and `tab_width`.
+The canonical config values are `theme`, `insert_escape`, `default_registers`, `syntax`, `todo_markers`, `auto_close_pairs`, `active_line`, `indent_guides`, `auto_indent`, `advanced_glyphs`, `tab_insertion`, `tab_behavior`, `tab_width`, and `scroll_margin`.
 
 ```toml
 theme = "Friday Night"
@@ -39,6 +39,7 @@ advanced_glyphs = ["nerdfont"]
 tab_insertion = "spaces"
 tab_behavior = "simple"
 tab_width = 4
+scroll_margin = { vertical = 5, horizontal = 5 }
 ```
 
 ### `theme`
@@ -167,6 +168,15 @@ Sets the visual width of tab characters in buffer rendering and the number of sp
 - Type: positive integer
 - Default: `4`
 - Behavior: tab characters render as a fixed-width block using the configured width, so the visible tab expansion does not depend on the current cursor column; space-based tab insertion uses that same width
+
+### `scroll_margin`
+
+Sets the visual margin bands near viewport edges that trigger scrolling before edge crossing.
+
+- Type: table with `vertical` and `horizontal` integer entries
+- Default: `{ vertical = 5, horizontal = 5 }`
+- Behavior: vertical scrolling starts once the cursor enters the top/bottom margin bands; horizontal scrolling starts once the cursor enters the left/right margin bands
+- Small viewport behavior: effective margins automatically clamp down when the viewport is too small to satisfy configured values
 
 ## Notes
 

@@ -1,6 +1,7 @@
 use super::*;
 use crate::buffer::BufferId;
 use crate::buffer::{configured_tab_width, display_grapheme_width, display_width_at};
+use crate::config::ScrollMargin;
 use crate::theme::Tag;
 use imbl::Vector;
 use smol_str::SmolStr;
@@ -354,11 +355,28 @@ impl BufferView {
 
         let visible_rows = viewport_size.rows as usize;
         let visible_cols = viewport_size.cols.saturating_sub(gutter_width) as usize;
+        let scroll_margin = crate::globals::with_config(|config| config.scroll_margin)
+            .unwrap_or_else(ScrollMargin::default);
+        let effective_vertical_margin = scroll_margin
+            .vertical
+            .min(visible_rows.saturating_sub(1) / 2);
+        let effective_horizontal_margin = scroll_margin
+            .horizontal
+            .min(visible_cols.saturating_sub(1) / 2);
 
-        if cursor.line < self.scroll_offset.row as usize {
-            self.scroll_offset.row = cursor.line as u16;
-        } else if cursor.line >= self.scroll_offset.row as usize + visible_rows {
-            self.scroll_offset.row = (cursor.line + 1 - visible_rows) as u16;
+        let scroll_row = self.scroll_offset.row as usize;
+        let min_visible_row = scroll_row.saturating_add(effective_vertical_margin);
+        let max_visible_row = scroll_row
+            .saturating_add(visible_rows.saturating_sub(1))
+            .saturating_sub(effective_vertical_margin);
+        if cursor.line < min_visible_row {
+            self.scroll_offset.row = cursor.line.saturating_sub(effective_vertical_margin) as u16;
+        } else if cursor.line > max_visible_row {
+            self.scroll_offset.row = cursor
+                .line
+                .saturating_add(effective_vertical_margin)
+                .saturating_add(1)
+                .saturating_sub(visible_rows) as u16;
         }
 
         let max_row = buffer_line_count.saturating_sub(visible_rows);
@@ -366,10 +384,19 @@ impl BufferView {
             self.scroll_offset.row = max_row as u16;
         }
 
-        if cursor_visual_col < self.scroll_offset.col as usize {
-            self.scroll_offset.col = cursor_visual_col as u16;
-        } else if cursor_visual_col >= self.scroll_offset.col as usize + visible_cols {
-            self.scroll_offset.col = (cursor_visual_col + 1 - visible_cols) as u16;
+        let scroll_col = self.scroll_offset.col as usize;
+        let min_visible_col = scroll_col.saturating_add(effective_horizontal_margin);
+        let max_visible_col = scroll_col
+            .saturating_add(visible_cols.saturating_sub(1))
+            .saturating_sub(effective_horizontal_margin);
+        if cursor_visual_col < min_visible_col {
+            self.scroll_offset.col =
+                cursor_visual_col.saturating_sub(effective_horizontal_margin) as u16;
+        } else if cursor_visual_col > max_visible_col {
+            self.scroll_offset.col = cursor_visual_col
+                .saturating_add(effective_horizontal_margin)
+                .saturating_add(1)
+                .saturating_sub(visible_cols) as u16;
         }
 
         let max_col = line_width.saturating_sub(visible_cols);

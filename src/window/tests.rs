@@ -1,7 +1,9 @@
 use super::*;
 use crate::action::ActionResult;
 use crate::buffer::{BufferId, Cursor};
-use crate::config::{AdvancedGlyphCapability, AutoIndentMode, Config, DefaultRegisters};
+use crate::config::{
+    AdvancedGlyphCapability, AutoIndentMode, Config, DefaultRegisters, ScrollMargin,
+};
 use crate::editor::{Action, ActionKind, BoundaryMotion, BracketKind, LinewiseMotion, ModeKind};
 use crate::editor::{Operator, OperatorTarget, QuoteKind, TextObject};
 use crate::globals;
@@ -330,6 +332,128 @@ fn test_buffer_view_scroll_offset() {
 
     view.set_scroll_offset(Position::new(5, 10));
     assert_eq!(view.scroll_offset(), Position::new(5, 10));
+}
+
+#[test]
+fn test_scroll_margin_starts_vertical_scrolling_near_bottom_and_top_edges() {
+    let buffer = Buffer::from_str(
+        &(0..80)
+            .map(|index| format!("line-{index}"))
+            .collect::<Vec<_>>()
+            .join("\n"),
+    );
+    let mut view = BufferView::new(buffer);
+    let _config_guard = globals::set_test_config(Config {
+        scroll_margin: ScrollMargin {
+            vertical: 5,
+            horizontal: 5,
+        },
+        ..Default::default()
+    });
+
+    view.set_cursor(Cursor::new(14, 0));
+    view.scroll_to_cursor(Size::new(20, 40), 0);
+    assert_eq!(view.scroll_offset().row, 0);
+
+    view.set_cursor(Cursor::new(15, 0));
+    view.scroll_to_cursor(Size::new(20, 40), 0);
+    assert_eq!(view.scroll_offset().row, 1);
+
+    view.set_scroll_offset(Position::new(10, 0));
+    view.set_cursor(Cursor::new(15, 0));
+    view.scroll_to_cursor(Size::new(20, 40), 0);
+    assert_eq!(view.scroll_offset().row, 10);
+
+    view.set_cursor(Cursor::new(14, 0));
+    view.scroll_to_cursor(Size::new(20, 40), 0);
+    assert_eq!(view.scroll_offset().row, 9);
+}
+
+#[test]
+fn test_scroll_margin_starts_horizontal_scrolling_near_right_and_left_edges() {
+    let buffer = Buffer::from_str(
+        &(0..8)
+            .map(|_| "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
+            .collect::<Vec<_>>()
+            .join("\n"),
+    );
+    let mut view = BufferView::new(buffer);
+    let _config_guard = globals::set_test_config(Config {
+        scroll_margin: ScrollMargin {
+            vertical: 5,
+            horizontal: 5,
+        },
+        ..Default::default()
+    });
+
+    view.set_cursor(Cursor::new(0, 14));
+    view.scroll_to_cursor(Size::new(6, 20), 0);
+    assert_eq!(view.scroll_offset().col, 0);
+
+    view.set_cursor(Cursor::new(0, 15));
+    view.scroll_to_cursor(Size::new(6, 20), 0);
+    assert_eq!(view.scroll_offset().col, 1);
+
+    view.set_scroll_offset(Position::new(0, 20));
+    view.set_cursor(Cursor::new(0, 25));
+    view.scroll_to_cursor(Size::new(6, 20), 0);
+    assert_eq!(view.scroll_offset().col, 20);
+
+    view.set_cursor(Cursor::new(0, 24));
+    view.scroll_to_cursor(Size::new(6, 20), 0);
+    assert_eq!(view.scroll_offset().col, 19);
+}
+
+#[test]
+fn test_scroll_margin_clamps_for_small_viewports() {
+    let buffer = Buffer::from_str(
+        &(0..20)
+            .map(|_| "abcdefghijklmnopqrstuvwxyz")
+            .collect::<Vec<_>>()
+            .join("\n"),
+    );
+    let mut view = BufferView::new(buffer);
+    let _config_guard = globals::set_test_config(Config {
+        scroll_margin: ScrollMargin {
+            vertical: 10,
+            horizontal: 10,
+        },
+        ..Default::default()
+    });
+
+    view.set_cursor(Cursor::new(2, 2));
+    view.scroll_to_cursor(Size::new(5, 4), 0);
+    assert_eq!(view.scroll_offset(), Position::new(0, 0));
+
+    view.set_cursor(Cursor::new(3, 3));
+    view.scroll_to_cursor(Size::new(5, 4), 0);
+    assert_eq!(view.scroll_offset(), Position::new(1, 1));
+}
+
+#[test]
+fn test_scroll_margin_zero_keeps_edge_trigger_behavior() {
+    let buffer = Buffer::from_str(
+        &(0..20)
+            .map(|_| "abcdefghijklmnopqrstuvwxyz")
+            .collect::<Vec<_>>()
+            .join("\n"),
+    );
+    let mut view = BufferView::new(buffer);
+    let _config_guard = globals::set_test_config(Config {
+        scroll_margin: ScrollMargin {
+            vertical: 0,
+            horizontal: 0,
+        },
+        ..Default::default()
+    });
+
+    view.set_cursor(Cursor::new(5, 9));
+    view.scroll_to_cursor(Size::new(6, 10), 0);
+    assert_eq!(view.scroll_offset(), Position::new(0, 0));
+
+    view.set_cursor(Cursor::new(6, 10));
+    view.scroll_to_cursor(Size::new(6, 10), 0);
+    assert_eq!(view.scroll_offset(), Position::new(1, 1));
 }
 
 #[test]

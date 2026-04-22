@@ -498,8 +498,17 @@ A 2D dimension `(rows, cols)` representing the size of a region.
 ### Viewport
 The visible portion of the buffer being displayed. Defined by scroll offset and visible area size.
 
+### Scroll Margin
+A configurable viewport boundary band that determines when cursor movement should start scrolling. It defines the minimum visual distance (in lines/columns) to keep between the cursor and each viewport edge before adjusting scroll offset.
+
+**Context:** Window viewport reconciliation, scrolling behavior configuration
+
+**Related Terms:** Scroll Offset, Viewport, Configuration
+
 ### Scroll Offset
 The position in the buffer that corresponds to the top-left of the viewport.
+
+**Related Terms:** Scroll Margin, Viewport
 
 ## Actions (Common)
 

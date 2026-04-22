@@ -103,6 +103,36 @@ impl Default for DefaultRegisters {
 
 /// Default visual width for tab characters when no config is available.
 pub const DEFAULT_TAB_WIDTH: usize = 4;
+/// Default top/bottom and left/right visual scroll margin.
+pub const DEFAULT_SCROLL_MARGIN: usize = 5;
+
+/// Visual scroll margins that determine when viewport scrolling starts.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ScrollMargin {
+    /// Number of lines to keep between the cursor and top/bottom viewport edges.
+    pub vertical: usize,
+    /// Number of columns to keep between the cursor and left/right viewport edges.
+    pub horizontal: usize,
+}
+
+/// The TOML-backed visual scroll margin table stored in the config file.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct PartialScrollMargin {
+    /// The vertical margin stored in the config file.
+    pub vertical: Option<usize>,
+    /// The horizontal margin stored in the config file.
+    pub horizontal: Option<usize>,
+}
+
+impl Default for ScrollMargin {
+    fn default() -> Self {
+        Self {
+            vertical: DEFAULT_SCROLL_MARGIN,
+            horizontal: DEFAULT_SCROLL_MARGIN,
+        }
+    }
+}
 
 /// The resolved startup configuration used by the editor.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -133,6 +163,8 @@ pub struct Config {
     pub tab_behavior: TabBehavior,
     /// The number of visual columns a tab occupies.
     pub tab_width: usize,
+    /// Visual scroll margins that trigger viewport movement before edge crossing.
+    pub scroll_margin: ScrollMargin,
 }
 
 /// The TOML-backed config file schema.
@@ -165,6 +197,8 @@ pub struct PartialConfig {
     pub tab_behavior: Option<TabBehavior>,
     /// The tab width stored in the config file.
     pub tab_width: Option<usize>,
+    /// The visual scroll margin table stored in the config file.
+    pub scroll_margin: Option<PartialScrollMargin>,
 }
 
 /// Errors that can occur while loading or resolving startup configuration.
@@ -251,6 +285,8 @@ impl Config {
         let tab_width = file
             .and_then(|config| config.tab_width)
             .unwrap_or(DEFAULT_TAB_WIDTH);
+        let scroll_margin =
+            resolve_scroll_margin(file.and_then(|config| config.scroll_margin.as_ref()));
 
         Self {
             theme,
@@ -266,6 +302,7 @@ impl Config {
             tab_insertion,
             tab_behavior,
             tab_width,
+            scroll_margin,
         }
     }
 
@@ -312,6 +349,7 @@ impl Default for Config {
             tab_insertion: TabInsertion::default(),
             tab_behavior: TabBehavior::default(),
             tab_width: DEFAULT_TAB_WIDTH,
+            scroll_margin: ScrollMargin::default(),
         }
     }
 }
@@ -411,6 +449,18 @@ fn validate_partial_config(config: &PartialConfig) -> Result<(), ConfigLoadError
     }
 
     Ok(())
+}
+
+fn resolve_scroll_margin(scroll_margin: Option<&PartialScrollMargin>) -> ScrollMargin {
+    let default_margin = ScrollMargin::default();
+    ScrollMargin {
+        vertical: scroll_margin
+            .and_then(|margin| margin.vertical)
+            .unwrap_or(default_margin.vertical),
+        horizontal: scroll_margin
+            .and_then(|margin| margin.horizontal)
+            .unwrap_or(default_margin.horizontal),
+    }
 }
 
 fn default_todo_markers() -> Vector<SmolStr> {
@@ -598,6 +648,10 @@ mod tests {
                 AdvancedGlyphCapability::UnicodeBorders,
                 AdvancedGlyphCapability::UnicodeIndent,
             ]),
+            scroll_margin: Some(PartialScrollMargin {
+                vertical: Some(8),
+                horizontal: Some(6),
+            }),
             ..Default::default()
         };
 
@@ -662,6 +716,17 @@ mod tests {
         assert_eq!(
             Config::resolve(None, None, None).tab_width,
             DEFAULT_TAB_WIDTH
+        );
+        assert_eq!(
+            Config::resolve(None, None, None).scroll_margin,
+            ScrollMargin::default()
+        );
+        assert_eq!(
+            Config::resolve(Some(&file), None, None).scroll_margin,
+            ScrollMargin {
+                vertical: 8,
+                horizontal: 6
+            }
         );
         assert_eq!(
             Config::resolve(Some(&file), None, None).advanced_glyphs,
@@ -769,6 +834,38 @@ mod tests {
     }
 
     #[test]
+    fn load_from_locations_rejects_unknown_scroll_margin_fields() {
+        let home = unique_temp_dir("scroll-margin-unknown-field-home");
+        write_config(
+            &home,
+            "scroll_margin = { vertical = 5, horizontal = 5, side = 2 }",
+        );
+
+        let error = Config::load_from_locations(home, vec![], None, None).expect_err("should fail");
+
+        match error {
+            ConfigLoadError::Parse { .. } => {}
+            other => panic!("expected parse error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn load_from_locations_rejects_invalid_scroll_margin_value_type() {
+        let home = unique_temp_dir("scroll-margin-invalid-type-home");
+        write_config(
+            &home,
+            "scroll_margin = { vertical = \"wide\", horizontal = 5 }",
+        );
+
+        let error = Config::load_from_locations(home, vec![], None, None).expect_err("should fail");
+
+        match error {
+            ConfigLoadError::Parse { .. } => {}
+            other => panic!("expected parse error, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn load_from_locations_rejects_empty_theme() {
         let home = unique_temp_dir("empty-theme-home");
         write_config(&home, "theme = \"   \"");
@@ -853,6 +950,47 @@ mod tests {
         assert_eq!(config.tab_insertion, TabInsertion::Tabs);
         assert_eq!(config.tab_behavior, TabBehavior::Smart);
         assert_eq!(config.tab_width, 8);
+    }
+
+    #[test]
+    fn load_from_locations_loads_scroll_margin_table() {
+        let home = unique_temp_dir("scroll-margin-home");
+        write_config(&home, "scroll_margin = { vertical = 3, horizontal = 9 }");
+
+        let config = Config::load_from_locations(home, vec![], None, None).expect("should load");
+
+        assert_eq!(
+            config.scroll_margin,
+            ScrollMargin {
+                vertical: 3,
+                horizontal: 9
+            }
+        );
+    }
+
+    #[test]
+    fn load_from_locations_defaults_partial_scroll_margin_values() {
+        let home = unique_temp_dir("scroll-margin-partial-home");
+        write_config(&home, "scroll_margin = { vertical = 2 }");
+
+        let config = Config::load_from_locations(home, vec![], None, None).expect("should load");
+
+        assert_eq!(
+            config.scroll_margin,
+            ScrollMargin {
+                vertical: 2,
+                horizontal: DEFAULT_SCROLL_MARGIN
+            }
+        );
+    }
+
+    #[test]
+    fn load_from_locations_defaults_scroll_margin_to_builtin_values() {
+        let home = unique_temp_dir("scroll-margin-default-home");
+
+        let config = Config::load_from_locations(home, vec![], None, None).expect("should load");
+
+        assert_eq!(config.scroll_margin, ScrollMargin::default());
     }
 
     #[test]
