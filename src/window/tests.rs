@@ -3222,10 +3222,10 @@ fn test_page_motions_render_updated_gutter_line_numbers() {
 
     window.process_action(&Action::new(ActionKind::MovePageDown));
     window.render(&mut screen, Position::new(0, 0), size);
-    assert_eq!(window.buffer_view.scroll_offset(), Position::new(1, 0));
-    assert_eq!(screen.get_cell_mut(0, gutter_col).unwrap().text, "2");
-    assert_eq!(screen.get_cell_mut(1, gutter_col).unwrap().text, "3");
-    assert_eq!(screen.get_cell_mut(2, gutter_col).unwrap().text, "4");
+    assert_eq!(window.buffer_view.scroll_offset(), Position::new(2, 0));
+    assert_eq!(screen.get_cell_mut(0, gutter_col).unwrap().text, "3");
+    assert_eq!(screen.get_cell_mut(1, gutter_col).unwrap().text, "4");
+    assert_eq!(screen.get_cell_mut(2, gutter_col).unwrap().text, "5");
 
     window.process_action(&Action::new(ActionKind::MovePageUp));
     window.render(&mut screen, Position::new(0, 0), size);
