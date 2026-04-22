@@ -431,6 +431,9 @@ impl Window {
             let row = content_origin.row + screen_row as u16;
             let col = content_origin.col + relative_col as u16;
             if let Some(cell) = screen.get_cell_mut(row, col) {
+                if !cell.text.chars().all(char::is_whitespace) {
+                    continue;
+                }
                 cell.text.clear();
                 cell.text.push_str(glyph);
                 cell.style = guide_style;

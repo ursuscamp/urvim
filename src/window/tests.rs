@@ -936,6 +936,25 @@ fn test_window_render_skips_indent_guide_without_eligible_scope() {
 }
 
 #[test]
+fn test_window_render_indent_guide_does_not_overwrite_wrapped_continuation_text() {
+    let _config_guard = globals::set_test_config(Config {
+        indent_guides: true,
+        wrap_mode: WrapMode::Hard,
+        ..Default::default()
+    });
+    let mut window = Window::new(Buffer::from_str("a\n  abcdefghij\n  tail\nz"));
+    window.set_wrap_enabled(true);
+    window.set_cursor(Cursor::new(1, 2));
+
+    let mut screen = crate::screen::Screen::new(6, 9);
+    window.render(&mut screen, Position::new(0, 0), Size::new(6, 9));
+
+    // Row 2 is the second wrapped segment of line 2 ("efghij"), and the guide
+    // column intersects that segment. The rendered text must win over the guide.
+    assert_eq!(screen.get_cell_mut(2, 5).unwrap().text, "g");
+}
+
+#[test]
 fn test_window_render_fills_empty_content_rows_with_theme_default() {
     let buffer = Buffer::from_str("line1");
     let mut window = Window::new(buffer);
