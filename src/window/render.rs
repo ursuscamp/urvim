@@ -81,7 +81,12 @@ impl RenderData {
 
     pub fn cursor_screen_position(&self, cursor: Cursor) -> Option<Position> {
         let tab_width = configured_tab_width();
-        for (screen_row, line_data) in self.line_data.iter().enumerate() {
+        for (screen_row, line_data) in self
+            .line_data
+            .iter()
+            .take(self.visible_rows as usize)
+            .enumerate()
+        {
             if line_data.buffer_line != cursor.line || cursor.col < line_data.byte_offset {
                 continue;
             }

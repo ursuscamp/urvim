@@ -1981,6 +1981,30 @@ fn test_vertical_motions_remain_logical_lines_when_wrapping_is_enabled() {
 }
 
 #[test]
+fn test_wrapped_eof_cursor_stays_in_viewport_and_reveals_overflow_rows() {
+    let _config_guard = globals::set_test_config(Config {
+        wrap_mode: WrapMode::Hard,
+        ..Default::default()
+    });
+    // With content width 4:
+    // - line 1 wraps into 2 rows (1 overflow)
+    // - line 2 wraps into 4 rows (3 overflow)
+    let mut window = Window::new(Buffer::from_str("abcdefgh\nabcdefghijklmnop"));
+    window.set_wrap_enabled(true);
+    window.set_cursor(Cursor::new(1, 15));
+    let mut screen = crate::screen::Screen::new(3, 7);
+
+    window.render(&mut screen, Position::new(0, 0), Size::new(3, 7));
+
+    let cursor = window
+        .visual_cursor()
+        .expect("cursor should remain visible");
+    assert!(cursor.row < 3);
+    // Reaching EOF in wrapped mode should scroll into line-2 continuations.
+    assert_eq!(screen.get_cell_mut(0, 1).unwrap().text, " ");
+}
+
+#[test]
 fn test_visual_selection_is_rendered() {
     let mut theme = themed_window();
     theme.highlights.insert(

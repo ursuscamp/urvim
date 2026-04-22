@@ -216,11 +216,15 @@ fn test_layout_split_copies_active_buffer_view_state() {
     let mut layout = layout_with_buffers(vec![Buffer::from_str("one\ntwo\nthree\nfour")]);
     let source_cursor = crate::buffer::Cursor::new(2, 3);
     let source_scroll = Position::new(1, 4);
+    let source_wrapped_row = 3;
 
     layout.active_buffer_view_mut().set_cursor(source_cursor);
     layout
         .active_buffer_view_mut()
         .set_scroll_offset(source_scroll);
+    layout
+        .active_buffer_view_mut()
+        .set_wrapped_row_offset(source_wrapped_row);
     layout
         .active_window_group_mut()
         .active_window_mut()
@@ -237,6 +241,10 @@ fn test_layout_split_copies_active_buffer_view_state() {
     assert_eq!(layout.active_buffer_view().buffer_id(), source_buffer_id);
     assert_eq!(layout.active_buffer_view().cursor(), source_cursor);
     assert_eq!(layout.active_buffer_view().scroll_offset(), source_scroll);
+    assert_eq!(
+        layout.active_buffer_view().wrapped_row_offset(),
+        source_wrapped_row
+    );
     assert!(layout.active_window_group().active_window().wrap_enabled());
 
     let root = layout.root.as_ref().expect("layout should keep a root");
@@ -248,9 +256,11 @@ fn test_layout_split_copies_active_buffer_view_state() {
             assert_eq!(original.buffer_id(), source_buffer_id);
             assert_eq!(original.cursor(), source_cursor);
             assert_eq!(original.scroll_offset(), source_scroll);
+            assert_eq!(original.wrapped_row_offset(), source_wrapped_row);
             assert_eq!(copied.buffer_id(), source_buffer_id);
             assert_eq!(copied.cursor(), source_cursor);
             assert_eq!(copied.scroll_offset(), source_scroll);
+            assert_eq!(copied.wrapped_row_offset(), source_wrapped_row);
             assert!(pane_window(&split.first).wrap_enabled());
             assert!(pane_window(&split.second).wrap_enabled());
         }

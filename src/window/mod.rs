@@ -92,6 +92,7 @@ pub struct RenderData {
 pub struct BufferView {
     buffer_id: BufferId,
     scroll_offset: Position,
+    wrapped_row_offset: u16,
     cursor: Cursor,
     remembered_visual_col: Option<usize>,
     visual_selection: Option<VisualSelection>,
@@ -300,8 +301,12 @@ impl Window {
 
         // Resolve scrolling before building the gutter so line numbers and
         // visible content are derived from the same viewport.
-        self.buffer_view
-            .scroll_to_cursor_with_wrap(size, gutter_width, self.wrap_enabled);
+        self.buffer_view.scroll_to_cursor_with_wrap(
+            size,
+            gutter_width,
+            self.wrap_enabled,
+            wrap_mode,
+        );
         let start_line = self.buffer_view.scroll_offset().row as usize;
 
         // Create gutter with the finalized viewport state.

@@ -4,6 +4,7 @@ use crate::buffer::{configured_tab_width, display_grapheme_width, display_width_
 use crate::config::ScrollMargin;
 use crate::config::WrapMode;
 use crate::theme::Tag;
+use crate::window::wrap::WrappedLineSegment;
 use imbl::Vector;
 use smol_str::SmolStr;
 use std::ops::Range;
@@ -21,6 +22,7 @@ impl BufferView {
         Self {
             buffer_id,
             scroll_offset: Position::new(0, 0),
+            wrapped_row_offset: 0,
             cursor: Cursor::new(0, 0),
             remembered_visual_col: None,
             visual_selection: None,
@@ -150,6 +152,15 @@ impl BufferView {
 
     pub fn set_scroll_offset(&mut self, offset: Position) {
         self.scroll_offset = offset;
+        self.wrapped_row_offset = offset.row;
+    }
+
+    pub fn wrapped_row_offset(&self) -> u16 {
+        self.wrapped_row_offset
+    }
+
+    pub fn set_wrapped_row_offset(&mut self, offset: u16) {
+        self.wrapped_row_offset = offset;
     }
 
     pub fn cursor(&self) -> Cursor {
@@ -337,18 +348,22 @@ impl BufferView {
     }
 
     pub fn scroll_to_cursor(&mut self, viewport_size: Size, gutter_width: u16) {
-        self.scroll_to_cursor_with_wrap(viewport_size, gutter_width, false);
+        self.scroll_to_cursor_with_wrap(viewport_size, gutter_width, false, WrapMode::Hard);
     }
 
     /// Scrolls the viewport to keep the cursor visible.
     ///
-    /// When wrapping is enabled, horizontal scrolling is disabled and the
-    /// viewport tracks cursor visibility by logical line.
+    /// In non-wrapped mode, vertical and horizontal scrolling are based on
+    /// logical buffer lines and visual columns.
+    ///
+    /// In wrapped mode, horizontal scrolling is disabled and vertical scrolling
+    /// is driven by wrapped visual rows.
     pub fn scroll_to_cursor_with_wrap(
         &mut self,
         viewport_size: Size,
         gutter_width: u16,
         wrap_enabled: bool,
+        wrap_mode: WrapMode,
     ) {
         let cursor = self.cursor;
         let Some((buffer_line_count, cursor_visual_col, line_width)) = self.with_buffer(|buffer| {
@@ -369,6 +384,32 @@ impl BufferView {
 
         let visible_rows = viewport_size.rows as usize;
         let visible_cols = viewport_size.cols.saturating_sub(gutter_width) as usize;
+        let (effective_vertical_margin, effective_horizontal_margin) =
+            Self::effective_scroll_margins(visible_rows, visible_cols);
+        self.scroll_offset.row = Self::offset_to_keep_target_visible(
+            self.scroll_offset.row as usize,
+            cursor.line,
+            visible_rows,
+            effective_vertical_margin,
+            buffer_line_count,
+        ) as u16;
+
+        if wrap_enabled {
+            self.scroll_to_cursor_wrapped(viewport_size, gutter_width, wrap_mode);
+            return;
+        }
+
+        self.wrapped_row_offset = self.scroll_offset.row;
+        self.scroll_offset.col = Self::offset_to_keep_target_visible(
+            self.scroll_offset.col as usize,
+            cursor_visual_col,
+            visible_cols,
+            effective_horizontal_margin,
+            line_width,
+        ) as u16;
+    }
+
+    fn effective_scroll_margins(visible_rows: usize, visible_cols: usize) -> (usize, usize) {
         let scroll_margin = crate::globals::with_config(|config| config.scroll_margin)
             .unwrap_or_else(ScrollMargin::default);
         let effective_vertical_margin = scroll_margin
@@ -377,51 +418,152 @@ impl BufferView {
         let effective_horizontal_margin = scroll_margin
             .horizontal
             .min(visible_cols.saturating_sub(1) / 2);
+        (effective_vertical_margin, effective_horizontal_margin)
+    }
 
-        let scroll_row = self.scroll_offset.row as usize;
-        let min_visible_row = scroll_row.saturating_add(effective_vertical_margin);
-        let max_visible_row = scroll_row
-            .saturating_add(visible_rows.saturating_sub(1))
-            .saturating_sub(effective_vertical_margin);
-        if cursor.line < min_visible_row {
-            self.scroll_offset.row = cursor.line.saturating_sub(effective_vertical_margin) as u16;
-        } else if cursor.line > max_visible_row {
-            self.scroll_offset.row = cursor
-                .line
-                .saturating_add(effective_vertical_margin)
+    fn offset_to_keep_target_visible(
+        current_offset: usize,
+        target: usize,
+        visible_extent: usize,
+        margin: usize,
+        total_extent: usize,
+    ) -> usize {
+        let min_visible = current_offset.saturating_add(margin);
+        let max_visible = current_offset
+            .saturating_add(visible_extent.saturating_sub(1))
+            .saturating_sub(margin);
+        let mut next_offset = current_offset;
+        if target < min_visible {
+            next_offset = target.saturating_sub(margin);
+        } else if target > max_visible {
+            next_offset = target
+                .saturating_add(margin)
                 .saturating_add(1)
-                .saturating_sub(visible_rows) as u16;
+                .saturating_sub(visible_extent);
         }
 
-        let max_row = buffer_line_count.saturating_sub(visible_rows);
-        if self.scroll_offset.row as usize > max_row {
-            self.scroll_offset.row = max_row as u16;
-        }
+        let max_offset = total_extent.saturating_sub(visible_extent);
+        next_offset.min(max_offset)
+    }
 
-        if wrap_enabled {
+    fn scroll_to_cursor_wrapped(
+        &mut self,
+        viewport_size: Size,
+        gutter_width: u16,
+        wrap_mode: WrapMode,
+    ) {
+        let visible_rows = viewport_size.rows as usize;
+        let visible_cols = viewport_size.cols.saturating_sub(gutter_width) as usize;
+        if visible_rows == 0 || visible_cols == 0 {
+            self.wrapped_row_offset = 0;
             self.scroll_offset.col = 0;
             return;
         }
 
-        let scroll_col = self.scroll_offset.col as usize;
-        let min_visible_col = scroll_col.saturating_add(effective_horizontal_margin);
-        let max_visible_col = scroll_col
-            .saturating_add(visible_cols.saturating_sub(1))
-            .saturating_sub(effective_horizontal_margin);
-        if cursor_visual_col < min_visible_col {
-            self.scroll_offset.col =
-                cursor_visual_col.saturating_sub(effective_horizontal_margin) as u16;
-        } else if cursor_visual_col > max_visible_col {
-            self.scroll_offset.col = cursor_visual_col
-                .saturating_add(effective_horizontal_margin)
-                .saturating_add(1)
-                .saturating_sub(visible_cols) as u16;
-        }
+        let (effective_vertical_margin, _) =
+            Self::effective_scroll_margins(visible_rows, visible_cols);
+        let Some((cursor_wrapped_row, total_wrapped_rows)) =
+            self.wrapped_cursor_row_and_total_rows(visible_cols, wrap_mode)
+        else {
+            self.wrapped_row_offset = 0;
+            self.scroll_offset.col = 0;
+            return;
+        };
+        let wrapped_row = Self::offset_to_keep_target_visible(
+            self.wrapped_row_offset as usize,
+            cursor_wrapped_row,
+            visible_rows,
+            effective_vertical_margin,
+            total_wrapped_rows,
+        );
 
-        let max_col = line_width.saturating_sub(visible_cols);
-        if self.scroll_offset.col as usize > max_col {
-            self.scroll_offset.col = max_col as u16;
+        // Components like gutter/layout still consume logical `scroll_offset.row`.
+        // We therefore project the wrapped top row back to its owning logical line,
+        // while preserving wrapped precision in `wrapped_row_offset`.
+        let top_wrapped_line = self
+            .logical_line_for_wrapped_row(wrapped_row, visible_cols, wrap_mode)
+            .unwrap_or(0);
+        self.wrapped_row_offset = wrapped_row as u16;
+        self.scroll_offset.row = top_wrapped_line as u16;
+        self.scroll_offset.col = 0;
+    }
+
+    fn wrapped_cursor_row_and_total_rows(
+        &self,
+        visible_cols: usize,
+        wrap_mode: WrapMode,
+    ) -> Option<(usize, usize)> {
+        let cursor = self.cursor;
+        self.with_buffer(|buffer| {
+            let mut total_rows = 0usize;
+            let mut cursor_row = 0usize;
+
+            for line_idx in 0..buffer.line_count() {
+                let line_text = buffer
+                    .line_at(line_idx)
+                    .map(|line| line.as_ref())
+                    .unwrap_or("");
+                let segments = Self::wrap_segments_for_line(line_text, visible_cols, wrap_mode);
+                let segment_count = segments.len().max(1);
+
+                if line_idx == cursor.line {
+                    let segment_idx = Self::wrapped_segment_index_for_cursor(&segments, cursor.col);
+                    cursor_row = total_rows + segment_idx;
+                }
+
+                total_rows += segment_count;
+            }
+            (cursor_row, total_rows.max(1))
+        })
+    }
+
+    fn wrapped_segment_index_for_cursor(
+        segments: &[WrappedLineSegment],
+        cursor_col: usize,
+    ) -> usize {
+        let mut segment_idx = segments.len().saturating_sub(1);
+        for (idx, segment) in segments.iter().enumerate() {
+            if cursor_col < segment.start_byte || cursor_col > segment.end_byte {
+                continue;
+            }
+            // At an exact segment boundary, prefer the continuation segment so
+            // end-of-segment cursors display on the next visual row.
+            if cursor_col == segment.end_byte
+                && let Some(next) = segments.get(idx + 1)
+                && next.start_byte == cursor_col
+            {
+                continue;
+            }
+            segment_idx = idx;
+            break;
         }
+        segment_idx
+    }
+
+    fn logical_line_for_wrapped_row(
+        &self,
+        wrapped_row: usize,
+        visible_cols: usize,
+        wrap_mode: WrapMode,
+    ) -> Option<usize> {
+        self.with_buffer(|buffer| {
+            let mut accumulated_rows = 0usize;
+            for line_idx in 0..buffer.line_count() {
+                let line_text = buffer
+                    .line_at(line_idx)
+                    .map(|line| line.as_ref())
+                    .unwrap_or("");
+                let segment_count =
+                    Self::wrap_segments_for_line(line_text, visible_cols, wrap_mode)
+                        .len()
+                        .max(1);
+                if accumulated_rows + segment_count > wrapped_row {
+                    return line_idx;
+                }
+                accumulated_rows += segment_count;
+            }
+            buffer.line_count().saturating_sub(1)
+        })
     }
 
     pub fn build_render_data(&self, size: Size) -> RenderData {
@@ -460,7 +602,7 @@ impl BufferView {
         };
         let _applied = self.with_buffer_mut(|buffer| {
             let start_line = self.scroll_offset.row as usize;
-            let row_limit = size.rows as usize + 512;
+            let row_limit = size.rows as usize + 32;
             let mut rendered_rows = 0usize;
             let horizontal_offset = self.scroll_offset.col as usize;
 
@@ -470,7 +612,12 @@ impl BufferView {
                 buffer.request_syntax_catch_up(self.buffer_id());
             }
 
-            let mut buffer_line_idx = start_line;
+            let mut buffer_line_idx = if wrap_enabled { 0 } else { start_line };
+            let mut rows_to_skip = if wrap_enabled {
+                self.wrapped_row_offset as usize
+            } else {
+                0
+            };
             loop {
                 if let Some(line_text) = buffer.line_at(buffer_line_idx).cloned() {
                     let line_text = line_text.as_ref();
@@ -484,7 +631,12 @@ impl BufferView {
                     if wrap_enabled {
                         let segments =
                             Self::wrap_segments_for_line(line_text, size.cols as usize, wrap_mode);
-                        for segment in segments {
+                        if rows_to_skip >= segments.len() {
+                            rows_to_skip -= segments.len();
+                            buffer_line_idx += 1;
+                            continue;
+                        }
+                        for segment in segments.into_iter().skip(rows_to_skip) {
                             let visible_text = &line_text[segment.start_byte..segment.end_byte];
                             let chunks = Self::build_chunks_for_visible_line(
                                 line_text,
@@ -506,7 +658,11 @@ impl BufferView {
                             };
                             render_data.line_data.push(line_data);
                             rendered_rows += 1;
+                            if rendered_rows >= row_limit {
+                                break;
+                            }
                         }
+                        rows_to_skip = 0;
                     } else {
                         let (byte_offset, width_offset, visible_text) =
                             Self::calculate_horizontal_offset(line_text, horizontal_offset);
