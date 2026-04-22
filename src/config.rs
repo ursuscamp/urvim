@@ -68,6 +68,17 @@ pub enum AutoIndentMode {
     Neighbor,
 }
 
+/// How long logical lines should be wrapped when visual wrapping is enabled.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum WrapMode {
+    /// Break at the exact render width.
+    #[default]
+    Hard,
+    /// Prefer the nearest word boundary at or before the render width.
+    Soft,
+}
+
 /// The resolved default register selectors used by yank, delete, and change.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DefaultRegisters {
@@ -165,6 +176,8 @@ pub struct Config {
     pub tab_width: usize,
     /// Visual scroll margins that trigger viewport movement before edge crossing.
     pub scroll_margin: ScrollMargin,
+    /// How visual line wrapping should break lines when enabled per window.
+    pub wrap_mode: WrapMode,
 }
 
 /// The TOML-backed config file schema.
@@ -199,6 +212,8 @@ pub struct PartialConfig {
     pub tab_width: Option<usize>,
     /// The visual scroll margin table stored in the config file.
     pub scroll_margin: Option<PartialScrollMargin>,
+    /// The wrap strategy stored in the config file.
+    pub wrap_mode: Option<WrapMode>,
 }
 
 /// Errors that can occur while loading or resolving startup configuration.
@@ -287,6 +302,7 @@ impl Config {
             .unwrap_or(DEFAULT_TAB_WIDTH);
         let scroll_margin =
             resolve_scroll_margin(file.and_then(|config| config.scroll_margin.as_ref()));
+        let wrap_mode = file.and_then(|config| config.wrap_mode).unwrap_or_default();
 
         Self {
             theme,
@@ -303,6 +319,7 @@ impl Config {
             tab_behavior,
             tab_width,
             scroll_margin,
+            wrap_mode,
         }
     }
 
@@ -350,6 +367,7 @@ impl Default for Config {
             tab_behavior: TabBehavior::default(),
             tab_width: DEFAULT_TAB_WIDTH,
             scroll_margin: ScrollMargin::default(),
+            wrap_mode: WrapMode::default(),
         }
     }
 }
@@ -652,6 +670,7 @@ mod tests {
                 vertical: Some(8),
                 horizontal: Some(6),
             }),
+            wrap_mode: Some(WrapMode::Soft),
             ..Default::default()
         };
 
@@ -721,12 +740,17 @@ mod tests {
             Config::resolve(None, None, None).scroll_margin,
             ScrollMargin::default()
         );
+        assert_eq!(Config::resolve(None, None, None).wrap_mode, WrapMode::Hard);
         assert_eq!(
             Config::resolve(Some(&file), None, None).scroll_margin,
             ScrollMargin {
                 vertical: 8,
                 horizontal: 6
             }
+        );
+        assert_eq!(
+            Config::resolve(Some(&file), None, None).wrap_mode,
+            WrapMode::Soft
         );
         assert_eq!(
             Config::resolve(Some(&file), None, None).advanced_glyphs,
@@ -991,6 +1015,38 @@ mod tests {
         let config = Config::load_from_locations(home, vec![], None, None).expect("should load");
 
         assert_eq!(config.scroll_margin, ScrollMargin::default());
+    }
+
+    #[test]
+    fn load_from_locations_loads_wrap_mode() {
+        let home = unique_temp_dir("wrap-mode-home");
+        write_config(&home, "wrap_mode = \"soft\"");
+
+        let config = Config::load_from_locations(home, vec![], None, None).expect("should load");
+
+        assert_eq!(config.wrap_mode, WrapMode::Soft);
+    }
+
+    #[test]
+    fn load_from_locations_defaults_wrap_mode_to_hard() {
+        let home = unique_temp_dir("wrap-mode-default-home");
+
+        let config = Config::load_from_locations(home, vec![], None, None).expect("should load");
+
+        assert_eq!(config.wrap_mode, WrapMode::Hard);
+    }
+
+    #[test]
+    fn load_from_locations_rejects_invalid_wrap_mode() {
+        let home = unique_temp_dir("wrap-mode-invalid-home");
+        write_config(&home, "wrap_mode = \"word\"");
+
+        let error = Config::load_from_locations(home, vec![], None, None).expect_err("should fail");
+
+        match error {
+            ConfigLoadError::Parse { .. } => {}
+            other => panic!("expected parse error, got {other:?}"),
+        }
     }
 
     #[test]

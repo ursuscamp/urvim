@@ -2,7 +2,7 @@ use super::*;
 use crate::action::ActionResult;
 use crate::buffer::{BufferId, Cursor};
 use crate::config::{
-    AdvancedGlyphCapability, AutoIndentMode, Config, DefaultRegisters, ScrollMargin,
+    AdvancedGlyphCapability, AutoIndentMode, Config, DefaultRegisters, ScrollMargin, WrapMode,
 };
 use crate::editor::{Action, ActionKind, BoundaryMotion, BracketKind, LinewiseMotion, ModeKind};
 use crate::editor::{Operator, OperatorTarget, QuoteKind, TextObject};
@@ -1853,6 +1853,131 @@ fn test_window_visual_cursor_with_gutter() {
     // The cursor is at column 2 in the content, plus 3 for gutter = column 5
     let gutter_width = 3; // digits(3) + 2 = 3
     assert_eq!(pos.col, 2 + gutter_width);
+}
+
+#[test]
+fn test_toggle_wrap_action_toggles_window_state() {
+    let mut window = Window::new(Buffer::from_str("line"));
+    assert!(!window.wrap_enabled());
+
+    assert_eq!(
+        window.process_action(&Action::new(ActionKind::ToggleWrap)),
+        ActionResult::Handled
+    );
+    assert!(window.wrap_enabled());
+
+    assert_eq!(
+        window.process_action(&Action::new(ActionKind::ToggleWrap)),
+        ActionResult::Handled
+    );
+    assert!(!window.wrap_enabled());
+}
+
+#[test]
+fn test_build_render_data_wraps_hard_mode() {
+    let view = BufferView::new(Buffer::from_str("abcdefgh"));
+    let render_data = view.build_render_data_with_options(
+        Size::new(3, 4),
+        Style::default(),
+        true,
+        WrapMode::Hard,
+    );
+
+    assert_eq!(render_data.line_count(), 2);
+    assert_eq!(render_data.get_line(0).unwrap()[0].text, "abcd");
+    assert_eq!(render_data.get_line(1).unwrap()[0].text, "efgh");
+}
+
+#[test]
+fn test_build_render_data_wraps_soft_mode_at_word_boundary() {
+    let view = BufferView::new(Buffer::from_str("hello world"));
+    let render_data = view.build_render_data_with_options(
+        Size::new(3, 6),
+        Style::default(),
+        true,
+        WrapMode::Soft,
+    );
+
+    assert_eq!(render_data.line_count(), 2);
+    assert_eq!(render_data.get_line(0).unwrap()[0].text, "hello ");
+    assert_eq!(render_data.get_line(1).unwrap()[0].text, "world");
+}
+
+#[test]
+fn test_build_render_data_soft_wrap_falls_back_to_hard_break() {
+    let view = BufferView::new(Buffer::from_str("superlongword"));
+    let render_data = view.build_render_data_with_options(
+        Size::new(4, 4),
+        Style::default(),
+        true,
+        WrapMode::Soft,
+    );
+
+    assert_eq!(render_data.get_line(0).unwrap()[0].text, "supe");
+    assert_eq!(render_data.get_line(1).unwrap()[0].text, "rlon");
+}
+
+#[test]
+fn test_window_render_hides_gutter_line_number_on_wrapped_continuation() {
+    let _config_guard = globals::set_test_config(Config {
+        wrap_mode: WrapMode::Hard,
+        ..Default::default()
+    });
+    let mut window = Window::new(Buffer::from_str("abcdefghij"));
+    window.set_wrap_enabled(true);
+    let mut screen = crate::screen::Screen::new(2, 9);
+
+    window.render(&mut screen, Position::new(0, 0), Size::new(2, 9));
+
+    assert_eq!(screen.get_cell_mut(0, 1).unwrap().text, "1");
+    assert_eq!(screen.get_cell_mut(1, 1).unwrap().text, " ");
+}
+
+#[test]
+fn test_window_visual_cursor_maps_to_wrapped_continuation_row() {
+    let _config_guard = globals::set_test_config(Config {
+        wrap_mode: WrapMode::Hard,
+        ..Default::default()
+    });
+    let mut window = Window::new(Buffer::from_str("abcdefghi"));
+    window.set_wrap_enabled(true);
+    window.set_cursor(Cursor::new(0, 5));
+    let mut screen = crate::screen::Screen::new(3, 7);
+
+    window.render(&mut screen, Position::new(0, 0), Size::new(3, 7));
+
+    let cursor = window.visual_cursor().expect("cursor should be visible");
+    assert_eq!(cursor.row, 1);
+    assert_eq!(cursor.col, 4);
+}
+
+#[test]
+fn test_vertical_motions_remain_logical_lines_when_wrapping_is_enabled() {
+    let _config_guard = globals::set_test_config(Config {
+        wrap_mode: WrapMode::Hard,
+        ..Default::default()
+    });
+    let mut window = Window::new(Buffer::from_str("abcdefghij\nxy\nklmnop"));
+    window.set_wrap_enabled(true);
+    window.set_cursor(Cursor::new(0, 6));
+
+    assert_eq!(
+        window.process_action(&Action::new(ActionKind::MoveDown)),
+        ActionResult::Handled
+    );
+    assert_eq!(window.buffer_view().cursor().line, 1);
+
+    assert_eq!(
+        window.process_action(&Action::new(ActionKind::MoveDown)),
+        ActionResult::Handled
+    );
+    assert_eq!(window.buffer_view().cursor().line, 2);
+
+    assert_eq!(
+        window.process_action(&Action::new(ActionKind::MoveUp)),
+        ActionResult::Handled
+    );
+    assert_eq!(window.buffer_view().cursor().line, 1);
 }
 
 #[test]

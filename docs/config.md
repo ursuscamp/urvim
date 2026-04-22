@@ -23,7 +23,7 @@ Command-line flags override config file values.
 
 ## Current Schema
 
-The canonical config values are `theme`, `insert_escape`, `default_registers`, `syntax`, `todo_markers`, `auto_close_pairs`, `active_line`, `indent_guides`, `auto_indent`, `advanced_glyphs`, `tab_insertion`, `tab_behavior`, `tab_width`, and `scroll_margin`.
+The canonical config values are `theme`, `insert_escape`, `default_registers`, `syntax`, `todo_markers`, `auto_close_pairs`, `active_line`, `indent_guides`, `auto_indent`, `advanced_glyphs`, `tab_insertion`, `tab_behavior`, `tab_width`, `scroll_margin`, and `wrap_mode`.
 
 ```toml
 theme = "Friday Night"
@@ -40,6 +40,7 @@ tab_insertion = "spaces"
 tab_behavior = "simple"
 tab_width = 4
 scroll_margin = { vertical = 5, horizontal = 5 }
+wrap_mode = "hard"
 ```
 
 ### `theme`
@@ -177,6 +178,16 @@ Sets the visual margin bands near viewport edges that trigger scrolling before e
 - Default: `{ vertical = 5, horizontal = 5 }`
 - Behavior: vertical scrolling starts once the cursor enters the top/bottom margin bands; horizontal scrolling starts once the cursor enters the left/right margin bands
 - Small viewport behavior: effective margins automatically clamp down when the viewport is too small to satisfy configured values
+
+### `wrap_mode`
+
+Sets how long logical lines break when visual wrapping is enabled for a window.
+
+- Type: string enum
+- Default: `"hard"`
+- Supported values: `hard`, `soft`
+- Behavior: `hard` wraps at the exact content width; `soft` wraps at the nearest word boundary at or before the content width, and falls back to a hard split when no boundary exists
+- Scope: wrapped window rendering only (wrapping is toggled per window)
 
 ## Notes
 

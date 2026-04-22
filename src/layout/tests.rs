@@ -97,6 +97,13 @@ fn pane_buffer_view(node: &LayoutNode) -> &crate::window::BufferView {
     }
 }
 
+fn pane_window(node: &LayoutNode) -> &crate::window::Window {
+    match node {
+        LayoutNode::Pane(pane) => pane.window_group.active_window(),
+        LayoutNode::Split(_) => panic!("expected pane"),
+    }
+}
+
 fn pane_count(node: &LayoutNode) -> usize {
     match node {
         LayoutNode::Pane(_) => 1,
@@ -214,6 +221,10 @@ fn test_layout_split_copies_active_buffer_view_state() {
     layout
         .active_buffer_view_mut()
         .set_scroll_offset(source_scroll);
+    layout
+        .active_window_group_mut()
+        .active_window_mut()
+        .set_wrap_enabled(true);
 
     let source_buffer_id = layout.active_buffer_view().buffer_id();
 
@@ -226,6 +237,7 @@ fn test_layout_split_copies_active_buffer_view_state() {
     assert_eq!(layout.active_buffer_view().buffer_id(), source_buffer_id);
     assert_eq!(layout.active_buffer_view().cursor(), source_cursor);
     assert_eq!(layout.active_buffer_view().scroll_offset(), source_scroll);
+    assert!(layout.active_window_group().active_window().wrap_enabled());
 
     let root = layout.root.as_ref().expect("layout should keep a root");
     match root {
@@ -239,6 +251,32 @@ fn test_layout_split_copies_active_buffer_view_state() {
             assert_eq!(copied.buffer_id(), source_buffer_id);
             assert_eq!(copied.cursor(), source_cursor);
             assert_eq!(copied.scroll_offset(), source_scroll);
+            assert!(pane_window(&split.first).wrap_enabled());
+            assert!(pane_window(&split.second).wrap_enabled());
+        }
+        LayoutNode::Pane(_) => panic!("split action should replace the root pane"),
+    }
+}
+
+#[test]
+fn test_layout_wrap_toggle_is_window_local() {
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("one\ntwo")]);
+    assert_eq!(
+        layout.process_action(&Action::new(ActionKind::SplitVertical)),
+        ActionResult::Handled
+    );
+    assert!(!layout.active_window_group().active_window().wrap_enabled());
+
+    assert_eq!(
+        layout.process_action(&Action::new(ActionKind::ToggleWrap)),
+        ActionResult::Handled
+    );
+    assert!(layout.active_window_group().active_window().wrap_enabled());
+    let root = layout.root.as_ref().expect("layout should keep a root");
+    match root {
+        LayoutNode::Split(split) => {
+            assert!(!pane_window(&split.first).wrap_enabled());
+            assert!(pane_window(&split.second).wrap_enabled());
         }
         LayoutNode::Pane(_) => panic!("split action should replace the root pane"),
     }

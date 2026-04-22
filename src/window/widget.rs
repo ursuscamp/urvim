@@ -446,6 +446,10 @@ impl Widget for Window {
                     }
                     ActionResult::Handled
                 }
+                Some(ActionKind::ToggleWrap) => {
+                    self.toggle_wrap();
+                    ActionResult::Handled
+                }
                 Some(ActionKind::MoveToPreviousParagraph) => {
                     self.move_cursor_to_previous_paragraph();
                     ActionResult::Handled

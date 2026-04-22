@@ -82,24 +82,34 @@ impl RenderData {
     pub fn cursor_screen_position(&self, cursor: Cursor) -> Option<Position> {
         let tab_width = configured_tab_width();
         for (screen_row, line_data) in self.line_data.iter().enumerate() {
-            if line_data.buffer_line == cursor.line {
-                let mut visual_col = 0;
-                let mut byte_pos = line_data.byte_offset;
-
-                for chunk in &line_data.chunks {
-                    let mut chunk_byte_pos = 0;
-                    for grapheme in chunk.text.graphemes(true) {
-                        if byte_pos + chunk_byte_pos >= cursor.col {
-                            break;
-                        }
-                        visual_col += display_grapheme_width(grapheme, visual_col, tab_width);
-                        chunk_byte_pos += grapheme.len();
-                    }
-                    byte_pos += chunk.text.len();
-                }
-
-                return Some(Position::new(screen_row as u16, visual_col as u16));
+            if line_data.buffer_line != cursor.line || cursor.col < line_data.byte_offset {
+                continue;
             }
+            if cursor.col > line_data.end_byte {
+                continue;
+            }
+            if cursor.col == line_data.end_byte
+                && let Some(next_line_data) = self.line_data.get(screen_row + 1)
+                && next_line_data.buffer_line == cursor.line
+                && next_line_data.byte_offset == cursor.col
+            {
+                continue;
+            }
+
+            let mut visual_col = 0;
+            let mut byte_pos = line_data.byte_offset;
+            for chunk in &line_data.chunks {
+                let mut chunk_byte_pos = 0;
+                for grapheme in chunk.text.graphemes(true) {
+                    if byte_pos + chunk_byte_pos >= cursor.col {
+                        break;
+                    }
+                    visual_col += display_grapheme_width(grapheme, visual_col, tab_width);
+                    chunk_byte_pos += grapheme.len();
+                }
+                byte_pos += chunk.text.len();
+            }
+            return Some(Position::new(screen_row as u16, visual_col as u16));
         }
         None
     }

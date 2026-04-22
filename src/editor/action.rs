@@ -179,6 +179,8 @@ pub enum ActionKind {
     ResizePaneDown,
     /// Equalize all split ratios in the layout.
     EqualizeSplits,
+    /// Toggle visual wrapping for the focused window.
+    ToggleWrap,
     /// Split the focused pane vertically.
     SplitVertical,
     /// Split the focused pane horizontally.

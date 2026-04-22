@@ -12,6 +12,7 @@ mod motions;
 mod render;
 mod view;
 mod widget;
+mod wrap;
 
 use crate::action::ActionResult;
 use crate::buffer::{Boundary, Buffer, BufferId, Cursor};
@@ -58,8 +59,6 @@ pub struct Gutter {
     visible_rows: u16,
     /// Total number of lines in the buffer (for width calculation)
     total_buffer_lines: usize,
-    /// Last rendered buffer line number (for wrapping detection)
-    last_buffer_line: Option<usize>,
     /// Resolved style for the gutter.
     style: Style,
 }
@@ -74,7 +73,9 @@ pub struct RenderChunk {
 pub struct LineData {
     pub buffer_line: usize,
     pub byte_offset: usize,
+    pub end_byte: usize,
     pub width_offset: usize,
+    pub show_gutter_line_number: bool,
     /// Extra base style applied before this line's chunks are rendered.
     pub base_style: Style,
     pub chunks: Vec<RenderChunk>,
@@ -137,6 +138,7 @@ pub struct Window {
     buffer_view: BufferView,
     render_data: RenderData,
     size: Size,
+    wrap_enabled: bool,
     pending_repeat_suffix: Option<String>,
     mode: Box<dyn Mode>,
 }
@@ -147,6 +149,7 @@ impl fmt::Debug for Window {
             .field("buffer_view", &self.buffer_view)
             .field("render_data", &self.render_data)
             .field("size", &self.size)
+            .field("wrap_enabled", &self.wrap_enabled)
             .field("pending_repeat_suffix", &self.pending_repeat_suffix)
             .field("mode_kind", &self.mode.kind())
             .finish()
@@ -162,6 +165,7 @@ impl Window {
             buffer_view,
             render_data: RenderData::new(0),
             size: Size::default(),
+            wrap_enabled: false,
             pending_repeat_suffix: None,
             mode: Box::new(NormalMode::new()),
         }
@@ -173,6 +177,7 @@ impl Window {
             buffer_view: BufferView::from_buffer_id(buffer_id),
             render_data: RenderData::new(0),
             size: Size::default(),
+            wrap_enabled: false,
             pending_repeat_suffix: None,
             mode: Box::new(NormalMode::new()),
         }
@@ -188,6 +193,21 @@ impl Window {
 
     pub fn size(&self) -> Size {
         self.size
+    }
+
+    /// Returns whether visual wrapping is enabled for this window.
+    pub fn wrap_enabled(&self) -> bool {
+        self.wrap_enabled
+    }
+
+    /// Enables or disables visual wrapping for this window.
+    pub fn set_wrap_enabled(&mut self, enabled: bool) {
+        self.wrap_enabled = enabled;
+    }
+
+    /// Toggles visual wrapping for this window.
+    pub fn toggle_wrap(&mut self) {
+        self.wrap_enabled = !self.wrap_enabled;
     }
 
     pub fn render_data(&self) -> &RenderData {
@@ -276,17 +296,16 @@ impl Window {
         let total_lines = self.buffer_view.line_count();
         let gutter_width =
             Gutter::new_with_style(0, size.rows, total_lines, gutter_style).calculate_width();
+        let wrap_mode = globals::with_config(|config| config.wrap_mode).unwrap_or_default();
 
         // Resolve scrolling before building the gutter so line numbers and
         // visible content are derived from the same viewport.
-        self.buffer_view.scroll_to_cursor(size, gutter_width);
+        self.buffer_view
+            .scroll_to_cursor_with_wrap(size, gutter_width, self.wrap_enabled);
         let start_line = self.buffer_view.scroll_offset().row as usize;
 
         // Create gutter with the finalized viewport state.
         let mut gutter = Gutter::new_with_style(start_line, size.rows, total_lines, gutter_style);
-
-        // Render gutter at origin position
-        gutter.render(screen, origin);
 
         // Render buffer content offset by gutter width
         let content_origin = Position::new(origin.row, origin.col + gutter_width);
@@ -299,9 +318,13 @@ impl Window {
             default_style,
         );
 
-        self.render_data = self
-            .buffer_view
-            .build_render_data_with_style(content_size, default_style);
+        self.render_data = self.buffer_view.build_render_data_with_options(
+            content_size,
+            default_style,
+            self.wrap_enabled,
+            wrap_mode,
+        );
+        gutter.render_for_render_data(screen, origin, &self.render_data);
         let active_line_enabled =
             globals::with_config(|config| config.active_line).unwrap_or(false);
         let is_normal_mode = self.mode.kind() == ModeKind::Normal;

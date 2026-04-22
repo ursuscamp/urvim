@@ -140,6 +140,7 @@ fn register_window_bindings(trie_keymap: &mut TrieKeymap) {
     trie_keymap.insert_str("<C-w>l", Action::new(ActionKind::FocusPaneRight));
     trie_keymap.insert_str("<C-w>q", Action::new(ActionKind::ClosePane));
     trie_keymap.insert_str("<C-w>=", Action::new(ActionKind::EqualizeSplits));
+    trie_keymap.insert_str("<C-w>w", Action::new(ActionKind::ToggleWrap));
     trie_keymap.insert_str("<C-w>r", Action::mode_transition(ModeKind::Resizing));
 }
 

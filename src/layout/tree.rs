@@ -82,12 +82,15 @@ impl Layout {
                 let buffer_id = buffer_view.buffer_id();
                 let cursor = buffer_view.cursor();
                 let scroll_offset = buffer_view.scroll_offset();
+                let wrap_enabled = pane.window_group.active_window().wrap_enabled();
 
                 let mut window_group = WindowGroup::new(vec![Window::from_buffer_id(buffer_id)]);
                 {
-                    let view = window_group.active_window_mut().buffer_view_mut();
+                    let window = window_group.active_window_mut();
+                    let view = window.buffer_view_mut();
                     view.set_scroll_offset(scroll_offset);
                     view.set_cursor(cursor);
+                    window.set_wrap_enabled(wrap_enabled);
                 }
 
                 (

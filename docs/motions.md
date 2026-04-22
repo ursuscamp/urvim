@@ -38,6 +38,7 @@ Register behavior is documented separately in [docs/registers.md](docs/registers
 | `Ctrl-W j` | Move focus to the pane below |
 | `Ctrl-W k` | Move focus to the pane above |
 | `Ctrl-W l` | Move focus to the pane on the right |
+| `Ctrl-W w` | Toggle visual wrapping in the focused pane |
 | `Ctrl-W r` | Enter resize mode |
 | `Ctrl-W q` | Close the current pane |
 | `Ctrl-W =` | Equalize all splits |
@@ -50,7 +51,7 @@ Register behavior is documented separately in [docs/registers.md](docs/registers
 | `gJ` | Join lines without space |
 | `gcc` | Toggle line comment on the current line (or N consecutive lines with a count) |
 | `<<` | Decrease indentation on the current line (or N consecutive lines with a count) |
-| `>>` | Increase indentation on the current line (or N consecutive lines with a count) |
+| `\>>` | Increase indentation on the current line (or N consecutive lines with a count) |
 | `dd` | Delete line (or N lines with count) |
 | `cc` | Change line: delete line(s) and enter insert mode, leaving one blank line |
 | `C` | Change to end of line: delete from cursor to EOL and enter insert mode |
@@ -176,6 +177,16 @@ Closes the current pane. If that removes one child from a split, the surviving s
 
 - **Count**: No
 - **Vim difference**: If the final pane is closed, urvim exits the editor.
+
+### Ctrl-W w - Toggle Visual Wrap
+
+Toggles visual wrapping for the focused pane.
+
+- **Count**: No
+- **Behavior**: when enabled, long logical lines render across multiple visual rows in that pane only
+- **Behavior**: gutter line numbers are shown once per logical line (on the first wrapped row)
+- **Behavior**: logical motions (`h`, `j`, `k`, `l`, `w`, `e`, and related motions) remain buffer-line based
+- **Default**: wrapping starts off for new panes/windows
 
 ### Ctrl-W = - Equalize Splits
 

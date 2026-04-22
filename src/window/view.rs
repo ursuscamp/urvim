@@ -2,6 +2,7 @@ use super::*;
 use crate::buffer::BufferId;
 use crate::buffer::{configured_tab_width, display_grapheme_width, display_width_at};
 use crate::config::ScrollMargin;
+use crate::config::WrapMode;
 use crate::theme::Tag;
 use imbl::Vector;
 use smol_str::SmolStr;
@@ -336,6 +337,19 @@ impl BufferView {
     }
 
     pub fn scroll_to_cursor(&mut self, viewport_size: Size, gutter_width: u16) {
+        self.scroll_to_cursor_with_wrap(viewport_size, gutter_width, false);
+    }
+
+    /// Scrolls the viewport to keep the cursor visible.
+    ///
+    /// When wrapping is enabled, horizontal scrolling is disabled and the
+    /// viewport tracks cursor visibility by logical line.
+    pub fn scroll_to_cursor_with_wrap(
+        &mut self,
+        viewport_size: Size,
+        gutter_width: u16,
+        wrap_enabled: bool,
+    ) {
         let cursor = self.cursor;
         let Some((buffer_line_count, cursor_visual_col, line_width)) = self.with_buffer(|buffer| {
             (
@@ -384,6 +398,11 @@ impl BufferView {
             self.scroll_offset.row = max_row as u16;
         }
 
+        if wrap_enabled {
+            self.scroll_offset.col = 0;
+            return;
+        }
+
         let scroll_col = self.scroll_offset.col as usize;
         let min_visible_col = scroll_col.saturating_add(effective_horizontal_margin);
         let max_visible_col = scroll_col
@@ -411,6 +430,18 @@ impl BufferView {
 
     /// Builds render data for the visible buffer region using a base style.
     pub fn build_render_data_with_style(&self, size: Size, default_style: Style) -> RenderData {
+        self.build_render_data_with_options(size, default_style, false, WrapMode::Hard)
+    }
+
+    /// Builds render data for the visible buffer region using a base style and
+    /// optional visual wrapping.
+    pub fn build_render_data_with_options(
+        &self,
+        size: Size,
+        default_style: Style,
+        wrap_enabled: bool,
+        wrap_mode: WrapMode,
+    ) -> RenderData {
         if size.rows == 0 || size.cols == 0 {
             return RenderData::new(0);
         }
@@ -429,7 +460,8 @@ impl BufferView {
         };
         let _applied = self.with_buffer_mut(|buffer| {
             let start_line = self.scroll_offset.row as usize;
-            let total_lines_needed = size.rows as usize + 10;
+            let row_limit = size.rows as usize + 512;
+            let mut rendered_rows = 0usize;
             let horizontal_offset = self.scroll_offset.col as usize;
 
             if syntax_enabled {
@@ -438,12 +470,10 @@ impl BufferView {
                 buffer.request_syntax_catch_up(self.buffer_id());
             }
 
-            for screen_line in 0..total_lines_needed {
-                let buffer_line_idx = start_line + screen_line;
+            let mut buffer_line_idx = start_line;
+            loop {
                 if let Some(line_text) = buffer.line_at(buffer_line_idx).cloned() {
                     let line_text = line_text.as_ref();
-                    let (byte_offset, width_offset, visible_text) =
-                        Self::calculate_horizontal_offset(line_text, horizontal_offset);
                     let syntax_spans = if syntax_enabled {
                         buffer
                             .cached_syntax_spans_for_line(buffer_line_idx)
@@ -451,26 +481,63 @@ impl BufferView {
                     } else {
                         Vec::new()
                     };
-                    let chunks = Self::build_chunks_for_visible_line(
-                        line_text,
-                        byte_offset,
-                        &visible_text,
-                        &syntax_spans,
-                        &todo_markers,
-                        default_style,
-                        syntax_styles.as_ref(),
-                    );
-                    let line_data = LineData {
-                        buffer_line: buffer_line_idx,
-                        byte_offset,
-                        width_offset,
-                        base_style: Style::default(),
-                        chunks,
-                    };
-                    render_data.line_data.push(line_data);
+                    if wrap_enabled {
+                        let segments =
+                            Self::wrap_segments_for_line(line_text, size.cols as usize, wrap_mode);
+                        for segment in segments {
+                            let visible_text = &line_text[segment.start_byte..segment.end_byte];
+                            let chunks = Self::build_chunks_for_visible_line(
+                                line_text,
+                                segment.start_byte..segment.end_byte,
+                                visible_text,
+                                &syntax_spans,
+                                &todo_markers,
+                                default_style,
+                                syntax_styles.as_ref(),
+                            );
+                            let line_data = LineData {
+                                buffer_line: buffer_line_idx,
+                                byte_offset: segment.start_byte,
+                                end_byte: segment.end_byte,
+                                width_offset: 0,
+                                show_gutter_line_number: !segment.is_continuation,
+                                base_style: Style::default(),
+                                chunks,
+                            };
+                            render_data.line_data.push(line_data);
+                            rendered_rows += 1;
+                        }
+                    } else {
+                        let (byte_offset, width_offset, visible_text) =
+                            Self::calculate_horizontal_offset(line_text, horizontal_offset);
+                        let chunks = Self::build_chunks_for_visible_line(
+                            line_text,
+                            byte_offset..line_text.len(),
+                            &visible_text,
+                            &syntax_spans,
+                            &todo_markers,
+                            default_style,
+                            syntax_styles.as_ref(),
+                        );
+                        let line_data = LineData {
+                            buffer_line: buffer_line_idx,
+                            byte_offset,
+                            end_byte: line_text.len(),
+                            width_offset,
+                            show_gutter_line_number: true,
+                            base_style: Style::default(),
+                            chunks,
+                        };
+                        render_data.line_data.push(line_data);
+                        rendered_rows += 1;
+                    }
                 } else {
                     break;
                 }
+                if rendered_rows >= row_limit {
+                    break;
+                }
+                buffer_line_idx += 1;
             }
         });
 
@@ -574,7 +641,7 @@ impl BufferView {
 
     fn build_chunks_for_visible_line(
         line_text: &str,
-        visible_start: usize,
+        visible: Range<usize>,
         visible_text: &str,
         syntax_spans: &[crate::buffer::SyntaxSpan],
         todo_markers: &Vector<SmolStr>,
@@ -585,7 +652,8 @@ impl BufferView {
             return vec![RenderChunk::new("", Style::default())];
         }
 
-        let visible_end = line_text.len();
+        let visible_start = visible.start;
+        let visible_end = visible.end;
         let mut chunks = Vec::new();
         let mut chunk_start = visible_start;
 
