@@ -93,6 +93,38 @@ impl WindowGroup {
         Self::new(tabs)
     }
 
+    /// Loads a window group from CLI file arguments with optional initial cursor positions.
+    pub fn from_cli_files(files: &[crate::cli::CliFileSpec]) -> Self {
+        let mut tabs: Vec<Window> = Vec::new();
+
+        for file in files {
+            match crate::globals::with_buffer_pool(|pool| pool.open_buffer(&file.path)) {
+                Ok(buffer_id) => {
+                    tracing::info!("Opened file: {:?}", file.path);
+                    if let Some(window) = tabs
+                        .iter_mut()
+                        .find(|window| window.buffer_view().buffer_id() == buffer_id)
+                    {
+                        if let Some(cursor) = file.cursor {
+                            window.set_cursor_synced(cursor);
+                        }
+                    } else {
+                        let mut window = Window::from_buffer_id(buffer_id);
+                        if let Some(cursor) = file.cursor {
+                            window.set_cursor_synced(cursor);
+                        }
+                        tabs.push(window);
+                    }
+                }
+                Err(error) => {
+                    tracing::warn!("Failed to open file {:?}: {}", file.path, error);
+                }
+            }
+        }
+
+        Self::new(tabs)
+    }
+
     /// Returns the active tab index.
     pub fn active_tab_index(&self) -> usize {
         self.active_tab.min(self.tabs.len().saturating_sub(1))

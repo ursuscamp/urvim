@@ -1,6 +1,7 @@
 use super::*;
 use crate::action::ActionResult;
 use crate::buffer::Cursor;
+use crate::cli::CliFileSpec;
 use crate::config::{AdvancedGlyphCapability, Config};
 use crate::editor::{Action, ActionKind, ModeKind};
 use crate::globals;
@@ -179,6 +180,64 @@ fn test_window_group_from_paths_deduplicates_duplicate_files() {
     assert_eq!(
         buffer_file_name(group.active_window().buffer_view()).unwrap(),
         path.file_name().unwrap()
+    );
+
+    std::fs::remove_file(&path).ok();
+    std::fs::remove_dir_all(&temp_dir).ok();
+}
+
+#[test]
+fn test_window_group_from_cli_files_applies_and_syncs_cursor() {
+    let temp_dir = std::env::temp_dir().join(format!(
+        "urvim-cli-file-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&temp_dir).unwrap();
+
+    let path = temp_dir.join("cursor.txt");
+    std::fs::write(&path, "a😀b").unwrap();
+
+    let group = WindowGroup::from_cli_files(&[CliFileSpec {
+        path: path.clone(),
+        cursor: Some(Cursor::new(0, 2)),
+    }]);
+
+    assert_eq!(
+        buffer_cursor(group.active_window().buffer_view()),
+        Cursor::new(0, 1)
+    );
+
+    std::fs::remove_file(&path).ok();
+    std::fs::remove_dir_all(&temp_dir).ok();
+}
+
+#[test]
+fn test_window_group_from_cli_files_clamps_cursor_to_file_bounds() {
+    let temp_dir = std::env::temp_dir().join(format!(
+        "urvim-cli-file-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&temp_dir).unwrap();
+
+    let path = temp_dir.join("clamp.txt");
+    std::fs::write(&path, "alpha\nbeta").unwrap();
+
+    let group = WindowGroup::from_cli_files(&[CliFileSpec {
+        path: path.clone(),
+        cursor: Some(Cursor::new(98, 98)),
+    }]);
+
+    assert_eq!(
+        buffer_cursor(group.active_window().buffer_view()),
+        Cursor::new(1, 4)
     );
 
     std::fs::remove_file(&path).ok();

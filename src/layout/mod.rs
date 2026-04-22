@@ -55,6 +55,11 @@ impl Layout {
         Self::new(crate::window_group::WindowGroup::from_paths(paths))
     }
 
+    /// Creates a layout from CLI file arguments with optional initial cursor positions.
+    pub fn from_cli_files(files: &[crate::cli::CliFileSpec]) -> Self {
+        Self::new(crate::window_group::WindowGroup::from_cli_files(files))
+    }
+
     /// Returns true when the layout has no panes left to render.
     pub fn should_exit(&self) -> bool {
         self.root.is_none()

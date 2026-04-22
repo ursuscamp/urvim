@@ -1,5 +1,6 @@
 pub mod action;
 pub mod buffer;
+pub mod cli;
 pub mod config;
 pub mod editor;
 pub mod globals;

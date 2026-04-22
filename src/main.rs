@@ -23,7 +23,7 @@ struct Cli {
     theme: Option<String>,
     #[arg(long = "no-syntax")]
     no_syntax: bool,
-    files: Vec<std::path::PathBuf>,
+    files: Vec<urvim::cli::CliFileSpec>,
 }
 
 fn main() -> io::Result<()> {
@@ -67,7 +67,7 @@ fn main() -> io::Result<()> {
     let (mut rows, mut cols) = get_terminal_size().unwrap_or((24, 80));
     let mut screen = Screen::new(rows, cols);
 
-    let mut layout = Layout::from_paths(&cli.files);
+    let mut layout = Layout::from_cli_files(&cli.files);
     globals::set_active_buffer_id(layout.active_buffer_view().buffer_id());
     globals::with_buffer_pool(|pool| {
         pool.warmup_syntax_at_startup(
