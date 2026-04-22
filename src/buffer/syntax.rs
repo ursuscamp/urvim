@@ -98,6 +98,11 @@ impl SyntaxCache {
         self.lines.get(line).map(|entry| entry.spans.clone())
     }
 
+    /// Returns how many leading lines currently have cached syntax data.
+    pub fn cached_line_count(&self) -> usize {
+        self.lines.len()
+    }
+
     /// Returns true when every line in the buffer has a cached syntax result.
     pub fn is_complete_for_line_count(&self, line_count: usize) -> bool {
         self.lines.len() >= line_count
@@ -1173,6 +1178,11 @@ impl Buffer {
     pub fn syntax_cache_complete(&self) -> bool {
         self.syntax_cache
             .is_complete_for_line_count(self.line_count())
+    }
+
+    /// Returns how many leading lines currently have cached syntax spans.
+    pub fn cached_syntax_line_count(&self) -> usize {
+        self.syntax_cache.cached_line_count()
     }
 
     /// Returns the current syntax generation used to reject stale background results.

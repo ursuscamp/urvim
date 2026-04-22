@@ -17,6 +17,7 @@ use std::collections::BTreeSet;
 use std::sync::{Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
+use tracing_subscriber::layer::SubscriberExt;
 
 fn process_action_and_snapshot(window: &mut Window, action: &Action) {
     assert_eq!(window.process_action(action), ActionResult::Handled);
@@ -1091,11 +1092,15 @@ fn test_window_render_does_not_force_full_syntax_warmup_on_bottom_jump() {
     let path = temp_path_with_ext("bottom-jump", "rs");
     let buffer = Buffer::from_str_with_path(&repeated_rust_buffer(256), path);
     let mut window = Window::new(buffer);
-    window.set_cursor(Cursor::new(127, 0));
+    window.set_cursor(Cursor::new(255, 0));
 
     let mut screen = crate::screen::Screen::new(4, 80);
     window.render(&mut screen, Position::new(0, 0), Size::new(4, 80));
 
+    let rendered_line = window
+        .render_data()
+        .get_line(0)
+        .expect("rendered line should exist");
     let syntax_pending = window
         .buffer_view()
         .with_buffer(|buffer| buffer.syntax_background_pending())
@@ -1108,10 +1113,89 @@ fn test_window_render_does_not_force_full_syntax_warmup_on_bottom_jump() {
         .buffer_view()
         .with_buffer(|buffer| buffer.cached_syntax_spans_for_line(200).is_some())
         .unwrap_or(true);
+    let eof_line_cached = window
+        .buffer_view()
+        .with_buffer(|buffer| buffer.cached_syntax_spans_for_line(255).is_some())
+        .unwrap_or(true);
 
+    assert!(!rendered_line.is_empty());
+    assert!(
+        rendered_line
+            .iter()
+            .any(|chunk| chunk.text.contains("fn main()"))
+    );
     assert!(syntax_pending);
     assert!(!cache_complete);
     assert!(!beyond_viewport_cached);
+    assert!(!eof_line_cached);
+}
+
+#[test]
+fn test_window_render_keeps_top_viewport_syntax_warmup() {
+    let _lock = syntax_worker_lock();
+    let theme = syntax_themed_window();
+    let _theme_guard = globals::set_test_active_theme(theme);
+    let _config_guard = globals::set_test_config(Config {
+        theme: "demo-syntax".to_string(),
+        insert_escape: None,
+        syntax: true,
+        auto_close_pairs: true,
+        auto_indent: AutoIndentMode::Off,
+        advanced_glyphs: BTreeSet::new(),
+        ..Default::default()
+    });
+    globals::set_job_manager(JobManager::new());
+
+    let path = temp_path_with_ext("top-warmup", "rs");
+    let buffer = Buffer::from_str_with_path(&repeated_rust_buffer(256), path);
+    let mut window = Window::new(buffer);
+    window.set_cursor(Cursor::new(0, 0));
+
+    let mut screen = crate::screen::Screen::new(4, 80);
+    window.render(&mut screen, Position::new(0, 0), Size::new(4, 80));
+
+    let visible_prefix_cached = window
+        .buffer_view()
+        .with_buffer(|buffer| buffer.cached_syntax_spans_for_line(3).is_some())
+        .unwrap_or(false);
+    let far_line_cached = window
+        .buffer_view()
+        .with_buffer(|buffer| buffer.cached_syntax_spans_for_line(120).is_some())
+        .unwrap_or(true);
+
+    assert!(visible_prefix_cached);
+    assert!(!far_line_cached);
+}
+
+#[test]
+fn test_buffer_view_set_cursor_debug_logging_does_not_force_syntax_warmup() {
+    let _lock = syntax_worker_lock();
+    let _config_guard = globals::set_test_config(Config {
+        syntax: true,
+        ..Default::default()
+    });
+    let subscriber = tracing_subscriber::registry().with(
+        tracing_subscriber::fmt::layer()
+            .with_test_writer()
+            .with_ansi(false)
+            .without_time(),
+    );
+    let _subscriber_guard = tracing::subscriber::set_default(subscriber);
+
+    let path = temp_path_with_ext("set-cursor-debug", "rs");
+    let buffer = Buffer::from_str_with_path(&repeated_rust_buffer(256), path);
+    let mut view = BufferView::new(buffer);
+    view.set_cursor(Cursor::new(255, 0));
+
+    let eof_line_cached = view
+        .with_buffer(|buffer| buffer.cached_syntax_spans_for_line(255).is_some())
+        .unwrap_or(true);
+    let cache_line_count = view
+        .with_buffer(|buffer| buffer.cached_syntax_line_count())
+        .unwrap_or(usize::MAX);
+
+    assert!(!eof_line_cached);
+    assert_eq!(cache_line_count, 0);
 }
 
 #[test]

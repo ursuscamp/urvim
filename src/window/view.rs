@@ -102,13 +102,12 @@ impl BufferView {
     /// The returned line bounds are exclusive boundary lines, so callers render
     /// on `start_exclusive + 1..end_exclusive`.
     pub(super) fn active_indent_guide(&self) -> Option<(usize, usize, usize)> {
-        self.with_buffer_mut(|buffer| {
+        self.with_buffer(|buffer| {
             if buffer.line_count() == 0 {
                 return None;
             }
 
             let cursor_line = self.cursor.line.min(buffer.line_count().saturating_sub(1));
-            buffer.ensure_syntax_through(cursor_line);
             let cursor_visual_col = buffer.visual_col_at(self.cursor);
             let scope_ids = buffer.cached_line_indent_scope_ids(cursor_line)?;
             let scopes = buffer.cached_indent_scopes();
@@ -280,7 +279,6 @@ impl BufferView {
         }
 
         let Some((stale, scope_dump)) = self.with_buffer_mut(|buffer| {
-            buffer.ensure_syntax_through(cursor.line);
             let stale = buffer.indent_scope_cache_stale();
             let scope_dump = buffer
                 .cached_line_indent_scope_ids(cursor.line)
@@ -608,7 +606,13 @@ impl BufferView {
 
             if syntax_enabled {
                 let visible_end_line = start_line + size.rows.saturating_sub(1) as usize;
-                buffer.ensure_syntax_through(visible_end_line);
+                let cached_line_count = buffer.cached_syntax_line_count();
+                let warmup_window = size.rows as usize + 32;
+                let near_cached_frontier =
+                    start_line <= cached_line_count.saturating_add(warmup_window);
+                if near_cached_frontier {
+                    buffer.ensure_syntax_through(visible_end_line);
+                }
                 buffer.request_syntax_catch_up(self.buffer_id());
             }
 
