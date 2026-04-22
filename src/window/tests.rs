@@ -1679,6 +1679,129 @@ fn test_insert_newline_prefers_next_line_indent_when_it_is_more_indented() {
 }
 
 #[test]
+fn test_raw_paste_in_insert_mode_bypasses_auto_pair_and_auto_indent() {
+    let mut window = Window::new(Buffer::from_str("fn main() {"));
+    let _config_guard = globals::set_test_config(Config {
+        auto_close_pairs: true,
+        auto_indent: AutoIndentMode::Neighbor,
+        ..Default::default()
+    });
+    window.switch_mode(ModeKind::Insert);
+    let cursor = Cursor::new(0, window.buffer_view().line_len(0));
+    window.set_cursor(cursor);
+    window
+        .buffer_view_mut()
+        .with_buffer_mut(|buffer| buffer.push_snapshot(cursor))
+        .unwrap();
+
+    process_action_and_snapshot(
+        &mut window,
+        &Action::insert_raw_paste("(\n".to_string()).with_from_mode(ModeKind::Insert),
+    );
+
+    assert_eq!(buffer_text(window.buffer_view()), "fn main() {(\n");
+    assert_eq!(window.buffer_view().cursor(), Cursor::new(1, 0));
+    assert_eq!(window.take_pending_repeat_suffix(), None);
+
+    if let Some(cursor) = window
+        .buffer_view
+        .with_buffer_mut(|buffer| buffer.undo())
+        .flatten()
+    {
+        window.buffer_view.set_cursor(cursor);
+    }
+
+    assert_eq!(buffer_text(window.buffer_view()), "fn main() {");
+    assert_eq!(window.buffer_view().cursor(), cursor);
+}
+
+#[test]
+fn test_raw_paste_in_normal_mode_inserts_text_without_mode_change() {
+    let mut window = Window::new(Buffer::from_str("hello"));
+    let cursor = Cursor::new(0, window.buffer_view().line_len(0));
+    window.set_cursor(cursor);
+    window
+        .buffer_view_mut()
+        .with_buffer_mut(|buffer| buffer.push_snapshot(cursor))
+        .unwrap();
+
+    process_action_and_snapshot(
+        &mut window,
+        &Action::insert_raw_paste(" world".to_string()).with_from_mode(ModeKind::Normal),
+    );
+
+    assert_eq!(buffer_text(window.buffer_view()), "hello world");
+    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 11));
+    assert_eq!(window.mode_kind(), ModeKind::Normal);
+
+    if let Some(cursor) = window
+        .buffer_view
+        .with_buffer_mut(|buffer| buffer.undo())
+        .flatten()
+    {
+        window.buffer_view.set_cursor(cursor);
+    }
+
+    assert_eq!(buffer_text(window.buffer_view()), "hello");
+    assert_eq!(window.buffer_view().cursor(), cursor);
+}
+
+#[test]
+fn test_raw_paste_replaces_visual_selection_and_exits_to_normal_mode() {
+    let mut window = Window::new(Buffer::from_str("abcdef"));
+    window.set_cursor(Cursor::new(0, 1));
+    window
+        .buffer_view_mut()
+        .with_buffer_mut(|buffer| buffer.push_snapshot(Cursor::new(0, 1)))
+        .unwrap();
+    window.switch_mode(ModeKind::Visual);
+    window.buffer_view_mut().set_cursor(Cursor::new(0, 4));
+
+    process_action_and_snapshot(
+        &mut window,
+        &Action::replace_selection_raw_paste("zap".to_string())
+            .with_mode(Some(ModeKind::Visual), Some(ModeKind::Normal)),
+    );
+    window.switch_mode(ModeKind::Normal);
+
+    assert_eq!(buffer_text(window.buffer_view()), "azapf");
+    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 4));
+    assert_eq!(window.mode_kind(), ModeKind::Normal);
+    assert_eq!(window.buffer_view().visual_selection(), None);
+
+    if let Some(cursor) = window
+        .buffer_view
+        .with_buffer_mut(|buffer| buffer.undo())
+        .flatten()
+    {
+        window.buffer_view.set_cursor(cursor);
+    }
+
+    assert_eq!(buffer_text(window.buffer_view()), "abcdef");
+    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 1));
+}
+
+#[test]
+fn test_raw_paste_replaces_visual_line_selection_and_exits_to_normal_mode() {
+    let mut window = Window::new(Buffer::from_str("abc\ndef\nghi"));
+    window.set_cursor(Cursor::new(0, 0));
+    window.switch_mode(ModeKind::VisualLine);
+    window.buffer_view_mut().set_cursor(Cursor::new(1, 0));
+
+    process_action_and_snapshot(
+        &mut window,
+        &Action::replace_selection_raw_paste("Z".to_string())
+            .with_mode(Some(ModeKind::VisualLine), Some(ModeKind::Normal)),
+    );
+    window.switch_mode(ModeKind::Normal);
+
+    assert_eq!(buffer_text(window.buffer_view()), "Z\nghi");
+    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 1));
+    assert_eq!(window.mode_kind(), ModeKind::Normal);
+    assert_eq!(window.buffer_view().visual_selection(), None);
+}
+
+#[test]
 fn test_indent_decrease_shifts_current_line() {
     let mut window = Window::new(Buffer::from_str("    hello\n  world"));
     window.set_cursor(Cursor::new(0, 4));

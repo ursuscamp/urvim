@@ -199,6 +199,10 @@ pub enum ActionKind {
     InsertChar(char),
     /// Insert a string at the cursor.
     InsertText(String),
+    /// Insert raw paste text at the cursor without helper transforms.
+    InsertRawPaste(String),
+    /// Replace the active visual selection with raw paste text.
+    ReplaceSelectionRawPaste(String),
     /// Insert a newline, letting the window decide whether to auto-indent it.
     InsertNewline,
     /// Exit the editor.
@@ -362,6 +366,16 @@ impl Action {
         Self::new(ActionKind::InsertText(text))
     }
 
+    /// Creates a raw-paste insertion action.
+    pub fn insert_raw_paste(text: String) -> Self {
+        Self::new(ActionKind::InsertRawPaste(text))
+    }
+
+    /// Creates a raw-paste visual replacement action.
+    pub fn replace_selection_raw_paste(text: String) -> Self {
+        Self::new(ActionKind::ReplaceSelectionRawPaste(text))
+    }
+
     /// Creates an insert-newline action.
     pub fn insert_newline() -> Self {
         Self::new(ActionKind::InsertNewline)
@@ -505,6 +519,8 @@ impl Action {
                 | Some(ActionKind::MoveToLineContentStart)
                 | Some(ActionKind::InsertChar(_))
                 | Some(ActionKind::InsertText(_))
+                | Some(ActionKind::InsertRawPaste(_))
+                | Some(ActionKind::ReplaceSelectionRawPaste(_))
                 | Some(ActionKind::InsertNewline)
                 | Some(ActionKind::DeleteBackward)
                 | Some(ActionKind::DeleteForward)
@@ -650,6 +666,8 @@ impl Action {
             | Some(ActionKind::DeleteLine)
             | Some(ActionKind::PasteAfter)
             | Some(ActionKind::PasteBefore)
+            | Some(ActionKind::InsertRawPaste(_))
+            | Some(ActionKind::ReplaceSelectionRawPaste(_))
             | Some(ActionKind::JoinWithSpace)
             | Some(ActionKind::JoinWithoutSpace)
             | Some(ActionKind::IndentDecrease)
@@ -727,6 +745,8 @@ impl Action {
             | Some(ActionKind::ChangeSelection)
             | Some(ActionKind::VisualTextObject(_))
             | Some(ActionKind::ChangeToLineEnd)
+            | Some(ActionKind::InsertRawPaste(_))
+            | Some(ActionKind::ReplaceSelectionRawPaste(_))
             | Some(ActionKind::PasteAfter)
             | Some(ActionKind::PasteBefore)
             | Some(ActionKind::IndentDecrease)

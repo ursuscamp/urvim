@@ -1,6 +1,7 @@
 use super::*;
 use crate::buffer::IndentDirection;
 use crate::config::DefaultRegisters;
+use crate::editor::ModeKind;
 use crate::editor::pairs;
 use crate::editor::{ActionKind, OperatorTarget, TextObject};
 use crate::register::{
@@ -89,6 +90,66 @@ impl Window {
         self.buffer_view
             .with_buffer(|buffer| buffer.text_in_lines(start_line, count))
             .flatten()
+    }
+
+    pub(super) fn insert_text_at_cursor(&mut self, cursor: Cursor, text: &str) -> Cursor {
+        self.buffer_view
+            .with_buffer_mut(|buffer| buffer.insert_text(cursor, text))
+            .unwrap_or(());
+        cursor_after_text(cursor, text)
+    }
+
+    pub(super) fn insert_raw_text(&mut self, text: &str) -> Option<Cursor> {
+        if text.is_empty() {
+            return None;
+        }
+
+        let cursor = self.buffer_view.cursor();
+        let new_cursor = self.insert_text_at_cursor(cursor, text);
+        self.buffer_view.set_cursor(new_cursor);
+        Some(new_cursor)
+    }
+
+    pub(super) fn replace_visual_selection_with_raw_text(
+        &mut self,
+        text: &str,
+        from_mode: Option<ModeKind>,
+    ) -> Option<Cursor> {
+        if text.is_empty() {
+            return None;
+        }
+
+        let (cursor, needs_separator_newline) = match from_mode {
+            Some(ModeKind::VisualLine) => {
+                let (start_line, count) = self.buffer_view.visual_line_selection_range()?;
+                let had_remaining_lines = self.buffer_view.line_count() > start_line + count;
+                let cursor = self
+                    .buffer_view
+                    .with_buffer_mut(|buffer| buffer.delete_lines(start_line, count))
+                    .flatten()?;
+                (cursor, had_remaining_lines)
+            }
+            Some(ModeKind::Visual) => {
+                let range = self.buffer_view.visual_selection_range()?;
+                let cursor = self
+                    .buffer_view
+                    .with_buffer_mut(|buffer| buffer.delete_range(range))
+                    .flatten()?;
+                (cursor, false)
+            }
+            _ => return None,
+        };
+
+        let inserted_cursor = self.insert_text_at_cursor(cursor, text);
+
+        if needs_separator_newline && !text.ends_with('\n') {
+            self.buffer_view
+                .with_buffer_mut(|buffer| buffer.insert_text(inserted_cursor, "\n"))
+                .unwrap_or(());
+        }
+
+        self.buffer_view.set_cursor(inserted_cursor);
+        Some(inserted_cursor)
     }
 
     fn paste_characterwise_text(&mut self, text: &str, after: bool) -> Option<Cursor> {
@@ -1158,4 +1219,16 @@ impl Window {
             }
         }
     }
+}
+
+fn cursor_after_text(mut cursor: Cursor, text: &str) -> Cursor {
+    for ch in text.chars() {
+        if ch == '\n' {
+            cursor = Cursor::new(cursor.line + 1, 0);
+        } else {
+            cursor.col += ch.len_utf8();
+        }
+    }
+
+    cursor
 }

@@ -107,6 +107,23 @@ impl Widget for Window {
                     }
                     ActionResult::Handled
                 }
+                Some(ActionKind::InsertRawPaste(text)) => {
+                    if self.insert_raw_text(text).is_some() {
+                        ActionResult::Handled
+                    } else {
+                        ActionResult::NotHandled
+                    }
+                }
+                Some(ActionKind::ReplaceSelectionRawPaste(text)) => {
+                    if self
+                        .replace_visual_selection_with_raw_text(text, action.from_mode)
+                        .is_some()
+                    {
+                        ActionResult::Handled
+                    } else {
+                        ActionResult::NotHandled
+                    }
+                }
                 Some(ActionKind::InsertNewline) => {
                     self.pending_repeat_suffix = self.insert_newline();
                     ActionResult::Handled

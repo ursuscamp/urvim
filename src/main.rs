@@ -125,10 +125,54 @@ fn main() -> io::Result<()> {
                 continue;
             }
             Event::Paste(text) => {
-                tracing::debug!(
-                    len = text.len(),
-                    "ignoring bracketed paste event until raw paste insertion is implemented"
-                );
+                let Some(action) =
+                    raw_paste_action_for_mode(layout.active_window_mode_kind(), text)
+                else {
+                    tracing::debug!("ignoring raw paste event in unsupported mode");
+                    continue;
+                };
+
+                let handled = layout.process_action(&action) == ActionResult::Handled;
+                if handled {
+                    if let Some(to_mode) = action.to_mode {
+                        let repeat_text = {
+                            let window = layout.active_window_group_mut().active_window_mut();
+                            window.switch_mode(to_mode)
+                        };
+                        terminal.set_cursor_style(layout.active_window_cursor_style())?;
+                        if let Some(repeat_text) = repeat_text.filter(|text| !text.is_empty())
+                            && let Some(mut repeat_state) = globals::get_last_repeat()
+                        {
+                            repeat_state.insert_text = Some(repeat_text);
+                            globals::set_last_repeat(repeat_state);
+                        }
+                    }
+
+                    if action.is_snapshottable() {
+                        let cursor = layout.active_buffer_view().cursor();
+                        layout
+                            .active_buffer_view()
+                            .with_buffer_mut(|buffer| buffer.push_snapshot(cursor))
+                            .unwrap_or(());
+                    }
+
+                    if action.updates_snapshot_cursor() {
+                        let cursor = layout.active_buffer_view().cursor();
+                        layout
+                            .active_buffer_view()
+                            .with_buffer_mut(|buffer| buffer.update_cursor(cursor))
+                            .unwrap_or(());
+                    }
+
+                    needs_redraw = true;
+                }
+
+                if layout.should_exit() {
+                    globals::shutdown_job_manager();
+                    break;
+                }
+
+                terminal.set_cursor_style(layout.active_window_cursor_style())?;
             }
             Event::Resize(new_rows, new_cols) => {
                 rows = new_rows;
@@ -499,6 +543,18 @@ fn cursor_after_text(mut cursor: Cursor, text: &str) -> Cursor {
     cursor
 }
 
+fn raw_paste_action_for_mode(mode: ModeKind, text: String) -> Option<Action> {
+    match mode {
+        ModeKind::Insert | ModeKind::Normal => {
+            Some(Action::insert_raw_paste(text).with_from_mode(mode))
+        }
+        ModeKind::Visual | ModeKind::VisualLine => Some(
+            Action::replace_selection_raw_paste(text).with_mode(Some(mode), Some(ModeKind::Normal)),
+        ),
+        ModeKind::Resizing => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -699,6 +755,50 @@ mod tests {
 
         assert!(error.contains("missing"));
         assert!(error.contains("Friday Night"));
+    }
+
+    #[test]
+    fn raw_paste_action_for_insert_and_normal_modes_inserts_text() {
+        let insert = raw_paste_action_for_mode(ModeKind::Insert, "hello".to_string())
+            .expect("insert mode paste should be handled");
+        let normal = raw_paste_action_for_mode(ModeKind::Normal, "hello".to_string())
+            .expect("normal mode paste should be handled");
+
+        assert!(matches!(
+            insert.kind.as_ref(),
+            Some(ActionKind::InsertRawPaste(text)) if text == "hello"
+        ));
+        assert_eq!(insert.from_mode, Some(ModeKind::Insert));
+        assert_eq!(insert.to_mode, None);
+
+        assert!(matches!(
+            normal.kind.as_ref(),
+            Some(ActionKind::InsertRawPaste(text)) if text == "hello"
+        ));
+        assert_eq!(normal.from_mode, Some(ModeKind::Normal));
+        assert_eq!(normal.to_mode, None);
+    }
+
+    #[test]
+    fn raw_paste_action_for_visual_modes_replaces_selection_then_exits() {
+        let visual = raw_paste_action_for_mode(ModeKind::Visual, "hello".to_string())
+            .expect("visual mode paste should be handled");
+        let visual_line = raw_paste_action_for_mode(ModeKind::VisualLine, "hello".to_string())
+            .expect("visual line mode paste should be handled");
+
+        assert!(matches!(
+            visual.kind.as_ref(),
+            Some(ActionKind::ReplaceSelectionRawPaste(text)) if text == "hello"
+        ));
+        assert_eq!(visual.from_mode, Some(ModeKind::Visual));
+        assert_eq!(visual.to_mode, Some(ModeKind::Normal));
+
+        assert!(matches!(
+            visual_line.kind.as_ref(),
+            Some(ActionKind::ReplaceSelectionRawPaste(text)) if text == "hello"
+        ));
+        assert_eq!(visual_line.from_mode, Some(ModeKind::VisualLine));
+        assert_eq!(visual_line.to_mode, Some(ModeKind::Normal));
     }
 
     #[test]
