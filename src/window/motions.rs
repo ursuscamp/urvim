@@ -1,5 +1,12 @@
 use super::*;
 
+#[derive(Clone, Copy)]
+enum ViewportAnchor {
+    Top,
+    Center,
+    Bottom,
+}
+
 impl Window {
     pub(super) fn set_cursor_to_visual_col_on_line(
         &mut self,
@@ -52,6 +59,44 @@ impl Window {
     pub fn move_cursor_half_page_down(&mut self, viewport_rows: usize) {
         let delta = (viewport_rows / 2).max(1);
         self.move_cursor_by_lines(delta, false);
+    }
+
+    fn align_viewport_to_cursor(&mut self, anchor: ViewportAnchor, viewport_rows: usize) {
+        if viewport_rows == 0 {
+            return;
+        }
+
+        let line_count = self.buffer_view.line_count();
+        if line_count == 0 {
+            return;
+        }
+
+        let cursor_line = self.buffer_view.cursor().line.min(line_count - 1);
+        let unclamped_top_line = match anchor {
+            ViewportAnchor::Top => cursor_line,
+            ViewportAnchor::Center => cursor_line.saturating_sub(viewport_rows / 2),
+            ViewportAnchor::Bottom => cursor_line.saturating_add(1).saturating_sub(viewport_rows),
+        };
+        let max_top_line = line_count.saturating_sub(viewport_rows);
+        let clamped_top_line = unclamped_top_line.min(max_top_line);
+        let row = u16::try_from(clamped_top_line).unwrap_or(u16::MAX);
+        self.buffer_view
+            .set_scroll_offset(Position::new(row, self.buffer_view.scroll_offset().col));
+    }
+
+    /// Aligns the viewport so the cursor line is shown on the top row.
+    pub fn align_viewport_cursor_top(&mut self, viewport_rows: usize) {
+        self.align_viewport_to_cursor(ViewportAnchor::Top, viewport_rows);
+    }
+
+    /// Aligns the viewport so the cursor line is shown on the center row.
+    pub fn align_viewport_cursor_center(&mut self, viewport_rows: usize) {
+        self.align_viewport_to_cursor(ViewportAnchor::Center, viewport_rows);
+    }
+
+    /// Aligns the viewport so the cursor line is shown on the bottom row.
+    pub fn align_viewport_cursor_bottom(&mut self, viewport_rows: usize) {
+        self.align_viewport_to_cursor(ViewportAnchor::Bottom, viewport_rows);
     }
 
     pub fn move_cursor_left(&mut self) {

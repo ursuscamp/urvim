@@ -233,6 +233,12 @@ pub enum ActionKind {
     MoveToScreenMiddle,
     /// Move to the bottom of the screen.
     MoveToScreenBottom,
+    /// Scroll the viewport so the cursor line appears at the top.
+    ViewportCursorTop,
+    /// Scroll the viewport so the cursor line appears at the center.
+    ViewportCursorCenter,
+    /// Scroll the viewport so the cursor line appears at the bottom.
+    ViewportCursorBottom,
     /// Delete the character before the cursor.
     DeleteBackward,
     /// Delete the character under the cursor.

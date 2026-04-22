@@ -184,6 +184,18 @@ impl Widget for Window {
                     self.set_cursor_to_visual_col_on_line(end_line, target_col);
                     ActionResult::Handled
                 }
+                Some(ActionKind::ViewportCursorTop) => {
+                    self.align_viewport_cursor_top(self.size.rows as usize);
+                    ActionResult::Handled
+                }
+                Some(ActionKind::ViewportCursorCenter) => {
+                    self.align_viewport_cursor_center(self.size.rows as usize);
+                    ActionResult::Handled
+                }
+                Some(ActionKind::ViewportCursorBottom) => {
+                    self.align_viewport_cursor_bottom(self.size.rows as usize);
+                    ActionResult::Handled
+                }
                 Some(ActionKind::DeleteBackward) => {
                     if insert_mode {
                         if !self.delete_insert_indent_before_cursor() {

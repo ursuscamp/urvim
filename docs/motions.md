@@ -448,6 +448,35 @@ H, M, and L behave like vertical motions (`j`/`k`) for column preservation:
 - They use the remembered column when moving (like j/k)
 - They update the remembered column after moving
 
+## Viewport Repositioning
+
+These `z` commands scroll the viewport around the cursor without moving the cursor.
+
+### zt - Cursor Line to Top
+
+Scrolls so the cursor line appears at the top of the viewport when possible.
+
+- **Count**: No - numeric prefixes are ignored
+- **Cursor position**: Unchanged
+
+### zz - Cursor Line to Center
+
+Scrolls so the cursor line appears at the middle of the viewport when possible.
+
+- **Count**: No - numeric prefixes are ignored
+- **Cursor position**: Unchanged
+
+### zb - Cursor Line to Bottom
+
+Scrolls so the cursor line appears at the bottom of the viewport when possible.
+
+- **Count**: No - numeric prefixes are ignored
+- **Cursor position**: Unchanged
+
+### Edge Cases
+
+- If exact top/center/bottom placement is not possible near file boundaries, urvim clamps to the nearest valid viewport position.
+
 ## Paging Motions
 
 Paging motions move the cursor relative to the viewport height and preserve the current column when possible. They are available in both normal mode and insert mode, and they do not leave insert mode.

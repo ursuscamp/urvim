@@ -3836,6 +3836,49 @@ fn test_count_screen_top_preserves_visual_column() {
 }
 
 #[test]
+fn test_viewport_cursor_alignment_repositions_without_moving_cursor() {
+    let buffer = Buffer::from_str("0\n1\n2\n3\n4\n5\n6\n7\n8\n9");
+    let mut window = Window::new(buffer);
+
+    window.size = Size::new(5, 20);
+    window.buffer_view.set_cursor(Cursor::new(6, 0));
+    window.buffer_view.set_scroll_offset(Position::new(0, 3));
+
+    window.process_action(&Action::new(ActionKind::ViewportCursorTop));
+    assert_eq!(window.buffer_view.scroll_offset(), Position::new(5, 3));
+    assert_eq!(window.buffer_view.cursor(), Cursor::new(6, 0));
+
+    window.process_action(&Action::new(ActionKind::ViewportCursorCenter));
+    assert_eq!(window.buffer_view.scroll_offset(), Position::new(4, 3));
+    assert_eq!(window.buffer_view.cursor(), Cursor::new(6, 0));
+
+    window.process_action(&Action::new(ActionKind::ViewportCursorBottom));
+    assert_eq!(window.buffer_view.scroll_offset(), Position::new(2, 3));
+    assert_eq!(window.buffer_view.cursor(), Cursor::new(6, 0));
+}
+
+#[test]
+fn test_viewport_cursor_alignment_clamps_near_buffer_end() {
+    let buffer = Buffer::from_str("0\n1\n2\n3\n4\n5\n6\n7");
+    let mut window = Window::new(buffer);
+
+    window.size = Size::new(5, 20);
+    window.buffer_view.set_cursor(Cursor::new(7, 0));
+
+    window.process_action(&Action::new(ActionKind::ViewportCursorTop));
+    assert_eq!(window.buffer_view.scroll_offset(), Position::new(3, 0));
+    assert_eq!(window.buffer_view.cursor(), Cursor::new(7, 0));
+
+    window.process_action(&Action::new(ActionKind::ViewportCursorCenter));
+    assert_eq!(window.buffer_view.scroll_offset(), Position::new(3, 0));
+    assert_eq!(window.buffer_view.cursor(), Cursor::new(7, 0));
+
+    window.process_action(&Action::new(ActionKind::ViewportCursorBottom));
+    assert_eq!(window.buffer_view.scroll_offset(), Position::new(3, 0));
+    assert_eq!(window.buffer_view.cursor(), Cursor::new(7, 0));
+}
+
+#[test]
 fn test_next_paragraph_clamps_visual_column_on_blank_line() {
     let buffer = Buffer::from_str("ab\n\ncd");
     let mut window = Window::new(buffer);

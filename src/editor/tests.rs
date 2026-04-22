@@ -752,6 +752,69 @@ fn test_gg_motion() {
 }
 
 #[test]
+fn test_z_viewport_sequences() {
+    let mut mode = NormalMode::new();
+    assert!(matches!(
+        mode.handle_key(&key('z')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert!(matches!(
+        complete_action_kind(mode.handle_key(&key('t'))),
+        ActionKind::ViewportCursorTop
+    ));
+
+    let mut mode = NormalMode::new();
+    assert!(matches!(
+        mode.handle_key(&key('z')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert!(matches!(
+        complete_action_kind(mode.handle_key(&key('z'))),
+        ActionKind::ViewportCursorCenter
+    ));
+
+    let mut mode = NormalMode::new();
+    assert!(matches!(
+        mode.handle_key(&key('z')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert!(matches!(
+        complete_action_kind(mode.handle_key(&key('b'))),
+        ActionKind::ViewportCursorBottom
+    ));
+}
+
+#[test]
+fn test_counted_z_viewport_sequence_ignores_count() {
+    let mut mode = NormalMode::new();
+    assert!(matches!(
+        mode.handle_key(&key('3')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert!(matches!(
+        mode.handle_key(&key('z')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert!(matches!(
+        complete_action_kind(mode.handle_key(&key('z'))),
+        ActionKind::ViewportCursorCenter
+    ));
+}
+
+#[test]
+fn test_unsupported_z_sequence_is_invalid() {
+    let mut mode = NormalMode::new();
+    assert!(matches!(
+        mode.handle_key(&key('z')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert!(matches!(
+        mode.handle_key(&key('x')),
+        HandleKeyResult::InvalidSequence
+    ));
+}
+
+#[test]
 fn test_count_diw() {
     let mut mode = NormalMode::new();
     assert!(matches!(

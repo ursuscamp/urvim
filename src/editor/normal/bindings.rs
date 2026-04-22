@@ -78,6 +78,9 @@ fn register_motion_bindings(trie_keymap: &mut TrieKeymap) {
     trie_keymap.insert_str("H", Action::new(ActionKind::MoveToScreenTop));
     trie_keymap.insert_str("M", Action::new(ActionKind::MoveToScreenMiddle));
     trie_keymap.insert_str("L", Action::new(ActionKind::MoveToScreenBottom));
+    trie_keymap.insert_str("zt", Action::new(ActionKind::ViewportCursorTop));
+    trie_keymap.insert_str("zz", Action::new(ActionKind::ViewportCursorCenter));
+    trie_keymap.insert_str("zb", Action::new(ActionKind::ViewportCursorBottom));
     trie_keymap.insert_str("{", Action::new(ActionKind::MoveToPreviousParagraph));
     trie_keymap.insert_str("}", Action::new(ActionKind::MoveToNextParagraph));
     trie_keymap.insert_str("J", Action::new(ActionKind::JoinWithSpace));
