@@ -231,20 +231,12 @@ mod tests {
 
     fn selection_style(theme: &str) -> Style {
         match theme {
-            "Friday Night" => Style::new().fg(Color::ansi(16)).bg(Color::ansi(252)),
-            "Saturday Morning" => Style::new().fg(Color::ansi(231)).bg(Color::ansi(235)),
-            "Rose Pine" => Style::new()
-                .fg(Color::Rgb(Rgb::new(25, 23, 36)))
-                .bg(Color::Rgb(Rgb::new(224, 222, 244))),
-            "Dracula" => Style::new()
-                .fg(Color::Rgb(Rgb::new(40, 42, 54)))
-                .bg(Color::Rgb(Rgb::new(248, 248, 242))),
-            "Tokyo Night" => Style::new()
-                .fg(Color::Rgb(Rgb::new(26, 27, 38)))
-                .bg(Color::Rgb(Rgb::new(192, 202, 245))),
-            "Catppuccin" => Style::new()
-                .fg(Color::Rgb(Rgb::new(30, 30, 46)))
-                .bg(Color::Rgb(Rgb::new(205, 214, 244))),
+            "Friday Night" => Style::new().bg(Color::ansi(235)),
+            "Saturday Morning" => Style::new().bg(Color::ansi(254)),
+            "Rose Pine" => Style::new().bg(Color::Rgb(Rgb::new(45, 40, 67))),
+            "Dracula" => Style::new().bg(Color::Rgb(Rgb::new(68, 71, 90))),
+            "Tokyo Night" => Style::new().bg(Color::Rgb(Rgb::new(36, 40, 59))),
+            "Catppuccin" => Style::new().bg(Color::Rgb(Rgb::new(49, 50, 68))),
             other => panic!("unexpected theme {other}"),
         }
     }

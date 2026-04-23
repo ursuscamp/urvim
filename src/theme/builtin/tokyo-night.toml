@@ -23,7 +23,7 @@ bg = "bg"
 # UI
 "ui.status_bar" = { fg = "fg", bg = "panel", bold = true }
 "ui.status_bar.modified_marker" = { fg = "orange", bold = true }
-"ui.selection" = { fg = "bg", bg = "fg" }
+"ui.selection" = { bg = "panel" }
 "ui.window.active_line" = { bg = "panel", overlay = true }
 "ui.tab.active" = { fg = "bg", bg = "accent", bold = true }
 "ui.tab.inactive" = { fg = "fg", bg = "panel" }

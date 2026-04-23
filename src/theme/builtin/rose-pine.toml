@@ -4,6 +4,7 @@ name = "Rose Pine"
 bg = "#191724"
 fg = "#e0def4"
 panel = "#1f1d2e"
+selection = "#2d2843"
 accent = "#c4a7e7"
 muted = "#6e6a86"
 comment = "#908caa"
@@ -23,7 +24,7 @@ bg = "bg"
 # UI
 "ui.status_bar" = { fg = "fg", bg = "panel", bold = true }
 "ui.status_bar.modified_marker" = { fg = "orange", bold = true }
-"ui.selection" = { fg = "bg", bg = "fg" }
+"ui.selection" = { bg = "selection" }
 "ui.window.active_line" = { bg = "panel", overlay = true }
 "ui.tab.active" = { fg = "bg", bg = "accent", bold = true }
 "ui.tab.inactive" = { fg = "fg", bg = "panel" }
