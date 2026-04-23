@@ -1247,6 +1247,13 @@ fn regex_match_at_with_captures<'a>(
 }
 
 impl Buffer {
+    fn sync_undo_snapshot_cache_if_current(&mut self) {
+        if self.current_text_matches_undo_head() {
+            self.undo_state
+                .update_buffer_cache(self.buffer_cache.clone());
+        }
+    }
+
     /// Invalidates buffer-owned cache data from the given line onward.
     pub fn invalidate_syntax_from(&mut self, line: usize) {
         self.buffer_cache.invalidate_from(line);
@@ -1302,8 +1309,13 @@ impl Buffer {
     pub fn syntax_spans_for_line(&mut self, line: usize) -> Option<Vec<SyntaxSpan>> {
         let line_texts: Vec<&str> = self.lines.iter().map(|line| line.as_ref()).collect();
         let syntax_name = self.syntax_name().to_owned();
-        self.buffer_cache
-            .spans_for_line(&syntax_name, &line_texts, line)
+        let spans = self
+            .buffer_cache
+            .spans_for_line(&syntax_name, &line_texts, line);
+        if spans.is_some() {
+            self.sync_undo_snapshot_cache_if_current();
+        }
+        spans
     }
 
     /// Applies a background buffer cache refresh result when it still matches this buffer.
@@ -1313,8 +1325,7 @@ impl Buffer {
         }
 
         self.buffer_cache.replace_with(result.cache);
-        self.undo_state
-            .update_buffer_cache(self.buffer_cache.clone());
+        self.sync_undo_snapshot_cache_if_current();
         if self.syntax_background_generation == Some(result.generation) {
             self.syntax_background_generation = None;
         }
@@ -1396,6 +1407,7 @@ impl Buffer {
         let syntax_name = self.syntax_name().to_owned();
         self.buffer_cache
             .ensure_through(&syntax_name, &line_texts, line);
+        self.sync_undo_snapshot_cache_if_current();
     }
 
     /// Returns true when the complete buffer cache is available for the current text.
@@ -1592,6 +1604,35 @@ mod tests {
         assert_eq!(scope_tuples(&buffer), edited_scopes);
         assert!(buffer.syntax_cache_complete());
         assert!(!buffer.indent_scope_cache_stale());
+    }
+
+    #[test]
+    fn undo_recomputes_highlighting_after_line_insert_before_assert_macro() {
+        let path = temp_path_with_ext("undo-rust-assert", "rs");
+        let original = "fn main() {\n    assert!(true);\n}\n";
+        let mut buffer = Buffer::from_str_with_path(original, path.clone());
+
+        buffer.ensure_syntax_through(buffer.line_count().saturating_sub(1));
+        let expected = buffer
+            .syntax_spans_for_line(1)
+            .expect("assert line should exist")
+            .to_vec();
+
+        buffer.insert_lines_before(1, 1);
+        buffer.push_snapshot(Cursor::new(2, 0));
+        let result = BufferCacheRefreshResult {
+            buffer_id: BufferId::new(1),
+            generation: buffer.syntax_generation(),
+            cache: buffer.buffer_cache.clone(),
+        };
+        assert!(buffer.apply_buffer_cache_refresh_result(result));
+
+        assert!(buffer.undo().is_some());
+        let undo_spans = buffer
+            .syntax_spans_for_line(1)
+            .expect("assert line should exist after undo");
+
+        assert_eq!(undo_spans, expected);
     }
 
     #[test]
