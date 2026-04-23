@@ -295,9 +295,9 @@ impl IndentScopeCache {
     fn line_has_open_scopes(&self, line_idx: usize) -> bool {
         self.line_to_scopes.get(line_idx).is_some_and(|scope_ids| {
             scope_ids.iter().any(|scope_id| {
-                self.scopes
-                    .get(*scope_id)
-                    .is_some_and(|scope| scope.is_open())
+                self.scopes.get(*scope_id).is_some_and(|scope| {
+                    scope.end_line.map_or(true, |end_line| end_line > line_idx)
+                })
             })
         })
     }
@@ -1504,8 +1504,8 @@ mod tests {
         buffer.invalidate_syntax_from(1);
 
         assert!(buffer.indent_scope_cache_stale());
-        assert_eq!(scope_tuples(&buffer), vec![(0, Some(2), 0)]);
-        assert!(buffer.cached_line_indent_scope_ids(0).is_some());
+        assert!(scope_tuples(&buffer).is_empty());
+        assert!(buffer.cached_line_indent_scope_ids(0).is_none());
         assert!(buffer.cached_line_indent_scope_ids(1).is_none());
     }
 
@@ -1689,6 +1689,22 @@ mod tests {
 
         assert!(buffer.syntax_cache_complete());
         assert!(!buffer.indent_scope_cache_stale());
+    }
+
+    #[test]
+    fn inserting_line_keeps_parent_scope_active_for_following_lines() {
+        let mut buffer = Buffer::from_str("root\n  first\nroot-close");
+        buffer.ensure_syntax_through(2);
+        assert_eq!(scope_tuples(&buffer), vec![(0, Some(2), 0)]);
+
+        buffer.insert_text(Cursor::new(1, 0), "  inserted\n");
+        buffer.ensure_syntax_through(buffer.line_count().saturating_sub(1));
+
+        assert_eq!(scope_tuples(&buffer), vec![(0, Some(3), 0)]);
+        let line_scope_ids = buffer
+            .cached_line_indent_scope_ids(2)
+            .expect("line after insertion should have scope ids");
+        assert_eq!(line_scope_ids.iter().copied().collect::<Vec<_>>(), vec![0]);
     }
 
     #[test]
