@@ -54,10 +54,10 @@ bg = "bg"
 "syntax.markup.strong" = { fg = "accent", bold = true }
 "syntax.markup.thematic_break" = { fg = "muted" }
 "syntax.number" = { fg = "yellow" }
-"syntax.operator" = { fg = "fg" }
+"syntax.operator" = { fg = "red" }
 "syntax.punctuation" = { fg = "muted" }
 "syntax.string" = { fg = "green" }
 "syntax.string.escape" = { fg = "muted" }
 "syntax.string.interpolation" = { fg = "accent" }
-"syntax.type" = { fg = "cyan" }
+"syntax.type" = { fg = "accent" }
 "syntax.variable" = { fg = "fg" }

@@ -608,6 +608,16 @@ bg = "base"
         let registry = ThemeRegistry::load_builtin().expect("builtins should load");
         let friday_night = registry.default_theme();
 
+        fn count_unique_styles(styles: &[Style]) -> usize {
+            let mut unique = Vec::new();
+            for style in styles {
+                if !unique.iter().any(|existing: &Style| existing == style) {
+                    unique.push(style.clone());
+                }
+            }
+            unique.len()
+        }
+
         assert_eq!(registry.default_theme().name(), "Friday Night");
         assert_eq!(
             registry.get("Friday Night").unwrap().kind(),
@@ -635,6 +645,17 @@ bg = "base"
         );
         for name in registry.names() {
             let theme = registry.get(name).unwrap();
+            let semantic_styles = [
+                theme.highlight_style_for_tag(&tag("syntax.constant")),
+                theme.highlight_style_for_tag(&tag("syntax.function")),
+                theme.highlight_style_for_tag(&tag("syntax.namespace")),
+                theme.highlight_style_for_tag(&tag("syntax.keyword")),
+                theme.highlight_style_for_tag(&tag("syntax.number")),
+                theme.highlight_style_for_tag(&tag("syntax.operator")),
+                theme.highlight_style_for_tag(&tag("syntax.string")),
+                theme.highlight_style_for_tag(&tag("syntax.type")),
+                theme.highlight_style_for_tag(&tag("syntax.variable")),
+            ];
             assert_eq!(
                 theme.highlight_style_for_name("ui.selection"),
                 selection_style(name),
@@ -654,6 +675,11 @@ bg = "base"
                 theme.highlight_style_for_name("ui.window.lines.resize"),
                 split_border_resize_style(name),
                 "theme {name} should define a resize split border style"
+            );
+            let unique_style_count = count_unique_styles(&semantic_styles);
+            assert!(
+                unique_style_count >= 7,
+                "theme {name} should give core code syntax tags a broad style spread"
             );
         }
         assert_eq!(
