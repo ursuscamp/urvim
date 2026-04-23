@@ -30,7 +30,8 @@ tag = "string"
 
 [[rules]]
 kind = "regex"
-pattern = "^\\s*[A-Za-z0-9_-]+:"
+pattern = "^\\s*[A-Za-z0-9_-]+"
+lookahead = ":"
 tag = "variable.property"
 
 [[rules]]
@@ -92,7 +93,7 @@ tag = "number"
 
 [[rules]]
 kind = "regex"
-pattern = "\\s*[^#\\n\"'|>{&*!][^#\\n]*$"
+pattern = "\\s*[^#\\n\"'|>{&*!:][^#\\n]*$"
 tag = "string"
 
 [[rules]]

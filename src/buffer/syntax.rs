@@ -934,7 +934,7 @@ fn tokenize_rule_list_line(
         }
 
         if let Some((start, end, captures, _, tag, context)) = chosen {
-            let mut chosen_spans = split_trailing_punctuation_span(start, end, &tag, line);
+            let mut chosen_spans = vec![SyntaxSpan::new(start, end, tag.clone())];
             spans.append(&mut chosen_spans);
             apply_context_control(contexts, context.as_ref(), Some(&captures));
             *parent_style = Some(tag);
@@ -1127,43 +1127,6 @@ fn tokenize_code_line(
     }
 
     (spans, SyntaxState::Code(state))
-}
-
-fn split_trailing_punctuation_span(
-    start: usize,
-    end: usize,
-    tag: &Tag,
-    line: &str,
-) -> Vec<SyntaxSpan> {
-    let style = tag.as_str();
-    if style != "type" && style != "variable.property" {
-        return vec![SyntaxSpan::new(start, end, tag.clone())];
-    }
-
-    let Some(text) = line.get(start..end) else {
-        return vec![SyntaxSpan::new(start, end, tag.clone())];
-    };
-
-    let suffix_len = text
-        .as_bytes()
-        .iter()
-        .rev()
-        .take_while(|&&byte| matches!(byte, b'{' | b'}' | b':' | b';' | b','))
-        .count();
-
-    if suffix_len == 0 || suffix_len >= text.len() {
-        return vec![SyntaxSpan::new(start, end, tag.clone())];
-    }
-
-    let split = end - suffix_len;
-    vec![
-        SyntaxSpan::new(start, split, tag.clone()),
-        SyntaxSpan::new(
-            split,
-            end,
-            Tag::parse("punctuation").expect("valid punctuation tag"),
-        ),
-    ]
 }
 
 fn tokenize_nested_body(nested: &mut NestedState, body: &str, offset: usize) -> Vec<SyntaxSpan> {

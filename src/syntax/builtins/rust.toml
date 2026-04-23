@@ -310,6 +310,11 @@ tag = "punctuation"
 
 [[rules]]
 kind = "regex"
+pattern = "[{}]"
+tag = "punctuation"
+
+[[rules]]
+kind = "regex"
 pattern = "(?:=>|->|==|!=|<=|>=|&&|\\|\\||[+\\-*/%=&|!<>^?])"
 tag = "operator"
 

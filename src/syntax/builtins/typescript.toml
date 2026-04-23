@@ -164,7 +164,8 @@ tag = "function"
 
 [[rules]]
 kind = "regex"
-pattern = "\\b[A-Za-z_:][A-Za-z0-9:._-]*="
+pattern = "\\b[A-Za-z_:][A-Za-z0-9:._-]*"
+lookahead = "="
 tag = "variable.property"
 
 [[rules]]

@@ -8,9 +8,23 @@ fn test_rust_fixture_uses_grammar_rules() {
     let comment = buf
         .syntax_spans_for_line(0)
         .expect("comment line should exist");
+    let function_line = buf
+        .syntax_spans_for_line(3)
+        .expect("function line should exist");
+    let function_line_text = buf
+        .line_at(3)
+        .expect("function line should exist")
+        .to_string();
     let type_line = buf
         .syntax_spans_for_line(4)
         .expect("type line should exist");
+    let block_line = buf
+        .syntax_spans_for_line(14)
+        .expect("block line should exist");
+    let block_line_text = buf
+        .line_at(14)
+        .expect("block line should exist")
+        .to_string();
     let operator_line = buf
         .syntax_spans_for_line(12)
         .expect("operator line should exist");
@@ -22,12 +36,15 @@ fn test_rust_fixture_uses_grammar_rules() {
         .expect("escaped char line should exist");
 
     assert_spans_include_comment_style(&comment);
+    assert_spans_include_exact_style(&function_line, &function_line_text, "{", tag("punctuation"));
     assert_spans_include_style(&type_line, tag("type"));
     assert_spans_include_style(&type_line, tag("punctuation"));
     assert_spans_include_style(&type_line, tag("operator"));
     assert_spans_include_style(&operator_line, tag("operator"));
     assert_spans_include_style(&operator_line, tag("keyword"));
     assert_spans_include_style(&operator_line, tag("punctuation"));
+    assert_spans_include_exact_style(&block_line, &block_line_text, "}", tag("punctuation"));
+    assert_spans_include_exact_style(&block_line, &block_line_text, "{", tag("punctuation"));
     assert_spans_include_style(&char_line, tag("constant"));
     assert_spans_include_style(&escaped_char_line, tag("constant"));
 }
