@@ -878,6 +878,7 @@ fn tokenize_rule_list_line(
         for rule in definition.rules() {
             if let SyntaxRule::Regex {
                 regex,
+                lookahead,
                 tag,
                 context,
             } = rule
@@ -888,7 +889,7 @@ fn tokenize_rule_list_line(
                     continue;
                 }
                 if let Some((start, end, captures)) =
-                    regex_match_at_with_captures(regex, line, index)
+                    regex_match_at_with_captures(regex, lookahead.as_ref(), line, index)
                 {
                     let matched_text = line.get(start..end).unwrap_or("");
                     if let Some(context) = context.as_ref()
@@ -1010,7 +1011,13 @@ fn find_next_rule_list_regex_match(
     let mut index = start;
     while index < line.len() {
         for rule in rules {
-            if let SyntaxRule::Regex { regex, context, .. } = rule {
+            if let SyntaxRule::Regex {
+                regex,
+                lookahead,
+                context,
+                ..
+            } = rule
+            {
                 if let Some(context) = context.as_ref()
                     && !contexts.contains_all(&context.requires)
                 {
@@ -1019,7 +1026,12 @@ fn find_next_rule_list_regex_match(
                 if contexts.contains("markdown_code_fence_body") && context.is_none() {
                     continue;
                 }
-                if let Some((start, end)) = regex_match_at(regex, line, index) {
+                let match_result = if let Some(lookahead) = lookahead.as_ref() {
+                    regex_match_at_with_lookahead(regex, Some(lookahead), line, index)
+                } else {
+                    regex_match_at(regex, line, index)
+                };
+                if let Some((start, end)) = match_result {
                     return Some((start, end));
                 }
             }
@@ -1213,37 +1225,75 @@ fn next_char(line: &str, index: usize) -> Option<(usize, char)> {
 }
 
 fn regex_match_at(regex: &Regex, line: &str, index: usize) -> Option<(usize, usize)> {
-    let pattern = regex.as_str();
-    if pattern.starts_with('^') || pattern.starts_with("\\A") {
-        let tail = line.get(index..)?;
-        let matched = regex.find(tail)?;
-        if matched.start() == 0 {
-            return Some((index, index + matched.end()));
-        }
-        return None;
-    }
-
-    let matched = regex.find_at(line, index)?;
-    if matched.start() == index {
-        Some((matched.start(), matched.end()))
-    } else {
-        None
-    }
+    regex_match_at_with_lookahead(regex, None, line, index)
 }
 
 fn regex_match_at_with_captures<'a>(
     regex: &'a Regex,
+    lookahead: Option<&'a Regex>,
     line: &'a str,
     index: usize,
 ) -> Option<(usize, usize, regex::Captures<'a>)> {
-    let tail = line.get(index..)?;
-    let captures = regex.captures(tail)?;
-    let matched = captures.get(0)?;
-    if matched.start() == 0 {
-        Some((index, index + matched.end(), captures))
+    let pattern = regex.as_str();
+    let (start, end, captures) = if pattern.starts_with('^') || pattern.starts_with("\\A") {
+        let tail = line.get(index..)?;
+        let captures = regex.captures(tail)?;
+        let matched = captures.get(0)?;
+        if matched.start() != 0 {
+            return None;
+        }
+        (index, index + matched.end(), captures)
     } else {
-        None
+        let captures = regex.captures_at(line, index)?;
+        let matched = captures.get(0)?;
+        if matched.start() != index {
+            return None;
+        }
+        (matched.start(), matched.end(), captures)
+    };
+
+    if let Some(lookahead) = lookahead {
+        let tail = line.get(end..)?;
+        let matched = lookahead.find(tail)?;
+        if matched.start() != 0 {
+            return None;
+        }
     }
+
+    Some((start, end, captures))
+}
+
+fn regex_match_at_with_lookahead(
+    regex: &Regex,
+    lookahead: Option<&Regex>,
+    line: &str,
+    index: usize,
+) -> Option<(usize, usize)> {
+    let pattern = regex.as_str();
+    let (start, end) = if pattern.starts_with('^') || pattern.starts_with("\\A") {
+        let tail = line.get(index..)?;
+        let matched = regex.find(tail)?;
+        if matched.start() != 0 {
+            return None;
+        }
+        (index, index + matched.end())
+    } else {
+        let matched = regex.find_at(line, index)?;
+        if matched.start() != index {
+            return None;
+        }
+        (matched.start(), matched.end())
+    };
+
+    if let Some(lookahead) = lookahead {
+        let tail = line.get(end..)?;
+        let matched = lookahead.find(tail)?;
+        if matched.start() != 0 {
+            return None;
+        }
+    }
+
+    Some((start, end))
 }
 
 impl Buffer {
@@ -1479,6 +1529,7 @@ mod tests {
             rules: vec![
                 SyntaxRule::Regex {
                     regex: Regex::new(r"^```[A-Za-z]+$").expect("valid opener regex"),
+                    lookahead: None,
                     tag: tag("markup.code"),
                     context: Some(ContextControl {
                         requires: Vec::new(),
@@ -1504,6 +1555,7 @@ mod tests {
                 },
                 SyntaxRule::Regex {
                     regex: Regex::new(r"^```$").expect("valid closer regex"),
+                    lookahead: None,
                     tag: tag("markup.code"),
                     context: Some(ContextControl {
                         requires: vec![SmolStr::new("fence")],

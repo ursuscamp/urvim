@@ -407,9 +407,9 @@ fn test_syntax_spans_for_supported_filetype() {
     assert!(spans.iter().any(|span| span.style == tag("constant")));
     assert!(spans.iter().any(|span| span.style == tag("type")));
     assert!(spans.iter().any(|span| span.style == tag("variable")));
+    assert!(spans.iter().any(|span| span.style == tag("function")));
     assert!(spans.iter().any(|span| span.style == tag("string")));
     assert_spans_include_comment_style(&spans);
-    assert!(!spans.iter().any(|span| span.style == tag("function")));
 }
 
 #[test]
@@ -670,7 +670,7 @@ fn test_rust_fixture_uses_grammar_rules() {
         .syntax_spans_for_line(4)
         .expect("type line should exist");
     let operator_line = buf
-        .syntax_spans_for_line(11)
+        .syntax_spans_for_line(12)
         .expect("operator line should exist");
 
     assert_spans_include_comment_style(&comment);
@@ -744,29 +744,29 @@ fn test_rust_fixture_highlights_extended_literals() {
     let mut buf = fixture_buffer("syntax-rust-extended", "rs", fixture);
 
     let doc_comment = buf
-        .syntax_spans_for_line(28)
+        .syntax_spans_for_line(29)
         .expect("doc comment line should exist");
     let attribute = buf
-        .syntax_spans_for_line(30)
+        .syntax_spans_for_line(31)
         .expect("attribute line should exist");
     let raw_string = buf
-        .syntax_spans_for_line(32)
+        .syntax_spans_for_line(33)
         .expect("raw string line should exist");
     let raw_multiline = buf
-        .syntax_spans_for_line(33)
+        .syntax_spans_for_line(34)
         .expect("raw multiline line should exist");
     let byte_string = buf
-        .syntax_spans_for_line(35)
+        .syntax_spans_for_line(36)
         .expect("byte string line should exist");
     let raw_bytes = buf
-        .syntax_spans_for_line(36)
+        .syntax_spans_for_line(37)
         .expect("raw byte string line should exist");
     let numeric = buf
-        .syntax_spans_for_line(38)
+        .syntax_spans_for_line(39)
         .expect("numeric line should exist");
 
     assert_spans_include_style(&doc_comment, tag("comment.documentation"));
-    assert_spans_include_style(&attribute, tag("keyword"));
+    assert_spans_include_style(&attribute, tag("punctuation"));
     assert_spans_include_style(&raw_string, tag("string"));
     assert_spans_include_style(&raw_multiline, tag("string"));
     assert_spans_include_style(&byte_string, tag("string"));
@@ -937,7 +937,7 @@ fn test_markdown_fixture_highlights_extended_structures() {
     assert_spans_include_style(&underscore_line, tag("markup.strong"));
     assert_spans_include_style(&indented_code, tag("markup.code"));
     assert_spans_include_style(&tilde_fence, tag("markup.code"));
-    assert_spans_include_style(&tilde_body, tag("variable"));
+    assert_spans_include_style(&tilde_body, tag("function"));
 }
 
 #[test]
@@ -1208,15 +1208,15 @@ fn test_rust_fixture_format_strings_follow_std_fmt_rules() {
     let mut buf = fixture_buffer("syntax-rust-fixture-fmt", "rs", fixture);
 
     let positional = buf
-        .syntax_spans_for_line(23)
+        .syntax_spans_for_line(24)
         .expect("positional format line should exist");
     let specifier = buf
-        .syntax_spans_for_line(24)
+        .syntax_spans_for_line(25)
         .expect("specifier format line should exist");
     let escaped = buf
-        .syntax_spans_for_line(25)
+        .syntax_spans_for_line(26)
         .expect("escaped format line should exist");
-    let escaped_line = buf.line_at(25).expect("escaped format line should exist");
+    let escaped_line = buf.line_at(26).expect("escaped format line should exist");
     let escaped_body_start = escaped_line.find('"').expect("opening quote should exist") + 1;
     let escaped_body_end = escaped_line.rfind('"').expect("closing quote should exist");
     let escaped_body = escaped

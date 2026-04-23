@@ -56,12 +56,20 @@ The supported rule kinds are:
 ### `regex`
 
 Use `kind = "regex"` for single-pattern matches that do not need a closing delimiter.
+You can also add an optional `lookahead` regex to require a specific suffix
+immediately after the main match without consuming it.
 
 ```toml
 [[rules]]
 kind = "regex"
 pattern = "//.*$"
 tag = "comment.line"
+
+[[rules]]
+kind = "regex"
+pattern = "\\b[A-Za-z_][A-Za-z0-9_]*\\b"
+lookahead = "\\s*\\("
+tag = "function"
 ```
 
 Best uses:
@@ -72,6 +80,8 @@ Best uses:
 | keywords | A word boundary regex is often enough. |
 | numbers, constants, simple identifiers | These are easy to describe with one pattern. |
 | language directives | Preprocessor lines, annotations, and decorators often fit well here. |
+
+The optional `lookahead` pattern is checked against the text immediately after the main match. The rule only wins when the lookahead also matches, which is useful for call-like names such as `name(...)` and macro-like forms.
 
 ### `injection`
 

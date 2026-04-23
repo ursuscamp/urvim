@@ -87,6 +87,8 @@ pub enum SyntaxRule {
     Regex {
         /// Compiled regular expression.
         regex: Regex,
+        /// Optional regex that must also match immediately after the main match.
+        lookahead: Option<Regex>,
         /// Syntax tag applied to the match.
         tag: Tag,
         /// Context updates applied when this rule matches.
@@ -190,6 +192,8 @@ pub(super) enum RawGlyphColor {
 pub(super) enum RawRule {
     Regex {
         pattern: String,
+        #[serde(default)]
+        lookahead: Option<String>,
         tag: String,
         #[serde(default)]
         context: Option<RawContextControl>,

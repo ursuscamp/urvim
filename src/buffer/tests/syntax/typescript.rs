@@ -14,6 +14,9 @@ fn test_typescript_fixture_uses_grammar_rules() {
     let function_line = buf
         .syntax_spans_for_line(13)
         .expect("function line should exist");
+    let call_line = buf
+        .syntax_spans_for_line(18)
+        .expect("call line should exist");
     let template_line = buf
         .syntax_spans_for_line(15)
         .expect("template line should exist");
@@ -29,7 +32,9 @@ fn test_typescript_fixture_uses_grammar_rules() {
     assert_spans_include_style(&interface_line, tag("type"));
     assert_spans_include_style(&decorator_line, tag("keyword"));
     assert_spans_include_style(&function_line, tag("keyword"));
+    assert_spans_include_style(&function_line, tag("function"));
     assert_spans_include_style(&function_line, tag("type"));
+    assert_spans_include_style(&call_line, tag("function"));
     assert_spans_include_style(&template_line, tag("string"));
     assert_spans_include_style(&template_line, tag("punctuation"));
     assert_spans_include_exact_style(

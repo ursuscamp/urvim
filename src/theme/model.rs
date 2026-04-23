@@ -379,6 +379,10 @@ mod tests {
             Style::new().bold().fg(Color::ansi(12)),
         );
         highlights.insert(
+            tag("syntax.namespace"),
+            Style::new().bold().fg(Color::ansi(22)),
+        );
+        highlights.insert(
             tag("syntax.keyword"),
             Style::new().bold().fg(Color::ansi(13)),
         );
@@ -452,6 +456,10 @@ mod tests {
         assert_eq!(
             theme.highlight_style_for_tag(&tag("syntax.constant.float")),
             Style::new().bold().fg(Color::ansi(11))
+        );
+        assert_eq!(
+            theme.highlight_style_for_tag(&tag("syntax.namespace")),
+            Style::new().bold().fg(Color::ansi(22))
         );
         assert_eq!(
             theme.highlight_style_for_tag(&tag("syntax.markup.code.inline")),

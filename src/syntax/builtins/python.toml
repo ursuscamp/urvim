@@ -20,6 +20,12 @@ tag = "keyword"
 
 [[rules]]
 kind = "regex"
+pattern = "\\b[A-Za-z_][A-Za-z0-9_]*\\b"
+lookahead = "\\s*\\("
+tag = "function"
+
+[[rules]]
+kind = "regex"
 pattern = "\"\"\""
 tag = "string"
 context = { requires = ["py_fexpr_triple_double"], pop = ["py_fexpr_triple_double"], push = ["py_ftriple_double"] }

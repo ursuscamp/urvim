@@ -134,6 +134,10 @@ Older queued catch-up jobs for the same buffer are also pruned before execution,
 
 - Put comments and other structural matches before broad fallback matches.
 - Keep regexes narrow.
+- Use `lookahead` for call-style identifiers when you want the name highlighted
+  only when a delimiter like `(` follows immediately after optional whitespace.
+- Use `namespace` for qualified prefixes and module paths like `std::`,
+  `crate::`, or `super::`.
 - Use `context` when a rule only makes sense after an earlier opener.
 - Reach for `injection` when a body needs nested highlighting.
 

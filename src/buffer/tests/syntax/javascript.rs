@@ -22,6 +22,9 @@ fn test_javascript_fixture_uses_grammar_rules() {
     let keyword_line = buf
         .syntax_spans_for_line(3)
         .expect("keyword line should exist");
+    let call_line = buf
+        .syntax_spans_for_line(4)
+        .expect("call line should exist");
     let object_line = buf
         .syntax_spans_for_line(5)
         .expect("object line should exist");
@@ -32,6 +35,7 @@ fn test_javascript_fixture_uses_grammar_rules() {
     assert_spans_include_comment_style(&comment);
     assert_spans_include_style(&keyword_line, tag("keyword"));
     assert_spans_include_style(&keyword_line, tag("punctuation"));
+    assert_spans_include_style(&call_line, tag("function"));
     assert_spans_include_style(&object_line, tag("punctuation"));
     assert_spans_include_style(&object_line, tag("constant"));
     assert_spans_include_style(&operator_line, tag("operator"));

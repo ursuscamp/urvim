@@ -41,6 +41,7 @@ bg = "bg"
 "syntax.comment.note" = { fg = "bg", bg = "cyan", bold = true }
 "syntax.constant" = { fg = "orange" }
 "syntax.function" = { fg = "blue" }
+"syntax.namespace" = { fg = "cyan" }
 "syntax.keyword" = { fg = "magenta" }
 "syntax.markup" = { fg = "accent" }
 "syntax.markup.code" = { fg = "orange" }

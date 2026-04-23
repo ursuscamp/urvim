@@ -17,11 +17,16 @@ fn test_zig_fixture_uses_grammar_rules() {
     let string_line = buf
         .syntax_spans_for_line(4)
         .expect("string line should exist");
+    let call_line = buf
+        .syntax_spans_for_line(5)
+        .expect("call line should exist");
 
     assert_spans_include_comment_style(&comment);
     assert_spans_include_style(&import_line, tag("keyword"));
+    assert_spans_include_style(&import_line, tag("function.macro"));
     assert_spans_include_style(&import_line, tag("string"));
     assert_spans_include_style(&const_line, tag("keyword"));
     assert_spans_include_style(&const_line, tag("type"));
     assert_spans_include_style(&string_line, tag("string"));
+    assert_spans_include_style(&call_line, tag("function"));
 }

@@ -143,6 +143,7 @@ fn compile_rule(syntax: &str, rule: RawRule) -> Result<SyntaxRule, SyntaxLoadErr
     match rule {
         RawRule::Regex {
             pattern,
+            lookahead,
             tag,
             context,
         } => {
@@ -152,8 +153,19 @@ fn compile_rule(syntax: &str, rule: RawRule) -> Result<SyntaxRule, SyntaxLoadErr
                 pattern: pattern.clone(),
                 message: error.to_string(),
             })?;
+            let lookahead = lookahead
+                .as_ref()
+                .map(|pattern| {
+                    Regex::new(pattern).map_err(|error| SyntaxLoadError::InvalidRegex {
+                        syntax: syntax.to_string(),
+                        pattern: pattern.clone(),
+                        message: error.to_string(),
+                    })
+                })
+                .transpose()?;
             Ok(SyntaxRule::Regex {
                 regex,
+                lookahead,
                 tag,
                 context: compile_context_control(syntax, context.as_ref())?,
             })
@@ -338,6 +350,7 @@ mod tests {
             },
             rules: vec![RawRule::Regex {
                 pattern: "foo".to_string(),
+                lookahead: None,
                 tag: "string".to_string(),
                 context: Some(RawContextControl {
                     requires: vec!["Context".to_string()],
@@ -379,6 +392,7 @@ mod tests {
             },
             rules: vec![RawRule::Regex {
                 pattern: "foo".to_string(),
+                lookahead: None,
                 tag: "variable".to_string(),
                 context: Some(RawContextControl {
                     requires: vec!["Context".to_string()],
@@ -413,6 +427,39 @@ mod tests {
             .expect("expected payload match");
         assert_eq!(payload_match.name, "heredoc");
         assert_eq!(payload_match.capture, Some(1));
+    }
+
+    #[test]
+    fn regex_rule_compiles_lookahead() {
+        let raw = RawSyntaxDefinition {
+            metadata: RawSyntaxMetadata {
+                name: "example".to_string(),
+                display_name: "Example".to_string(),
+                alias: Vec::new(),
+                comment_prefix: None,
+                glyph: None,
+                glyph_color: None,
+                filename: Vec::new(),
+                shebang: Vec::new(),
+            },
+            rules: vec![RawRule::Regex {
+                pattern: r"\bname\b".to_string(),
+                lookahead: Some(r"\s*\(".to_string()),
+                tag: "function".to_string(),
+                context: None,
+            }],
+        };
+
+        let definition = resolve_syntax(raw, "example.toml").expect("rule should compile");
+        let SyntaxRule::Regex {
+            lookahead: Some(lookahead),
+            ..
+        } = &definition.rules[0]
+        else {
+            panic!("expected lookahead");
+        };
+
+        assert_eq!(lookahead.as_str(), r"\s*\(");
     }
 
     #[test]

@@ -24,3 +24,14 @@ fn test_csharp_fixture_uses_grammar_rules() {
     assert_spans_include_style(&class_line, tag("type"));
     assert_spans_include_style(&string_line, tag("string"));
 }
+
+#[test]
+fn test_csharp_function_call_highlights_function_name() {
+    let path =
+        AbsolutePath::from_path(temp_path_with_ext("syntax-csharp-function", "cs").as_path())
+            .unwrap();
+    let mut buf = Buffer::from_str_with_path("Render(Name);", path);
+
+    let spans = buf.syntax_spans_for_line(0).expect("line should exist");
+    assert_spans_include_style(&spans, tag("function"));
+}

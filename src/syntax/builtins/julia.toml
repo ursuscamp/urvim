@@ -85,7 +85,7 @@ tag = "keyword"
 [[rules]]
 kind = "regex"
 pattern = "@[A-Za-z_][A-Za-z0-9_]*"
-tag = "keyword"
+tag = "function.macro"
 
 [[rules]]
 kind = "regex"

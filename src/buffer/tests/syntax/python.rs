@@ -127,6 +127,18 @@ fn test_python_constants_use_constant_rules() {
 }
 
 #[test]
+fn test_python_function_call_highlights_function_name() {
+    let path =
+        AbsolutePath::from_path(temp_path_with_ext("syntax-py-function", "py").as_path()).unwrap();
+    let mut buf = Buffer::from_str_with_path("value = len(items)", path);
+
+    let spans = buf.syntax_spans_for_line(0).expect("line should exist");
+    assert_spans_include_style(&spans, tag("function"));
+    assert_spans_include_style(&spans, tag("punctuation"));
+    assert_spans_include_style(&spans, tag("variable"));
+}
+
+#[test]
 fn test_python_types_use_type_rules() {
     let path =
         AbsolutePath::from_path(temp_path_with_ext("syntax-py-type", "py").as_path()).unwrap();

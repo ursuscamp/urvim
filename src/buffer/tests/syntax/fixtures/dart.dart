@@ -7,4 +7,5 @@ class Greeter {
 world""";
   final count = 42;
   final ok = true;
+  void demo() { render(name); }
 }

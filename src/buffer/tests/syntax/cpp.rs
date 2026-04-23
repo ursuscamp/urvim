@@ -35,11 +35,13 @@ fn test_cpp_fixture_uses_grammar_rules() {
     assert_spans_include_style(&raw_string_body, tag("string"));
     assert_spans_include_style(&constants_line, tag("constant"));
     assert_spans_include_style(&constants_line, tag("keyword"));
+    assert_spans_include_style(&printf_line, tag("namespace"));
     assert_spans_include_style(&printf_line, tag("function"));
     assert_spans_include_style(&printf_line, tag("punctuation"));
     assert_spans_include_style(&printf_line, tag("string"));
     assert_spans_include_style(&printf_line, tag("string.interpolation"));
     assert_spans_include_style(&printf_line, tag("string.escape"));
+    assert_spans_include_style(&fprintf_line, tag("namespace"));
     assert_spans_include_style(&fprintf_line, tag("function"));
     assert_spans_include_style(&fprintf_line, tag("punctuation"));
     assert_spans_include_style(&fprintf_line, tag("string"));
@@ -117,4 +119,25 @@ fn test_cpp_printf_format_string_keeps_plain_text_as_string() {
     assert!(spans.iter().any(|span| {
         span.start_byte <= value_start && span.end_byte >= value_end && span.style == tag("string")
     }));
+}
+
+#[test]
+fn test_cpp_function_call_highlights_function_name() {
+    let path = AbsolutePath::from_path(temp_path_with_ext("syntax-cpp-function", "cpp").as_path())
+        .unwrap();
+    let mut buf = Buffer::from_str_with_path("compute(value);", path);
+
+    let spans = buf.syntax_spans_for_line(0).expect("line should exist");
+    assert_spans_include_style(&spans, tag("function"));
+}
+
+#[test]
+fn test_cpp_namespace_prefix_highlights_namespace_name() {
+    let path = AbsolutePath::from_path(temp_path_with_ext("syntax-cpp-namespace", "cpp").as_path())
+        .unwrap();
+    let mut buf = Buffer::from_str_with_path("std::printf(\"value=%d\", 1);", path);
+
+    let spans = buf.syntax_spans_for_line(0).expect("line should exist");
+    assert_spans_include_style(&spans, tag("namespace"));
+    assert_spans_include_style(&spans, tag("function"));
 }

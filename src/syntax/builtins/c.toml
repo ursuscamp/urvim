@@ -50,6 +50,12 @@ context = { push = ["printf_call_head"] }
 
 [[rules]]
 kind = "regex"
+pattern = "\\b[A-Za-z_][A-Za-z0-9_]*\\b"
+lookahead = "\\s*\\("
+tag = "function"
+
+[[rules]]
+kind = "regex"
 pattern = "\\("
 tag = "punctuation"
 context = { requires = ["printf_call_head"], pop = ["printf_call_head"], push = ["printf_call"] }

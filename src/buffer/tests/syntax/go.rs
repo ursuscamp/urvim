@@ -23,6 +23,9 @@ fn test_go_fixture_uses_grammar_rules() {
     let bool_line = buf
         .syntax_spans_for_line(10)
         .expect("bool line should exist");
+    let call_line = buf
+        .syntax_spans_for_line(12)
+        .expect("call line should exist");
 
     assert_spans_include_style(&package_line, tag("keyword"));
     assert_spans_include_style(&raw_string, tag("string"));
@@ -31,4 +34,5 @@ fn test_go_fixture_uses_grammar_rules() {
     assert_spans_include_style(&number_line, tag("number"));
     assert_spans_include_style(&bool_line, tag("keyword"));
     assert_spans_include_style(&bool_line, tag("constant"));
+    assert_spans_include_style(&call_line, tag("function"));
 }

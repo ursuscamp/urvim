@@ -111,7 +111,7 @@ fn test_markdown_fixture_highlights_extended_structures() {
     assert_spans_include_style(&underscore_line, tag("markup.strong"));
     assert_spans_include_style(&indented_code, tag("markup.code"));
     assert_spans_include_style(&tilde_fence, tag("markup.code"));
-    assert_spans_include_style(&tilde_body, tag("variable"));
+    assert_spans_include_style(&tilde_body, tag("function"));
 }
 
 #[test]

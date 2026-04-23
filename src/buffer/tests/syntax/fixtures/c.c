@@ -9,5 +9,6 @@ int main(void) {
   printf("value=%u\n", 42);
   fprintf(stderr, "error=%d: %s\n", 7, "tail");
   printf("%s %s", "first", "second");
+  compute(value);
   return 0;
 }

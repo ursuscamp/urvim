@@ -16,4 +16,5 @@ public class Demo<T> {
   char ch = '\n';
   int count = 1_000;
   boolean enabled = true;
+  void demo() { render(enabled); }
 }

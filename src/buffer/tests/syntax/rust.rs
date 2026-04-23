@@ -12,8 +12,14 @@ fn test_rust_fixture_uses_grammar_rules() {
         .syntax_spans_for_line(4)
         .expect("type line should exist");
     let operator_line = buf
-        .syntax_spans_for_line(11)
+        .syntax_spans_for_line(12)
         .expect("operator line should exist");
+    let char_line = buf
+        .syntax_spans_for_line(6)
+        .expect("char line should exist");
+    let escaped_char_line = buf
+        .syntax_spans_for_line(7)
+        .expect("escaped char line should exist");
 
     assert_spans_include_comment_style(&comment);
     assert_spans_include_style(&type_line, tag("type"));
@@ -22,6 +28,25 @@ fn test_rust_fixture_uses_grammar_rules() {
     assert_spans_include_style(&operator_line, tag("operator"));
     assert_spans_include_style(&operator_line, tag("keyword"));
     assert_spans_include_style(&operator_line, tag("punctuation"));
+    assert_spans_include_style(&char_line, tag("constant"));
+    assert_spans_include_style(&escaped_char_line, tag("constant"));
+}
+
+#[test]
+fn test_rust_character_literals_use_constant_rules() {
+    let path =
+        AbsolutePath::from_path(temp_path_with_ext("syntax-rust-char", "rs").as_path()).unwrap();
+    let mut buf = Buffer::from_str_with_path("let a = 'x'; let b = '\\n'; let c = b'\\t';", path);
+
+    let line = buf.line_at(0).expect("line should exist").to_string();
+    let spans = buf.syntax_spans_for_line(0).expect("line should exist");
+    for literal in ["'x'", "'\\n'", "b'\\t'"] {
+        let start = line.find(literal).expect("literal should exist");
+        let end = start + literal.len();
+        assert!(spans.iter().any(|span| {
+            span.style == tag("constant") && span.start_byte <= start && span.end_byte >= end
+        }));
+    }
 }
 
 #[test]
@@ -30,34 +55,49 @@ fn test_rust_fixture_highlights_extended_literals() {
     let mut buf = fixture_buffer("syntax-rust-extended", "rs", fixture);
 
     let doc_comment = buf
-        .syntax_spans_for_line(28)
+        .syntax_spans_for_line(29)
         .expect("doc comment line should exist");
     let attribute = buf
-        .syntax_spans_for_line(30)
+        .syntax_spans_for_line(31)
         .expect("attribute line should exist");
+    let attribute_line = buf
+        .line_at(31)
+        .expect("attribute line should exist")
+        .to_string();
     let raw_string = buf
-        .syntax_spans_for_line(32)
+        .syntax_spans_for_line(33)
         .expect("raw string line should exist");
     let raw_multiline = buf
-        .syntax_spans_for_line(33)
+        .syntax_spans_for_line(34)
         .expect("raw multiline line should exist");
     let byte_string = buf
-        .syntax_spans_for_line(35)
+        .syntax_spans_for_line(36)
         .expect("byte string line should exist");
     let raw_bytes = buf
-        .syntax_spans_for_line(36)
+        .syntax_spans_for_line(37)
         .expect("raw byte string line should exist");
     let numeric = buf
-        .syntax_spans_for_line(38)
+        .syntax_spans_for_line(39)
         .expect("numeric line should exist");
+    let namespace = buf
+        .syntax_spans_for_line(44)
+        .expect("namespace line should exist");
 
     assert_spans_include_style(&doc_comment, tag("comment.documentation"));
-    assert_spans_include_style(&attribute, tag("keyword"));
+    assert_spans_include_exact_style(
+        &attribute,
+        attribute_line.as_str(),
+        "#[",
+        tag("punctuation"),
+    );
+    assert_spans_include_exact_style(&attribute, attribute_line.as_str(), "]", tag("punctuation"));
     assert_spans_include_style(&raw_string, tag("string"));
     assert_spans_include_style(&raw_multiline, tag("string"));
     assert_spans_include_style(&byte_string, tag("string"));
     assert_spans_include_style(&raw_bytes, tag("string"));
     assert_spans_include_style(&numeric, tag("number"));
+    assert_spans_include_style(&namespace, tag("namespace"));
+    assert_spans_include_style(&namespace, tag("function"));
     assert!(raw_multiline.iter().any(|span| span.style == tag("string")));
 }
 
@@ -94,15 +134,15 @@ fn test_rust_fixture_format_strings_follow_std_fmt_rules() {
     let mut buf = fixture_buffer("syntax-rust-fixture-fmt", "rs", fixture);
 
     let positional = buf
-        .syntax_spans_for_line(23)
+        .syntax_spans_for_line(24)
         .expect("positional format line should exist");
     let specifier = buf
-        .syntax_spans_for_line(24)
+        .syntax_spans_for_line(25)
         .expect("specifier format line should exist");
     let escaped = buf
-        .syntax_spans_for_line(25)
+        .syntax_spans_for_line(26)
         .expect("escaped format line should exist");
-    let escaped_line = buf.line_at(25).expect("escaped format line should exist");
+    let escaped_line = buf.line_at(26).expect("escaped format line should exist");
     let escaped_body_start = escaped_line.find('"').expect("opening quote should exist") + 1;
     let escaped_body_end = escaped_line.rfind('"').expect("closing quote should exist");
     let escaped_body = escaped
@@ -110,7 +150,7 @@ fn test_rust_fixture_format_strings_follow_std_fmt_rules() {
         .filter(|span| span.start_byte >= escaped_body_start && span.end_byte <= escaped_body_end)
         .collect::<Vec<_>>();
     let specifier_line = buf
-        .line_at(24)
+        .line_at(25)
         .expect("specifier format line should exist")
         .to_string();
 
@@ -148,9 +188,9 @@ fn test_rust_format_string_keeps_capitalized_text_as_string() {
     let mut buf = fixture_buffer("syntax-rust-format-string-body", "rs", fixture);
 
     let spans = buf
-        .syntax_spans_for_line(23)
+        .syntax_spans_for_line(24)
         .expect("format string line should exist");
-    let line = buf.line_at(23).expect("format string line should exist");
+    let line = buf.line_at(24).expect("format string line should exist");
     let hello_start = line.find("Hello").expect("capitalized text should exist");
     let hello_end = hello_start + "Hello".len();
 
@@ -198,4 +238,16 @@ fn test_rust_format_macro_highlighting_updates_after_edit() {
     let spans = buf.syntax_spans_for_line(0).expect("line should exist");
     assert_spans_include_style(&spans, tag("function.macro"));
     assert_spans_include_style(&spans, tag("string"));
+}
+
+#[test]
+fn test_rust_function_call_highlights_function_name() {
+    let path = AbsolutePath::from_path(temp_path_with_ext("syntax-rust-function", "rs").as_path())
+        .unwrap();
+    let mut buf = Buffer::from_str_with_path("let value = compute(answer);", path);
+
+    let spans = buf.syntax_spans_for_line(0).expect("line should exist");
+    assert_spans_include_style(&spans, tag("function"));
+    assert_spans_include_style(&spans, tag("punctuation"));
+    assert_spans_include_style(&spans, tag("variable"));
 }

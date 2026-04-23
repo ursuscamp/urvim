@@ -5,6 +5,7 @@ fn main() {
     let value: Option<String> = Some("hello");
     let number = 42.5;
     let ch = 'x';
+    let escaped_ch = '\n';
     let ok = Ok::<_, String>("done");
     let path = PathBuf::from("/tmp/example");
     let escaped = "line 1\nline 2";
@@ -41,5 +42,6 @@ second"#;
     let oct = 0o77;
     let float = 1.5e-2_f64;
     'label: loop { break 'label; }
+    std::mem::drop(input);
     input
 }

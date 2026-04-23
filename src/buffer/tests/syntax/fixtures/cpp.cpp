@@ -18,4 +18,5 @@ constexpr bool enabled = true;
 auto none = nullptr;
 std::printf("value=%d\n", 42);
 std::fprintf(stderr, "%s %s", "first", "second");
+compute(value);
 }

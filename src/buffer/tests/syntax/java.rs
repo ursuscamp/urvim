@@ -53,3 +53,14 @@ fn test_java_fixture_uses_grammar_rules() {
     assert_spans_include_style(&number_line, tag("number"));
     assert_spans_include_style(&constant_line, tag("constant"));
 }
+
+#[test]
+fn test_java_function_call_highlights_function_name() {
+    let path =
+        AbsolutePath::from_path(temp_path_with_ext("syntax-java-function", "java").as_path())
+            .unwrap();
+    let mut buf = Buffer::from_str_with_path("render(enabled);", path);
+
+    let spans = buf.syntax_spans_for_line(0).expect("line should exist");
+    assert_spans_include_style(&spans, tag("function"));
+}

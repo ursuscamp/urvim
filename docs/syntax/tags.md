@@ -20,6 +20,7 @@ Theme authors should use these tags under the `syntax.` highlight namespace when
 - `function`
 - `function.macro`
 - `keyword`
+- `namespace`
 - `markup`
 - `operator`
 - `punctuation`
@@ -42,6 +43,7 @@ Theme authors should use these tags under the `syntax.` highlight namespace when
 - `constant.null`
 - `constant.number`
 - `function.method`
+- `namespace.module`
 - `markup.code`
 - `markup.code.inline`
 - `markup.emphasis`

@@ -163,6 +163,16 @@ context = { requires = ["rust_string"] }
 
 [[rules]]
 kind = "regex"
+pattern = "b'(?:[^'\\\\\\n]|\\\\.)'"
+tag = "constant"
+
+[[rules]]
+kind = "regex"
+pattern = "'(?:[^'\\\\\\n]|\\\\.)'"
+tag = "constant"
+
+[[rules]]
+kind = "regex"
 pattern = "b'"
 tag = "constant"
 context = { push = ["rust_byte_char"] }
@@ -203,7 +213,7 @@ tag = "variable"
 [[rules]]
 kind = "regex"
 pattern = "#!?\\["
-tag = "keyword"
+tag = "punctuation"
 
 [[rules]]
 kind = "regex"
@@ -245,6 +255,18 @@ context = { requires = ["format_string"] }
 kind = "regex"
 pattern = "\\b(?:Option|Result|String|Vec|HashMap|Path|PathBuf|[A-Z][A-Za-z0-9]*)\\b"
 tag = "type"
+
+[[rules]]
+kind = "regex"
+pattern = "\\b(?:crate|self|super|Self|[A-Za-z_][A-Za-z0-9_]*)\\b"
+lookahead = "\\s*::"
+tag = "namespace"
+
+[[rules]]
+kind = "regex"
+pattern = "\\b[A-Za-z_][A-Za-z0-9_]*\\b"
+lookahead = "\\s*\\("
+tag = "function"
 
 [[rules]]
 kind = "regex"

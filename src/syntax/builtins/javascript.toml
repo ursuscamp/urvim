@@ -165,6 +165,12 @@ tag = "type"
 
 [[rules]]
 kind = "regex"
+pattern = "\\b[A-Za-z_][$A-Za-z0-9_]*\\b"
+lookahead = "\\s*\\("
+tag = "function"
+
+[[rules]]
+kind = "regex"
 pattern = "\\b[$A-Za-z_][$A-Za-z0-9_]*\\b"
 tag = "variable"
 

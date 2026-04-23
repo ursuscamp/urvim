@@ -23,7 +23,7 @@ fn test_julia_fixture_uses_grammar_rules() {
 
     assert_spans_include_comment_style(&comment);
     assert_spans_include_style(&module_line, tag("keyword"));
-    assert_spans_include_style(&macro_line, tag("keyword"));
+    assert_spans_include_style(&macro_line, tag("function.macro"));
     assert_spans_include_style(&string_line, tag("string"));
     assert_spans_include_style(&number_line, tag("number"));
 }

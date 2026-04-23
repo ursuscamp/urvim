@@ -5,4 +5,5 @@ struct Greeter {
 world"""
     let count = 42
     let flag = true
+    func demo() { render(message) }
 }

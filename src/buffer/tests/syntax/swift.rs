@@ -27,3 +27,14 @@ fn test_swift_fixture_uses_grammar_rules() {
     assert_spans_include_style(&string_line, tag("string"));
     assert_spans_include_style(&constant_line, tag("constant"));
 }
+
+#[test]
+fn test_swift_function_call_highlights_function_name() {
+    let path =
+        AbsolutePath::from_path(temp_path_with_ext("syntax-swift-function", "swift").as_path())
+            .unwrap();
+    let mut buf = Buffer::from_str_with_path("render(message)", path);
+
+    let spans = buf.syntax_spans_for_line(0).expect("line should exist");
+    assert_spans_include_style(&spans, tag("function"));
+}
