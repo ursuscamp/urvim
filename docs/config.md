@@ -23,7 +23,7 @@ Command-line flags override config file values.
 
 ## Current Schema
 
-The canonical config values are `theme`, `insert_escape`, `default_registers`, `syntax`, `todo_markers`, `auto_close_pairs`, `active_line`, `indent_guides`, `auto_indent`, `advanced_glyphs`, `tab_insertion`, `tab_behavior`, `tab_width`, `scroll_margin`, and `wrap_mode`.
+The canonical config values are `theme`, `insert_escape`, `default_registers`, `syntax`, `todo_markers`, `auto_close_pairs`, `active_line`, `relative_number`, `indent_guides`, `auto_indent`, `advanced_glyphs`, `tab_insertion`, `tab_behavior`, `tab_width`, `scroll_margin`, and `wrap_mode`.
 
 ```toml
 theme = "Friday Night"
@@ -110,6 +110,15 @@ Controls whether the focused window highlights the cursor line in normal mode.
 - Default: `false`
 - Behavior: when `true`, the current line in the focused window receives the theme's active-line UI style while the editor is in normal mode; when `false`, the editor keeps its current rendering behavior
 - Scope: focused window only, normal mode only
+
+### `relative_number`
+
+Controls whether the gutter shows relative line numbers around the cursor line.
+
+- Type: boolean
+- Default: `false`
+- Behavior: when `true`, the cursor line keeps its absolute buffer line number while surrounding visible lines show their distance from the cursor line; when `false`, the gutter shows absolute line numbers only
+- Scope: all editor modes
 
 ### `indent_guides`
 

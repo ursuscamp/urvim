@@ -360,6 +360,10 @@ mod tests {
             Style::new().fg(Color::ansi(5)),
         );
         highlights.insert(tag("ui.window.gutter"), Style::new().fg(Color::ansi(6)));
+        highlights.insert(
+            tag("ui.window.gutter.active_line"),
+            Style::new().fg(Color::ansi(23)),
+        );
         highlights.insert(tag("ui.window"), Style::new().fg(Color::ansi(7)));
         highlights.insert(tag("ui.window.lines"), Style::new().fg(Color::ansi(8)));
         highlights.insert(
@@ -434,6 +438,10 @@ mod tests {
         assert_eq!(
             theme.highlight_style_for_name("ui.window.active_line"),
             Style::new().bg(Color::ansi(21))
+        );
+        assert_eq!(
+            theme.highlight_style_for_name("ui.window.gutter.active_line"),
+            Style::new().fg(Color::ansi(23))
         );
         assert_eq!(
             theme.highlight_style_for_name("ui.window"),

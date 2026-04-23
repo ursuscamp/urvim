@@ -96,7 +96,7 @@ The line in the focused editor window that is visually emphasized to help the us
 
 **Context:** Window rendering, theme UI styling, configuration
 
-**Related Terms:** Window, Focused Window, Theme, Configuration, Normal Mode
+**Related Terms:** Window, Focused Window, Theme, Configuration, Normal Mode, Gutter, Relative Line Numbering
 
 ### Auto-Indent
 A user-facing insert-mode setting that selects how new lines should inherit indentation. The initial supported style is a neighbor mode that reuses nearby leading whitespace, and the setting is intentionally extensible so additional indentation strategies can be added later.
@@ -144,6 +144,15 @@ A session-scoped storage slot that holds copied or removed text along with wheth
 **Context:** Yank, delete, change, paste workflows
 
 **Related Terms:** Buffer, Visual Mode, Visual Line Mode, Yank Flash, Change Operator
+
+### Relative Line Numbering
+A gutter display mode that keeps the cursor line labeled with its absolute buffer line number while showing nearby visible lines as their distance from the cursor line.
+
+**Context:** Window rendering, gutter display, configuration
+
+**Example:** If the cursor is on line 25, the gutter can show `25` on the cursor line, `1` on line 24, and `2` on line 27.
+
+**Related Terms:** Gutter, Cursor, Active Line, Configuration, Window
 
 ### Resizing Mode
 A user-facing editor mode that lets the focused pane be resized with directional keys instead of editing text. In urvim, resizing mode is entered with `Ctrl-w r`, uses `h/j/k/l` for pane resizing, and exits with `Esc`.
@@ -356,6 +365,8 @@ A one-line footer rendered by the root layout that shows editor metadata such as
 
 ### Gutter
 The left margin area that displays line numbers. Shows a distinct background color to separate it from content.
+
+**Related Terms:** Window, Relative Line Numbering, Active Line
 
 ### Tab Group
 A container that owns multiple windows, displays a horizontal tab bar, and routes editing actions to the active window. The tab bar can scroll horizontally when more tabs exist than fit in the visible terminal width.

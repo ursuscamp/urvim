@@ -261,6 +261,18 @@ mod tests {
         }
     }
 
+    fn active_gutter_line_style(theme: &str) -> Style {
+        match theme {
+            "Friday Night" => Style::new().fg(Color::ansi(252)),
+            "Saturday Morning" => Style::new().fg(Color::ansi(16)),
+            "Rose Pine" => Style::new().fg(Color::Rgb(Rgb::new(224, 222, 244))),
+            "Dracula" => Style::new().fg(Color::Rgb(Rgb::new(248, 248, 242))),
+            "Tokyo Night" => Style::new().fg(Color::Rgb(Rgb::new(192, 202, 245))),
+            "Catppuccin" => Style::new().fg(Color::Rgb(Rgb::new(205, 214, 244))),
+            other => panic!("unexpected theme {other}"),
+        }
+    }
+
     fn split_border_style(theme: &str) -> Style {
         match theme {
             "Friday Night" => Style::new().fg(Color::ansi(244)),
@@ -306,6 +318,7 @@ bold = true
 "ui.tab.inactive" = { fg = "base" }
 "ui.tab.scroll_indicator" = { fg = "base" }
 "ui.window.gutter" = { fg = "base" }
+"ui.window.gutter.active_line" = { fg = "accent" }
 "ui.window" = { fg = "base" }
 "ui.window.lines" = { fg = "base" }
 "ui.window.lines.resize" = { fg = "accent", bold = true }
@@ -382,6 +395,7 @@ fg = "base"
 "ui.tab.inactive" = { fg = "base" }
 "ui.tab.scroll_indicator" = { fg = "base" }
 "ui.window.gutter" = { fg = "base" }
+"ui.window.gutter.active_line" = { fg = "accent" }
 "ui.window" = { fg = "base" }
 "syntax.comment" = { fg = "base" }
 "syntax.constant" = { fg = "base" }
@@ -421,6 +435,7 @@ fg = "base"
 "ui.tab.inactive" = { fg = "base" }
 "ui.tab.scroll_indicator" = { fg = "base" }
 "ui.window.gutter" = { fg = "base" }
+"ui.window.gutter.active_line" = { fg = "accent" }
 "ui.window" = { fg = "base" }
 "ui.Extra" = { fg = "base" }
 "syntax.comment" = { fg = "base" }
@@ -458,6 +473,7 @@ fg = "base"
 "ui.tab.inactive" = { fg = "base" }
 "ui.tab.scroll_indicator" = { fg = "base" }
 "ui.window.gutter" = { fg = "base" }
+"ui.window.gutter.active_line" = { fg = "accent" }
 "ui.window" = { fg = "base" }
 "syntax.comment" = { fg = "base" }
 "syntax.constant" = { fg = "base" }
@@ -498,6 +514,7 @@ bold = true
 "ui.tab.inactive" = { fg = "base" }
 "ui.tab.scroll_indicator" = { fg = "base" }
 "ui.window.gutter" = { fg = "base" }
+"ui.window.gutter.active_line" = { fg = "accent" }
 "ui.window" = { fg = "base" }
 "syntax.comment" = { fg = "base" }
 "syntax.constant" = { fg = "base" }
@@ -545,6 +562,7 @@ bold = true
 "ui.tab.inactive" = { fg = "base" }
 "ui.tab.scroll_indicator" = { fg = "base" }
 "ui.window.gutter" = { fg = "base" }
+"ui.window.gutter.active_line" = { fg = "accent" }
 "ui.window" = { fg = "base" }
 "syntax.comment" = { fg = "base" }
 "syntax.constant" = { fg = "base" }
@@ -585,6 +603,7 @@ bg = "base"
 "ui.tab.inactive" = { fg = "base" }
 "ui.tab.scroll_indicator" = { fg = "base" }
 "ui.window.gutter" = { fg = "base" }
+"ui.window.gutter.active_line" = { fg = "accent" }
 "ui.window" = { fg = "base" }
 "syntax.comment" = { fg = "base" }
 "syntax.constant" = { fg = "base" }
@@ -665,6 +684,11 @@ bg = "base"
                 theme.highlight_style_for_name("ui.window.active_line"),
                 active_line_style(name),
                 "theme {name} should define an active line style"
+            );
+            assert_eq!(
+                theme.highlight_style_for_name("ui.window.gutter.active_line"),
+                active_gutter_line_style(name),
+                "theme {name} should define an active gutter line style"
             );
             assert_eq!(
                 theme.highlight_style_for_name("ui.window.lines.border"),

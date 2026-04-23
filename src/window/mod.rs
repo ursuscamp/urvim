@@ -63,6 +63,19 @@ pub struct Gutter {
     style: Style,
 }
 
+/// Per-render gutter state used to resolve relative numbering and active-row styling.
+#[derive(Debug, Clone, Copy)]
+pub struct GutterRenderState {
+    /// The current cursor line in the buffer.
+    pub cursor_line: usize,
+    /// Whether relative line numbering is enabled.
+    pub relative_number: bool,
+    /// The visible screen row containing the cursor, if any.
+    pub active_screen_row: Option<usize>,
+    /// The overlay style to apply to the active gutter row, if any.
+    pub active_line_style: Option<Style>,
+}
+
 #[derive(Debug, Clone)]
 pub struct RenderChunk {
     pub text: String,
@@ -298,6 +311,11 @@ impl Window {
         let gutter_width =
             Gutter::new_with_style(0, size.rows, total_lines, gutter_style).calculate_width();
         let wrap_mode = globals::with_config(|config| config.wrap_mode).unwrap_or_default();
+        let relative_number =
+            globals::with_config(|config| config.relative_number).unwrap_or(false);
+        let active_line_enabled =
+            globals::with_config(|config| config.active_line).unwrap_or(false);
+        let is_normal_mode = self.mode.kind() == ModeKind::Normal;
 
         // Resolve scrolling before building the gutter so line numbers and
         // visible content are derived from the same viewport.
@@ -329,21 +347,40 @@ impl Window {
             self.wrap_enabled,
             wrap_mode,
         );
-        gutter.render_for_render_data(screen, origin, &self.render_data);
-        let active_line_enabled =
-            globals::with_config(|config| config.active_line).unwrap_or(false);
-        let is_normal_mode = self.mode.kind() == ModeKind::Normal;
+        let active_cursor_row = if active_line_enabled {
+            self.render_data
+                .cursor_screen_position(self.buffer_view.cursor())
+                .map(|position| position.row as usize)
+        } else {
+            None
+        };
+        let active_gutter_style = if active_line_enabled {
+            globals::with_active_theme(|theme| {
+                theme.map(|theme| theme.highlight_style_for_name("ui.window.gutter.active_line"))
+            })
+        } else {
+            None
+        };
+        gutter.render_for_render_data(
+            screen,
+            origin,
+            &self.render_data,
+            GutterRenderState {
+                cursor_line: self.buffer_view.cursor().line,
+                relative_number,
+                active_screen_row: active_cursor_row,
+                active_line_style: active_gutter_style,
+            },
+        );
         if active_line_enabled
             && is_normal_mode
-            && let Some(cursor_position) = self
-                .render_data
-                .cursor_screen_position(self.buffer_view.cursor())
+            && let Some(cursor_row) = active_cursor_row
             && let Some(active_line_style) = globals::with_active_theme(|theme| {
                 theme.map(|theme| theme.resolve_name_with_default("ui.window.active_line"))
             })
         {
             self.render_data
-                .set_line_base_style(cursor_position.row as usize, active_line_style);
+                .set_line_base_style(cursor_row, active_line_style);
         }
 
         self.render_data

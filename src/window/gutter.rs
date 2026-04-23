@@ -45,10 +45,15 @@ impl Gutter {
     pub fn render(&mut self, screen: &mut Screen, origin: Position) {
         let start_line = self.start_line;
         let total_buffer_lines = self.total_buffer_lines;
+        let gutter_style = self.style;
+        let width = self.calculate_width();
         self.render_rows(screen, origin, |screen_row_idx| {
             let buffer_line = start_line + screen_row_idx;
             if buffer_line < total_buffer_lines {
-                Some((buffer_line, true))
+                Some((
+                    Self::format_line_number(buffer_line + 1, width),
+                    gutter_style,
+                ))
             } else {
                 None
             }
@@ -61,54 +66,60 @@ impl Gutter {
         screen: &mut Screen,
         origin: Position,
         render_data: &RenderData,
+        state: GutterRenderState,
     ) {
         let total_buffer_lines = self.total_buffer_lines;
+        let gutter_style = self.style;
+        let gutter_width = self.calculate_width();
         self.render_rows(screen, origin, |screen_row_idx| {
-            render_data
-                .line_data
-                .get(screen_row_idx)
-                .and_then(|line_data| {
-                    if line_data.show_gutter_line_number {
-                        Some((line_data.buffer_line, true))
-                    } else {
-                        Some((line_data.buffer_line, false))
-                    }
-                })
-                .filter(|(buffer_line, _)| *buffer_line < total_buffer_lines)
+            let line_data = render_data.line_data.get(screen_row_idx)?;
+
+            if line_data.buffer_line >= total_buffer_lines {
+                return None;
+            }
+
+            let row_style = if state.active_screen_row == Some(screen_row_idx) {
+                gutter_style.overlay(state.active_line_style.unwrap_or_default())
+            } else {
+                gutter_style
+            };
+
+            let gutter_line = if !line_data.show_gutter_line_number {
+                " ".repeat(gutter_width as usize)
+            } else if state.relative_number && line_data.buffer_line != state.cursor_line {
+                Self::format_line_number(
+                    line_data.buffer_line.abs_diff(state.cursor_line),
+                    gutter_width,
+                )
+            } else {
+                Self::format_line_number(line_data.buffer_line + 1, gutter_width)
+            };
+
+            Some((gutter_line, row_style))
         });
     }
 
     fn render_rows<F>(&mut self, screen: &mut Screen, origin: Position, line_for_row: F)
     where
-        F: Fn(usize) -> Option<(usize, bool)>,
+        F: Fn(usize) -> Option<(String, Style)>,
     {
         let width = self.calculate_width();
         let gutter_style = self.style;
 
         for screen_row in 0..self.visible_rows {
             let screen_row_idx = screen_row as usize;
-            let gutter_line = if let Some((buffer_line, show_number)) = line_for_row(screen_row_idx)
-            {
-                if !show_number {
-                    " ".repeat(width as usize)
-                } else {
-                    let line_num = buffer_line + 1;
-                    let line_str = line_num.to_string();
-                    let line_width = line_str.len();
-                    let left_pad_len = width as usize - 1 - line_width;
-                    let left_pad = " ".repeat(left_pad_len);
-                    format!("{}{} ", left_pad, line_str)
-                }
-            } else {
-                " ".repeat(width as usize)
-            };
+            let (gutter_line, row_style) = line_for_row(screen_row_idx)
+                .unwrap_or_else(|| (" ".repeat(width as usize), gutter_style));
 
-            screen.write_string(
-                origin.row + screen_row,
-                origin.col,
-                gutter_style,
-                &gutter_line,
-            );
+            screen.write_string(origin.row + screen_row, origin.col, row_style, &gutter_line);
         }
+    }
+
+    fn format_line_number(line_number: usize, width: u16) -> String {
+        let line_str = line_number.to_string();
+        let line_width = line_str.len();
+        let left_pad_len = width as usize - 1 - line_width;
+        let left_pad = " ".repeat(left_pad_len);
+        format!("{}{} ", left_pad, line_str)
     }
 }

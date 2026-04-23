@@ -29,6 +29,7 @@ bg = "bg"
 "ui.tab.inactive" = { fg = "fg", bg = "panel" }
 "ui.tab.scroll_indicator" = { fg = "muted", bg = "bg" }
 "ui.window.gutter" = { fg = "muted", bg = "bg" }
+"ui.window.gutter.active_line" = { fg = "fg" }
 "ui.window" = { fg = "fg", bg = "bg" }
 "ui.window.lines" = { fg = "muted" }
 "ui.window.lines.resize" = { fg = "accent", bold = true }

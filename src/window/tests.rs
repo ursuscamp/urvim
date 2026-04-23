@@ -623,7 +623,7 @@ fn test_window_render_keeps_todo_marker_above_active_line_base_style() {
 }
 
 #[test]
-fn test_window_render_skips_active_line_when_mode_is_insert() {
+fn test_window_render_keeps_active_gutter_style_in_insert_mode() {
     let path = temp_path_with_ext("active-line-insert", "rs");
     let buffer = Buffer::from_str_with_path("fn main() {}", path);
     let mut window = Window::new(buffer);
@@ -631,6 +631,9 @@ fn test_window_render_skips_active_line_when_mode_is_insert() {
     let expected_style = theme
         .default_style()
         .overlay(theme.highlight_style_for_tag(&tag("keyword")));
+    let expected_gutter_style = theme
+        .resolve_name_with_default("ui.window.gutter")
+        .overlay(theme.highlight_style_for_name("ui.window.gutter.active_line"));
     let _theme_guard = globals::set_test_active_theme(theme);
     let _config_guard = globals::set_test_config(Config {
         active_line: true,
@@ -642,6 +645,10 @@ fn test_window_render_skips_active_line_when_mode_is_insert() {
     let mut screen = crate::screen::Screen::new(1, 20);
     window.render(&mut screen, Position::new(0, 0), Size::new(1, 20));
 
+    assert_eq!(
+        screen.get_cell_mut(0, 0).unwrap().style,
+        expected_gutter_style
+    );
     assert_eq!(screen.get_cell_mut(0, 3).unwrap().style, expected_style);
 }
 
@@ -1948,6 +1955,87 @@ fn test_gutter_digit_count() {
     assert_eq!(Gutter::digit_count(100), 3);
     assert_eq!(Gutter::digit_count(999), 3);
     assert_eq!(Gutter::digit_count(1000), 4);
+}
+
+#[test]
+fn test_window_render_supports_relative_line_numbers_in_all_modes() {
+    let theme = syntax_themed_window();
+    let _theme_guard = globals::set_test_active_theme(theme);
+    let _config_guard = globals::set_test_config(Config {
+        relative_number: true,
+        syntax: false,
+        ..Default::default()
+    });
+
+    let expected_rows = [("2", 0), ("1", 1), ("3", 2), ("1", 3), ("2", 4)];
+    for mode in [
+        ModeKind::Normal,
+        ModeKind::Insert,
+        ModeKind::Visual,
+        ModeKind::VisualLine,
+    ] {
+        let mut mode_window = Window::new(Buffer::from_str_with_path(
+            "a\nb\nc\nd\ne",
+            temp_path_with_ext(&format!("relative-number-{mode:?}"), "txt"),
+        ));
+        mode_window.switch_mode(mode);
+        let mut screen = crate::screen::Screen::new(5, 20);
+        mode_window.set_cursor(crate::buffer::Cursor::new(2, 0));
+        mode_window.render(&mut screen, Position::new(0, 0), Size::new(5, 20));
+
+        for (expected, row) in expected_rows {
+            assert_eq!(screen.get_cell_mut(row, 1).unwrap().text, expected);
+        }
+    }
+}
+
+#[test]
+fn test_window_render_applies_active_gutter_style_to_full_row() {
+    let path = temp_path_with_ext("active-gutter", "txt");
+    let buffer = Buffer::from_str_with_path("a\nb\nc", path);
+    let mut window = Window::new(buffer);
+    let mut theme = syntax_themed_window();
+    theme.highlights.insert(
+        Tag::parse("ui.window.gutter.active_line").expect("valid tag"),
+        Style::new().fg(Color::ansi(99)),
+    );
+    let _theme_guard = globals::set_test_active_theme(theme.clone());
+    let _config_guard = globals::set_test_config(Config {
+        active_line: true,
+        relative_number: true,
+        syntax: false,
+        ..Default::default()
+    });
+
+    window.set_cursor(crate::buffer::Cursor::new(1, 0));
+
+    let mut screen = crate::screen::Screen::new(3, 20);
+    window.render(&mut screen, Position::new(0, 0), Size::new(3, 20));
+
+    let expected_active_style = theme
+        .resolve_name_with_default("ui.window.gutter")
+        .overlay(theme.highlight_style_for_name("ui.window.gutter.active_line"));
+    let expected_base_style = theme.resolve_name_with_default("ui.window.gutter");
+    assert_eq!(
+        screen.get_cell_mut(1, 0).unwrap().style,
+        expected_active_style
+    );
+    assert_eq!(
+        screen.get_cell_mut(1, 1).unwrap().style,
+        expected_active_style
+    );
+    assert_eq!(
+        screen.get_cell_mut(1, 2).unwrap().style,
+        expected_active_style
+    );
+    assert_eq!(
+        screen.get_cell_mut(0, 0).unwrap().style,
+        expected_base_style
+    );
+    assert_eq!(
+        screen.get_cell_mut(2, 0).unwrap().style,
+        expected_base_style
+    );
 }
 
 #[test]

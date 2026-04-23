@@ -160,6 +160,8 @@ pub struct Config {
     pub auto_close_pairs: bool,
     /// Whether the active line should be highlighted in the focused window.
     pub active_line: bool,
+    /// Whether to render relative gutter line numbers.
+    pub relative_number: bool,
     /// Whether to render the active indent scope guide.
     pub indent_guides: bool,
     /// The configured comment todo markers used for highlighting.
@@ -196,6 +198,8 @@ pub struct PartialConfig {
     pub auto_close_pairs: Option<bool>,
     /// Whether the active line should be highlighted in the focused window.
     pub active_line: Option<bool>,
+    /// Whether to render relative gutter line numbers.
+    pub relative_number: Option<bool>,
     /// Whether to render the active indent scope guide.
     pub indent_guides: Option<bool>,
     /// The todo marker list stored in the config file.
@@ -279,6 +283,9 @@ impl Config {
             .and_then(|config| config.auto_close_pairs)
             .unwrap_or(true);
         let active_line = file.and_then(|config| config.active_line).unwrap_or(false);
+        let relative_number = file
+            .and_then(|config| config.relative_number)
+            .unwrap_or(false);
         let indent_guides = file.and_then(|config| config.indent_guides).unwrap_or(true);
         let todo_markers = file
             .and_then(|config| config.todo_markers.clone())
@@ -311,6 +318,7 @@ impl Config {
             syntax,
             auto_close_pairs,
             active_line,
+            relative_number,
             indent_guides,
             todo_markers,
             auto_indent,
@@ -359,6 +367,7 @@ impl Default for Config {
             syntax: true,
             auto_close_pairs: true,
             active_line: false,
+            relative_number: false,
             indent_guides: true,
             todo_markers: default_todo_markers(),
             auto_indent: AutoIndentMode::default(),
@@ -657,6 +666,7 @@ mod tests {
             syntax: Some(false),
             auto_close_pairs: Some(false),
             active_line: Some(true),
+            relative_number: Some(true),
             indent_guides: Some(false),
             todo_markers: Some(todo_marker_strings(&["TASK", "FIXME"])),
             auto_indent: Some(AutoIndentMode::Neighbor),
@@ -696,6 +706,7 @@ mod tests {
         assert!(!Config::resolve(Some(&file), None, None).syntax);
         assert!(!Config::resolve(Some(&file), None, None).auto_close_pairs);
         assert!(Config::resolve(Some(&file), None, None).active_line);
+        assert!(Config::resolve(Some(&file), None, None).relative_number);
         assert!(!Config::resolve(Some(&file), None, None).indent_guides);
         assert_eq!(
             Config::resolve(Some(&file), None, None).todo_markers,
@@ -708,6 +719,7 @@ mod tests {
         assert!(Config::resolve(None, None, None).syntax);
         assert!(Config::resolve(None, None, None).auto_close_pairs);
         assert!(!Config::resolve(None, None, None).active_line);
+        assert!(!Config::resolve(None, None, None).relative_number);
         assert!(Config::resolve(None, None, None).indent_guides);
         assert_eq!(
             Config::resolve(None, None, None).auto_indent,
@@ -1151,12 +1163,31 @@ mod tests {
     }
 
     #[test]
+    fn load_from_locations_loads_relative_number_flag() {
+        let home = unique_temp_dir("relative-number-home");
+        write_config(&home, "relative_number = true");
+
+        let config = Config::load_from_locations(home, vec![], None, None).expect("should load");
+
+        assert!(config.relative_number);
+    }
+
+    #[test]
     fn load_from_locations_defaults_active_line_to_false() {
         let home = unique_temp_dir("active-line-default-home");
 
         let config = Config::load_from_locations(home, vec![], None, None).expect("should load");
 
         assert!(!config.active_line);
+    }
+
+    #[test]
+    fn load_from_locations_defaults_relative_number_to_false() {
+        let home = unique_temp_dir("relative-number-default-home");
+
+        let config = Config::load_from_locations(home, vec![], None, None).expect("should load");
+
+        assert!(!config.relative_number);
     }
 
     #[test]
