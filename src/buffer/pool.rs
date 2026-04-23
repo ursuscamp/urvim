@@ -143,9 +143,10 @@ impl BufferPool {
                 if active_scroll_row == 0 && visible_rows > 0 {
                     buffer.ensure_syntax_through(active_prefix_end);
                 }
-                buffer.request_syntax_catch_up_with_priority(buffer_id, JobPriority::Foreground);
+                buffer
+                    .request_buffer_cache_refresh_with_priority(buffer_id, JobPriority::Foreground);
             } else {
-                buffer.request_syntax_catch_up(buffer_id);
+                buffer.request_buffer_cache_refresh(buffer_id);
             }
         }
     }

@@ -21,6 +21,13 @@ The internal editor subsystem that executes deferred jobs off the main input/ren
 ### Buffer
 A text storage data structure backed by `imbl::Vector<Arc<str>>`. Each line is stored as an `Arc<str>` without trailing newline characters. Newlines exist implicitly between lines. The buffer supports efficient text manipulation with proper Unicode handling including grapheme clusters, combining characters, and emoji.
 
+### Buffer Cache
+A buffer-owned container for cache state derived from the current text, including syntax highlighting cache and indent-scope cache snapshots. The buffer cache keeps these derived views grouped together so future buffer-level caches can be added without coupling them to syntax storage.
+
+**Context:** Buffer caching, background worker refreshes, undo/redo snapshots, syntax highlighting
+
+**Related Terms:** Buffer, Syntax Cache, Indent Scope Cache, Buffer Cache Worker
+
 ### Buffer ID
 A newtype wrapper around `usize` that identifies a buffer stored in the global buffer pool. Buffer IDs are assigned monotonically starting at `0`.
 
@@ -30,6 +37,13 @@ A newtype wrapper around `usize` that identifies a buffer stored in the global b
 A process-global store that owns all live buffers and resolves them by `BufferId`. It deduplicates file-backed buffers by absolute path so that the same file is not loaded more than once.
 
 **Related Terms:** Buffer, Buffer ID, Buffer View, Window
+
+### Buffer Cache Worker
+The background worker that refreshes buffer-derived caches for a buffer when its text changes. The worker can rebuild syntax-related data and any other buffer caches that become stale as part of the same refresh pass.
+
+**Context:** Background job scheduling, buffer cache refresh, syntax highlighting catch-up
+
+**Related Terms:** Buffer Cache, Job, Job Framework, Syntax Cache
 
 ### Configuration
 The resolved startup settings loaded from the command line and the user config file. Configuration is the single source of truth for user-facing startup options such as the active theme.
@@ -103,7 +117,7 @@ A buffer-owned cached index of computed indent scopes and per-line scope members
 
 **Context:** Buffer caching, syntax invalidation/rebuild, fold and guide feature infrastructure
 
-**Related Terms:** Indent Scope, Syntax Highlighting, Buffer
+**Related Terms:** Indent Scope, Syntax Highlighting, Buffer, Buffer Cache
 
 ### Change Operator
 The `c` operator in operator-pending mode. It removes the resolved text range and then places the editor in insert mode when the operation succeeds. Examples include `cw`, `ciw`, `c$`, and `cG`.
@@ -212,6 +226,13 @@ A buffer-derived visual styling layer that classifies text spans by filetype-awa
 **Context:** Buffer rendering, filetype-aware styling, theme syntax styles
 
 **Related Terms:** Buffer, Filetype, Theme, Default Style, Window, Syntax Definition
+
+### Syntax Cache
+The buffer cache segment that stores line-oriented syntax highlighting results and syntax-name state for a buffer. Syntax cache is responsible for text-derived tokenization data, while other buffer cache concerns such as indent scopes live alongside it in `BufferCache`.
+
+**Context:** Buffer caching, syntax tokenization, undo/redo snapshots, background catch-up
+
+**Related Terms:** Buffer Cache, Syntax Highlighting, Buffer Cache Worker, Indent Scope Cache
 
 ### Syntax Definition
 A per-file TOML syntax configuration that describes how a filetype should be highlighted. Syntax definitions are loaded into memory and associated with one or more filetypes or language names. A syntax definition contains metadata plus one ordered `rules` list made of `regex` and `injection` rules.

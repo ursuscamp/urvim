@@ -1271,10 +1271,10 @@ fn test_window_render_uses_background_syntax_after_tick() {
             if let Some(job_manager) = job_manager {
                 let _ = job_manager.process_completed(|event| {
                     if let Ok((_kind, _token, result)) =
-                        event.into_completed_output::<crate::buffer::SyntaxCatchUpResult>()
+                        event.into_completed_output::<crate::buffer::BufferCacheRefreshResult>()
                     {
                         globals::with_buffer_mut(result.buffer_id, |buffer| {
-                            applied = buffer.apply_syntax_catch_up_result(result);
+                            applied = buffer.apply_buffer_cache_refresh_result(result);
                         });
                     }
                 });

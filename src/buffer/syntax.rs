@@ -1,4 +1,4 @@
-//! Buffer-owned syntax highlighting cache and tokenizers.
+//! Syntax highlighting tokenizers and indent-scope cache primitives.
 
 use crate::buffer::Buffer;
 use crate::buffer::BufferId;
@@ -52,8 +52,6 @@ impl SyntaxLine {
 pub struct SyntaxCache {
     syntax_name: SmolStr,
     lines: Vector<SyntaxLine>,
-    indent_scope_cache: IndentScopeCache,
-    indent_scope_cache_stale: bool,
 }
 
 impl SyntaxCache {
@@ -62,8 +60,6 @@ impl SyntaxCache {
         Self {
             syntax_name: syntax_name.into(),
             lines: Vector::new(),
-            indent_scope_cache: IndentScopeCache::empty(),
-            indent_scope_cache_stale: true,
         }
     }
 
@@ -73,14 +69,7 @@ impl SyntaxCache {
         if self.syntax_name != syntax_name {
             self.syntax_name = syntax_name;
             self.lines = Vector::new();
-            self.indent_scope_cache = IndentScopeCache::empty();
-            self.indent_scope_cache_stale = true;
         }
-    }
-
-    /// Replaces the current cache with a newer snapshot.
-    pub fn replace_with(&mut self, other: SyntaxCache) {
-        *self = other;
     }
 
     /// Returns the canonical syntax name tracked by this cache.
@@ -94,8 +83,6 @@ impl SyntaxCache {
             return;
         }
         self.lines.truncate(line.min(self.lines.len()));
-        self.indent_scope_cache.invalidate_from(line);
-        self.indent_scope_cache_stale = true;
     }
 
     /// Returns cached spans for a line without computing any missing prefix.
@@ -133,11 +120,6 @@ impl SyntaxCache {
     pub fn ensure_through(&mut self, syntax_name: &str, line_texts: &[&str], line: usize) {
         self.set_syntax_name(syntax_name);
 
-        if line_texts.is_empty() {
-            self.indent_scope_cache_stale = false;
-            return;
-        }
-
         let target_line = line.min(line_texts.len().saturating_sub(1));
         if self.lines.len() > line_texts.len() {
             self.lines.truncate(line_texts.len());
@@ -158,44 +140,22 @@ impl SyntaxCache {
                 state = next_state;
             }
         }
-
-        let tab_width = globals::with_config(|config| config.tab_width)
-            .unwrap_or(4)
-            .max(1);
-        self.indent_scope_cache_stale =
-            !self
-                .indent_scope_cache
-                .ensure_through(line_texts, target_line, tab_width);
-    }
-
-    /// Returns true when the indent-scope cache needs rebuilding.
-    pub fn indent_scope_cache_stale(&self) -> bool {
-        self.indent_scope_cache_stale
-    }
-
-    /// Returns all cached indent scopes for this buffer snapshot.
-    pub fn indent_scopes(&self) -> &Vector<IndentScope> {
-        &self.indent_scope_cache.scopes
-    }
-
-    /// Returns cached containing indent scope ids for a line.
-    pub fn line_indent_scope_ids(&self, line: usize) -> Option<&Vector<IndentScopeId>> {
-        self.indent_scope_cache.line_to_scopes.get(line)
     }
 }
 
-/// Result produced by the background syntax catch-up job.
+/// Result produced by the background buffer cache refresh job.
 #[derive(Debug, Clone)]
-pub struct SyntaxCatchUpResult {
+pub struct BufferCacheRefreshResult {
     /// Buffer the result applies to.
     pub buffer_id: BufferId,
-    /// Syntax generation that produced the result.
+    /// Cache generation that produced the result.
     pub generation: u64,
-    /// Completed syntax cache snapshot.
-    pub cache: SyntaxCache,
-    /// Completed indent-scope cache snapshot aligned with syntax cache.
-    pub(crate) indent_scope_cache: IndentScopeCache,
+    /// Completed buffer cache snapshot.
+    pub cache: BufferCache,
 }
+
+/// Backward-compatible alias for the buffer cache refresh result.
+pub type SyntaxCatchUpResult = BufferCacheRefreshResult;
 
 /// A stable identifier for one indent scope inside a cache generation.
 pub type IndentScopeId = usize;
@@ -258,11 +218,11 @@ pub(crate) struct IndentScopeCache {
 }
 
 impl IndentScopeCache {
-    fn empty() -> Self {
+    pub(crate) fn empty() -> Self {
         Self::default()
     }
 
-    fn invalidate_from(&mut self, line: usize) {
+    pub(crate) fn invalidate_from(&mut self, line: usize) {
         let boundary = line.min(self.line_to_scopes.len());
         let sync_point = self.previous_sync_point(boundary);
 
@@ -302,7 +262,7 @@ impl IndentScopeCache {
         })
     }
 
-    fn ensure_through(
+    pub(crate) fn ensure_through(
         &mut self,
         line_texts: &[&str],
         target_line: usize,
@@ -509,6 +469,124 @@ impl IndentScopeCache {
                 .collect();
         }
     }
+
+    pub(crate) fn indent_scopes(&self) -> &Vector<IndentScope> {
+        &self.scopes
+    }
+
+    pub(crate) fn line_indent_scope_ids(&self, line: usize) -> Option<&Vector<IndentScopeId>> {
+        self.line_to_scopes.get(line)
+    }
+}
+
+/// Buffer-owned cache state derived from the current text.
+#[derive(Debug, Clone)]
+pub struct BufferCache {
+    syntax_cache: SyntaxCache,
+    indent_scope_cache: IndentScopeCache,
+    indent_scope_cache_stale: bool,
+}
+
+impl BufferCache {
+    /// Creates an empty buffer cache for a syntax name.
+    pub fn new(syntax_name: impl Into<SmolStr>) -> Self {
+        Self {
+            syntax_cache: SyntaxCache::new(syntax_name),
+            indent_scope_cache: IndentScopeCache::empty(),
+            indent_scope_cache_stale: true,
+        }
+    }
+
+    /// Returns the canonical syntax name tracked by this buffer cache.
+    pub fn syntax_name(&self) -> &str {
+        self.syntax_cache.syntax_name()
+    }
+
+    /// Updates the cached syntax name, clearing cached data when it changes.
+    pub fn set_syntax_name(&mut self, syntax_name: impl Into<SmolStr>) {
+        let syntax_name = syntax_name.into();
+        if self.syntax_cache.syntax_name() != syntax_name {
+            self.syntax_cache.set_syntax_name(syntax_name);
+            self.indent_scope_cache = IndentScopeCache::empty();
+            self.indent_scope_cache_stale = true;
+        }
+    }
+
+    /// Replaces the current cache with a newer snapshot.
+    pub fn replace_with(&mut self, other: BufferCache) {
+        *self = other;
+    }
+
+    /// Invalidates cached data from the provided line onward.
+    pub fn invalidate_from(&mut self, line: usize) {
+        if line >= self.syntax_cache.cached_line_count() {
+            return;
+        }
+        self.syntax_cache.invalidate_from(line);
+        self.indent_scope_cache.invalidate_from(line);
+        self.indent_scope_cache_stale = true;
+    }
+
+    /// Returns cached spans for a line without computing any missing prefix.
+    pub fn cached_spans_for_line(&self, line: usize) -> Option<Vec<SyntaxSpan>> {
+        self.syntax_cache.cached_spans_for_line(line)
+    }
+
+    /// Returns how many leading lines currently have cached syntax data.
+    pub fn cached_line_count(&self) -> usize {
+        self.syntax_cache.cached_line_count()
+    }
+
+    /// Returns true when every line in the buffer has a cached syntax result.
+    pub fn is_complete_for_line_count(&self, line_count: usize) -> bool {
+        self.syntax_cache.is_complete_for_line_count(line_count)
+    }
+
+    /// Returns the cached spans for a line, computing any missing prefix first.
+    pub fn spans_for_line(
+        &mut self,
+        syntax_name: &str,
+        line_texts: &[&str],
+        line: usize,
+    ) -> Option<Vec<SyntaxSpan>> {
+        self.syntax_cache
+            .spans_for_line(syntax_name, line_texts, line)
+    }
+
+    /// Ensures syntax and indent cache data exists through the requested line.
+    pub fn ensure_through(&mut self, syntax_name: &str, line_texts: &[&str], line: usize) {
+        self.syntax_cache
+            .ensure_through(syntax_name, line_texts, line);
+
+        if line_texts.is_empty() {
+            self.indent_scope_cache_stale = false;
+            return;
+        }
+
+        let target_line = line.min(line_texts.len().saturating_sub(1));
+        let tab_width = globals::with_config(|config| config.tab_width)
+            .unwrap_or(4)
+            .max(1);
+        self.indent_scope_cache_stale =
+            !self
+                .indent_scope_cache
+                .ensure_through(line_texts, target_line, tab_width);
+    }
+
+    /// Returns true when the indent-scope cache needs rebuilding.
+    pub fn indent_scope_cache_stale(&self) -> bool {
+        self.indent_scope_cache_stale
+    }
+
+    /// Returns all cached indent scopes for this buffer snapshot.
+    pub fn indent_scopes(&self) -> &Vector<IndentScope> {
+        self.indent_scope_cache.indent_scopes()
+    }
+
+    /// Returns cached containing indent scope ids for a line.
+    pub fn line_indent_scope_ids(&self, line: usize) -> Option<&Vector<IndentScopeId>> {
+        self.indent_scope_cache.line_indent_scope_ids(line)
+    }
 }
 
 fn leading_indent_width(line: &str, tab_width: usize) -> usize {
@@ -517,20 +595,20 @@ fn leading_indent_width(line: &str, tab_width: usize) -> usize {
         .fold(0, |acc, ch| acc + if ch == '\t' { tab_width } else { 1 })
 }
 
-struct SyntaxCatchUpJob {
+struct BufferCacheRefreshJob {
     buffer_id: BufferId,
     generation: u64,
     syntax_name: SmolStr,
-    cache: SyntaxCache,
+    cache: BufferCache,
     line_texts: Vector<Arc<str>>,
 }
 
-impl SyntaxCatchUpJob {
+impl BufferCacheRefreshJob {
     fn new(
         buffer_id: BufferId,
         generation: u64,
         syntax_name: SmolStr,
-        cache: SyntaxCache,
+        cache: BufferCache,
         line_texts: Vector<Arc<str>>,
     ) -> Self {
         Self {
@@ -543,62 +621,61 @@ impl SyntaxCatchUpJob {
     }
 }
 
-impl Job for SyntaxCatchUpJob {
-    type Output = SyntaxCatchUpResult;
+impl Job for BufferCacheRefreshJob {
+    type Output = BufferCacheRefreshResult;
 
     fn run(mut self, context: &JobContext) -> Self::Output {
         let line_refs: Vec<&str> = self.line_texts.iter().map(|line| line.as_ref()).collect();
         if !line_refs.is_empty() {
-            if self.cache.lines.len() > line_refs.len() {
-                self.cache.lines.truncate(line_refs.len());
+            if self.cache.syntax_cache.lines.len() > line_refs.len() {
+                self.cache.syntax_cache.lines.truncate(line_refs.len());
             }
 
             let target_line = line_refs.len() - 1;
             let mut state = self
                 .cache
+                .syntax_cache
                 .lines
                 .last()
                 .map(|line| line.state.clone())
                 .unwrap_or_default();
-            let start_line = self.cache.lines.len();
+            let start_line = self.cache.syntax_cache.lines.len();
 
             for line_text in line_refs.iter().take(target_line + 1).skip(start_line) {
                 if !context.is_current() {
                     tracing::debug!(
                         kind = %context.kind(),
                         generation = context.token().generation(),
-                        "stopping stale syntax catch-up job"
+                        "stopping stale buffer cache refresh job"
                     );
                     break;
                 }
 
                 let (spans, next_state) = tokenize_line(&self.syntax_name, line_text, state);
                 self.cache
+                    .syntax_cache
                     .lines
                     .push_back(SyntaxLine::new(spans, next_state.clone()));
                 state = next_state;
+            }
+
+            if context.is_current() {
+                let tab_width = globals::with_config(|config| config.tab_width)
+                    .unwrap_or(4)
+                    .max(1);
+                self.cache.indent_scope_cache_stale = !self
+                    .cache
+                    .indent_scope_cache
+                    .ensure_through(&line_refs, target_line, tab_width);
             }
         } else {
             self.cache.set_syntax_name(self.syntax_name.as_str());
         }
 
-        let tab_width = globals::with_config(|config| config.tab_width)
-            .unwrap_or(4)
-            .max(1);
-        let indent_scope_cache = {
-            let target_line = line_refs.len().saturating_sub(1);
-            let _ =
-                self.cache
-                    .indent_scope_cache
-                    .ensure_through(&line_refs, target_line, tab_width);
-            self.cache.indent_scope_cache.clone()
-        };
-
-        SyntaxCatchUpResult {
+        BufferCacheRefreshResult {
             buffer_id: self.buffer_id,
             generation: self.generation,
             cache: self.cache,
-            indent_scope_cache,
         }
     }
 }
@@ -1170,9 +1247,9 @@ fn regex_match_at_with_captures<'a>(
 }
 
 impl Buffer {
-    /// Invalidates buffer-owned syntax data from the given line onward.
+    /// Invalidates buffer-owned cache data from the given line onward.
     pub fn invalidate_syntax_from(&mut self, line: usize) {
-        self.syntax_cache.invalidate_from(line);
+        self.buffer_cache.invalidate_from(line);
         self.syntax_generation = self.syntax_generation.wrapping_add(1);
         self.syntax_background_generation = None;
         if line == 0 {
@@ -1182,33 +1259,33 @@ impl Buffer {
 
     /// Returns cached spans for a line without computing missing prefix data.
     pub fn cached_syntax_spans_for_line(&self, line: usize) -> Option<Vec<SyntaxSpan>> {
-        self.syntax_cache.cached_spans_for_line(line)
+        self.buffer_cache.cached_spans_for_line(line)
     }
 
     /// Returns true when the indent-scope cache needs rebuilding.
     pub fn indent_scope_cache_stale(&self) -> bool {
-        self.syntax_cache.indent_scope_cache_stale()
+        self.buffer_cache.indent_scope_cache_stale()
     }
 
     /// Returns all cached indent scopes for the current buffer snapshot.
     pub fn cached_indent_scopes(&self) -> &Vector<IndentScope> {
-        self.syntax_cache.indent_scopes()
+        self.buffer_cache.indent_scopes()
     }
 
     /// Returns cached containing indent scope ids for the requested line.
     pub fn cached_line_indent_scope_ids(&self, line: usize) -> Option<&Vector<IndentScopeId>> {
-        self.syntax_cache.line_indent_scope_ids(line)
+        self.buffer_cache.line_indent_scope_ids(line)
     }
 
     /// Returns true when all buffer lines currently have cached syntax data.
     pub fn syntax_cache_complete(&self) -> bool {
-        self.syntax_cache
+        self.buffer_cache
             .is_complete_for_line_count(self.line_count())
     }
 
     /// Returns how many leading lines currently have cached syntax spans.
     pub fn cached_syntax_line_count(&self) -> usize {
-        self.syntax_cache.cached_line_count()
+        self.buffer_cache.cached_line_count()
     }
 
     /// Returns the current syntax generation used to reject stale background results.
@@ -1224,44 +1301,46 @@ impl Buffer {
     /// Returns the highlighted spans for a line, computing them on demand.
     pub fn syntax_spans_for_line(&mut self, line: usize) -> Option<Vec<SyntaxSpan>> {
         let line_texts: Vec<&str> = self.lines.iter().map(|line| line.as_ref()).collect();
-        let syntax_name = self.syntax_name.clone();
-        self.syntax_cache
+        let syntax_name = self.syntax_name().to_owned();
+        self.buffer_cache
             .spans_for_line(&syntax_name, &line_texts, line)
     }
 
-    /// Applies a background syntax catch-up result when it still matches this buffer.
-    pub fn apply_syntax_catch_up_result(&mut self, result: SyntaxCatchUpResult) -> bool {
+    /// Applies a background buffer cache refresh result when it still matches this buffer.
+    pub fn apply_buffer_cache_refresh_result(&mut self, result: BufferCacheRefreshResult) -> bool {
         if result.generation != self.syntax_generation {
             return false;
         }
 
-        self.syntax_cache.replace_with(result.cache);
-        self.syntax_cache.indent_scope_cache = result.indent_scope_cache;
-        self.syntax_cache.indent_scope_cache_stale = false;
-        self.syntax_name = self.syntax_cache.syntax_name().into();
+        self.buffer_cache.replace_with(result.cache);
         self.undo_state
-            .update_syntax_cache(self.syntax_cache.clone());
+            .update_buffer_cache(self.buffer_cache.clone());
         if self.syntax_background_generation == Some(result.generation) {
             self.syntax_background_generation = None;
         }
         true
     }
 
-    /// Requests background syntax catch-up when the cache is incomplete.
-    pub fn request_syntax_catch_up(&mut self, buffer_id: BufferId) {
-        self.request_syntax_catch_up_with_priority(buffer_id, JobPriority::Background);
+    /// Applies a background syntax catch-up result when it still matches this buffer.
+    pub fn apply_syntax_catch_up_result(&mut self, result: SyntaxCatchUpResult) -> bool {
+        self.apply_buffer_cache_refresh_result(result)
     }
 
-    /// Requests syntax catch-up with the given job priority when the cache is incomplete.
+    /// Requests background buffer cache refresh when the cache is incomplete.
+    pub fn request_buffer_cache_refresh(&mut self, buffer_id: BufferId) {
+        self.request_buffer_cache_refresh_with_priority(buffer_id, JobPriority::Background);
+    }
+
+    /// Requests buffer cache refresh with the given job priority when the cache is incomplete.
     ///
-    /// Syntax catch-up uses latest-only job submission so stale queued work for the same buffer
+    /// Buffer cache refresh uses latest-only job submission so stale queued work for the same buffer
     /// can be pruned before it consumes worker time.
-    pub fn request_syntax_catch_up_with_priority(
+    pub fn request_buffer_cache_refresh_with_priority(
         &mut self,
         buffer_id: BufferId,
         priority: JobPriority,
     ) {
-        if self.syntax_cache_complete() {
+        if self.buffer_cache_complete() {
             return;
         }
 
@@ -1269,14 +1348,14 @@ impl Buffer {
             return;
         }
 
-        let job = SyntaxCatchUpJob::new(
+        let job = BufferCacheRefreshJob::new(
             buffer_id,
             self.syntax_generation,
-            self.syntax_name.clone(),
-            self.syntax_cache.clone(),
+            self.syntax_name().to_owned().into(),
+            self.buffer_cache.clone(),
             self.lines.clone(),
         );
-        let kind = JobKind::new(format!("syntax:{}", buffer_id.get()));
+        let kind = JobKind::new(format!("buffer-cache:{}", buffer_id.get()));
         let token = JobToken::new(self.syntax_generation);
 
         let submitted = globals::with_job_manager(|job_manager| {
@@ -1294,12 +1373,35 @@ impl Buffer {
         }
     }
 
+    /// Requests background syntax catch-up when the cache is incomplete.
+    pub fn request_syntax_catch_up(&mut self, buffer_id: BufferId) {
+        self.request_buffer_cache_refresh(buffer_id);
+    }
+
+    /// Requests syntax catch-up with the given job priority when the cache is incomplete.
+    ///
+    /// Syntax catch-up uses latest-only job submission so stale queued work for the same buffer
+    /// can be pruned before it consumes worker time.
+    pub fn request_syntax_catch_up_with_priority(
+        &mut self,
+        buffer_id: BufferId,
+        priority: JobPriority,
+    ) {
+        self.request_buffer_cache_refresh_with_priority(buffer_id, priority);
+    }
+
     /// Ensures syntax data exists through a line without returning it.
     pub fn ensure_syntax_through(&mut self, line: usize) {
         let line_texts: Vec<&str> = self.lines.iter().map(|line| line.as_ref()).collect();
-        let syntax_name = self.syntax_name.clone();
-        self.syntax_cache
+        let syntax_name = self.syntax_name().to_owned();
+        self.buffer_cache
             .ensure_through(&syntax_name, &line_texts, line);
+    }
+
+    /// Returns true when the complete buffer cache is available for the current text.
+    pub fn buffer_cache_complete(&self) -> bool {
+        self.buffer_cache
+            .is_complete_for_line_count(self.line_count())
     }
 }
 
@@ -1444,7 +1546,7 @@ mod tests {
             SyntaxState::default(),
         ));
 
-        cache.replace_with(replacement);
+        cache = replacement;
 
         let cached = cache
             .cached_spans_for_line(1)
@@ -1461,8 +1563,7 @@ mod tests {
         let initial_result = SyntaxCatchUpResult {
             buffer_id: BufferId::new(1),
             generation: buffer.syntax_generation(),
-            cache: buffer.syntax_cache.clone(),
-            indent_scope_cache: buffer.syntax_cache.indent_scope_cache.clone(),
+            cache: buffer.buffer_cache.clone(),
         };
         assert!(buffer.apply_syntax_catch_up_result(initial_result));
         let initial_scopes = scope_tuples(&buffer);
@@ -1475,8 +1576,7 @@ mod tests {
         let edited_result = SyntaxCatchUpResult {
             buffer_id: BufferId::new(1),
             generation: buffer.syntax_generation(),
-            cache: buffer.syntax_cache.clone(),
-            indent_scope_cache: buffer.syntax_cache.indent_scope_cache.clone(),
+            cache: buffer.buffer_cache.clone(),
         };
         assert!(buffer.apply_syntax_catch_up_result(edited_result));
         let edited_scopes = scope_tuples(&buffer);
@@ -1745,11 +1845,11 @@ mod tests {
         let buffer = Buffer::from_str_with_path(&text, path);
         let handle = JobHandle::new();
         let token = JobToken::new(buffer.syntax_generation());
-        let job = SyntaxCatchUpJob::new(
+        let job = BufferCacheRefreshJob::new(
             BufferId::new(1),
             buffer.syntax_generation(),
-            buffer.syntax_name.clone(),
-            buffer.syntax_cache.clone(),
+            buffer.syntax_name().to_owned().into(),
+            buffer.buffer_cache.clone(),
             buffer.lines.clone(),
         );
 
@@ -1824,11 +1924,11 @@ mod tests {
                 JobKind::new("syntax:1"),
                 JobPriority::Background,
                 JobToken::new(1),
-                SyntaxCatchUpJob::new(
+                BufferCacheRefreshJob::new(
                     BufferId::new(1),
                     old_buffer.syntax_generation(),
-                    old_buffer.syntax_name.clone(),
-                    old_buffer.syntax_cache.clone(),
+                    old_buffer.syntax_name().to_owned().into(),
+                    old_buffer.buffer_cache.clone(),
                     old_buffer.lines.clone(),
                 ),
             )
@@ -1839,11 +1939,11 @@ mod tests {
                 JobKind::new("syntax:1"),
                 JobPriority::Background,
                 JobToken::new(2),
-                SyntaxCatchUpJob::new(
+                BufferCacheRefreshJob::new(
                     BufferId::new(1),
                     new_buffer.syntax_generation(),
-                    new_buffer.syntax_name.clone(),
-                    new_buffer.syntax_cache.clone(),
+                    new_buffer.syntax_name().to_owned().into(),
+                    new_buffer.buffer_cache.clone(),
                     new_buffer.lines.clone(),
                 ),
             )
@@ -1876,8 +1976,7 @@ mod tests {
         let result = SyntaxCatchUpResult {
             buffer_id: BufferId::new(1),
             generation: buffer.syntax_generation(),
-            cache: buffer.syntax_cache.clone(),
-            indent_scope_cache: buffer.syntax_cache.indent_scope_cache.clone(),
+            cache: buffer.buffer_cache.clone(),
         };
 
         buffer.invalidate_syntax_from(0);

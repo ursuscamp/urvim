@@ -4,7 +4,7 @@ use std::io;
 
 use urvim::Layout;
 use urvim::action::ActionResult;
-use urvim::buffer::{Cursor, SyntaxCatchUpResult};
+use urvim::buffer::{BufferCacheRefreshResult, Cursor};
 use urvim::config::Config;
 use urvim::editor::{Action, ActionKind, HandleKeyResult, ModeKind, RepeatReplay};
 use urvim::globals;
@@ -86,10 +86,10 @@ fn main() -> io::Result<()> {
             if let Some(job_manager) = job_manager {
                 let accepted_redraw = job_manager.process_completed(|event| {
                     if let Ok((_kind, _token, result)) =
-                        event.into_completed_output::<SyntaxCatchUpResult>()
+                        event.into_completed_output::<BufferCacheRefreshResult>()
                     {
                         globals::with_buffer_mut(result.buffer_id, |buffer| {
-                            buffer.apply_syntax_catch_up_result(result);
+                            buffer.apply_buffer_cache_refresh_result(result);
                         });
                     }
                 });

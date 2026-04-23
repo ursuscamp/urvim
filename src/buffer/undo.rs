@@ -1,13 +1,12 @@
-use super::syntax::SyntaxCache;
 use super::*;
 
 impl UndoState {
-    pub(super) fn new(lines: Vector<Arc<str>>, cursor: Cursor, syntax_cache: SyntaxCache) -> Self {
+    pub(super) fn new(lines: Vector<Arc<str>>, cursor: Cursor, buffer_cache: BufferCache) -> Self {
         Self {
             history: Vector::unit(Snapshot {
                 lines,
                 cursor,
-                syntax_cache,
+                buffer_cache,
             }),
             position: 0,
         }
@@ -17,7 +16,7 @@ impl UndoState {
         &mut self,
         lines: Vector<Arc<str>>,
         cursor: Cursor,
-        syntax_cache: SyntaxCache,
+        buffer_cache: BufferCache,
     ) {
         if let Some(active) = self.history.get(self.position)
             && active.lines == lines
@@ -26,7 +25,7 @@ impl UndoState {
                 *active_snapshot = Snapshot {
                     lines,
                     cursor,
-                    syntax_cache,
+                    buffer_cache,
                 };
             }
             return;
@@ -39,7 +38,7 @@ impl UndoState {
         self.history.push_back(Snapshot {
             lines,
             cursor,
-            syntax_cache,
+            buffer_cache,
         });
         self.position = self.history.len() - 1;
     }
@@ -50,13 +49,13 @@ impl UndoState {
         }
     }
 
-    pub(super) fn update_syntax_cache(&mut self, syntax_cache: SyntaxCache) {
+    pub(super) fn update_buffer_cache(&mut self, buffer_cache: BufferCache) {
         if let Some(active) = self.history.get_mut(self.position) {
-            active.syntax_cache = syntax_cache;
+            active.buffer_cache = buffer_cache;
         }
     }
 
-    fn undo(&mut self) -> Option<(Vector<Arc<str>>, SyntaxCache, Cursor)> {
+    fn undo(&mut self) -> Option<(Vector<Arc<str>>, BufferCache, Cursor)> {
         if self.position == 0 {
             return None;
         }
@@ -65,12 +64,12 @@ impl UndoState {
         let snapshot = self.history.get(self.position)?;
         Some((
             snapshot.lines.clone(),
-            snapshot.syntax_cache.clone(),
+            snapshot.buffer_cache.clone(),
             snapshot.cursor,
         ))
     }
 
-    fn redo(&mut self) -> Option<(Vector<Arc<str>>, SyntaxCache, Cursor)> {
+    fn redo(&mut self) -> Option<(Vector<Arc<str>>, BufferCache, Cursor)> {
         if self.position >= self.history.len() - 1 {
             return None;
         }
@@ -79,7 +78,7 @@ impl UndoState {
         let snapshot = self.history.get(self.position)?;
         Some((
             snapshot.lines.clone(),
-            snapshot.syntax_cache.clone(),
+            snapshot.buffer_cache.clone(),
             snapshot.cursor,
         ))
     }
@@ -103,7 +102,7 @@ impl Buffer {
     /// Records the current text and syntax state as an undo snapshot.
     pub fn push_snapshot(&mut self, cursor: Cursor) {
         self.undo_state
-            .push_snapshot(self.lines.clone(), cursor, self.syntax_cache.clone());
+            .push_snapshot(self.lines.clone(), cursor, self.buffer_cache.clone());
     }
 
     /// Updates the cursor stored in the active undo snapshot.
@@ -113,10 +112,9 @@ impl Buffer {
 
     pub fn undo(&mut self) -> Option<Cursor> {
         match self.undo_state.undo() {
-            Some((lines, syntax_cache, cursor)) => {
+            Some((lines, buffer_cache, cursor)) => {
                 self.lines = lines;
-                self.syntax_cache = syntax_cache;
-                self.syntax_name = self.syntax_cache.syntax_name().into();
+                self.buffer_cache = buffer_cache;
                 self.syntax_generation = self.syntax_generation.wrapping_add(1);
                 self.syntax_background_generation = None;
                 Some(cursor)
@@ -127,10 +125,9 @@ impl Buffer {
 
     pub fn redo(&mut self) -> Option<Cursor> {
         match self.undo_state.redo() {
-            Some((lines, syntax_cache, cursor)) => {
+            Some((lines, buffer_cache, cursor)) => {
                 self.lines = lines;
-                self.syntax_cache = syntax_cache;
-                self.syntax_name = self.syntax_cache.syntax_name().into();
+                self.buffer_cache = buffer_cache;
                 self.syntax_generation = self.syntax_generation.wrapping_add(1);
                 self.syntax_background_generation = None;
                 Some(cursor)

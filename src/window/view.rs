@@ -613,7 +613,7 @@ impl BufferView {
                 if near_cached_frontier {
                     buffer.ensure_syntax_through(visible_end_line);
                 }
-                buffer.request_syntax_catch_up(self.buffer_id());
+                buffer.request_buffer_cache_refresh(self.buffer_id());
             }
 
             let mut buffer_line_idx = if wrap_enabled { 0 } else { start_line };

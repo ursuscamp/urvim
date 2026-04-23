@@ -53,7 +53,10 @@ mod unicode;
 
 pub use indent::IndentDirection;
 pub use pool::{BufferId, BufferPool};
-pub use syntax::{IndentScope, IndentScopeId, SyntaxCatchUpResult, SyntaxSpan};
+pub use syntax::{
+    BufferCache, BufferCacheRefreshResult, IndentScope, IndentScopeId, SyntaxCatchUpResult,
+    SyntaxSpan,
+};
 pub use unicode::{
     char_width, configured_tab_width, display_char_width, display_grapheme_width, display_width_at,
     expand_tabs, grapheme_width, str_width, to_byte_index,
@@ -118,8 +121,8 @@ struct Snapshot {
     lines: Vector<Arc<str>>,
     /// The cursor position at this point in time.
     cursor: Cursor,
-    /// The syntax cache state at this point in time.
-    syntax_cache: syntax::SyntaxCache,
+    /// The buffer cache state at this point in time.
+    buffer_cache: BufferCache,
 }
 
 /// Stores undo/redo history for a buffer.
@@ -163,11 +166,10 @@ pub struct Buffer {
     lines: Vector<Arc<str>>,
     saved_lines: Vector<Arc<str>>,
     path: Option<AbsolutePath>,
-    syntax_name: SmolStr,
     syntax_generation: u64,
     syntax_background_generation: Option<u64>,
     undo_state: UndoState,
-    syntax_cache: syntax::SyntaxCache,
+    buffer_cache: BufferCache,
 }
 
 impl Clone for Buffer {
@@ -176,11 +178,10 @@ impl Clone for Buffer {
             lines: self.lines.clone(),
             saved_lines: self.saved_lines.clone(),
             path: self.path.clone(),
-            syntax_name: self.syntax_name.clone(),
             syntax_generation: self.syntax_generation,
             syntax_background_generation: self.syntax_background_generation,
             undo_state: self.undo_state.clone(),
-            syntax_cache: self.syntax_cache.clone(),
+            buffer_cache: self.buffer_cache.clone(),
         }
     }
 }
@@ -240,15 +241,15 @@ impl Buffer {
 
     /// Returns the resolved canonical syntax name for this buffer.
     pub fn syntax_name(&self) -> &str {
-        &self.syntax_name
+        self.buffer_cache.syntax_name()
     }
 
     /// Returns the user-facing syntax label for this buffer.
     pub fn syntax_label(&self) -> String {
         crate::syntax::builtin_syntax_registry()
             .ok()
-            .and_then(|registry| registry.display_name(&self.syntax_name))
-            .unwrap_or_else(|| self.syntax_name.clone())
+            .and_then(|registry| registry.display_name(self.syntax_name()))
+            .unwrap_or_else(|| self.syntax_name().to_owned().into())
             .to_string()
     }
 
@@ -325,10 +326,9 @@ impl Buffer {
         )
         .unwrap_or_else(|| smol_str::SmolStr::new(crate::syntax::fallback_syntax_name()));
 
-        if self.syntax_name != new_syntax_name {
-            self.syntax_name = new_syntax_name.clone();
-            self.syntax_cache.set_syntax_name(new_syntax_name);
-            self.syntax_cache.invalidate_from(0);
+        if self.syntax_name() != new_syntax_name {
+            self.buffer_cache.set_syntax_name(new_syntax_name);
+            self.buffer_cache.invalidate_from(0);
             self.syntax_generation = self.syntax_generation.wrapping_add(1);
             self.syntax_background_generation = None;
         }
