@@ -51,7 +51,7 @@ impl SyntaxLine {
 #[derive(Debug, Clone)]
 pub struct SyntaxCache {
     syntax_name: SmolStr,
-    lines: Vec<SyntaxLine>,
+    lines: Vector<SyntaxLine>,
     indent_scope_cache: IndentScopeCache,
     indent_scope_cache_stale: bool,
 }
@@ -61,7 +61,7 @@ impl SyntaxCache {
     pub fn new(syntax_name: impl Into<SmolStr>) -> Self {
         Self {
             syntax_name: syntax_name.into(),
-            lines: Vec::new(),
+            lines: Vector::new(),
             indent_scope_cache: IndentScopeCache::empty(),
             indent_scope_cache_stale: true,
         }
@@ -72,7 +72,7 @@ impl SyntaxCache {
         let syntax_name = syntax_name.into();
         if self.syntax_name != syntax_name {
             self.syntax_name = syntax_name;
-            self.lines.clear();
+            self.lines = Vector::new();
             self.indent_scope_cache = IndentScopeCache::empty();
             self.indent_scope_cache_stale = true;
         }
@@ -81,6 +81,11 @@ impl SyntaxCache {
     /// Replaces the current cache with a newer snapshot.
     pub fn replace_with(&mut self, other: SyntaxCache) {
         *self = other;
+    }
+
+    /// Returns the canonical syntax name tracked by this cache.
+    pub fn syntax_name(&self) -> &str {
+        &self.syntax_name
     }
 
     /// Invalidates cached syntax data from the provided line onward.
@@ -148,7 +153,8 @@ impl SyntaxCache {
 
             for line_text in line_texts.iter().take(target_line + 1).skip(start_line) {
                 let (spans, next_state) = tokenize_line(syntax_name, line_text, state);
-                self.lines.push(SyntaxLine::new(spans, next_state.clone()));
+                self.lines
+                    .push_back(SyntaxLine::new(spans, next_state.clone()));
                 state = next_state;
             }
         }
@@ -168,16 +174,13 @@ impl SyntaxCache {
     }
 
     /// Returns all cached indent scopes for this buffer snapshot.
-    pub fn indent_scopes(&self) -> &[IndentScope] {
+    pub fn indent_scopes(&self) -> &Vector<IndentScope> {
         &self.indent_scope_cache.scopes
     }
 
     /// Returns cached containing indent scope ids for a line.
-    pub fn line_indent_scope_ids(&self, line: usize) -> Option<&[IndentScopeId]> {
-        self.indent_scope_cache
-            .line_to_scopes
-            .get(line)
-            .map(|scope_ids| scope_ids.as_slice())
+    pub fn line_indent_scope_ids(&self, line: usize) -> Option<&Vector<IndentScopeId>> {
+        self.indent_scope_cache.line_to_scopes.get(line)
     }
 }
 
@@ -248,9 +251,9 @@ impl IndentScope {
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct IndentScopeCache {
-    scopes: Vec<IndentScope>,
-    line_to_scopes: Vec<Vec<IndentScopeId>>,
-    open_scope_stack: Vec<IndentScopeId>,
+    scopes: Vector<IndentScope>,
+    line_to_scopes: Vector<Vector<IndentScopeId>>,
+    open_scope_stack: Vector<IndentScopeId>,
     scanned_through_line: usize,
 }
 
@@ -265,10 +268,12 @@ impl IndentScopeCache {
 
         self.line_to_scopes.truncate(sync_point);
         self.scanned_through_line = sync_point;
-        self.open_scope_stack.clear();
+        self.open_scope_stack = Vector::new();
 
         let prefix_len = self
             .scopes
+            .iter()
+            .collect::<Vec<_>>()
             .partition_point(|scope| scope.start_line < sync_point);
         self.scopes.truncate(prefix_len);
     }
@@ -305,7 +310,7 @@ impl IndentScopeCache {
     ) -> bool {
         if line_texts.is_empty() {
             self.scanned_through_line = 0;
-            self.open_scope_stack.clear();
+            self.open_scope_stack = Vector::new();
             return true;
         }
 
@@ -353,7 +358,7 @@ impl IndentScopeCache {
                 } else {
                     invalid_branch_start = Some(self.scopes[scope_id].start_line);
                 }
-                self.open_scope_stack.pop();
+                self.open_scope_stack.pop_back();
             }
 
             if let Some(branch_start) = invalid_branch_start {
@@ -365,7 +370,7 @@ impl IndentScopeCache {
 
             let mut row_members = self.open_scope_stack.clone();
             if let Some(scope_id) = closed_scope_on_line {
-                row_members.push(scope_id);
+                row_members.push_back(scope_id);
             }
 
             if !line_text.is_empty() {
@@ -380,9 +385,9 @@ impl IndentScopeCache {
 
             let new_scope_id = self.scopes.len();
             self.scopes
-                .push(IndentScope::open(new_scope_id, line_idx, indent_width));
-            row_members.push(new_scope_id);
-            self.open_scope_stack.push(new_scope_id);
+                .push_back(IndentScope::open(new_scope_id, line_idx, indent_width));
+            row_members.push_back(new_scope_id);
+            self.open_scope_stack.push_back(new_scope_id);
 
             self.commit_row(line_idx, row_members);
         }
@@ -398,13 +403,18 @@ impl IndentScopeCache {
 
     fn ensure_row_for_line(&mut self, line_idx: usize) {
         if self.line_to_scopes.len() <= line_idx {
-            self.line_to_scopes.resize_with(line_idx + 1, Vec::new);
+            while self.line_to_scopes.len() <= line_idx {
+                self.line_to_scopes.push_back(Vector::new());
+            }
         } else {
-            self.line_to_scopes[line_idx].clear();
+            if let Some(row) = self.line_to_scopes.get_mut(line_idx) {
+                *row = Vector::new();
+            }
         }
     }
 
-    fn commit_row(&mut self, line_idx: usize, mut scope_ids: Vec<IndentScopeId>) {
+    fn commit_row(&mut self, line_idx: usize, scope_ids: Vector<IndentScopeId>) {
+        let mut scope_ids: Vec<IndentScopeId> = scope_ids.into_iter().collect();
         scope_ids.sort_by_key(|scope_id| {
             let scope = &self.scopes[*scope_id];
             (
@@ -412,7 +422,9 @@ impl IndentScopeCache {
                 std::cmp::Reverse(scope.end_line.unwrap_or(usize::MAX)),
             )
         });
-        self.line_to_scopes[line_idx] = scope_ids;
+        if let Some(row) = self.line_to_scopes.get_mut(line_idx) {
+            *row = scope_ids.into_iter().collect();
+        }
     }
 
     fn close_scope_line(&mut self, scope_id: IndentScopeId, end_line: usize) -> bool {
@@ -430,23 +442,33 @@ impl IndentScopeCache {
         if let Some(scope) = self.scopes.get(scope_id) {
             self.remove_scope_memberships(scope.start_line, end_line, scope_id);
         }
-        self.open_scope_stack.pop();
+        self.open_scope_stack.pop_back();
     }
 
     fn trim_invalid_branch(&mut self, branch_start: usize, end_line: usize) {
         let prefix_len = self
             .scopes
+            .iter()
+            .collect::<Vec<_>>()
             .partition_point(|scope| scope.start_line < branch_start);
         self.scopes.truncate(prefix_len);
-        self.open_scope_stack
-            .retain(|scope_id| *scope_id < prefix_len);
+        self.open_scope_stack = self
+            .open_scope_stack
+            .iter()
+            .copied()
+            .filter(|scope_id| *scope_id < prefix_len)
+            .collect();
         for row in self
             .line_to_scopes
             .iter_mut()
             .take(end_line + 1)
             .skip(branch_start)
         {
-            row.retain(|scope_id| *scope_id < prefix_len);
+            *row = row
+                .iter()
+                .copied()
+                .filter(|scope_id| *scope_id < prefix_len)
+                .collect();
         }
     }
 
@@ -458,7 +480,7 @@ impl IndentScopeCache {
         let last_line = line_texts.len() - 1;
         while let Some(&scope_id) = self.open_scope_stack.last() {
             if self.close_scope_line(scope_id, last_line) {
-                self.open_scope_stack.pop();
+                self.open_scope_stack.pop_back();
                 continue;
             }
 
@@ -480,7 +502,11 @@ impl IndentScopeCache {
             .take(end_line + 1)
             .skip(start_line)
         {
-            row.retain(|existing| *existing != scope_id);
+            *row = row
+                .iter()
+                .copied()
+                .filter(|existing| *existing != scope_id)
+                .collect();
         }
     }
 }
@@ -549,7 +575,7 @@ impl Job for SyntaxCatchUpJob {
                 let (spans, next_state) = tokenize_line(&self.syntax_name, line_text, state);
                 self.cache
                     .lines
-                    .push(SyntaxLine::new(spans, next_state.clone()));
+                    .push_back(SyntaxLine::new(spans, next_state.clone()));
                 state = next_state;
             }
         } else {
@@ -1165,12 +1191,12 @@ impl Buffer {
     }
 
     /// Returns all cached indent scopes for the current buffer snapshot.
-    pub fn cached_indent_scopes(&self) -> &[IndentScope] {
+    pub fn cached_indent_scopes(&self) -> &Vector<IndentScope> {
         self.syntax_cache.indent_scopes()
     }
 
     /// Returns cached containing indent scope ids for the requested line.
-    pub fn cached_line_indent_scope_ids(&self, line: usize) -> Option<&[IndentScopeId]> {
+    pub fn cached_line_indent_scope_ids(&self, line: usize) -> Option<&Vector<IndentScopeId>> {
         self.syntax_cache.line_indent_scope_ids(line)
     }
 
@@ -1212,6 +1238,9 @@ impl Buffer {
         self.syntax_cache.replace_with(result.cache);
         self.syntax_cache.indent_scope_cache = result.indent_scope_cache;
         self.syntax_cache.indent_scope_cache_stale = false;
+        self.syntax_name = self.syntax_cache.syntax_name().into();
+        self.undo_state
+            .update_syntax_cache(self.syntax_cache.clone());
         if self.syntax_background_generation == Some(result.generation) {
             self.syntax_background_generation = None;
         }
@@ -1277,7 +1306,7 @@ impl Buffer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::buffer::BufferId;
+    use crate::buffer::{BufferId, Cursor};
     use crate::config::Config;
     use crate::globals;
     use crate::job::{JobEvent, JobHandle, JobKind, JobPriority, JobToken};
@@ -1394,7 +1423,7 @@ mod tests {
         let mut cache = SyntaxCache::new("plain");
         assert_eq!(cache.cached_spans_for_line(0), None);
 
-        cache.lines.push(SyntaxLine::new(
+        cache.lines.push_back(SyntaxLine::new(
             vec![SyntaxSpan::new(0, 3, tag("text.plain"))],
             SyntaxState::default(),
         ));
@@ -1406,11 +1435,11 @@ mod tests {
         assert_eq!(cached[0].style, tag("text.plain"));
 
         let mut replacement = SyntaxCache::new("plain");
-        replacement.lines.push(SyntaxLine::new(
+        replacement.lines.push_back(SyntaxLine::new(
             vec![SyntaxSpan::new(0, 4, tag("text.replaced"))],
             SyntaxState::default(),
         ));
-        replacement.lines.push(SyntaxLine::new(
+        replacement.lines.push_back(SyntaxLine::new(
             vec![SyntaxSpan::new(0, 5, tag("text.replaced"))],
             SyntaxState::default(),
         ));
@@ -1422,6 +1451,47 @@ mod tests {
             .expect("replacement cache should have line 1");
         assert_eq!(cached.len(), 1);
         assert_eq!(cached[0].style, tag("text.replaced"));
+    }
+
+    #[test]
+    fn undo_and_redo_restore_syntax_cache_snapshots() {
+        let mut buffer = Buffer::from_str("root\n  child\nroot-close");
+
+        buffer.ensure_syntax_through(2);
+        let initial_result = SyntaxCatchUpResult {
+            buffer_id: BufferId::new(1),
+            generation: buffer.syntax_generation(),
+            cache: buffer.syntax_cache.clone(),
+            indent_scope_cache: buffer.syntax_cache.indent_scope_cache.clone(),
+        };
+        assert!(buffer.apply_syntax_catch_up_result(initial_result));
+        let initial_scopes = scope_tuples(&buffer);
+        assert!(buffer.syntax_cache_complete());
+        assert!(!buffer.indent_scope_cache_stale());
+
+        buffer.insert_text(Cursor::new(2, 0), "  nested\n");
+        buffer.push_snapshot(Cursor::new(3, 0));
+        buffer.ensure_syntax_through(buffer.line_count().saturating_sub(1));
+        let edited_result = SyntaxCatchUpResult {
+            buffer_id: BufferId::new(1),
+            generation: buffer.syntax_generation(),
+            cache: buffer.syntax_cache.clone(),
+            indent_scope_cache: buffer.syntax_cache.indent_scope_cache.clone(),
+        };
+        assert!(buffer.apply_syntax_catch_up_result(edited_result));
+        let edited_scopes = scope_tuples(&buffer);
+        assert!(buffer.syntax_cache_complete());
+        assert!(!buffer.indent_scope_cache_stale());
+
+        assert!(buffer.undo().is_some());
+        assert_eq!(scope_tuples(&buffer), initial_scopes);
+        assert!(buffer.syntax_cache_complete());
+        assert!(!buffer.indent_scope_cache_stale());
+
+        assert!(buffer.redo().is_some());
+        assert_eq!(scope_tuples(&buffer), edited_scopes);
+        assert!(buffer.syntax_cache_complete());
+        assert!(!buffer.indent_scope_cache_stale());
     }
 
     #[test]
@@ -1538,7 +1608,7 @@ mod tests {
         let scope_ids = buffer
             .cached_line_indent_scope_ids(2)
             .expect("closing line should have containing scopes");
-        assert_eq!(scope_ids, &[0]);
+        assert_eq!(scope_ids.iter().copied().collect::<Vec<_>>(), vec![0]);
     }
 
     #[test]

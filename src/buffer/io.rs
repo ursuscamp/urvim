@@ -9,6 +9,7 @@ impl Buffer {
         let syntax_name = SmolStr::new(crate::syntax::fallback_syntax_name());
         let saved_lines = lines.clone();
         let undo_lines = lines.clone();
+        let syntax_cache = SyntaxCache::new(syntax_name.clone());
         Self {
             lines,
             saved_lines,
@@ -16,8 +17,12 @@ impl Buffer {
             syntax_name: syntax_name.clone(),
             syntax_generation: 0,
             syntax_background_generation: None,
-            undo_state: UndoState::new(undo_lines, Cursor::new(0, 0)),
-            syntax_cache: SyntaxCache::new(syntax_name),
+            syntax_cache,
+            undo_state: UndoState::new(
+                undo_lines,
+                Cursor::new(0, 0),
+                SyntaxCache::new(syntax_name),
+            ),
         }
     }
 
@@ -33,6 +38,7 @@ impl Buffer {
                 .unwrap_or_else(|| SmolStr::new(crate::syntax::fallback_syntax_name()));
         let saved_lines = lines.clone();
         let undo_lines = lines.clone();
+        let syntax_cache = SyntaxCache::new(syntax_name.clone());
         Self {
             lines,
             saved_lines,
@@ -40,8 +46,12 @@ impl Buffer {
             syntax_name: syntax_name.clone(),
             syntax_generation: 0,
             syntax_background_generation: None,
-            undo_state: UndoState::new(undo_lines, Cursor::new(0, 0)),
-            syntax_cache: SyntaxCache::new(syntax_name),
+            syntax_cache,
+            undo_state: UndoState::new(
+                undo_lines,
+                Cursor::new(0, 0),
+                SyntaxCache::new(syntax_name),
+            ),
         }
     }
 
@@ -60,6 +70,7 @@ impl Buffer {
         .unwrap_or_else(|| SmolStr::new(crate::syntax::fallback_syntax_name()));
         let saved_lines = lines.clone();
         let undo_lines = lines.clone();
+        let syntax_cache = SyntaxCache::new(syntax_name.clone());
         Self {
             lines,
             saved_lines,
@@ -67,8 +78,12 @@ impl Buffer {
             syntax_name: syntax_name.clone(),
             syntax_generation: 0,
             syntax_background_generation: None,
-            undo_state: UndoState::new(undo_lines, Cursor::new(0, 0)),
-            syntax_cache: SyntaxCache::new(syntax_name),
+            syntax_cache,
+            undo_state: UndoState::new(
+                undo_lines,
+                Cursor::new(0, 0),
+                SyntaxCache::new(syntax_name),
+            ),
         }
     }
 

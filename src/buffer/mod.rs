@@ -108,7 +108,7 @@ pub struct TextObjectRange {
     pub end: Cursor,
 }
 
-/// A single snapshot of buffer state (text + cursor).
+/// A single snapshot of buffer state (text, cursor, and syntax cache).
 ///
 /// This is used for undo/redo functionality to store the buffer state
 /// at a particular point in time.
@@ -118,6 +118,8 @@ struct Snapshot {
     lines: Vector<Arc<str>>,
     /// The cursor position at this point in time.
     cursor: Cursor,
+    /// The syntax cache state at this point in time.
+    syntax_cache: syntax::SyntaxCache,
 }
 
 /// Stores undo/redo history for a buffer.

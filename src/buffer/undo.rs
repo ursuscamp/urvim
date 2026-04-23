@@ -1,19 +1,33 @@
+use super::syntax::SyntaxCache;
 use super::*;
 
 impl UndoState {
-    pub(super) fn new(lines: Vector<Arc<str>>, cursor: Cursor) -> Self {
+    pub(super) fn new(lines: Vector<Arc<str>>, cursor: Cursor, syntax_cache: SyntaxCache) -> Self {
         Self {
-            history: Vector::unit(Snapshot { lines, cursor }),
+            history: Vector::unit(Snapshot {
+                lines,
+                cursor,
+                syntax_cache,
+            }),
             position: 0,
         }
     }
 
-    fn push_snapshot(&mut self, lines: Vector<Arc<str>>, cursor: Cursor) {
+    fn push_snapshot(
+        &mut self,
+        lines: Vector<Arc<str>>,
+        cursor: Cursor,
+        syntax_cache: SyntaxCache,
+    ) {
         if let Some(active) = self.history.get(self.position)
             && active.lines == lines
         {
             if let Some(active_snapshot) = self.history.get_mut(self.position) {
-                *active_snapshot = Snapshot { lines, cursor };
+                *active_snapshot = Snapshot {
+                    lines,
+                    cursor,
+                    syntax_cache,
+                };
             }
             return;
         }
@@ -22,7 +36,11 @@ impl UndoState {
             self.history.pop_back();
         }
 
-        self.history.push_back(Snapshot { lines, cursor });
+        self.history.push_back(Snapshot {
+            lines,
+            cursor,
+            syntax_cache,
+        });
         self.position = self.history.len() - 1;
     }
 
@@ -32,24 +50,38 @@ impl UndoState {
         }
     }
 
-    fn undo(&mut self) -> Option<(Vector<Arc<str>>, Cursor)> {
+    pub(super) fn update_syntax_cache(&mut self, syntax_cache: SyntaxCache) {
+        if let Some(active) = self.history.get_mut(self.position) {
+            active.syntax_cache = syntax_cache;
+        }
+    }
+
+    fn undo(&mut self) -> Option<(Vector<Arc<str>>, SyntaxCache, Cursor)> {
         if self.position == 0 {
             return None;
         }
 
         self.position -= 1;
         let snapshot = self.history.get(self.position)?;
-        Some((snapshot.lines.clone(), snapshot.cursor))
+        Some((
+            snapshot.lines.clone(),
+            snapshot.syntax_cache.clone(),
+            snapshot.cursor,
+        ))
     }
 
-    fn redo(&mut self) -> Option<(Vector<Arc<str>>, Cursor)> {
+    fn redo(&mut self) -> Option<(Vector<Arc<str>>, SyntaxCache, Cursor)> {
         if self.position >= self.history.len() - 1 {
             return None;
         }
 
         self.position += 1;
         let snapshot = self.history.get(self.position)?;
-        Some((snapshot.lines.clone(), snapshot.cursor))
+        Some((
+            snapshot.lines.clone(),
+            snapshot.syntax_cache.clone(),
+            snapshot.cursor,
+        ))
     }
 
     fn can_undo(&self) -> bool {
@@ -68,19 +100,25 @@ impl UndoState {
 }
 
 impl Buffer {
+    /// Records the current text and syntax state as an undo snapshot.
     pub fn push_snapshot(&mut self, cursor: Cursor) {
-        self.undo_state.push_snapshot(self.lines.clone(), cursor);
+        self.undo_state
+            .push_snapshot(self.lines.clone(), cursor, self.syntax_cache.clone());
     }
 
+    /// Updates the cursor stored in the active undo snapshot.
     pub fn update_cursor(&mut self, cursor: Cursor) {
         self.undo_state.update_cursor(cursor);
     }
 
     pub fn undo(&mut self) -> Option<Cursor> {
         match self.undo_state.undo() {
-            Some((lines, cursor)) => {
+            Some((lines, syntax_cache, cursor)) => {
                 self.lines = lines;
-                self.invalidate_syntax_from(0);
+                self.syntax_cache = syntax_cache;
+                self.syntax_name = self.syntax_cache.syntax_name().into();
+                self.syntax_generation = self.syntax_generation.wrapping_add(1);
+                self.syntax_background_generation = None;
                 Some(cursor)
             }
             None => None,
@@ -89,9 +127,12 @@ impl Buffer {
 
     pub fn redo(&mut self) -> Option<Cursor> {
         match self.undo_state.redo() {
-            Some((lines, cursor)) => {
+            Some((lines, syntax_cache, cursor)) => {
                 self.lines = lines;
-                self.invalidate_syntax_from(0);
+                self.syntax_cache = syntax_cache;
+                self.syntax_name = self.syntax_cache.syntax_name().into();
+                self.syntax_generation = self.syntax_generation.wrapping_add(1);
+                self.syntax_background_generation = None;
                 Some(cursor)
             }
             None => None,
