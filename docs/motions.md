@@ -49,6 +49,8 @@ Register behavior is documented separately in [docs/registers.md](docs/registers
 | `I` | Insert at line start (enter insert mode) |
 | `J` | Join lines with space |
 | `gJ` | Join lines without space |
+| `gsr{from}{to}` | Replace nearest surrounding pair of `{from}` family with `{to}` family |
+| `gsd{pair}` | Delete nearest surrounding pair of `{pair}` family |
 | `gcc` | Toggle line comment on the current line (or N consecutive lines with a count) |
 | `<<` | Decrease indentation on the current line (or N consecutive lines with a count) |
 | `\>>` | Increase indentation on the current line (or N consecutive lines with a count) |
@@ -552,6 +554,38 @@ Examples:
 
 - Joining from the last line: No operation (nothing to join with)
 - Joining when there are fewer lines than count: Joins all available lines
+
+## Surround Operations
+
+These normal-mode `gs` commands edit an existing surrounding pair without changing the enclosed text.
+
+### gsr - Replace Surrounding Pair
+
+Replaces the nearest resolved surrounding pair around the cursor.
+
+- **Form**: `gsr{from}{to}`
+- **Supported selectors**: `()`, `[]`, `{}`, `<>`, `"`, `'`, `` ` ``
+- **Selector symmetry**: bracket families accept opener or closer (for example, `(` and `)` both target parentheses)
+- **Cross-line behavior**: pair resolution can cross line boundaries
+- **No-op behavior**: unsupported selectors, unresolved pairs, or same-family replacement leave the buffer unchanged
+
+Examples:
+- `gsr{[` transforms `foo{bar}baz` into `foo[bar]baz`
+- `gsr)"` transforms `foo(bar)baz` into `foo"bar"baz`
+
+### gsd - Delete Surrounding Pair
+
+Deletes the nearest resolved surrounding pair around the cursor.
+
+- **Form**: `gsd{pair}`
+- **Supported selectors**: `()`, `[]`, `{}`, `<>`, `"`, `'`, `` ` ``
+- **Selector symmetry**: bracket families accept opener or closer
+- **Cross-line behavior**: pair resolution can cross line boundaries
+- **No-op behavior**: unsupported selectors or unresolved pairs leave the buffer unchanged
+
+Examples:
+- `gsd"` transforms `foo"bar"baz` into `foobarbaz`
+- `gsd}` on `foo{bar}baz` transforms text into `foobarbaz`
 
 ## Delete Line Operations
 

@@ -560,6 +560,11 @@ impl Widget for Window {
                         self.select_visual_text_object(*text_object, 1)
                     }
                 }
+                Some(ActionKind::SurroundReplace {
+                    target,
+                    replacement,
+                }) => self.replace_surround(*target, *replacement),
+                Some(ActionKind::SurroundDelete { target }) => self.delete_surround(*target),
                 Some(ActionKind::Count(count, inner)) => {
                     let mut counted_inner = inner.as_ref().clone();
                     if let Some(from_mode) = action.from_mode {

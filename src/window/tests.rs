@@ -4,7 +4,9 @@ use crate::buffer::{BufferId, Cursor};
 use crate::config::{
     AdvancedGlyphCapability, AutoIndentMode, Config, DefaultRegisters, ScrollMargin, WrapMode,
 };
-use crate::editor::{Action, ActionKind, BoundaryMotion, BracketKind, LinewiseMotion, ModeKind};
+use crate::editor::{
+    Action, ActionKind, BoundaryMotion, BracketKind, DelimiterFamily, LinewiseMotion, ModeKind,
+};
 use crate::editor::{Operator, OperatorTarget, QuoteKind, TextObject};
 use crate::globals;
 use crate::globals::{Direction, FindKind, FindState};
@@ -29,6 +31,90 @@ fn process_action_and_snapshot(window: &mut Window, action: &Action) {
             .with_buffer_mut(|buffer| buffer.push_snapshot(cursor))
             .unwrap_or(());
     }
+}
+
+#[test]
+fn test_surround_replace_updates_nearest_enclosing_pair() {
+    let mut window = Window::new(Buffer::from_str("one {two {three} four} five"));
+    window.set_cursor(Cursor::new(0, 10));
+
+    let action = Action::new(ActionKind::SurroundReplace {
+        target: DelimiterFamily::Curly,
+        replacement: DelimiterFamily::Square,
+    });
+    assert_eq!(window.process_action(&action), ActionResult::Handled);
+    assert_eq!(
+        buffer_text(window.buffer_view()),
+        "one {two [three] four} five"
+    );
+    assert_eq!(
+        window
+            .buffer_view()
+            .with_buffer(|buffer| buffer.char_at_cursor(window.buffer_view().cursor()))
+            .unwrap_or(None),
+        Some('[')
+    );
+}
+
+#[test]
+fn test_surround_delete_works_across_lines() {
+    let mut window = Window::new(Buffer::from_str("foo \"bar\nbaz\" qux"));
+    window.set_cursor(Cursor::new(1, 1));
+
+    let action = Action::new(ActionKind::SurroundDelete {
+        target: DelimiterFamily::DoubleQuote,
+    });
+    assert_eq!(window.process_action(&action), ActionResult::Handled);
+    assert_eq!(buffer_text(window.buffer_view()), "foo bar\nbaz qux");
+}
+
+#[test]
+fn test_surround_actions_noop_when_unresolvable_or_same_family() {
+    let mut missing = Window::new(Buffer::from_str("no delimiters here"));
+    missing.set_cursor(Cursor::new(0, 3));
+    let delete_action = Action::new(ActionKind::SurroundDelete {
+        target: DelimiterFamily::Curly,
+    });
+    assert_eq!(
+        missing.process_action(&delete_action),
+        ActionResult::NotHandled
+    );
+    assert_eq!(buffer_text(missing.buffer_view()), "no delimiters here");
+
+    let mut same_family = Window::new(Buffer::from_str("wrap (me) please"));
+    same_family.set_cursor(Cursor::new(0, 6));
+    let replace_action = Action::new(ActionKind::SurroundReplace {
+        target: DelimiterFamily::Paren,
+        replacement: DelimiterFamily::Paren,
+    });
+    assert_eq!(
+        same_family.process_action(&replace_action),
+        ActionResult::NotHandled
+    );
+    assert_eq!(buffer_text(same_family.buffer_view()), "wrap (me) please");
+}
+
+#[test]
+fn test_surround_replace_is_single_undoable_edit() {
+    let mut window = Window::new(Buffer::from_str("foo(bar)baz"));
+    window.set_cursor(Cursor::new(0, 4));
+
+    process_action_and_snapshot(
+        &mut window,
+        &Action::new(ActionKind::SurroundReplace {
+            target: DelimiterFamily::Paren,
+            replacement: DelimiterFamily::Square,
+        }),
+    );
+    assert_eq!(buffer_text(window.buffer_view()), "foo[bar]baz");
+
+    let cursor = window
+        .buffer_view
+        .with_buffer_mut(|buffer| buffer.undo())
+        .flatten()
+        .expect("undo should restore previous state");
+    window.set_cursor_synced(cursor);
+    assert_eq!(buffer_text(window.buffer_view()), "foo(bar)baz");
 }
 
 fn commit_insert_exit_snapshot(window: &mut Window) {

@@ -2,7 +2,7 @@ use super::*;
 use crate::buffer::Buffer;
 use crate::config::{AutoIndentMode, TabBehavior, TabInsertion};
 use crate::config::{Config, DefaultRegisters};
-use crate::editor::ActionKind;
+use crate::editor::{ActionKind, DelimiterFamily};
 use crate::globals;
 use crate::globals::set_test_config;
 use crate::globals::{Direction, FindKind, FindState};
@@ -812,6 +812,110 @@ fn test_unsupported_z_sequence_is_invalid() {
         mode.handle_key(&key('x')),
         HandleKeyResult::InvalidSequence
     ));
+}
+
+#[test]
+fn test_delimiter_family_selector_parsing() {
+    assert_eq!(
+        DelimiterFamily::from_selector_key("("),
+        Some(DelimiterFamily::Paren)
+    );
+    assert_eq!(
+        DelimiterFamily::from_selector_key(")"),
+        Some(DelimiterFamily::Paren)
+    );
+    assert_eq!(
+        DelimiterFamily::from_selector_key("<LessThan>"),
+        Some(DelimiterFamily::Angle)
+    );
+    assert_eq!(
+        DelimiterFamily::from_selector_key("<GreaterThan>"),
+        Some(DelimiterFamily::Angle)
+    );
+    assert_eq!(
+        DelimiterFamily::from_selector_key("\""),
+        Some(DelimiterFamily::DoubleQuote)
+    );
+    assert_eq!(DelimiterFamily::from_selector_key("x"), None);
+}
+
+#[test]
+fn test_gsd_quote_sequence() {
+    let mut mode = NormalMode::new();
+    assert!(matches!(
+        mode.handle_key(&key('g')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert!(matches!(
+        mode.handle_key(&key('s')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert!(matches!(
+        mode.handle_key(&key('d')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert_eq!(
+        complete_action_kind(mode.handle_key(&key('"'))),
+        ActionKind::SurroundDelete {
+            target: DelimiterFamily::DoubleQuote,
+        }
+    );
+}
+
+#[test]
+fn test_gsr_bracket_replace_sequence_accepts_closer_target() {
+    let mut mode = NormalMode::new();
+    assert!(matches!(
+        mode.handle_key(&key('g')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert!(matches!(
+        mode.handle_key(&key('s')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert!(matches!(
+        mode.handle_key(&key('r')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert!(matches!(
+        mode.handle_key(&key('}')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert_eq!(
+        complete_action_kind(mode.handle_key(&key('['))),
+        ActionKind::SurroundReplace {
+            target: DelimiterFamily::Curly,
+            replacement: DelimiterFamily::Square,
+        }
+    );
+}
+
+#[test]
+fn test_gsr_angle_to_quote_sequence() {
+    let mut mode = NormalMode::new();
+    assert!(matches!(
+        mode.handle_key(&key('g')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert!(matches!(
+        mode.handle_key(&key('s')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert!(matches!(
+        mode.handle_key(&key('r')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert!(matches!(
+        mode.handle_key(&key('<')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert_eq!(
+        complete_action_kind(mode.handle_key(&key('"'))),
+        ActionKind::SurroundReplace {
+            target: DelimiterFamily::Angle,
+            replacement: DelimiterFamily::DoubleQuote,
+        }
+    );
 }
 
 #[test]

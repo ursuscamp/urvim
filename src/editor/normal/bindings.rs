@@ -1,7 +1,7 @@
 use crate::buffer::Boundary;
 use crate::editor::{
-    Action, ActionKind, BoundaryMotion, BracketKind, LinewiseMotion, ModeKind, Operator,
-    OperatorTarget, QuoteKind, TextObject, TrieKeymap,
+    Action, ActionKind, BoundaryMotion, BracketKind, DelimiterFamily, LinewiseMotion, ModeKind,
+    Operator, OperatorTarget, QuoteKind, TextObject, TrieKeymap,
 };
 
 #[derive(Clone, Copy)]
@@ -162,6 +162,46 @@ fn register_edit_bindings(trie_keymap: &mut TrieKeymap) {
         "C",
         Action::new(ActionKind::ChangeToLineEnd).with_to_mode(ModeKind::Insert),
     );
+    register_surround_bindings(trie_keymap);
+}
+
+fn register_surround_bindings(trie_keymap: &mut TrieKeymap) {
+    let selectors = surround_selectors();
+
+    for (selector, target) in selectors {
+        trie_keymap.insert_str(
+            &format!("gsd{selector}"),
+            Action::new(ActionKind::SurroundDelete { target: *target }),
+        );
+    }
+
+    for (target_selector, target) in selectors {
+        for (replacement_selector, replacement) in selectors {
+            trie_keymap.insert_str(
+                &format!("gsr{target_selector}{replacement_selector}"),
+                Action::new(ActionKind::SurroundReplace {
+                    target: *target,
+                    replacement: *replacement,
+                }),
+            );
+        }
+    }
+}
+
+fn surround_selectors() -> &'static [(&'static str, DelimiterFamily)] {
+    &[
+        ("(", DelimiterFamily::Paren),
+        (")", DelimiterFamily::Paren),
+        ("[", DelimiterFamily::Square),
+        ("]", DelimiterFamily::Square),
+        ("{", DelimiterFamily::Curly),
+        ("}", DelimiterFamily::Curly),
+        ("<LessThan>", DelimiterFamily::Angle),
+        ("<GreaterThan>", DelimiterFamily::Angle),
+        ("\"", DelimiterFamily::DoubleQuote),
+        ("'", DelimiterFamily::SingleQuote),
+        ("`", DelimiterFamily::Backtick),
+    ]
 }
 
 fn register_operator_bindings(trie_keymap: &mut TrieKeymap) {

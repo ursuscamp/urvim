@@ -45,6 +45,7 @@ mod operator_target;
 mod pool;
 mod quote_text_object;
 mod search;
+mod surround;
 mod syntax;
 mod tab;
 mod text_object;

@@ -15,8 +15,8 @@ mod visual_common;
 mod visual_line;
 
 pub use action::{
-    Action, ActionKind, BoundaryMotion, BracketKind, HandleKeyResult, LinewiseMotion, Operator,
-    OperatorTarget, QuoteKind, RepeatReplay, TextObject,
+    Action, ActionKind, BoundaryMotion, BracketKind, DelimiterFamily, HandleKeyResult,
+    LinewiseMotion, Operator, OperatorTarget, QuoteKind, RepeatReplay, TextObject,
 };
 pub use insert::InsertMode;
 pub use keymap::{CountParser, KeyStringParseError, Keymap, TrieKeymap, validate_key_string};

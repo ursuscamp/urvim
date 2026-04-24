@@ -128,6 +128,69 @@ impl QuoteKind {
     }
 }
 
+/// Supported delimiter families for surround manipulation commands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DelimiterFamily {
+    /// Parenthesis pairs `(` and `)`.
+    Paren,
+    /// Square bracket pairs `[` and `]`.
+    Square,
+    /// Curly brace pairs `{` and `}`.
+    Curly,
+    /// Angle bracket pairs `<` and `>`.
+    Angle,
+    /// Double quote delimiters (`"`).
+    DoubleQuote,
+    /// Single quote delimiters (`'`).
+    SingleQuote,
+    /// Backtick delimiters (`` ` ``).
+    Backtick,
+}
+
+impl DelimiterFamily {
+    /// Resolves a canonical key token to a surround delimiter family.
+    ///
+    /// Bracket families accept both opening and closing selector keys.
+    pub fn from_selector_key(key: &str) -> Option<Self> {
+        match key {
+            "(" | ")" => Some(Self::Paren),
+            "[" | "]" => Some(Self::Square),
+            "{" | "}" => Some(Self::Curly),
+            "<LessThan>" | "<GreaterThan>" => Some(Self::Angle),
+            "\"" => Some(Self::DoubleQuote),
+            "'" => Some(Self::SingleQuote),
+            "`" => Some(Self::Backtick),
+            _ => None,
+        }
+    }
+
+    /// Returns the opening delimiter character for this family.
+    pub fn opening_delimiter(self) -> char {
+        match self {
+            Self::Paren => '(',
+            Self::Square => '[',
+            Self::Curly => '{',
+            Self::Angle => '<',
+            Self::DoubleQuote => '"',
+            Self::SingleQuote => '\'',
+            Self::Backtick => '`',
+        }
+    }
+
+    /// Returns the closing delimiter character for this family.
+    pub fn closing_delimiter(self) -> char {
+        match self {
+            Self::Paren => ')',
+            Self::Square => ']',
+            Self::Curly => '}',
+            Self::Angle => '>',
+            Self::DoubleQuote => '"',
+            Self::SingleQuote => '\'',
+            Self::Backtick => '`',
+        }
+    }
+}
+
 /// Operator targets used after an operator key is pressed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OperatorTarget {
@@ -323,6 +386,13 @@ pub enum ActionKind {
     Count(usize, Box<Action>),
     /// Apply an operator to the given target region.
     Operation(Operator, OperatorTarget),
+    /// Replace a surrounding delimiter pair around the cursor.
+    SurroundReplace {
+        target: DelimiterFamily,
+        replacement: DelimiterFamily,
+    },
+    /// Delete a surrounding delimiter pair around the cursor.
+    SurroundDelete { target: DelimiterFamily },
 }
 
 impl Action {
@@ -548,6 +618,8 @@ impl Action {
                 | Some(ActionKind::TillBackward(_))
                 | Some(ActionKind::RepeatLastFind)
                 | Some(ActionKind::RepeatLastFindReverse)
+                | Some(ActionKind::SurroundReplace { .. })
+                | Some(ActionKind::SurroundDelete { .. })
         )
     }
 
@@ -679,6 +751,9 @@ impl Action {
             Some(ActionKind::Operation(Operator::Delete, _)) => true,
             Some(ActionKind::Operation(Operator::Change, _)) => false,
             Some(ActionKind::Operation(Operator::Yank, _)) => false,
+            Some(ActionKind::SurroundReplace { .. }) | Some(ActionKind::SurroundDelete { .. }) => {
+                true
+            }
             Some(ActionKind::Operation(Operator::Lowercase, _))
             | Some(ActionKind::Operation(Operator::Uppercase, _))
             | Some(ActionKind::Operation(Operator::ToggleCase, _)) => true,
@@ -761,7 +836,9 @@ impl Action {
             | Some(ActionKind::Operation(Operator::Change, _))
             | Some(ActionKind::Operation(Operator::Lowercase, _))
             | Some(ActionKind::Operation(Operator::Uppercase, _))
-            | Some(ActionKind::Operation(Operator::ToggleCase, _)) => true,
+            | Some(ActionKind::Operation(Operator::ToggleCase, _))
+            | Some(ActionKind::SurroundReplace { .. })
+            | Some(ActionKind::SurroundDelete { .. }) => true,
             Some(ActionKind::Count(_, inner)) => inner.is_dot_repeat_source(),
             _ => false,
         }

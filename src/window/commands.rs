@@ -3,7 +3,7 @@ use crate::buffer::IndentDirection;
 use crate::config::DefaultRegisters;
 use crate::editor::ModeKind;
 use crate::editor::pairs;
-use crate::editor::{ActionKind, OperatorTarget, TextObject};
+use crate::editor::{ActionKind, DelimiterFamily, OperatorTarget, TextObject};
 use crate::register::{
     self, DefaultRegisterRole, RegisterContent, RegisterContentKind, RegisterName,
 };
@@ -477,6 +477,38 @@ impl Window {
             .flatten()
         {
             self.buffer_view.set_cursor(new_cursor);
+        }
+    }
+
+    pub(super) fn replace_surround(
+        &mut self,
+        target: DelimiterFamily,
+        replacement: DelimiterFamily,
+    ) -> ActionResult {
+        let cursor = self.buffer_view.cursor();
+        let new_cursor = self
+            .buffer_view
+            .with_buffer_mut(|buffer| buffer.replace_surround(cursor, target, replacement))
+            .flatten();
+        if let Some(new_cursor) = new_cursor {
+            self.buffer_view.set_cursor(new_cursor);
+            ActionResult::Handled
+        } else {
+            ActionResult::NotHandled
+        }
+    }
+
+    pub(super) fn delete_surround(&mut self, target: DelimiterFamily) -> ActionResult {
+        let cursor = self.buffer_view.cursor();
+        let new_cursor = self
+            .buffer_view
+            .with_buffer_mut(|buffer| buffer.delete_surround(cursor, target))
+            .flatten();
+        if let Some(new_cursor) = new_cursor {
+            self.buffer_view.set_cursor(new_cursor);
+            ActionResult::Handled
+        } else {
+            ActionResult::NotHandled
         }
     }
 
