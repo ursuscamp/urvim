@@ -753,7 +753,7 @@ impl Window {
         let current_cursor = self.buffer_view.cursor();
         self.buffer_view
             .set_cursor(Cursor::new(target_line, current_cursor.col));
-        self.process_action(action)
+        self.dispatch_action(action)
     }
 
     fn handle_count_join(&mut self, count: usize, action: &Action) -> ActionResult {
@@ -935,7 +935,7 @@ impl Window {
 
     fn handle_count_repeatable(&mut self, count: usize, action: &Action) -> ActionResult {
         for _ in 0..count {
-            self.process_action(action);
+            self.dispatch_action(action);
         }
         ActionResult::Handled
     }

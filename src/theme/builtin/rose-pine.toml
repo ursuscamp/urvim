@@ -34,6 +34,9 @@ bg = "bg"
 "ui.window" = { fg = "fg", bg = "bg" }
 "ui.window.lines" = { fg = "muted" }
 "ui.window.lines.resize" = { fg = "accent", bold = true }
+"ui.notification.info" = { fg = "blue" }
+"ui.notification.warn" = { fg = "yellow", bold = true }
+"ui.notification.error" = { fg = "red", bold = true }
 
 # Syntax
 "syntax.comment" = { fg = "comment" }

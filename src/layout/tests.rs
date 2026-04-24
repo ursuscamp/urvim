@@ -7,6 +7,7 @@ use crate::globals;
 use crate::path::AbsolutePath;
 use crate::terminal::{Color, Style};
 use crate::theme::{HighlightStyles, Tag, Theme, ThemeKind};
+use crate::ui::{Command, Intent, UiEvent, UiEventResult};
 use crate::window::{Position, Size};
 use crate::window_group::WindowGroup;
 use std::collections::BTreeSet;
@@ -15,6 +16,14 @@ use std::time::Duration;
 
 fn layout_with_buffers(buffers: Vec<Buffer>) -> Layout {
     Layout::new(WindowGroup::from_buffers(buffers))
+}
+
+fn dispatch_layout_action(layout: &mut Layout, action: &Action) -> ActionResult {
+    if layout.dispatch_action(action) {
+        ActionResult::Handled
+    } else {
+        ActionResult::NotHandled
+    }
 }
 
 fn border_theme() -> Theme {
@@ -155,6 +164,71 @@ fn test_layout_exposes_active_buffer_view() {
 }
 
 #[test]
+fn test_layout_dispatch_intent_handles_command_notifications() {
+    globals::clear_notifications();
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("one")]);
+
+    assert!(
+        layout.dispatch_intent(&Intent::Command(Command::EnqueueNotification {
+            level: crate::notification::NotificationLevel::Info,
+            message: "saved".to_string(),
+        }))
+    );
+
+    let message = globals::active_notification(std::time::Instant::now()).expect("notification");
+    assert_eq!(message.text, "saved");
+}
+
+#[test]
+fn test_layout_routes_tick_to_overlay_before_base_layer() {
+    let _guard = globals::notification_test_lock();
+    globals::clear_notifications();
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("one")]);
+
+    assert!(globals::enqueue_notification(
+        crate::notification::NotificationLevel::Info,
+        "saved".to_string(),
+    ));
+
+    let result = layout.route_ui_event(&UiEvent::Tick);
+    assert!(matches!(result, UiEventResult::NotHandled));
+    assert!(globals::active_notification(std::time::Instant::now()).is_some());
+}
+
+#[test]
+fn test_layout_layered_render_preserves_focus_and_cursor_in_split_layout() {
+    let _guard = globals::notification_test_lock();
+    globals::clear_notifications();
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("left")]);
+    assert_eq!(
+        dispatch_layout_action(&mut layout, &Action::new(ActionKind::SplitVertical)),
+        ActionResult::Handled
+    );
+    dispatch_layout_action(&mut layout, &Action::new(ActionKind::FocusPaneLeft));
+
+    layout
+        .active_buffer_view_mut()
+        .set_cursor(crate::buffer::Cursor::new(0, 2));
+
+    let mut screen = crate::screen::Screen::new(8, 40);
+    layout.render(&mut screen, Position::new(0, 0), Size::new(8, 40));
+    let cursor_before = layout
+        .visual_cursor()
+        .expect("cursor should exist before layered render");
+
+    assert!(globals::enqueue_notification(
+        crate::notification::NotificationLevel::Warn,
+        "queued".to_string(),
+    ));
+
+    let focused_before = layout.focused_pane;
+    layout.render(&mut screen, Position::new(0, 0), Size::new(8, 40));
+
+    assert_eq!(layout.focused_pane, focused_before);
+    assert_eq!(layout.visual_cursor(), Some(cursor_before));
+}
+
+#[test]
 fn test_layout_process_action_delegates_to_window_group() {
     let mut layout = layout_with_buffers(vec![
         Buffer::from_str("one"),
@@ -163,7 +237,7 @@ fn test_layout_process_action_delegates_to_window_group() {
     ]);
 
     assert_eq!(
-        layout.process_action(&Action::new(ActionKind::NextTab)),
+        dispatch_layout_action(&mut layout, &Action::new(ActionKind::NextTab)),
         ActionResult::Handled
     );
     assert_eq!(layout.window_group().active_tab_index(), 1);
@@ -174,7 +248,7 @@ fn test_layout_vertical_split_creates_second_pane_with_even_weights() {
     let mut layout = layout_with_buffers(vec![Buffer::from_str("one")]);
 
     assert_eq!(
-        layout.process_action(&Action::new(ActionKind::SplitVertical)),
+        dispatch_layout_action(&mut layout, &Action::new(ActionKind::SplitVertical)),
         ActionResult::Handled
     );
 
@@ -195,7 +269,7 @@ fn test_layout_horizontal_split_creates_second_pane_with_even_weights() {
     let mut layout = layout_with_buffers(vec![Buffer::from_str("one")]);
 
     assert_eq!(
-        layout.process_action(&Action::new(ActionKind::SplitHorizontal)),
+        dispatch_layout_action(&mut layout, &Action::new(ActionKind::SplitHorizontal)),
         ActionResult::Handled
     );
 
@@ -233,7 +307,7 @@ fn test_layout_split_copies_active_buffer_view_state() {
     let source_buffer_id = layout.active_buffer_view().buffer_id();
 
     assert_eq!(
-        layout.process_action(&Action::new(ActionKind::SplitVertical)),
+        dispatch_layout_action(&mut layout, &Action::new(ActionKind::SplitVertical)),
         ActionResult::Handled
     );
 
@@ -272,13 +346,13 @@ fn test_layout_split_copies_active_buffer_view_state() {
 fn test_layout_wrap_toggle_is_window_local() {
     let mut layout = layout_with_buffers(vec![Buffer::from_str("one\ntwo")]);
     assert_eq!(
-        layout.process_action(&Action::new(ActionKind::SplitVertical)),
+        dispatch_layout_action(&mut layout, &Action::new(ActionKind::SplitVertical)),
         ActionResult::Handled
     );
     assert!(!layout.active_window_group().active_window().wrap_enabled());
 
     assert_eq!(
-        layout.process_action(&Action::new(ActionKind::ToggleWrap)),
+        dispatch_layout_action(&mut layout, &Action::new(ActionKind::ToggleWrap)),
         ActionResult::Handled
     );
     assert!(layout.active_window_group().active_window().wrap_enabled());
@@ -297,7 +371,7 @@ fn test_layout_close_pane_exits_when_last_pane_is_removed() {
     let mut layout = layout_with_buffers(vec![Buffer::from_str("one")]);
 
     assert_eq!(
-        layout.process_action(&Action::new(ActionKind::ClosePane)),
+        dispatch_layout_action(&mut layout, &Action::new(ActionKind::ClosePane)),
         ActionResult::Handled
     );
     assert!(layout.should_exit());
@@ -324,7 +398,7 @@ fn test_layout_render_stores_geometry_and_forwards_size() {
 #[test]
 fn test_layout_render_divides_vertical_split_width_by_weights() {
     let mut layout = layout_with_buffers(vec![Buffer::from_str("alpha")]);
-    layout.process_action(&Action::new(ActionKind::SplitVertical));
+    dispatch_layout_action(&mut layout, &Action::new(ActionKind::SplitVertical));
 
     let mut screen = crate::screen::Screen::new(5, 13);
     layout.render(&mut screen, Position::new(0, 0), Size::new(5, 13));
@@ -340,7 +414,7 @@ fn test_layout_render_divides_vertical_split_width_by_weights() {
 #[test]
 fn test_layout_render_divides_horizontal_split_rows_by_weights() {
     let mut layout = layout_with_buffers(vec![Buffer::from_str("alpha")]);
-    layout.process_action(&Action::new(ActionKind::SplitHorizontal));
+    dispatch_layout_action(&mut layout, &Action::new(ActionKind::SplitHorizontal));
 
     let mut screen = crate::screen::Screen::new(8, 10);
     layout.render(&mut screen, Position::new(0, 0), Size::new(8, 10));
@@ -356,13 +430,13 @@ fn test_layout_render_divides_horizontal_split_rows_by_weights() {
 #[test]
 fn test_layout_resize_left_moves_vertical_split_for_the_left_pane() {
     let mut layout = layout_with_buffers(vec![Buffer::from_str("alpha")]);
-    layout.process_action(&Action::new(ActionKind::SplitVertical));
+    dispatch_layout_action(&mut layout, &Action::new(ActionKind::SplitVertical));
 
     let mut screen = crate::screen::Screen::new(5, 13);
     layout.render(&mut screen, Position::new(0, 0), Size::new(5, 13));
 
     assert_eq!(
-        layout.process_action(&Action::new(ActionKind::FocusPaneLeft)),
+        dispatch_layout_action(&mut layout, &Action::new(ActionKind::FocusPaneLeft)),
         ActionResult::Handled
     );
 
@@ -377,7 +451,7 @@ fn test_layout_resize_left_moves_vertical_split_for_the_left_pane() {
         .expect("right pane should be visible before resize");
 
     assert_eq!(
-        layout.process_action(&Action::new(ActionKind::ResizePaneLeft)),
+        dispatch_layout_action(&mut layout, &Action::new(ActionKind::ResizePaneLeft)),
         ActionResult::Handled
     );
 
@@ -398,7 +472,7 @@ fn test_layout_resize_left_moves_vertical_split_for_the_left_pane() {
 #[test]
 fn test_layout_resize_right_moves_vertical_split_for_the_right_pane() {
     let mut layout = layout_with_buffers(vec![Buffer::from_str("alpha")]);
-    layout.process_action(&Action::new(ActionKind::SplitVertical));
+    dispatch_layout_action(&mut layout, &Action::new(ActionKind::SplitVertical));
 
     let mut screen = crate::screen::Screen::new(5, 13);
     layout.render(&mut screen, Position::new(0, 0), Size::new(5, 13));
@@ -414,7 +488,7 @@ fn test_layout_resize_right_moves_vertical_split_for_the_right_pane() {
         .expect("right pane should be visible before resize");
 
     assert_eq!(
-        layout.process_action(&Action::new(ActionKind::ResizePaneRight)),
+        dispatch_layout_action(&mut layout, &Action::new(ActionKind::ResizePaneRight)),
         ActionResult::Handled
     );
 
@@ -435,13 +509,13 @@ fn test_layout_resize_right_moves_vertical_split_for_the_right_pane() {
 #[test]
 fn test_layout_resize_counted_steps_apply_larger_changes() {
     let mut layout = layout_with_buffers(vec![Buffer::from_str("alpha")]);
-    layout.process_action(&Action::new(ActionKind::SplitVertical));
+    dispatch_layout_action(&mut layout, &Action::new(ActionKind::SplitVertical));
 
     let mut screen = crate::screen::Screen::new(5, 21);
     layout.render(&mut screen, Position::new(0, 0), Size::new(5, 21));
 
     assert_eq!(
-        layout.process_action(&Action::new(ActionKind::FocusPaneLeft)),
+        dispatch_layout_action(&mut layout, &Action::new(ActionKind::FocusPaneLeft)),
         ActionResult::Handled
     );
 
@@ -456,10 +530,10 @@ fn test_layout_resize_counted_steps_apply_larger_changes() {
         .expect("right pane should be visible before counted resize");
 
     assert_eq!(
-        layout.process_action(&Action::count(
-            5,
-            Box::new(Action::new(ActionKind::ResizePaneLeft))
-        )),
+        dispatch_layout_action(
+            &mut layout,
+            &Action::count(5, Box::new(Action::new(ActionKind::ResizePaneLeft)))
+        ),
         ActionResult::Handled
     );
 
@@ -480,29 +554,29 @@ fn test_layout_resize_counted_steps_apply_larger_changes() {
 #[test]
 fn test_layout_equalize_splits_recursively_resets_weights() {
     let mut layout = layout_with_buffers(vec![Buffer::from_str("alpha")]);
-    layout.process_action(&Action::new(ActionKind::SplitVertical));
+    dispatch_layout_action(&mut layout, &Action::new(ActionKind::SplitVertical));
     let mut screen = crate::screen::Screen::new(8, 20);
     layout.render(&mut screen, Position::new(0, 0), Size::new(8, 20));
-    layout.process_action(&Action::new(ActionKind::FocusPaneLeft));
-    layout.process_action(&Action::new(ActionKind::SplitHorizontal));
+    dispatch_layout_action(&mut layout, &Action::new(ActionKind::FocusPaneLeft));
+    dispatch_layout_action(&mut layout, &Action::new(ActionKind::SplitHorizontal));
     let mut screen = crate::screen::Screen::new(8, 20);
     layout.render(&mut screen, Position::new(0, 0), Size::new(8, 20));
 
     assert_eq!(
-        layout.process_action(&Action::new(ActionKind::ResizePaneDown)),
+        dispatch_layout_action(&mut layout, &Action::new(ActionKind::ResizePaneDown)),
         ActionResult::Handled
     );
     assert_eq!(
-        layout.process_action(&Action::new(ActionKind::FocusPaneRight)),
+        dispatch_layout_action(&mut layout, &Action::new(ActionKind::FocusPaneRight)),
         ActionResult::Handled
     );
     assert_eq!(
-        layout.process_action(&Action::new(ActionKind::ResizePaneLeft)),
+        dispatch_layout_action(&mut layout, &Action::new(ActionKind::ResizePaneLeft)),
         ActionResult::Handled
     );
 
     assert_eq!(
-        layout.process_action(&Action::new(ActionKind::EqualizeSplits)),
+        dispatch_layout_action(&mut layout, &Action::new(ActionKind::EqualizeSplits)),
         ActionResult::Handled
     );
 
@@ -513,14 +587,14 @@ fn test_layout_equalize_splits_recursively_resets_weights() {
 #[test]
 fn test_layout_resize_clamps_and_stays_local_to_the_matching_split() {
     let mut layout = layout_with_buffers(vec![Buffer::from_str("alpha")]);
-    layout.process_action(&Action::new(ActionKind::SplitVertical));
+    dispatch_layout_action(&mut layout, &Action::new(ActionKind::SplitVertical));
     let mut screen = crate::screen::Screen::new(8, 20);
     layout.render(&mut screen, Position::new(0, 0), Size::new(8, 20));
     assert_eq!(
-        layout.process_action(&Action::new(ActionKind::FocusPaneLeft)),
+        dispatch_layout_action(&mut layout, &Action::new(ActionKind::FocusPaneLeft)),
         ActionResult::Handled
     );
-    layout.process_action(&Action::new(ActionKind::SplitHorizontal));
+    dispatch_layout_action(&mut layout, &Action::new(ActionKind::SplitHorizontal));
     let mut screen = crate::screen::Screen::new(8, 20);
     layout.render(&mut screen, Position::new(0, 0), Size::new(8, 20));
 
@@ -539,7 +613,7 @@ fn test_layout_resize_clamps_and_stays_local_to_the_matching_split() {
         .expect("outer sibling should be visible before resize");
 
     assert_eq!(
-        layout.process_action(&Action::new(ActionKind::ResizePaneDown)),
+        dispatch_layout_action(&mut layout, &Action::new(ActionKind::ResizePaneDown)),
         ActionResult::Handled
     );
 
@@ -570,7 +644,7 @@ fn test_layout_resize_clamps_and_stays_local_to_the_matching_split() {
 
     for _ in 0..20 {
         assert_eq!(
-            layout.process_action(&Action::new(ActionKind::ResizePaneUp)),
+            dispatch_layout_action(&mut layout, &Action::new(ActionKind::ResizePaneUp)),
             ActionResult::Handled
         );
     }
@@ -623,11 +697,11 @@ fn test_layout_mode_kind_updates_footer() {
 fn test_layout_nested_mixed_axis_split_creates_three_panes() {
     let mut layout = layout_with_buffers(vec![Buffer::from_str("alpha")]);
     assert_eq!(
-        layout.process_action(&Action::new(ActionKind::SplitVertical)),
+        dispatch_layout_action(&mut layout, &Action::new(ActionKind::SplitVertical)),
         ActionResult::Handled
     );
     assert_eq!(
-        layout.process_action(&Action::new(ActionKind::SplitHorizontal)),
+        dispatch_layout_action(&mut layout, &Action::new(ActionKind::SplitHorizontal)),
         ActionResult::Handled
     );
 
@@ -696,15 +770,15 @@ fn test_layout_render_omits_split_borders_for_single_pane_layouts() {
 #[test]
 fn test_layout_render_draws_split_border_junction_in_unicode_mode() {
     let mut layout = layout_with_buffers(vec![Buffer::from_str("alpha")]);
-    layout.process_action(&Action::new(ActionKind::SplitVertical));
+    dispatch_layout_action(&mut layout, &Action::new(ActionKind::SplitVertical));
 
     let mut screen = crate::screen::Screen::new(5, 20);
     let _theme_guard = globals::set_test_active_theme(border_theme());
     let _config_guard = globals::set_test_config(border_config(true));
 
     layout.render(&mut screen, Position::new(0, 0), Size::new(5, 20));
-    layout.process_action(&Action::new(ActionKind::FocusPaneLeft));
-    layout.process_action(&Action::new(ActionKind::SplitHorizontal));
+    dispatch_layout_action(&mut layout, &Action::new(ActionKind::FocusPaneLeft));
+    dispatch_layout_action(&mut layout, &Action::new(ActionKind::SplitHorizontal));
 
     layout.render(&mut screen, Position::new(0, 0), Size::new(5, 20));
 
@@ -716,15 +790,15 @@ fn test_layout_render_draws_split_border_junction_in_unicode_mode() {
 #[test]
 fn test_layout_render_draws_split_border_junction_in_ascii_mode() {
     let mut layout = layout_with_buffers(vec![Buffer::from_str("alpha")]);
-    layout.process_action(&Action::new(ActionKind::SplitVertical));
+    dispatch_layout_action(&mut layout, &Action::new(ActionKind::SplitVertical));
 
     let mut screen = crate::screen::Screen::new(5, 20);
     let _theme_guard = globals::set_test_active_theme(border_theme());
     let _config_guard = globals::set_test_config(border_config(false));
 
     layout.render(&mut screen, Position::new(0, 0), Size::new(5, 20));
-    layout.process_action(&Action::new(ActionKind::FocusPaneLeft));
-    layout.process_action(&Action::new(ActionKind::SplitHorizontal));
+    dispatch_layout_action(&mut layout, &Action::new(ActionKind::FocusPaneLeft));
+    dispatch_layout_action(&mut layout, &Action::new(ActionKind::SplitHorizontal));
 
     layout.render(&mut screen, Position::new(0, 0), Size::new(5, 20));
 
@@ -736,17 +810,17 @@ fn test_layout_render_draws_split_border_junction_in_ascii_mode() {
 #[test]
 fn test_layout_render_draws_four_way_split_junction_in_unicode_mode() {
     let mut layout = layout_with_buffers(vec![Buffer::from_str("alpha")]);
-    layout.process_action(&Action::new(ActionKind::SplitVertical));
+    dispatch_layout_action(&mut layout, &Action::new(ActionKind::SplitVertical));
 
     let mut screen = crate::screen::Screen::new(5, 20);
     let _theme_guard = globals::set_test_active_theme(border_theme());
     let _config_guard = globals::set_test_config(border_config(true));
 
     layout.render(&mut screen, Position::new(0, 0), Size::new(5, 20));
-    layout.process_action(&Action::new(ActionKind::FocusPaneLeft));
-    layout.process_action(&Action::new(ActionKind::SplitHorizontal));
-    layout.process_action(&Action::new(ActionKind::FocusPaneRight));
-    layout.process_action(&Action::new(ActionKind::SplitHorizontal));
+    dispatch_layout_action(&mut layout, &Action::new(ActionKind::FocusPaneLeft));
+    dispatch_layout_action(&mut layout, &Action::new(ActionKind::SplitHorizontal));
+    dispatch_layout_action(&mut layout, &Action::new(ActionKind::FocusPaneRight));
+    dispatch_layout_action(&mut layout, &Action::new(ActionKind::SplitHorizontal));
 
     layout.render(&mut screen, Position::new(0, 0), Size::new(5, 20));
 
@@ -756,17 +830,17 @@ fn test_layout_render_draws_four_way_split_junction_in_unicode_mode() {
 #[test]
 fn test_layout_render_draws_four_way_split_junction_in_ascii_mode() {
     let mut layout = layout_with_buffers(vec![Buffer::from_str("alpha")]);
-    layout.process_action(&Action::new(ActionKind::SplitVertical));
+    dispatch_layout_action(&mut layout, &Action::new(ActionKind::SplitVertical));
 
     let mut screen = crate::screen::Screen::new(5, 20);
     let _theme_guard = globals::set_test_active_theme(border_theme());
     let _config_guard = globals::set_test_config(border_config(false));
 
     layout.render(&mut screen, Position::new(0, 0), Size::new(5, 20));
-    layout.process_action(&Action::new(ActionKind::FocusPaneLeft));
-    layout.process_action(&Action::new(ActionKind::SplitHorizontal));
-    layout.process_action(&Action::new(ActionKind::FocusPaneRight));
-    layout.process_action(&Action::new(ActionKind::SplitHorizontal));
+    dispatch_layout_action(&mut layout, &Action::new(ActionKind::FocusPaneLeft));
+    dispatch_layout_action(&mut layout, &Action::new(ActionKind::SplitHorizontal));
+    dispatch_layout_action(&mut layout, &Action::new(ActionKind::FocusPaneRight));
+    dispatch_layout_action(&mut layout, &Action::new(ActionKind::SplitHorizontal));
 
     layout.render(&mut screen, Position::new(0, 0), Size::new(5, 20));
 
@@ -776,7 +850,7 @@ fn test_layout_render_draws_four_way_split_junction_in_ascii_mode() {
 #[test]
 fn test_layout_render_uses_resize_border_style_in_resize_mode() {
     let mut layout = layout_with_buffers(vec![Buffer::from_str("alpha")]);
-    layout.process_action(&Action::new(ActionKind::SplitVertical));
+    dispatch_layout_action(&mut layout, &Action::new(ActionKind::SplitVertical));
     layout
         .window_group_mut()
         .active_window_mut()
@@ -797,17 +871,17 @@ fn test_layout_render_uses_resize_border_style_in_resize_mode() {
 #[test]
 fn test_layout_focus_moves_across_rendered_vertical_split() {
     let mut layout = layout_with_buffers(vec![Buffer::from_str("left")]);
-    layout.process_action(&Action::new(ActionKind::SplitVertical));
+    dispatch_layout_action(&mut layout, &Action::new(ActionKind::SplitVertical));
 
     let mut screen = crate::screen::Screen::new(4, 20);
     layout.render(&mut screen, Position::new(0, 0), Size::new(4, 20));
 
     assert_eq!(
-        layout.process_action(&Action::new(ActionKind::FocusPaneLeft)),
+        dispatch_layout_action(&mut layout, &Action::new(ActionKind::FocusPaneLeft)),
         ActionResult::Handled
     );
     assert_eq!(
-        layout.process_action(&Action::new(ActionKind::FocusPaneRight)),
+        dispatch_layout_action(&mut layout, &Action::new(ActionKind::FocusPaneRight)),
         ActionResult::Handled
     );
 }
@@ -815,26 +889,26 @@ fn test_layout_focus_moves_across_rendered_vertical_split() {
 #[test]
 fn test_layout_focus_moves_across_nested_mixed_axis_splits() {
     let mut layout = layout_with_buffers(vec![Buffer::from_str("left")]);
-    layout.process_action(&Action::new(ActionKind::SplitVertical));
-    layout.process_action(&Action::new(ActionKind::SplitHorizontal));
+    dispatch_layout_action(&mut layout, &Action::new(ActionKind::SplitVertical));
+    dispatch_layout_action(&mut layout, &Action::new(ActionKind::SplitHorizontal));
 
     let mut screen = crate::screen::Screen::new(8, 20);
     layout.render(&mut screen, Position::new(0, 0), Size::new(8, 20));
 
     assert_eq!(
-        layout.process_action(&Action::new(ActionKind::FocusPaneUp)),
+        dispatch_layout_action(&mut layout, &Action::new(ActionKind::FocusPaneUp)),
         ActionResult::Handled
     );
     assert_eq!(
-        layout.process_action(&Action::new(ActionKind::FocusPaneLeft)),
+        dispatch_layout_action(&mut layout, &Action::new(ActionKind::FocusPaneLeft)),
         ActionResult::Handled
     );
     assert_eq!(
-        layout.process_action(&Action::new(ActionKind::FocusPaneRight)),
+        dispatch_layout_action(&mut layout, &Action::new(ActionKind::FocusPaneRight)),
         ActionResult::Handled
     );
     assert_eq!(
-        layout.process_action(&Action::new(ActionKind::FocusPaneDown)),
+        dispatch_layout_action(&mut layout, &Action::new(ActionKind::FocusPaneDown)),
         ActionResult::Handled
     );
 }
@@ -842,25 +916,25 @@ fn test_layout_focus_moves_across_nested_mixed_axis_splits() {
 #[test]
 fn test_layout_restores_last_focused_pane_when_reentering_split_subtree() {
     let mut layout = layout_with_buffers(vec![Buffer::from_str("left")]);
-    layout.process_action(&Action::new(ActionKind::SplitVertical));
+    dispatch_layout_action(&mut layout, &Action::new(ActionKind::SplitVertical));
     let mut screen = crate::screen::Screen::new(8, 20);
     layout.render(&mut screen, Position::new(0, 0), Size::new(8, 20));
     assert_eq!(
-        layout.process_action(&Action::new(ActionKind::FocusPaneLeft)),
+        dispatch_layout_action(&mut layout, &Action::new(ActionKind::FocusPaneLeft)),
         ActionResult::Handled
     );
-    layout.process_action(&Action::new(ActionKind::SplitHorizontal));
+    dispatch_layout_action(&mut layout, &Action::new(ActionKind::SplitHorizontal));
 
     let mut screen = crate::screen::Screen::new(8, 20);
     layout.render(&mut screen, Position::new(0, 0), Size::new(8, 20));
 
     assert_eq!(
-        layout.process_action(&Action::new(ActionKind::FocusPaneRight)),
+        dispatch_layout_action(&mut layout, &Action::new(ActionKind::FocusPaneRight)),
         ActionResult::Handled
     );
     assert_eq!(layout.focused_pane, PaneId(1));
     assert_eq!(
-        layout.process_action(&Action::new(ActionKind::FocusPaneLeft)),
+        dispatch_layout_action(&mut layout, &Action::new(ActionKind::FocusPaneLeft)),
         ActionResult::Handled
     );
     assert_eq!(layout.focused_pane, PaneId(2));
@@ -869,30 +943,30 @@ fn test_layout_restores_last_focused_pane_when_reentering_split_subtree() {
 #[test]
 fn test_layout_falls_back_to_surviving_pane_when_remembered_pane_closes() {
     let mut layout = layout_with_buffers(vec![Buffer::from_str("left")]);
-    layout.process_action(&Action::new(ActionKind::SplitVertical));
+    dispatch_layout_action(&mut layout, &Action::new(ActionKind::SplitVertical));
     let mut screen = crate::screen::Screen::new(8, 24);
     layout.render(&mut screen, Position::new(0, 0), Size::new(8, 24));
     assert_eq!(
-        layout.process_action(&Action::new(ActionKind::FocusPaneLeft)),
+        dispatch_layout_action(&mut layout, &Action::new(ActionKind::FocusPaneLeft)),
         ActionResult::Handled
     );
-    layout.process_action(&Action::new(ActionKind::SplitHorizontal));
-    layout.process_action(&Action::new(ActionKind::SplitVertical));
+    dispatch_layout_action(&mut layout, &Action::new(ActionKind::SplitHorizontal));
+    dispatch_layout_action(&mut layout, &Action::new(ActionKind::SplitVertical));
 
     let mut screen = crate::screen::Screen::new(8, 24);
     layout.render(&mut screen, Position::new(0, 0), Size::new(8, 24));
 
     assert_eq!(
-        layout.process_action(&Action::new(ActionKind::ClosePane)),
+        dispatch_layout_action(&mut layout, &Action::new(ActionKind::ClosePane)),
         ActionResult::Handled
     );
 
     assert_eq!(
-        layout.process_action(&Action::new(ActionKind::FocusPaneRight)),
+        dispatch_layout_action(&mut layout, &Action::new(ActionKind::FocusPaneRight)),
         ActionResult::Handled
     );
     assert_eq!(
-        layout.process_action(&Action::new(ActionKind::FocusPaneLeft)),
+        dispatch_layout_action(&mut layout, &Action::new(ActionKind::FocusPaneLeft)),
         ActionResult::Handled
     );
     assert_eq!(layout.focused_pane, PaneId(0));
@@ -901,10 +975,10 @@ fn test_layout_falls_back_to_surviving_pane_when_remembered_pane_closes() {
 #[test]
 fn test_layout_close_pane_collapses_parent_split_to_surviving_child() {
     let mut layout = layout_with_buffers(vec![Buffer::from_str("one")]);
-    layout.process_action(&Action::new(ActionKind::SplitVertical));
+    dispatch_layout_action(&mut layout, &Action::new(ActionKind::SplitVertical));
 
     assert_eq!(
-        layout.process_action(&Action::new(ActionKind::ClosePane)),
+        dispatch_layout_action(&mut layout, &Action::new(ActionKind::ClosePane)),
         ActionResult::Handled
     );
 
@@ -916,7 +990,7 @@ fn test_layout_close_pane_collapses_parent_split_to_surviving_child() {
 #[test]
 fn test_layout_prunes_empty_window_group_during_render() {
     let mut layout = layout_with_buffers(vec![Buffer::from_str("one")]);
-    layout.process_action(&Action::new(ActionKind::SplitVertical));
+    dispatch_layout_action(&mut layout, &Action::new(ActionKind::SplitVertical));
 
     assert!(layout.active_window_group_mut().close_active_tab());
 
@@ -951,7 +1025,7 @@ fn test_layout_prunes_expired_yank_flash_during_tick() {
         layout
             .active_window_group_mut()
             .active_window_mut()
-            .process_action(&Action::new(ActionKind::YankLine)),
+            .dispatch_action(&Action::new(ActionKind::YankLine)),
         ActionResult::Handled
     );
 
@@ -982,10 +1056,10 @@ fn test_layout_preserves_unrelated_pane_cursor_and_mode_state() {
         .active_window_mut()
         .switch_mode(ModeKind::Insert);
 
-    layout.process_action(&Action::new(ActionKind::SplitVertical));
+    dispatch_layout_action(&mut layout, &Action::new(ActionKind::SplitVertical));
     let mut screen = crate::screen::Screen::new(4, 20);
     layout.render(&mut screen, Position::new(0, 0), Size::new(4, 20));
-    layout.process_action(&Action::new(ActionKind::FocusPaneLeft));
+    dispatch_layout_action(&mut layout, &Action::new(ActionKind::FocusPaneLeft));
 
     assert_eq!(
         layout.active_buffer_view().cursor(),

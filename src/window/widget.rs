@@ -3,8 +3,9 @@ use crate::editor::pairs;
 use crate::editor::{ActionKind, ModeKind};
 use crate::register::{DefaultRegisterRole, RegisterContentKind};
 
-impl Widget for Window {
-    fn process_action(&mut self, action: &Action) -> ActionResult {
+impl Window {
+    /// Dispatches an editor action to this window.
+    pub fn dispatch_action(&mut self, action: &Action) -> ActionResult {
         self.pending_repeat_suffix = None;
         let insert_mode = action.from_mode == Some(ModeKind::Insert);
         let result =

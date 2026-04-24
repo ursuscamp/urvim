@@ -12,7 +12,6 @@ use crate::screen::Screen;
 use crate::syntax::builtin_syntax_registry;
 use crate::terminal::CursorStyle;
 use crate::terminal::Style;
-use crate::widget::Widget;
 use crate::window::{BufferView, Position, Size, Window};
 use std::cell::RefCell;
 use std::collections::HashSet;
@@ -85,7 +84,7 @@ impl WindowGroup {
                     tabs.push(Window::from_buffer_id(buffer_id));
                 }
                 Err(error) => {
-                    tracing::warn!("Failed to open file {:?}: {}", path, error);
+                    crate::notify_error!("Failed to open file {:?}: {}", path, error);
                 }
             }
         }
@@ -117,7 +116,7 @@ impl WindowGroup {
                     }
                 }
                 Err(error) => {
-                    tracing::warn!("Failed to open file {:?}: {}", file.path, error);
+                    crate::notify_error!("Failed to open file {:?}: {}", file.path, error);
                 }
             }
         }
@@ -682,8 +681,9 @@ impl WindowGroup {
     }
 }
 
-impl Widget for WindowGroup {
-    fn process_action(&mut self, action: &Action) -> ActionResult {
+impl WindowGroup {
+    /// Dispatches an editor action to the active tab/window.
+    pub fn dispatch_action(&mut self, action: &Action) -> ActionResult {
         let before = self.active_cursor_snapshot();
         let result = match action.kind.as_ref() {
             Some(crate::editor::ActionKind::PreviousTab) => {
@@ -719,9 +719,9 @@ impl Widget for WindowGroup {
                     self.jump_forward_count(*count);
                     ActionResult::Handled
                 }
-                _ => self.active_window_mut().process_action(action),
+                _ => self.active_window_mut().dispatch_action(action),
             },
-            _ => self.active_window_mut().process_action(action),
+            _ => self.active_window_mut().dispatch_action(action),
         };
 
         if result == ActionResult::Handled && self.should_record_cursor_position(action) {

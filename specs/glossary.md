@@ -133,6 +133,24 @@ The syntax metadata value named `comment_prefix` that identifies the token inser
 
 **Related Terms:** Action, Filetype, Syntax Definition
 
+### Command
+A UI/app orchestration instruction emitted by widgets and consumed by the root dispatcher. Commands coordinate cross-component behavior such as focus changes, overlay visibility, or notification enqueues.
+
+**Context:** Unified intent dispatch, non-buffer UI orchestration, component routing
+
+**Example:** A widget emits a command to enqueue a notification banner message after a save operation completes.
+
+**Related Terms:** Intent, Action, UI Event, Notification Queue
+
+### Intent
+A unified dispatch envelope that carries either an editing `Action` or a UI/app `Command` through one processing queue.
+
+**Context:** Root dispatch pipeline, widget event handling, editor/UI coordination
+
+**Example:** `Intent::Action(Action::new(...))` for edits and `Intent::Command(...)` for UI orchestration.
+
+**Related Terms:** Action, Command, UI Event
+
 ### Repeat Record
 A stored description of the last successful dot-repeatable edit. It records the originating normal-mode action, the count used for that edit, and any committed insert-mode text so `.` can replay the completed change.
 
@@ -194,6 +212,24 @@ A buffer state that indicates the in-memory contents differ from the last succes
 **Context:** Buffer editing, save workflow, tab bar rendering, status bar rendering
 
 **Related Terms:** Buffer, Tab Group, Status Bar, Save Command
+
+### Notification Banner
+A transient top-right UI surface that displays the currently active notification message without taking editing focus. In the current UI, it renders as a bordered floating window that can wrap long messages.
+
+**Context:** Overlay/chrome rendering, user feedback, runtime messaging
+
+**Example:** After a successful save, the banner shows an info message in a top-right popup with a level-colored border.
+
+**Related Terms:** Notification Queue, Command, Theme, UI Event
+
+### Notification Queue
+An in-memory FIFO queue of notification messages shown sequentially by the notification banner. In phase 1 it is unbounded and uses adaptive TTL behavior while backlog exists.
+
+**Context:** Runtime UI state, notification macros, banner rendering
+
+**Example:** During rapid save/error bursts, queued notifications display one-by-one at 1s each until the backlog clears.
+
+**Related Terms:** Notification Banner, Command, Intent
 
 ### Save Command
 The user-triggered save action, bound to `<C-s>`, that persists the active path-backed buffer to disk, refreshes filetype classification, and clears the modified state on success.
@@ -481,6 +517,17 @@ Terminal input events:
 - `Key(Key)` - A key press
 - `Resize(rows, cols)` - Terminal size change
 - `Paste(text)` - Bracketed paste content
+
+**Related Terms:** UI Event, Terminal
+
+### UI Event
+An internal UI-routing event derived from terminal `Event` values and UI lifecycle signals. UI events are consumed by widgets, which can emit intents for dispatch.
+
+**Context:** Widget event handling, unified intent dispatch, layered UI routing
+
+**Example:** A terminal key event is translated into a UI event and routed to the focused component.
+
+**Related Terms:** Event, Intent, Command, Widget
 
 ### Insert Mode Escape Binding
 A user-configurable canonical key string that exits insert mode and switches back to normal mode. It is added alongside the built-in `<Esc>` binding so users can choose a more ergonomic home-row escape sequence such as `jk`.

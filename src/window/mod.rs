@@ -26,7 +26,6 @@ use crate::terminal::Color;
 use crate::terminal::CursorStyle;
 use crate::terminal::Key;
 use crate::terminal::Style;
-use crate::widget::Widget;
 use std::fmt;
 use std::time::Instant;
 use unicode_segmentation::UnicodeSegmentation;

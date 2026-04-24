@@ -249,13 +249,13 @@ fn test_tab_navigation_wraps_and_supports_counts() {
     let mut group = window_group_with_labels(&["a", "b", "c", "d", "e"]);
 
     assert_eq!(
-        group.process_action(&Action::new(ActionKind::PreviousTab)),
+        group.dispatch_action(&Action::new(ActionKind::PreviousTab)),
         ActionResult::Handled
     );
     assert_eq!(group.active_tab_index(), 4);
 
     assert_eq!(
-        group.process_action(&Action::count(
+        group.dispatch_action(&Action::count(
             2,
             Box::new(Action::new(ActionKind::NextTab))
         )),
@@ -264,7 +264,7 @@ fn test_tab_navigation_wraps_and_supports_counts() {
     assert_eq!(group.active_tab_index(), 1);
 
     assert_eq!(
-        group.process_action(&Action::count(
+        group.dispatch_action(&Action::count(
             3,
             Box::new(Action::new(ActionKind::PreviousTab))
         )),
@@ -281,7 +281,7 @@ fn test_each_window_restores_its_own_mode() {
     group.active_window_mut().switch_mode(ModeKind::Insert);
 
     assert_eq!(
-        group.process_action(&Action::new(ActionKind::NextTab)),
+        group.dispatch_action(&Action::new(ActionKind::NextTab)),
         ActionResult::Handled
     );
     assert_eq!(group.active_tab_index(), 1);
@@ -290,14 +290,14 @@ fn test_each_window_restores_its_own_mode() {
     group.active_window_mut().switch_mode(ModeKind::VisualLine);
 
     assert_eq!(
-        group.process_action(&Action::new(ActionKind::PreviousTab)),
+        group.dispatch_action(&Action::new(ActionKind::PreviousTab)),
         ActionResult::Handled
     );
     assert_eq!(group.active_tab_index(), 0);
     assert_eq!(group.active_window_mode_kind(), ModeKind::Insert);
 
     assert_eq!(
-        group.process_action(&Action::new(ActionKind::NextTab)),
+        group.dispatch_action(&Action::new(ActionKind::NextTab)),
         ActionResult::Handled
     );
     assert_eq!(group.active_tab_index(), 1);
@@ -454,7 +454,7 @@ fn test_jump_navigation_selects_existing_tab() {
     group.record_cursor_position();
 
     assert_eq!(
-        group.process_action(&Action::jump_backward()),
+        group.dispatch_action(&Action::jump_backward()),
         ActionResult::Handled
     );
     assert_eq!(group.active_tab_index(), 0);
@@ -464,7 +464,7 @@ fn test_jump_navigation_selects_existing_tab() {
     );
     assert_eq!(buffer_cursor(group.active_buffer_view()), Cursor::new(0, 1));
     assert_eq!(
-        group.process_action(&Action::jump_forward()),
+        group.dispatch_action(&Action::jump_forward()),
         ActionResult::Handled
     );
     assert_eq!(group.active_tab_index(), 1);
@@ -491,7 +491,7 @@ fn test_jump_navigation_reopens_missing_tab() {
     group.active_tab = 0;
 
     assert_eq!(
-        group.process_action(&Action::jump_backward()),
+        group.dispatch_action(&Action::jump_backward()),
         ActionResult::Handled
     );
     assert_eq!(group.tabs.len(), 2);
@@ -511,7 +511,7 @@ fn test_counted_jump_down_creates_a_new_entry() {
     group.record_cursor_position();
 
     assert_eq!(
-        group.process_action(&Action::count(
+        group.dispatch_action(&Action::count(
             50,
             Box::new(Action::new(ActionKind::MoveDown))
         )),
@@ -523,7 +523,7 @@ fn test_counted_jump_down_creates_a_new_entry() {
     );
 
     assert_eq!(
-        group.process_action(&Action::jump_backward()),
+        group.dispatch_action(&Action::jump_backward()),
         ActionResult::Handled
     );
     assert_eq!(buffer_cursor(group.active_buffer_view()), Cursor::new(0, 0));
@@ -537,7 +537,7 @@ fn test_smaller_counted_jump_down_updates_current_entry() {
     group.record_cursor_position();
 
     assert_eq!(
-        group.process_action(&Action::count(
+        group.dispatch_action(&Action::count(
             5,
             Box::new(Action::new(ActionKind::MoveDown))
         )),
@@ -546,7 +546,7 @@ fn test_smaller_counted_jump_down_updates_current_entry() {
     assert_eq!(buffer_cursor(group.active_buffer_view()), Cursor::new(5, 0));
 
     assert_eq!(
-        group.process_action(&Action::jump_backward()),
+        group.dispatch_action(&Action::jump_backward()),
         ActionResult::Handled
     );
     assert_eq!(buffer_cursor(group.active_buffer_view()), Cursor::new(5, 0));

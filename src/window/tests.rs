@@ -22,7 +22,7 @@ use std::time::{Duration, Instant};
 use tracing_subscriber::layer::SubscriberExt;
 
 fn process_action_and_snapshot(window: &mut Window, action: &Action) {
-    assert_eq!(window.process_action(action), ActionResult::Handled);
+    assert_eq!(window.dispatch_action(action), ActionResult::Handled);
 
     if action.is_snapshottable() {
         let cursor = window.buffer_view.cursor();
@@ -42,7 +42,7 @@ fn test_surround_replace_updates_nearest_enclosing_pair() {
         target: DelimiterFamily::Curly,
         replacement: DelimiterFamily::Square,
     });
-    assert_eq!(window.process_action(&action), ActionResult::Handled);
+    assert_eq!(window.dispatch_action(&action), ActionResult::Handled);
     assert_eq!(
         buffer_text(window.buffer_view()),
         "one {two [three] four} five"
@@ -64,7 +64,7 @@ fn test_surround_delete_works_across_lines() {
     let action = Action::new(ActionKind::SurroundDelete {
         target: DelimiterFamily::DoubleQuote,
     });
-    assert_eq!(window.process_action(&action), ActionResult::Handled);
+    assert_eq!(window.dispatch_action(&action), ActionResult::Handled);
     assert_eq!(buffer_text(window.buffer_view()), "foo bar\nbaz qux");
 }
 
@@ -76,7 +76,7 @@ fn test_surround_actions_noop_when_unresolvable_or_same_family() {
         target: DelimiterFamily::Curly,
     });
     assert_eq!(
-        missing.process_action(&delete_action),
+        missing.dispatch_action(&delete_action),
         ActionResult::NotHandled
     );
     assert_eq!(buffer_text(missing.buffer_view()), "no delimiters here");
@@ -88,7 +88,7 @@ fn test_surround_actions_noop_when_unresolvable_or_same_family() {
         replacement: DelimiterFamily::Paren,
     });
     assert_eq!(
-        same_family.process_action(&replace_action),
+        same_family.dispatch_action(&replace_action),
         ActionResult::NotHandled
     );
     assert_eq!(buffer_text(same_family.buffer_view()), "wrap (me) please");
@@ -126,7 +126,7 @@ fn test_surround_add_inner_word_with_quotes() {
         target: TextObject::InnerWord,
         delimiter: DelimiterFamily::DoubleQuote,
     });
-    assert_eq!(window.process_action(&action), ActionResult::Handled);
+    assert_eq!(window.dispatch_action(&action), ActionResult::Handled);
     assert_eq!(buffer_text(window.buffer_view()), "\"hello\" world");
     assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 0));
 }
@@ -140,7 +140,7 @@ fn test_surround_add_bracket_selector_result() {
         target: TextObject::InnerWord,
         delimiter: DelimiterFamily::Paren,
     });
-    assert_eq!(window.process_action(&action), ActionResult::Handled);
+    assert_eq!(window.dispatch_action(&action), ActionResult::Handled);
     assert_eq!(buffer_text(window.buffer_view()), "(hello) world");
 }
 
@@ -153,7 +153,7 @@ fn test_surround_add_noops_when_text_object_unresolvable() {
         target: TextObject::InnerBracket(BracketKind::Paren),
         delimiter: DelimiterFamily::DoubleQuote,
     });
-    assert_eq!(window.process_action(&action), ActionResult::NotHandled);
+    assert_eq!(window.dispatch_action(&action), ActionResult::NotHandled);
     assert_eq!(buffer_text(window.buffer_view()), "hello");
 }
 
@@ -171,7 +171,7 @@ fn test_surround_add_visual_selection_with_quotes() {
     })
     .with_from_mode(ModeKind::Visual)
     .with_to_mode(ModeKind::Normal);
-    assert_eq!(window.process_action(&action), ActionResult::Handled);
+    assert_eq!(window.dispatch_action(&action), ActionResult::Handled);
     assert_eq!(buffer_text(window.buffer_view()), "foo \"bar\" baz");
     assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 4));
 }
@@ -190,7 +190,7 @@ fn test_surround_add_visual_selection_with_square_brackets() {
     })
     .with_from_mode(ModeKind::Visual)
     .with_to_mode(ModeKind::Normal);
-    assert_eq!(window.process_action(&action), ActionResult::Handled);
+    assert_eq!(window.dispatch_action(&action), ActionResult::Handled);
     assert_eq!(buffer_text(window.buffer_view()), "foo [bar] baz");
 }
 
@@ -209,7 +209,7 @@ fn test_surround_add_visual_line_selection_without_auto_indent() {
     })
     .with_from_mode(ModeKind::VisualLine)
     .with_to_mode(ModeKind::Normal);
-    assert_eq!(window.process_action(&action), ActionResult::Handled);
+    assert_eq!(window.dispatch_action(&action), ActionResult::Handled);
     assert_eq!(buffer_text(window.buffer_view()), "{\nalpha\nbeta\n}");
     assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 0));
 }
@@ -229,7 +229,7 @@ fn test_surround_add_visual_line_selection_with_auto_indent() {
     })
     .with_from_mode(ModeKind::VisualLine)
     .with_to_mode(ModeKind::Normal);
-    assert_eq!(window.process_action(&action), ActionResult::Handled);
+    assert_eq!(window.dispatch_action(&action), ActionResult::Handled);
     assert_eq!(
         buffer_text(window.buffer_view()),
         "{\n    alpha\n    beta\n}"
@@ -1122,7 +1122,9 @@ fn test_window_render_indent_guide_uses_split_border_style() {
     let mut window = Window::new(buffer);
     window.set_cursor(Cursor::new(1, 2));
     let theme = themed_window();
-    let expected_style = theme.resolve_name_with_default("ui.window.lines.indent");
+    let expected_style = theme
+        .default_style()
+        .accent(theme.resolve_name_with_default("ui.window.lines.indent"));
     let _theme_guard = globals::set_test_active_theme(theme);
     let _config_guard = globals::set_test_config(Config {
         indent_guides: true,
@@ -1740,7 +1742,7 @@ fn test_open_line_above_uses_neighbor_indent() {
     window.set_cursor(Cursor::new(1, 4));
 
     assert_eq!(
-        window.process_action(&Action::new(ActionKind::OpenLineAbove)),
+        window.dispatch_action(&Action::new(ActionKind::OpenLineAbove)),
         ActionResult::Handled
     );
     assert_eq!(
@@ -1756,15 +1758,16 @@ fn test_open_line_below_undo_restores_original_text() {
     window.set_cursor(Cursor::new(0, 5));
 
     assert_eq!(
-        window
-            .process_action(&Action::new(ActionKind::OpenLineBelow).with_to_mode(ModeKind::Insert)),
+        window.dispatch_action(
+            &Action::new(ActionKind::OpenLineBelow).with_to_mode(ModeKind::Insert)
+        ),
         ActionResult::Handled
     );
     assert_eq!(buffer_text(window.buffer_view()), "hello\n");
     assert_eq!(window.buffer_view().cursor(), Cursor::new(1, 0));
 
     assert_eq!(
-        window.process_action(
+        window.dispatch_action(
             &Action::insert_text("world".to_string()).with_from_mode(ModeKind::Insert)
         ),
         ActionResult::Handled
@@ -1796,7 +1799,7 @@ fn test_insert_newline_uses_neighbor_indent_and_reports_suffix() {
     window.set_cursor(Cursor::new(0, line_end));
 
     assert_eq!(
-        window.process_action(&Action::insert_newline().with_from_mode(ModeKind::Insert)),
+        window.dispatch_action(&Action::insert_newline().with_from_mode(ModeKind::Insert)),
         ActionResult::Handled
     );
     assert_eq!(
@@ -1814,7 +1817,7 @@ fn test_change_line_preserves_current_indentation_when_auto_indent_is_enabled() 
     window.set_cursor(Cursor::new(0, 4));
 
     assert_eq!(
-        window.process_action(&Action::new(ActionKind::ChangeLine).with_to_mode(ModeKind::Insert)),
+        window.dispatch_action(&Action::new(ActionKind::ChangeLine).with_to_mode(ModeKind::Insert)),
         ActionResult::Handled
     );
     assert_eq!(
@@ -1832,7 +1835,7 @@ fn test_change_line_undo_restores_original_text() {
     window.set_cursor(Cursor::new(0, 4));
 
     assert_eq!(
-        window.process_action(&Action::new(ActionKind::ChangeLine).with_to_mode(ModeKind::Insert)),
+        window.dispatch_action(&Action::new(ActionKind::ChangeLine).with_to_mode(ModeKind::Insert)),
         ActionResult::Handled
     );
     assert_eq!(
@@ -1843,8 +1846,9 @@ fn test_change_line_undo_restores_original_text() {
     assert_eq!(window.take_pending_repeat_suffix().as_deref(), Some("    "));
 
     assert_eq!(
-        window
-            .process_action(&Action::insert_text("x".to_string()).with_from_mode(ModeKind::Insert)),
+        window.dispatch_action(
+            &Action::insert_text("x".to_string()).with_from_mode(ModeKind::Insert)
+        ),
         ActionResult::Handled
     );
     assert_eq!(
@@ -1876,7 +1880,7 @@ fn test_change_to_line_end_undo_restores_original_text() {
     window.set_cursor(Cursor::new(0, 3));
 
     assert_eq!(
-        window.process_action(
+        window.dispatch_action(
             &Action::new(ActionKind::ChangeToLineEnd).with_to_mode(ModeKind::Insert)
         ),
         ActionResult::Handled
@@ -1885,8 +1889,9 @@ fn test_change_to_line_end_undo_restores_original_text() {
     assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 3));
 
     assert_eq!(
-        window
-            .process_action(&Action::insert_text("p".to_string()).with_from_mode(ModeKind::Insert)),
+        window.dispatch_action(
+            &Action::insert_text("p".to_string()).with_from_mode(ModeKind::Insert)
+        ),
         ActionResult::Handled
     );
     assert_eq!(buffer_text(window.buffer_view()), "help");
@@ -1916,7 +1921,7 @@ fn test_insert_newline_reports_no_suffix_when_disabled() {
     window.set_cursor(Cursor::new(0, line_end));
 
     assert_eq!(
-        window.process_action(&Action::insert_newline().with_from_mode(ModeKind::Insert)),
+        window.dispatch_action(&Action::insert_newline().with_from_mode(ModeKind::Insert)),
         ActionResult::Handled
     );
     assert_eq!(
@@ -1935,7 +1940,7 @@ fn test_insert_newline_prefers_next_line_indent_when_it_is_more_indented() {
     window.set_cursor(Cursor::new(0, line_end));
 
     assert_eq!(
-        window.process_action(&Action::insert_newline().with_from_mode(ModeKind::Insert)),
+        window.dispatch_action(&Action::insert_newline().with_from_mode(ModeKind::Insert)),
         ActionResult::Handled
     );
     assert_eq!(
@@ -2075,7 +2080,7 @@ fn test_indent_decrease_shifts_current_line() {
     window.set_cursor(Cursor::new(0, 4));
 
     assert_eq!(
-        window.process_action(&Action::new(ActionKind::IndentDecrease)),
+        window.dispatch_action(&Action::new(ActionKind::IndentDecrease)),
         ActionResult::Handled
     );
     assert_eq!(buffer_text(window.buffer_view()), "hello\n  world");
@@ -2088,7 +2093,7 @@ fn test_counted_indent_decrease_shifts_multiple_lines() {
     window.set_cursor(Cursor::new(0, 4));
 
     assert_eq!(
-        window.process_action(
+        window.dispatch_action(
             &Action::new(ActionKind::IndentDecrease)
                 .with_count(2)
                 .expect("counted indent decrease should be allowed"),
@@ -2108,7 +2113,7 @@ fn test_insert_mode_shift_tab_dedents_without_leaving_insert_mode() {
     window.set_cursor(Cursor::new(0, 4));
 
     assert_eq!(
-        window.process_action(
+        window.dispatch_action(
             &Action::new(ActionKind::IndentDecrease).with_from_mode(ModeKind::Insert),
         ),
         ActionResult::Handled
@@ -2123,7 +2128,7 @@ fn test_insert_mode_backspace_dedents_inside_leading_whitespace() {
     window.set_cursor(Cursor::new(0, 2));
 
     assert_eq!(
-        window.process_action(
+        window.dispatch_action(
             &Action::new(ActionKind::DeleteBackward).with_from_mode(ModeKind::Insert)
         ),
         ActionResult::Handled
@@ -2138,7 +2143,7 @@ fn test_insert_mode_backspace_keeps_plain_deletion_outside_indentation() {
     window.set_cursor(Cursor::new(0, 5));
 
     assert_eq!(
-        window.process_action(
+        window.dispatch_action(
             &Action::new(ActionKind::DeleteBackward).with_from_mode(ModeKind::Insert)
         ),
         ActionResult::Handled
@@ -2436,13 +2441,13 @@ fn test_toggle_wrap_action_toggles_window_state() {
     assert!(!window.wrap_enabled());
 
     assert_eq!(
-        window.process_action(&Action::new(ActionKind::ToggleWrap)),
+        window.dispatch_action(&Action::new(ActionKind::ToggleWrap)),
         ActionResult::Handled
     );
     assert!(window.wrap_enabled());
 
     assert_eq!(
-        window.process_action(&Action::new(ActionKind::ToggleWrap)),
+        window.dispatch_action(&Action::new(ActionKind::ToggleWrap)),
         ActionResult::Handled
     );
     assert!(!window.wrap_enabled());
@@ -2537,19 +2542,19 @@ fn test_vertical_motions_remain_logical_lines_when_wrapping_is_enabled() {
     window.set_cursor(Cursor::new(0, 6));
 
     assert_eq!(
-        window.process_action(&Action::new(ActionKind::MoveDown)),
+        window.dispatch_action(&Action::new(ActionKind::MoveDown)),
         ActionResult::Handled
     );
     assert_eq!(window.buffer_view().cursor().line, 1);
 
     assert_eq!(
-        window.process_action(&Action::new(ActionKind::MoveDown)),
+        window.dispatch_action(&Action::new(ActionKind::MoveDown)),
         ActionResult::Handled
     );
     assert_eq!(window.buffer_view().cursor().line, 2);
 
     assert_eq!(
-        window.process_action(&Action::new(ActionKind::MoveUp)),
+        window.dispatch_action(&Action::new(ActionKind::MoveUp)),
         ActionResult::Handled
     );
     assert_eq!(window.buffer_view().cursor().line, 1);
@@ -2690,7 +2695,7 @@ fn test_normal_yank_characterwise_flashes_selection() {
         Operator::Yank,
         OperatorTarget::TextObject(TextObject::InnerWord),
     );
-    assert_eq!(window.process_action(&action), ActionResult::Handled);
+    assert_eq!(window.dispatch_action(&action), ActionResult::Handled);
 
     let mut screen = crate::screen::Screen::new(1, 20);
     window.render(&mut screen, Position::new(0, 0), Size::new(1, 20));
@@ -2725,7 +2730,7 @@ fn test_normal_yank_line_flashes_selection() {
     window.buffer_view_mut().set_cursor(Cursor::new(0, 0));
 
     assert_eq!(
-        window.process_action(&Action::new(ActionKind::YankLine)),
+        window.dispatch_action(&Action::new(ActionKind::YankLine)),
         ActionResult::Handled
     );
 
@@ -2775,7 +2780,7 @@ fn test_normal_counted_linewise_yank_motion_flashes_selection() {
             OperatorTarget::LinewiseMotion(LinewiseMotion::FirstLine),
         )),
     );
-    assert_eq!(window.process_action(&action), ActionResult::Handled);
+    assert_eq!(window.dispatch_action(&action), ActionResult::Handled);
 
     let mut screen = crate::screen::Screen::new(4, 20);
     window.render(&mut screen, Position::new(0, 0), Size::new(4, 20));
@@ -2819,12 +2824,12 @@ fn test_normal_yank_restarts_flash_on_subsequent_yank() {
     let mut window = Window::new(buffer);
 
     assert_eq!(
-        window.process_action(&Action::new(ActionKind::YankLine)),
+        window.dispatch_action(&Action::new(ActionKind::YankLine)),
         ActionResult::Handled
     );
     window.buffer_view_mut().set_cursor(Cursor::new(1, 0));
     assert_eq!(
-        window.process_action(&Action::new(ActionKind::YankLine)),
+        window.dispatch_action(&Action::new(ActionKind::YankLine)),
         ActionResult::Handled
     );
 
@@ -2865,7 +2870,7 @@ fn test_normal_yank_flash_expires_and_is_cleared_on_render() {
     let buffer = Buffer::from_str("alpha");
     let mut window = Window::new(buffer);
     assert_eq!(
-        window.process_action(&Action::new(ActionKind::YankLine)),
+        window.dispatch_action(&Action::new(ActionKind::YankLine)),
         ActionResult::Handled
     );
 
@@ -2905,7 +2910,7 @@ fn test_visual_repeated_motion_matches_counted_motion() {
         .expect("counted motion should be allowed")
         .with_from_mode(ModeKind::Visual);
     assert_eq!(
-        counted.process_action(&counted_action),
+        counted.dispatch_action(&counted_action),
         ActionResult::Handled
     );
 
@@ -2915,7 +2920,7 @@ fn test_visual_repeated_motion_matches_counted_motion() {
         .begin_visual_selection(VisualSelectionKind::Character);
     let motion = Action::new(ActionKind::MoveRight).with_from_mode(ModeKind::Visual);
     for _ in 0..3 {
-        assert_eq!(repeated.process_action(&motion), ActionResult::Handled);
+        assert_eq!(repeated.dispatch_action(&motion), ActionResult::Handled);
     }
 
     assert_eq!(
@@ -2952,7 +2957,7 @@ fn test_visual_delete_leaves_cursor_at_selection_start() {
     let action = Action::new(ActionKind::DeleteSelection)
         .with_from_mode(ModeKind::Visual)
         .with_to_mode(ModeKind::Normal);
-    assert_eq!(window.process_action(&action), ActionResult::Handled);
+    assert_eq!(window.dispatch_action(&action), ActionResult::Handled);
     assert_eq!(buffer_text(window.buffer_view()), "c");
     assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 0));
 }
@@ -2981,7 +2986,7 @@ fn test_visual_change_leaves_cursor_at_selection_start() {
     let action = Action::new(ActionKind::ChangeSelection)
         .with_from_mode(ModeKind::Visual)
         .with_to_mode(ModeKind::Insert);
-    assert_eq!(window.process_action(&action), ActionResult::Handled);
+    assert_eq!(window.dispatch_action(&action), ActionResult::Handled);
     assert_eq!(buffer_text(window.buffer_view()), "c");
     assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 0));
 }
@@ -3010,13 +3015,14 @@ fn test_visual_change_undo_restores_original_text() {
     let action = Action::new(ActionKind::ChangeSelection)
         .with_from_mode(ModeKind::Visual)
         .with_to_mode(ModeKind::Insert);
-    assert_eq!(window.process_action(&action), ActionResult::Handled);
+    assert_eq!(window.dispatch_action(&action), ActionResult::Handled);
     assert_eq!(buffer_text(window.buffer_view()), "c");
     assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 0));
 
     assert_eq!(
-        window
-            .process_action(&Action::insert_text("x".to_string()).with_from_mode(ModeKind::Insert)),
+        window.dispatch_action(
+            &Action::insert_text("x".to_string()).with_from_mode(ModeKind::Insert)
+        ),
         ActionResult::Handled
     );
     assert_eq!(buffer_text(window.buffer_view()), "xc");
@@ -3047,7 +3053,7 @@ fn test_visual_text_object_repeats_are_idempotent() {
 
     let action = Action::new(ActionKind::VisualTextObject(TextObject::InnerWord))
         .with_from_mode(ModeKind::Visual);
-    assert_eq!(window.process_action(&action), ActionResult::Handled);
+    assert_eq!(window.dispatch_action(&action), ActionResult::Handled);
     let expected = Some(crate::buffer::TextObjectRange {
         start: Cursor::new(0, 0),
         end: Cursor::new(0, 5),
@@ -3055,7 +3061,7 @@ fn test_visual_text_object_repeats_are_idempotent() {
     assert_eq!(window.buffer_view().visual_selection_range(), expected);
     assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 4));
 
-    assert_eq!(window.process_action(&action), ActionResult::Handled);
+    assert_eq!(window.dispatch_action(&action), ActionResult::Handled);
     assert_eq!(window.buffer_view().visual_selection_range(), expected);
     assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 4));
 }
@@ -3071,11 +3077,11 @@ fn test_visual_text_object_can_retarget_selection() {
 
     let inner_word = Action::new(ActionKind::VisualTextObject(TextObject::InnerWord))
         .with_from_mode(ModeKind::Visual);
-    assert_eq!(window.process_action(&inner_word), ActionResult::Handled);
+    assert_eq!(window.dispatch_action(&inner_word), ActionResult::Handled);
 
     let around_word = Action::new(ActionKind::VisualTextObject(TextObject::AroundWord))
         .with_from_mode(ModeKind::Visual);
-    assert_eq!(window.process_action(&around_word), ActionResult::Handled);
+    assert_eq!(window.dispatch_action(&around_word), ActionResult::Handled);
     assert_eq!(
         window.buffer_view().visual_selection_range(),
         Some(crate::buffer::TextObjectRange {
@@ -3101,7 +3107,7 @@ fn test_visual_text_object_invalid_location_leaves_selection_unchanged() {
     )))
     .with_from_mode(ModeKind::Visual);
 
-    assert_eq!(window.process_action(&action), ActionResult::Handled);
+    assert_eq!(window.dispatch_action(&action), ActionResult::Handled);
     assert_eq!(window.buffer_view().visual_selection_range(), before);
 }
 
@@ -3129,7 +3135,7 @@ fn test_visual_case_lowercases_selection_and_exits_to_normal() {
     let action = Action::operation(Operator::Lowercase, OperatorTarget::Selection)
         .with_from_mode(ModeKind::Visual)
         .with_to_mode(ModeKind::Normal);
-    assert_eq!(window.process_action(&action), ActionResult::Handled);
+    assert_eq!(window.dispatch_action(&action), ActionResult::Handled);
     assert_eq!(buffer_text(window.buffer_view()), "abc");
     assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 0));
     assert_eq!(window.mode_kind(), ModeKind::Normal);
@@ -3141,7 +3147,7 @@ fn test_case_uppercase_operator_handles_unicode_expansion() {
     let mut window = Window::new(buffer);
 
     window.buffer_view_mut().set_cursor(Cursor::new(0, 0));
-    let result = window.process_action(&Action::operation(
+    let result = window.dispatch_action(&Action::operation(
         Operator::Uppercase,
         OperatorTarget::TextObject(TextObject::InnerBigWord),
     ));
@@ -3176,7 +3182,7 @@ fn test_visual_line_toggle_case_handles_unicode_and_exits_to_normal() {
     let action = Action::operation(Operator::ToggleCase, OperatorTarget::Selection)
         .with_from_mode(ModeKind::VisualLine)
         .with_to_mode(ModeKind::Normal);
-    assert_eq!(window.process_action(&action), ActionResult::Handled);
+    assert_eq!(window.dispatch_action(&action), ActionResult::Handled);
     assert_eq!(buffer_text(window.buffer_view()), "FOO\nSSA");
     assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 0));
     assert_eq!(window.mode_kind(), ModeKind::Normal);
@@ -3195,7 +3201,7 @@ fn test_visual_yank_copies_selection_without_mutating_buffer() {
     let action = Action::new(ActionKind::YankSelection)
         .with_from_mode(ModeKind::Visual)
         .with_to_mode(ModeKind::Normal);
-    assert_eq!(window.process_action(&action), ActionResult::Handled);
+    assert_eq!(window.dispatch_action(&action), ActionResult::Handled);
     assert_eq!(buffer_text(window.buffer_view()), "abc");
 
     let content = globals::with_register_store(|store| store.get(RegisterName('y')))
@@ -3229,7 +3235,7 @@ fn test_visual_line_delete_removes_entire_lines() {
     let action = Action::new(ActionKind::DeleteSelection)
         .with_from_mode(ModeKind::VisualLine)
         .with_to_mode(ModeKind::Normal);
-    assert_eq!(window.process_action(&action), ActionResult::Handled);
+    assert_eq!(window.dispatch_action(&action), ActionResult::Handled);
     assert_eq!(buffer_text(window.buffer_view()), "one\nfour");
     assert_eq!(window.buffer_view().cursor(), Cursor::new(1, 0));
 }
@@ -3259,7 +3265,7 @@ fn test_visual_line_change_leaves_blank_line() {
     let action = Action::new(ActionKind::ChangeSelection)
         .with_from_mode(ModeKind::VisualLine)
         .with_to_mode(ModeKind::Insert);
-    assert_eq!(window.process_action(&action), ActionResult::Handled);
+    assert_eq!(window.dispatch_action(&action), ActionResult::Handled);
     assert_eq!(buffer_text(window.buffer_view()), "one\n\nfour");
     assert_eq!(window.buffer_view().cursor(), Cursor::new(1, 0));
 }
@@ -3278,7 +3284,7 @@ fn test_visual_line_yank_copies_lines_without_mutating_buffer() {
     let action = Action::new(ActionKind::YankSelection)
         .with_from_mode(ModeKind::VisualLine)
         .with_to_mode(ModeKind::Normal);
-    assert_eq!(window.process_action(&action), ActionResult::Handled);
+    assert_eq!(window.dispatch_action(&action), ActionResult::Handled);
     assert_eq!(buffer_text(window.buffer_view()), "one\ntwo\nthree\nfour");
 
     let content = globals::with_register_store(|store| store.get(RegisterName('y')))
@@ -3413,7 +3419,7 @@ fn test_column_preservation_first_vertical_move() {
     window.buffer_view.set_cursor(Cursor::new(0, 5));
 
     // First move down via Window - should use current column (5), remember it
-    window.process_action(&Action::new(ActionKind::MoveDown));
+    window.dispatch_action(&Action::new(ActionKind::MoveDown));
     assert_eq!(window.buffer_view.cursor().line, 1);
     // Line 2 is "ij" (length 2), so column 5 should clamp to 2
     assert_eq!(window.buffer_view.cursor().col, 2);
@@ -3429,15 +3435,15 @@ fn test_column_preservation_consecutive_vertical_moves() {
     window.buffer_view.set_cursor(Cursor::new(0, 5));
 
     // Move down - remembers column 5
-    window.process_action(&Action::new(ActionKind::MoveDown));
+    window.dispatch_action(&Action::new(ActionKind::MoveDown));
     assert_eq!(window.buffer_view.cursor(), Cursor::new(1, 5));
 
     // Move down again - should use remembered column 5
-    window.process_action(&Action::new(ActionKind::MoveDown));
+    window.dispatch_action(&Action::new(ActionKind::MoveDown));
     assert_eq!(window.buffer_view.cursor(), Cursor::new(2, 5));
 
     // Move up - should use remembered column 5
-    window.process_action(&Action::new(ActionKind::MoveUp));
+    window.dispatch_action(&Action::new(ActionKind::MoveUp));
     assert_eq!(window.buffer_view.cursor(), Cursor::new(1, 5));
 }
 
@@ -3453,15 +3459,15 @@ fn test_column_preservation_horizontal_resets() {
     window.buffer_view.set_cursor(Cursor::new(0, 5));
 
     // Move down - remembers column 5
-    window.process_action(&Action::new(ActionKind::MoveDown));
+    window.dispatch_action(&Action::new(ActionKind::MoveDown));
     assert_eq!(window.buffer_view.cursor(), Cursor::new(1, 5));
 
     // Move right - should reset remembered column to current (now at column 6)
-    window.process_action(&Action::new(ActionKind::MoveRight));
+    window.dispatch_action(&Action::new(ActionKind::MoveRight));
     // Now at column 6 on line 1
 
     // Move down again - should use new column 6 and go to line 2
-    window.process_action(&Action::new(ActionKind::MoveDown));
+    window.dispatch_action(&Action::new(ActionKind::MoveDown));
     assert_eq!(window.buffer_view.cursor(), Cursor::new(2, 6));
 }
 
@@ -3475,12 +3481,12 @@ fn test_column_preservation_clamp_on_short_line() {
     window.buffer_view.set_cursor(Cursor::new(0, 5));
 
     // Move down to shorter line "ij" (length 2)
-    window.process_action(&Action::new(ActionKind::MoveDown));
+    window.dispatch_action(&Action::new(ActionKind::MoveDown));
     // Should clamp to column 2 (end of "ij")
     assert_eq!(window.buffer_view.cursor(), Cursor::new(1, 2));
 
     // Move down to longer line - should use remembered column 5
-    window.process_action(&Action::new(ActionKind::MoveDown));
+    window.dispatch_action(&Action::new(ActionKind::MoveDown));
     assert_eq!(window.buffer_view.cursor(), Cursor::new(2, 5));
 }
 
@@ -3551,10 +3557,10 @@ fn test_page_motions_move_by_viewport_height() {
     let mut screen = crate::screen::Screen::new(3, 40);
     window.render(&mut screen, Position::new(0, 0), Size::new(3, 40));
 
-    window.process_action(&Action::new(ActionKind::MovePageDown));
+    window.dispatch_action(&Action::new(ActionKind::MovePageDown));
     assert_eq!(window.buffer_view.cursor(), Cursor::new(3, 8));
 
-    window.process_action(&Action::new(ActionKind::MovePageUp));
+    window.dispatch_action(&Action::new(ActionKind::MovePageUp));
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 8));
 }
 
@@ -3569,14 +3575,14 @@ fn test_page_motions_render_updated_gutter_line_numbers() {
     window.render(&mut screen, Position::new(0, 0), size);
     assert_eq!(screen.get_cell_mut(0, gutter_col).unwrap().text, "1");
 
-    window.process_action(&Action::new(ActionKind::MovePageDown));
+    window.dispatch_action(&Action::new(ActionKind::MovePageDown));
     window.render(&mut screen, Position::new(0, 0), size);
     assert_eq!(window.buffer_view.scroll_offset(), Position::new(2, 0));
     assert_eq!(screen.get_cell_mut(0, gutter_col).unwrap().text, "3");
     assert_eq!(screen.get_cell_mut(1, gutter_col).unwrap().text, "4");
     assert_eq!(screen.get_cell_mut(2, gutter_col).unwrap().text, "5");
 
-    window.process_action(&Action::new(ActionKind::MovePageUp));
+    window.dispatch_action(&Action::new(ActionKind::MovePageUp));
     window.render(&mut screen, Position::new(0, 0), size);
     assert_eq!(window.buffer_view.scroll_offset(), Position::new(0, 0));
     assert_eq!(screen.get_cell_mut(0, gutter_col).unwrap().text, "1");
@@ -3593,7 +3599,7 @@ fn test_page_motions_clamp_on_short_line() {
     let mut screen = crate::screen::Screen::new(3, 40);
     window.render(&mut screen, Position::new(0, 0), Size::new(3, 40));
 
-    window.process_action(&Action::new(ActionKind::MovePageDown));
+    window.dispatch_action(&Action::new(ActionKind::MovePageDown));
     assert_eq!(window.buffer_view.cursor(), Cursor::new(3, 2));
 }
 
@@ -3606,10 +3612,10 @@ fn test_half_page_motions_move_by_half_viewport_height() {
     let mut screen = crate::screen::Screen::new(3, 40);
     window.render(&mut screen, Position::new(0, 0), Size::new(3, 40));
 
-    window.process_action(&Action::new(ActionKind::MoveHalfPageDown));
+    window.dispatch_action(&Action::new(ActionKind::MoveHalfPageDown));
     assert_eq!(window.buffer_view.cursor(), Cursor::new(1, 8));
 
-    window.process_action(&Action::new(ActionKind::MoveHalfPageUp));
+    window.dispatch_action(&Action::new(ActionKind::MoveHalfPageUp));
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 8));
 }
 
@@ -3622,7 +3628,7 @@ fn test_find_forward_moves_to_char() {
     let mut window = Window::new(buffer);
 
     window.buffer_view.set_cursor(Cursor::new(0, 0)); // at 'h'
-    window.process_action(&Action::find_forward('o'));
+    window.dispatch_action(&Action::find_forward('o'));
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 4)); // 'o' is at column 4
 }
 
@@ -3633,7 +3639,7 @@ fn test_find_forward_finds_third_occurrence() {
     let mut window = Window::new(buffer);
 
     window.buffer_view.set_cursor(Cursor::new(0, 0));
-    window.process_action(&Action::count(3, Box::new(Action::find_forward('x'))));
+    window.dispatch_action(&Action::count(3, Box::new(Action::find_forward('x'))));
     // Third 'x' is at column 4
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 4));
 }
@@ -3645,7 +3651,7 @@ fn test_find_forward_not_found_stays_in_place() {
     let mut window = Window::new(buffer);
 
     window.buffer_view.set_cursor(Cursor::new(0, 2)); // at 'l'
-    window.process_action(&Action::find_forward('z'));
+    window.dispatch_action(&Action::find_forward('z'));
     // Cursor should stay at column 2
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 2));
 }
@@ -3657,7 +3663,7 @@ fn test_find_backward_moves_to_char() {
     let mut window = Window::new(buffer);
 
     window.buffer_view.set_cursor(Cursor::new(0, 10)); // at 'd'
-    window.process_action(&Action::find_backward('o'));
+    window.dispatch_action(&Action::find_backward('o'));
     // First 'o' when going backward from position 10 is at column 7
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 7));
 }
@@ -3669,7 +3675,7 @@ fn test_find_backward_not_found_stays_in_place() {
     let mut window = Window::new(buffer);
 
     window.buffer_view.set_cursor(Cursor::new(0, 0)); // at 'h'
-    window.process_action(&Action::find_backward('x'));
+    window.dispatch_action(&Action::find_backward('x'));
     // Cursor should stay at column 0
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
 }
@@ -3681,7 +3687,7 @@ fn test_till_forward_lands_before_char() {
     let mut window = Window::new(buffer);
 
     window.buffer_view.set_cursor(Cursor::new(0, 0)); // at 'h'
-    window.process_action(&Action::till_forward('o'));
+    window.dispatch_action(&Action::till_forward('o'));
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 3)); // 'l' is at column 3
 }
 
@@ -3692,7 +3698,7 @@ fn test_till_forward_clamp_at_line_start() {
     let mut window = Window::new(buffer);
 
     window.buffer_view.set_cursor(Cursor::new(0, 0)); // at 'h'
-    window.process_action(&Action::till_forward('h'));
+    window.dispatch_action(&Action::till_forward('h'));
     // Till lands one before 'h', which would be column -1, clamped to 0
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
 }
@@ -3704,7 +3710,7 @@ fn test_till_backward_lands_after_char() {
     let mut window = Window::new(buffer);
 
     window.buffer_view.set_cursor(Cursor::new(0, 4)); // at 'o'
-    window.process_action(&Action::till_backward('h'));
+    window.dispatch_action(&Action::till_backward('h'));
     // Till backward 'h' from 'o': 'h' is at 0, +1 = column 1
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 1));
 }
@@ -3716,7 +3722,7 @@ fn test_till_backward_clamp_at_line_end() {
     let mut window = Window::new(buffer);
 
     window.buffer_view.set_cursor(Cursor::new(0, 4)); // at 'o'
-    window.process_action(&Action::till_backward('o'));
+    window.dispatch_action(&Action::till_backward('o'));
     // Till backward 'o' from 'o': there's no 'o' before position 4, so cursor stays
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 4));
 }
@@ -3729,7 +3735,7 @@ fn test_find_forward_with_count() {
 
     window.buffer_view.set_cursor(Cursor::new(0, 0));
     // Use Count wrapper for the action
-    window.process_action(&Action::count(2, Box::new(Action::find_forward('o'))));
+    window.dispatch_action(&Action::count(2, Box::new(Action::find_forward('o'))));
     // 'o' appears at column 4 and 7
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 7)); // second 'o'
 }
@@ -3741,7 +3747,7 @@ fn test_find_backward_with_count() {
     let mut window = Window::new(buffer);
 
     window.buffer_view.set_cursor(Cursor::new(0, 10)); // at 'd'
-    window.process_action(&Action::count(2, Box::new(Action::find_backward('l'))));
+    window.dispatch_action(&Action::count(2, Box::new(Action::find_backward('l'))));
     // 'l' appears at columns 2, 3, and 9
     // Going backward from 'd' at 10: 1st 'l' is at 9, 2nd 'l' is at 3
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 3));
@@ -3754,7 +3760,7 @@ fn test_find_backward_skips_current_char_on_duplicate() {
     let mut window = Window::new(buffer);
 
     window.buffer_view.set_cursor(Cursor::new(0, 3)); // at 3rd 'l'
-    window.process_action(&Action::find_backward('l'));
+    window.dispatch_action(&Action::find_backward('l'));
     // Should find 2nd 'l' at column 2, not 3rd 'l' at column 3
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 2));
 }
@@ -3770,7 +3776,7 @@ fn test_delete_character_scan_operator_updates_repeat_state() {
     };
 
     window.buffer_view.set_cursor(Cursor::new(0, 0));
-    window.process_action(&Action::operation(
+    window.dispatch_action(&Action::operation(
         Operator::Delete,
         OperatorTarget::CharacterScan(expected),
     ));
@@ -3791,7 +3797,7 @@ fn test_counted_character_scan_operator_uses_motion_count() {
     };
 
     window.buffer_view.set_cursor(Cursor::new(0, 0));
-    window.process_action(&Action::count(
+    window.dispatch_action(&Action::count(
         2,
         Box::new(Action::operation(
             Operator::Delete,
@@ -3810,7 +3816,7 @@ fn test_count_diw_deletes_multiple_words() {
     let mut window = Window::new(buffer);
 
     window.buffer_view.set_cursor(Cursor::new(0, 0));
-    window.process_action(&Action::count(
+    window.dispatch_action(&Action::count(
         3,
         Box::new(Action::operation(
             Operator::Delete,
@@ -3834,7 +3840,7 @@ fn test_dw_deletes_through_next_word_start() {
     let mut window = Window::new(buffer);
 
     window.buffer_view.set_cursor(Cursor::new(0, 0));
-    window.process_action(&Action::operation(
+    window.dispatch_action(&Action::operation(
         Operator::Delete,
         OperatorTarget::BoundaryMotion(BoundaryMotion::WordForward),
     ));
@@ -3849,7 +3855,7 @@ fn test_cw_changes_through_next_word_start() {
     let mut window = Window::new(buffer);
 
     window.buffer_view.set_cursor(Cursor::new(0, 0));
-    let result = window.process_action(&Action::operation(
+    let result = window.dispatch_action(&Action::operation(
         Operator::Change,
         OperatorTarget::BoundaryMotion(BoundaryMotion::WordForward),
     ));
@@ -3885,7 +3891,7 @@ fn test_cw_undo_restores_original_text() {
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
 
     assert_eq!(
-        window.process_action(
+        window.dispatch_action(
             &Action::insert_text("hi".to_string()).with_from_mode(ModeKind::Insert)
         ),
         ActionResult::Handled
@@ -3912,7 +3918,7 @@ fn test_cw_at_end_of_line_is_noop() {
     let mut window = Window::new(buffer);
 
     window.buffer_view.set_cursor(Cursor::new(0, 5));
-    let result = window.process_action(&Action::operation(
+    let result = window.dispatch_action(&Action::operation(
         Operator::Change,
         OperatorTarget::BoundaryMotion(BoundaryMotion::WordForward),
     ));
@@ -3928,7 +3934,7 @@ fn test_da_paren_deletes_around_bracket_pair() {
     let mut window = Window::new(buffer);
 
     window.buffer_view.set_cursor(Cursor::new(0, 4));
-    let result = window.process_action(&Action::operation(
+    let result = window.dispatch_action(&Action::operation(
         Operator::Delete,
         OperatorTarget::TextObject(TextObject::AroundBracket(BracketKind::Paren)),
     ));
@@ -3944,7 +3950,7 @@ fn test_di_quote_deletes_inner_quote_pair() {
     let mut window = Window::new(buffer);
 
     window.buffer_view.set_cursor(Cursor::new(0, 6));
-    let result = window.process_action(&Action::operation(
+    let result = window.dispatch_action(&Action::operation(
         Operator::Delete,
         OperatorTarget::TextObject(TextObject::InnerQuote(QuoteKind::Double)),
     ));
@@ -3960,7 +3966,7 @@ fn test_di_quote_with_no_matching_pair_is_noop() {
     let mut window = Window::new(buffer);
 
     window.buffer_view.set_cursor(Cursor::new(0, 0));
-    let result = window.process_action(&Action::operation(
+    let result = window.dispatch_action(&Action::operation(
         Operator::Delete,
         OperatorTarget::TextObject(TextObject::InnerQuote(QuoteKind::Single)),
     ));
@@ -3976,7 +3982,7 @@ fn test_di_paren_with_no_matching_pair_is_noop() {
     let mut window = Window::new(buffer);
 
     window.buffer_view.set_cursor(Cursor::new(0, 0));
-    let result = window.process_action(&Action::operation(
+    let result = window.dispatch_action(&Action::operation(
         Operator::Delete,
         OperatorTarget::TextObject(TextObject::InnerBracket(BracketKind::Paren)),
     ));
@@ -3992,7 +3998,7 @@ fn test_di_paren_on_empty_pair_is_noop() {
     let mut window = Window::new(buffer);
 
     window.buffer_view.set_cursor(Cursor::new(0, 0));
-    let result = window.process_action(&Action::operation(
+    let result = window.dispatch_action(&Action::operation(
         Operator::Delete,
         OperatorTarget::TextObject(TextObject::InnerBracket(BracketKind::Paren)),
     ));
@@ -4008,7 +4014,7 @@ fn test_ci_paren_on_empty_pair_enters_insert_point() {
     let mut window = Window::new(buffer);
 
     window.buffer_view.set_cursor(Cursor::new(0, 0));
-    let result = window.process_action(&Action::operation(
+    let result = window.dispatch_action(&Action::operation(
         Operator::Change,
         OperatorTarget::TextObject(TextObject::InnerBracket(BracketKind::Paren)),
     ));
@@ -4024,7 +4030,7 @@ fn test_ci_quote_on_empty_pair_enters_insert_point() {
     let mut window = Window::new(buffer);
 
     window.buffer_view.set_cursor(Cursor::new(0, 0));
-    let result = window.process_action(&Action::operation(
+    let result = window.dispatch_action(&Action::operation(
         Operator::Change,
         OperatorTarget::TextObject(TextObject::InnerQuote(QuoteKind::Double)),
     ));
@@ -4041,7 +4047,7 @@ fn test_insert_text_auto_closes_supported_pair_in_insert_mode() {
     let _config_guard = globals::set_test_config(pairing_test_config(true));
 
     window.buffer_view.set_cursor(Cursor::new(0, 0));
-    let result = window.process_action(&Action::insert_char('(').with_from_mode(ModeKind::Insert));
+    let result = window.dispatch_action(&Action::insert_char('(').with_from_mode(ModeKind::Insert));
 
     assert_eq!(result, ActionResult::Handled);
     assert_eq!(buffer_text(window.buffer_view()), "()");
@@ -4055,7 +4061,7 @@ fn test_insert_char_skips_supported_closer_in_insert_mode() {
     let _config_guard = globals::set_test_config(pairing_test_config(true));
 
     window.buffer_view.set_cursor(Cursor::new(0, 1));
-    let result = window.process_action(&Action::insert_char(')').with_from_mode(ModeKind::Insert));
+    let result = window.dispatch_action(&Action::insert_char(')').with_from_mode(ModeKind::Insert));
 
     assert_eq!(result, ActionResult::Handled);
     assert_eq!(buffer_text(window.buffer_view()), "()");
@@ -4069,7 +4075,7 @@ fn test_insert_char_skips_quote_closer_in_insert_mode() {
     let _config_guard = globals::set_test_config(pairing_test_config(true));
 
     window.buffer_view.set_cursor(Cursor::new(0, 1));
-    let result = window.process_action(&Action::insert_char('"').with_from_mode(ModeKind::Insert));
+    let result = window.dispatch_action(&Action::insert_char('"').with_from_mode(ModeKind::Insert));
 
     assert_eq!(result, ActionResult::Handled);
     assert_eq!(buffer_text(window.buffer_view()), "\"\"");
@@ -4084,7 +4090,7 @@ fn test_delete_backward_removes_supported_pair_in_insert_mode() {
 
     window.buffer_view.set_cursor(Cursor::new(0, 1));
     let result = window
-        .process_action(&Action::new(ActionKind::DeleteBackward).with_from_mode(ModeKind::Insert));
+        .dispatch_action(&Action::new(ActionKind::DeleteBackward).with_from_mode(ModeKind::Insert));
 
     assert_eq!(result, ActionResult::Handled);
     assert_eq!(buffer_text(window.buffer_view()), "");
@@ -4099,14 +4105,14 @@ fn test_pairing_disabled_keeps_plain_insert_and_delete_behavior() {
 
     window.buffer_view.set_cursor(Cursor::new(0, 1));
     let insert_result =
-        window.process_action(&Action::insert_char(')').with_from_mode(ModeKind::Insert));
+        window.dispatch_action(&Action::insert_char(')').with_from_mode(ModeKind::Insert));
     assert_eq!(insert_result, ActionResult::Handled);
     assert_eq!(buffer_text(window.buffer_view()), "())");
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 2));
 
     window.buffer_view.set_cursor(Cursor::new(0, 1));
     let delete_result = window
-        .process_action(&Action::new(ActionKind::DeleteBackward).with_from_mode(ModeKind::Insert));
+        .dispatch_action(&Action::new(ActionKind::DeleteBackward).with_from_mode(ModeKind::Insert));
 
     assert_eq!(delete_result, ActionResult::Handled);
     assert_eq!(buffer_text(window.buffer_view()), "))");
@@ -4120,7 +4126,7 @@ fn test_insert_pair_undo_and_redo_restore_exact_states() {
     let _config_guard = globals::set_test_config(pairing_test_config(true));
 
     window.buffer_view.set_cursor(Cursor::new(0, 0));
-    let result = window.process_action(&Action::insert_char('(').with_from_mode(ModeKind::Insert));
+    let result = window.dispatch_action(&Action::insert_char('(').with_from_mode(ModeKind::Insert));
     assert_eq!(result, ActionResult::Handled);
     let cursor = window.buffer_view.cursor();
     window
@@ -4160,7 +4166,7 @@ fn test_pair_delete_undo_and_redo_restore_exact_states() {
 
     window.buffer_view.set_cursor(Cursor::new(0, 1));
     let result = window
-        .process_action(&Action::new(ActionKind::DeleteBackward).with_from_mode(ModeKind::Insert));
+        .dispatch_action(&Action::new(ActionKind::DeleteBackward).with_from_mode(ModeKind::Insert));
     assert_eq!(result, ActionResult::Handled);
     let cursor = window.buffer_view.cursor();
     window
@@ -4284,7 +4290,7 @@ fn test_cg_changes_to_first_line() {
     let mut window = Window::new(buffer);
 
     window.buffer_view.set_cursor(Cursor::new(1, 0));
-    let result = window.process_action(&Action::operation(
+    let result = window.dispatch_action(&Action::operation(
         Operator::Change,
         OperatorTarget::LinewiseMotion(LinewiseMotion::LastLine),
     ));
@@ -4330,7 +4336,7 @@ fn test_dollar_deletes_to_line_end() {
     let mut window = Window::new(buffer);
 
     window.buffer_view.set_cursor(Cursor::new(0, 6));
-    window.process_action(&Action::operation(
+    window.dispatch_action(&Action::operation(
         Operator::Delete,
         OperatorTarget::BoundaryMotion(BoundaryMotion::LineEnd),
     ));
@@ -4345,7 +4351,7 @@ fn test_d0_deletes_to_line_start() {
     let mut window = Window::new(buffer);
 
     window.buffer_view.set_cursor(Cursor::new(0, 6));
-    window.process_action(&Action::operation(
+    window.dispatch_action(&Action::operation(
         Operator::Delete,
         OperatorTarget::BoundaryMotion(BoundaryMotion::LineStart),
     ));
@@ -4360,7 +4366,7 @@ fn test_dcaret_deletes_to_line_content_start() {
     let mut window = Window::new(buffer);
 
     window.buffer_view.set_cursor(Cursor::new(0, 10));
-    window.process_action(&Action::operation(
+    window.dispatch_action(&Action::operation(
         Operator::Delete,
         OperatorTarget::BoundaryMotion(BoundaryMotion::LineContentStart),
     ));
@@ -4375,7 +4381,7 @@ fn test_db_deletes_back_to_previous_word_start() {
     let mut window = Window::new(buffer);
 
     window.buffer_view.set_cursor(Cursor::new(0, 6));
-    window.process_action(&Action::operation(
+    window.dispatch_action(&Action::operation(
         Operator::Delete,
         OperatorTarget::BoundaryMotion(BoundaryMotion::WordBackward),
     ));
@@ -4390,7 +4396,7 @@ fn test_dgg_deletes_to_first_line_linewise() {
     let mut window = Window::new(buffer);
 
     window.buffer_view.set_cursor(Cursor::new(3, 1));
-    window.process_action(&Action::operation(
+    window.dispatch_action(&Action::operation(
         Operator::Delete,
         OperatorTarget::LinewiseMotion(LinewiseMotion::FirstLine),
     ));
@@ -4405,7 +4411,7 @@ fn test_d_g_deletes_to_last_line_linewise() {
     let mut window = Window::new(buffer);
 
     window.buffer_view.set_cursor(Cursor::new(2, 0));
-    window.process_action(&Action::operation(
+    window.dispatch_action(&Action::operation(
         Operator::Delete,
         OperatorTarget::LinewiseMotion(LinewiseMotion::LastLine),
     ));
@@ -4420,7 +4426,7 @@ fn test_counted_d_g_deletes_to_destination_line() {
     let mut window = Window::new(buffer);
 
     window.buffer_view.set_cursor(Cursor::new(2, 0));
-    window.process_action(&Action::count(
+    window.dispatch_action(&Action::count(
         5,
         Box::new(Action::operation(
             Operator::Delete,
@@ -4438,7 +4444,7 @@ fn test_dw_with_count_deletes_multiple_words() {
     let mut window = Window::new(buffer);
 
     window.buffer_view.set_cursor(Cursor::new(0, 0));
-    window.process_action(&Action::count(
+    window.dispatch_action(&Action::count(
         2,
         Box::new(Action::operation(
             Operator::Delete,
@@ -4456,7 +4462,7 @@ fn test_dbigword_forward_and_backward() {
     let mut window = Window::new(buffer);
 
     window.buffer_view.set_cursor(Cursor::new(0, 0));
-    window.process_action(&Action::operation(
+    window.dispatch_action(&Action::operation(
         Operator::Delete,
         OperatorTarget::BoundaryMotion(BoundaryMotion::BigWordForward),
     ));
@@ -4466,7 +4472,7 @@ fn test_dbigword_forward_and_backward() {
     let buffer = Buffer::from_str("alpha --- beta");
     let mut window = Window::new(buffer);
     window.buffer_view.set_cursor(Cursor::new(0, 10));
-    window.process_action(&Action::operation(
+    window.dispatch_action(&Action::operation(
         Operator::Delete,
         OperatorTarget::BoundaryMotion(BoundaryMotion::BigWordBackward),
     ));
@@ -4481,11 +4487,11 @@ fn test_till_forward_repeated_finds_next_occurrence() {
     let mut window = Window::new(buffer);
 
     window.buffer_view.set_cursor(Cursor::new(0, 0)); // at 'h'
-    window.process_action(&Action::till_forward('l'));
+    window.dispatch_action(&Action::till_forward('l'));
     // First 'l' at column 2, land before it at column 1
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 1));
 
-    window.process_action(&Action::till_forward('l'));
+    window.dispatch_action(&Action::till_forward('l'));
     // Second 'l' at column 3, land before it at column 2
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 2));
 }
@@ -4497,15 +4503,15 @@ fn test_till_backward_repeated_finds_previous_occurrence() {
     let mut window = Window::new(buffer);
 
     window.buffer_view.set_cursor(Cursor::new(0, 5)); // at 'o'
-    window.process_action(&Action::till_backward('h'));
+    window.dispatch_action(&Action::till_backward('h'));
     // First 'h' at column 1, land after it at column 2
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 2));
 
-    window.process_action(&Action::till_backward('h'));
+    window.dispatch_action(&Action::till_backward('h'));
     // Second 'h' at column 0, land after it at column 1
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 1));
 
-    window.process_action(&Action::till_backward('h'));
+    window.dispatch_action(&Action::till_backward('h'));
     // No more 'h' before column 0, cursor stays at column 1
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 1));
 }
@@ -4516,7 +4522,7 @@ fn test_till_forward_preserves_grapheme_boundaries() {
     let mut window = Window::new(buffer);
 
     window.buffer_view.set_cursor(Cursor::new(0, 0));
-    window.process_action(&Action::till_forward('b'));
+    window.dispatch_action(&Action::till_forward('b'));
 
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 1));
 }
@@ -4527,7 +4533,7 @@ fn test_till_backward_preserves_grapheme_boundaries() {
     let mut window = Window::new(buffer);
 
     window.buffer_view.set_cursor(Cursor::new(0, 5));
-    window.process_action(&Action::till_backward('a'));
+    window.dispatch_action(&Action::till_backward('a'));
 
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 1));
 }
@@ -4538,7 +4544,7 @@ fn test_move_to_last_line_preserves_visual_column() {
     let mut window = Window::new(buffer);
 
     window.buffer_view.set_cursor(Cursor::new(0, 2));
-    window.process_action(&Action::new(ActionKind::MoveToLastLine));
+    window.dispatch_action(&Action::new(ActionKind::MoveToLastLine));
 
     assert_eq!(window.buffer_view.cursor(), Cursor::new(1, 1));
 }
@@ -4551,7 +4557,7 @@ fn test_count_screen_top_preserves_visual_column() {
     window.size = Size::new(2, 10);
     window.buffer_view.set_scroll_offset(Position::new(1, 0));
     window.buffer_view.set_cursor(Cursor::new(0, 2));
-    window.process_action(&Action::count(
+    window.dispatch_action(&Action::count(
         1,
         Box::new(Action::new(ActionKind::MoveToScreenTop)),
     ));
@@ -4568,15 +4574,15 @@ fn test_viewport_cursor_alignment_repositions_without_moving_cursor() {
     window.buffer_view.set_cursor(Cursor::new(6, 0));
     window.buffer_view.set_scroll_offset(Position::new(0, 3));
 
-    window.process_action(&Action::new(ActionKind::ViewportCursorTop));
+    window.dispatch_action(&Action::new(ActionKind::ViewportCursorTop));
     assert_eq!(window.buffer_view.scroll_offset(), Position::new(5, 3));
     assert_eq!(window.buffer_view.cursor(), Cursor::new(6, 0));
 
-    window.process_action(&Action::new(ActionKind::ViewportCursorCenter));
+    window.dispatch_action(&Action::new(ActionKind::ViewportCursorCenter));
     assert_eq!(window.buffer_view.scroll_offset(), Position::new(4, 3));
     assert_eq!(window.buffer_view.cursor(), Cursor::new(6, 0));
 
-    window.process_action(&Action::new(ActionKind::ViewportCursorBottom));
+    window.dispatch_action(&Action::new(ActionKind::ViewportCursorBottom));
     assert_eq!(window.buffer_view.scroll_offset(), Position::new(2, 3));
     assert_eq!(window.buffer_view.cursor(), Cursor::new(6, 0));
 }
@@ -4589,15 +4595,15 @@ fn test_viewport_cursor_alignment_clamps_near_buffer_end() {
     window.size = Size::new(5, 20);
     window.buffer_view.set_cursor(Cursor::new(7, 0));
 
-    window.process_action(&Action::new(ActionKind::ViewportCursorTop));
+    window.dispatch_action(&Action::new(ActionKind::ViewportCursorTop));
     assert_eq!(window.buffer_view.scroll_offset(), Position::new(3, 0));
     assert_eq!(window.buffer_view.cursor(), Cursor::new(7, 0));
 
-    window.process_action(&Action::new(ActionKind::ViewportCursorCenter));
+    window.dispatch_action(&Action::new(ActionKind::ViewportCursorCenter));
     assert_eq!(window.buffer_view.scroll_offset(), Position::new(3, 0));
     assert_eq!(window.buffer_view.cursor(), Cursor::new(7, 0));
 
-    window.process_action(&Action::new(ActionKind::ViewportCursorBottom));
+    window.dispatch_action(&Action::new(ActionKind::ViewportCursorBottom));
     assert_eq!(window.buffer_view.scroll_offset(), Position::new(3, 0));
     assert_eq!(window.buffer_view.cursor(), Cursor::new(7, 0));
 }
@@ -4608,7 +4614,7 @@ fn test_next_paragraph_clamps_visual_column_on_blank_line() {
     let mut window = Window::new(buffer);
 
     window.buffer_view.set_cursor(Cursor::new(0, 2));
-    window.process_action(&Action::new(ActionKind::MoveToNextParagraph));
+    window.dispatch_action(&Action::new(ActionKind::MoveToNextParagraph));
 
     assert_eq!(window.buffer_view.cursor(), Cursor::new(1, 0));
 }
@@ -4620,7 +4626,7 @@ fn test_toggle_line_comment_uses_active_syntax_prefix() {
     let buffer = Buffer::from_str_with_path("fn main() {}", path);
     let mut window = Window::new(buffer);
 
-    let result = window.process_action(&Action::toggle_line_comment());
+    let result = window.dispatch_action(&Action::toggle_line_comment());
 
     assert_eq!(result, ActionResult::Handled);
     assert_eq!(
@@ -4639,7 +4645,7 @@ fn test_toggle_line_comment_count_applies_to_multiple_lines() {
     let buffer = Buffer::from_str_with_path("fn a() {}\nfn b() {}\nfn c() {}", path);
     let mut window = Window::new(buffer);
 
-    let result = window.process_action(&Action::count(3, Box::new(Action::toggle_line_comment())));
+    let result = window.dispatch_action(&Action::count(3, Box::new(Action::toggle_line_comment())));
 
     assert_eq!(result, ActionResult::Handled);
     assert_eq!(
@@ -4658,7 +4664,7 @@ fn test_toggle_line_comment_aligns_to_minimum_column_across_range() {
     let buffer = Buffer::from_str_with_path("  fn a() {}\n    fn b() {}", path);
     let mut window = Window::new(buffer);
 
-    let result = window.process_action(&Action::count(2, Box::new(Action::toggle_line_comment())));
+    let result = window.dispatch_action(&Action::count(2, Box::new(Action::toggle_line_comment())));
 
     assert_eq!(result, ActionResult::Handled);
     assert_eq!(
@@ -4677,7 +4683,7 @@ fn test_toggle_line_comment_skips_blank_lines() {
     let buffer = Buffer::from_str_with_path("\n    print('hello')", path);
     let mut window = Window::new(buffer);
 
-    let result = window.process_action(&Action::count(2, Box::new(Action::toggle_line_comment())));
+    let result = window.dispatch_action(&Action::count(2, Box::new(Action::toggle_line_comment())));
 
     assert_eq!(result, ActionResult::Handled);
     assert_eq!(
@@ -4694,7 +4700,7 @@ fn test_toggle_line_comment_returns_not_handled_without_prefix() {
     let buffer = Buffer::from_str("plain text");
     let mut window = Window::new(buffer);
 
-    let result = window.process_action(&Action::toggle_line_comment());
+    let result = window.dispatch_action(&Action::toggle_line_comment());
 
     assert_eq!(result, ActionResult::NotHandled);
     assert_eq!(
@@ -4713,7 +4719,7 @@ fn test_yank_line_populates_yank_register_and_paste_after_uses_it() {
     let mut window = Window::new(buffer);
 
     assert_eq!(
-        window.process_action(&Action::new(ActionKind::YankLine)),
+        window.dispatch_action(&Action::new(ActionKind::YankLine)),
         ActionResult::Handled
     );
 
@@ -4723,7 +4729,7 @@ fn test_yank_line_populates_yank_register_and_paste_after_uses_it() {
     assert_eq!(content.kind, RegisterContentKind::Linewise);
 
     assert_eq!(
-        window.process_action(&Action::paste_after()),
+        window.dispatch_action(&Action::paste_after()),
         ActionResult::Handled
     );
     assert_eq!(
@@ -4746,7 +4752,7 @@ fn test_visual_yank_uses_explicit_named_register() {
         .with_from_mode(ModeKind::Visual)
         .with_to_mode(ModeKind::Normal)
         .with_register(RegisterName('z'));
-    assert_eq!(window.process_action(&action), ActionResult::Handled);
+    assert_eq!(window.dispatch_action(&action), ActionResult::Handled);
 
     let content = globals::with_register_store(|store| store.get(RegisterName('z')))
         .expect("register store should be available");
@@ -4769,7 +4775,7 @@ fn test_delete_line_uses_configured_default_register() {
     let mut window = Window::new(buffer);
 
     assert_eq!(
-        window.process_action(&Action::new(ActionKind::DeleteLine)),
+        window.dispatch_action(&Action::new(ActionKind::DeleteLine)),
         ActionResult::Handled
     );
 
@@ -4794,7 +4800,7 @@ fn test_paste_after_uses_explicit_named_register() {
     let mut window = Window::new(buffer);
 
     assert_eq!(
-        window.process_action(&Action::paste_after().with_register(RegisterName('z'))),
+        window.dispatch_action(&Action::paste_after().with_register(RegisterName('z'))),
         ActionResult::Handled
     );
     assert_eq!(buffer_text(window.buffer_view()), "ahib".to_string());

@@ -289,6 +289,66 @@ mod tests {
         }
     }
 
+    fn notification_style(theme: &str, level: crate::notification::NotificationLevel) -> Style {
+        match (theme, level) {
+            ("Friday Night", crate::notification::NotificationLevel::Info) => {
+                Style::new().fg(Color::ansi(110))
+            }
+            ("Friday Night", crate::notification::NotificationLevel::Warn) => {
+                Style::new().fg(Color::ansi(221)).bold()
+            }
+            ("Friday Night", crate::notification::NotificationLevel::Error) => {
+                Style::new().fg(Color::ansi(203)).bold()
+            }
+            ("Saturday Morning", crate::notification::NotificationLevel::Info) => {
+                Style::new().fg(Color::ansi(25))
+            }
+            ("Saturday Morning", crate::notification::NotificationLevel::Warn) => {
+                Style::new().fg(Color::ansi(172)).bold()
+            }
+            ("Saturday Morning", crate::notification::NotificationLevel::Error) => {
+                Style::new().fg(Color::ansi(160)).bold()
+            }
+            ("Rose Pine", crate::notification::NotificationLevel::Info) => {
+                Style::new().fg(Color::Rgb(Rgb::new(156, 207, 216)))
+            }
+            ("Rose Pine", crate::notification::NotificationLevel::Warn) => {
+                Style::new().fg(Color::Rgb(Rgb::new(246, 193, 119))).bold()
+            }
+            ("Rose Pine", crate::notification::NotificationLevel::Error) => {
+                Style::new().fg(Color::Rgb(Rgb::new(235, 111, 146))).bold()
+            }
+            ("Dracula", crate::notification::NotificationLevel::Info) => {
+                Style::new().fg(Color::Rgb(Rgb::new(139, 233, 253)))
+            }
+            ("Dracula", crate::notification::NotificationLevel::Warn) => {
+                Style::new().fg(Color::Rgb(Rgb::new(241, 250, 140))).bold()
+            }
+            ("Dracula", crate::notification::NotificationLevel::Error) => {
+                Style::new().fg(Color::Rgb(Rgb::new(255, 85, 85))).bold()
+            }
+            ("Tokyo Night", crate::notification::NotificationLevel::Info) => {
+                Style::new().fg(Color::Rgb(Rgb::new(125, 207, 255)))
+            }
+            ("Tokyo Night", crate::notification::NotificationLevel::Warn) => {
+                Style::new().fg(Color::Rgb(Rgb::new(224, 175, 104))).bold()
+            }
+            ("Tokyo Night", crate::notification::NotificationLevel::Error) => {
+                Style::new().fg(Color::Rgb(Rgb::new(247, 118, 142))).bold()
+            }
+            ("Catppuccin", crate::notification::NotificationLevel::Info) => {
+                Style::new().fg(Color::Rgb(Rgb::new(137, 180, 250)))
+            }
+            ("Catppuccin", crate::notification::NotificationLevel::Warn) => {
+                Style::new().fg(Color::Rgb(Rgb::new(249, 226, 175))).bold()
+            }
+            ("Catppuccin", crate::notification::NotificationLevel::Error) => {
+                Style::new().fg(Color::Rgb(Rgb::new(243, 139, 168))).bold()
+            }
+            (other, _) => panic!("unexpected theme {other}"),
+        }
+    }
+
     fn sample_theme() -> &'static str {
         r##"
 name = "demo"
@@ -691,6 +751,21 @@ bg = "base"
                 theme.highlight_style_for_name("ui.window.lines.resize"),
                 split_border_resize_style(name),
                 "theme {name} should define a resize split border style"
+            );
+            assert_eq!(
+                theme.highlight_style_for_name("ui.notification.info"),
+                notification_style(name, crate::notification::NotificationLevel::Info),
+                "theme {name} should define an info notification style"
+            );
+            assert_eq!(
+                theme.highlight_style_for_name("ui.notification.warn"),
+                notification_style(name, crate::notification::NotificationLevel::Warn),
+                "theme {name} should define a warn notification style"
+            );
+            assert_eq!(
+                theme.highlight_style_for_name("ui.notification.error"),
+                notification_style(name, crate::notification::NotificationLevel::Error),
+                "theme {name} should define an error notification style"
             );
             let unique_style_count = count_unique_styles(&semantic_styles);
             assert!(

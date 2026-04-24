@@ -1,23 +1,41 @@
 //! Widget module.
 //!
-//! This module provides the Widget trait for widgets that can process actions.
+//! This module provides the `Widget` trait for UI components that participate
+//! in action handling, event routing, layout, and rendering.
 
-use crate::action::ActionResult;
-use crate::editor::Action;
+use crate::screen::Screen;
+use crate::ui::{FocusPolicy, UiConstraints, UiContext, UiEvent, UiEventResult, UiRect};
+use crate::window::Size;
 
-/// Trait for widgets that can process actions.
+/// Trait for UI widgets.
 ///
-/// Widgets are UI components (window, status bar, etc.) that can
-/// handle user actions. The main event loop passes actions to widgets
-/// first, and if no widget handles them, processes them at the app level.
+/// Widgets are UI components (window, status bar overlays, pane containers,
+/// and future floating components) that can participate in optional UI event
+/// routing and rendering lifecycle hooks.
 pub trait Widget {
-    /// Process an action and return whether it was handled.
+    /// Handles an internal UI event.
     ///
-    /// # Arguments
-    /// * `action` - The action to process
+    /// Default behavior does not handle the event.
+    fn handle_ui_event(&mut self, _event: &UiEvent, _ctx: &mut UiContext) -> UiEventResult {
+        UiEventResult::NotHandled
+    }
+
+    /// Computes this widget's desired layout size under constraints.
     ///
-    /// # Returns
-    /// * `ActionResult::Handled` - Widget handled the action
-    /// * `ActionResult::NotHandled` - Widget did not handle the action
-    fn process_action(&mut self, action: &Action) -> ActionResult;
+    /// Default behavior uses all available space.
+    fn layout(&mut self, constraints: UiConstraints) -> Size {
+        constraints.available
+    }
+
+    /// Renders this widget into the provided rectangle.
+    ///
+    /// Default behavior is a no-op.
+    fn render_widget(&mut self, _screen: &mut Screen, _rect: UiRect, _ctx: &UiContext) {}
+
+    /// Returns the widget's focus policy.
+    ///
+    /// Default behavior is passive.
+    fn focus_policy(&self) -> FocusPolicy {
+        FocusPolicy::Passive
+    }
 }

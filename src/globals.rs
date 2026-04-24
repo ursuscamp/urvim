@@ -7,6 +7,7 @@ use crate::buffer::{Buffer, BufferId, BufferPool};
 use crate::config::Config;
 use crate::editor::Action;
 use crate::job::JobManager;
+use crate::notification::{NotificationLevel, NotificationMessage, NotificationState};
 use crate::register::RegisterStore;
 use crate::theme::Theme;
 use std::sync::{Mutex, OnceLock, RwLock};
@@ -55,6 +56,7 @@ static ACTIVE_BUFFER_ID: OnceLock<RwLock<Option<BufferId>>> = OnceLock::new();
 static CONFIG: OnceLock<RwLock<Option<Config>>> = OnceLock::new();
 static ACTIVE_THEME: OnceLock<RwLock<Option<Theme>>> = OnceLock::new();
 static JOB_MANAGER: OnceLock<RwLock<Option<JobManager>>> = OnceLock::new();
+static NOTIFICATION_STATE: OnceLock<Mutex<NotificationState>> = OnceLock::new();
 #[cfg(not(test))]
 static REGISTER_STORE: OnceLock<RwLock<RegisterStore>> = OnceLock::new();
 
@@ -204,6 +206,10 @@ fn job_manager_slot() -> &'static RwLock<Option<JobManager>> {
     JOB_MANAGER.get_or_init(|| RwLock::new(None))
 }
 
+fn notification_state_slot() -> &'static Mutex<NotificationState> {
+    NOTIFICATION_STATE.get_or_init(|| Mutex::new(NotificationState::new()))
+}
+
 #[cfg(not(test))]
 fn register_store_slot() -> &'static RwLock<RegisterStore> {
     REGISTER_STORE.get_or_init(|| RwLock::new(RegisterStore::new()))
@@ -274,6 +280,55 @@ pub fn with_register_store_mut<R>(f: impl FnOnce(&mut RegisterStore) -> R) -> R 
         let mut store = register_store_slot().write().unwrap();
         f(&mut store)
     }
+}
+
+/// Enqueues a user-facing notification.
+pub fn enqueue_notification(level: NotificationLevel, text: String) -> bool {
+    let now = std::time::Instant::now();
+    let Ok(mut state) = notification_state_slot().lock() else {
+        tracing::warn!("notification queue unavailable; skipping enqueue");
+        return false;
+    };
+
+    state.enqueue(level, text, now)
+}
+
+/// Returns the active notification after pruning/advancing expired entries.
+pub fn active_notification(now: std::time::Instant) -> Option<NotificationMessage> {
+    let Ok(mut state) = notification_state_slot().lock() else {
+        tracing::warn!("notification queue unavailable; cannot read active notification");
+        return None;
+    };
+
+    state.prune_and_advance(now);
+    state.active().cloned()
+}
+
+/// Prunes expired notifications and advances the queue.
+pub fn prune_notifications() -> bool {
+    let Ok(mut state) = notification_state_slot().lock() else {
+        tracing::warn!("notification queue unavailable; skip prune");
+        return false;
+    };
+
+    state.prune_and_advance(std::time::Instant::now())
+}
+
+/// Requests a UI redraw due to notification state changes.
+pub fn request_notification_redraw() {
+    if let Ok(mut state) = notification_state_slot().lock() {
+        state.request_redraw();
+    }
+}
+
+/// Returns and clears the notification redraw-requested flag.
+pub fn take_notification_redraw_requested() -> bool {
+    let Ok(mut state) = notification_state_slot().lock() else {
+        tracing::warn!("notification queue unavailable; cannot read redraw flag");
+        return false;
+    };
+
+    state.take_redraw_requested()
 }
 
 /// Requests shutdown of the active job manager if one is configured.
@@ -351,10 +406,27 @@ pub fn set_test_register_store(store: RegisterStore) -> TestRegisterStoreGuard {
     TestRegisterStoreGuard
 }
 
+/// Clears active and queued notifications.
+pub fn clear_notifications() {
+    if let Ok(mut state) = notification_state_slot().lock() {
+        state.clear();
+    }
+}
+
+#[cfg(test)]
+/// Returns a process-wide guard for synchronizing notification-related tests.
+pub fn notification_test_lock() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::config::Config;
+    use crate::notification::NotificationLevel;
     use crate::terminal::Color;
     use crate::terminal::Style;
     use crate::theme::{HighlightStyles, Tag, Theme, ThemeKind};
@@ -581,5 +653,39 @@ mod tests {
             Some(ActionKind::DeleteLine)
         ));
         assert_eq!(state.insert_text.as_deref(), Some("hello"));
+    }
+
+    #[test]
+    fn test_notification_queue_round_trip() {
+        let _guard = notification_test_lock();
+        clear_notifications();
+
+        assert!(enqueue_notification(
+            NotificationLevel::Info,
+            "Saved".to_string()
+        ));
+        let message = active_notification(std::time::Instant::now()).expect("message");
+        assert_eq!(message.text, "Saved");
+        assert_eq!(message.level, NotificationLevel::Info);
+    }
+
+    #[test]
+    fn test_notification_redraw_flag_round_trip() {
+        let _guard = notification_test_lock();
+        clear_notifications();
+
+        assert!(!take_notification_redraw_requested());
+        request_notification_redraw();
+        assert!(take_notification_redraw_requested());
+        assert!(!take_notification_redraw_requested());
+    }
+
+    #[test]
+    fn test_notification_state_redraw_flag_round_trip() {
+        let mut state = NotificationState::new();
+        assert!(!state.take_redraw_requested());
+        state.request_redraw();
+        assert!(state.take_redraw_requested());
+        assert!(!state.take_redraw_requested());
     }
 }

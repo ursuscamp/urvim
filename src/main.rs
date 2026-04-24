@@ -3,15 +3,14 @@ use rustix::fd::AsFd;
 use std::io;
 
 use urvim::Layout;
-use urvim::action::ActionResult;
 use urvim::buffer::{BufferCacheRefreshResult, Cursor};
 use urvim::config::Config;
 use urvim::editor::{Action, ActionKind, HandleKeyResult, ModeKind, RepeatReplay};
 use urvim::globals;
 use urvim::screen::Screen;
-use urvim::terminal::{Event, Terminal, size::get_terminal_size};
+use urvim::terminal::{Terminal, size::get_terminal_size};
 use urvim::theme::ThemeRegistry;
-use urvim::widget::Widget;
+use urvim::ui::{Intent, UiEvent};
 use urvim::window::{Position, Size};
 
 #[derive(Parser)]
@@ -85,12 +84,15 @@ fn main() -> io::Result<()> {
         let background_requested_redraw = globals::with_job_manager(|job_manager| {
             if let Some(job_manager) = job_manager {
                 let accepted_redraw = job_manager.process_completed(|event| {
-                    if let Ok((_kind, _token, result)) =
-                        event.into_completed_output::<BufferCacheRefreshResult>()
-                    {
-                        globals::with_buffer_mut(result.buffer_id, |buffer| {
-                            buffer.apply_buffer_cache_refresh_result(result);
-                        });
+                    match event.into_completed_output::<BufferCacheRefreshResult>() {
+                        Ok((_kind, _token, result)) => {
+                            globals::with_buffer_mut(result.buffer_id, |buffer| {
+                                buffer.apply_buffer_cache_refresh_result(result);
+                            });
+                        }
+                        Err(error) => {
+                            urvim::notify_error!("Background job error: {:?}", error);
+                        }
                     }
                 });
 
@@ -98,7 +100,7 @@ fn main() -> io::Result<()> {
             } else {
                 false
             }
-        });
+        }) || globals::take_notification_redraw_requested();
 
         if background_requested_redraw {
             needs_redraw = true;
@@ -116,15 +118,17 @@ fn main() -> io::Result<()> {
         }
 
         let event = terminal.read_event()?;
+        let ui_event: UiEvent = event.into();
 
-        match event {
-            Event::Tick => {
-                if layout.prune_expired_yank_flashes() {
+        match ui_event {
+            UiEvent::Tick => {
+                let ui_result = layout.route_ui_event(&UiEvent::Tick);
+                if ui_result.handled() {
                     needs_redraw = true;
                 }
                 continue;
             }
-            Event::Paste(text) => {
+            UiEvent::Paste(text) => {
                 let Some(action) =
                     raw_paste_action_for_mode(layout.active_window_mode_kind(), text)
                 else {
@@ -132,7 +136,8 @@ fn main() -> io::Result<()> {
                     continue;
                 };
 
-                let handled = layout.process_action(&action) == ActionResult::Handled;
+                let handled =
+                    process_intent_queue(&mut layout, vec![Intent::Action(action.clone())]);
                 if handled {
                     if let Some(to_mode) = action.to_mode {
                         let repeat_text = {
@@ -174,13 +179,13 @@ fn main() -> io::Result<()> {
 
                 terminal.set_cursor_style(layout.active_window_cursor_style())?;
             }
-            Event::Resize(new_rows, new_cols) => {
+            UiEvent::Resize(new_rows, new_cols) => {
                 rows = new_rows;
                 cols = new_cols;
                 handle_resize(&mut terminal, &mut screen, rows, cols)?;
                 needs_redraw = true;
             }
-            Event::Key(key) => {
+            UiEvent::Key(key) => {
                 let result = layout
                     .active_window_group_mut()
                     .active_window_mut()
@@ -237,9 +242,12 @@ fn main() -> io::Result<()> {
                                         }
                                     }
                                 } else {
-                                    let action_result = layout.process_action(&dispatch_action);
+                                    let handled_by_layout = process_intent_queue(
+                                        &mut layout,
+                                        vec![Intent::Action(dispatch_action.clone())],
+                                    );
 
-                                    if action_result == ActionResult::NotHandled {
+                                    if !handled_by_layout {
                                         // Fall back to app-level handling
                                         match dispatch_action {
                                             _ if matches!(
@@ -247,37 +255,10 @@ fn main() -> io::Result<()> {
                                                 Some(ActionKind::SaveBuffer(_))
                                             ) =>
                                             {
-                                                let target = match dispatch_action.kind.as_ref() {
-                                                    Some(ActionKind::SaveBuffer(target)) => *target,
-                                                    _ => None,
-                                                };
-                                                let buffer_id = target.unwrap_or_else(|| {
-                                                    layout.active_buffer_view().buffer_id()
-                                                });
-                                                let save_result =
-                                                    globals::with_buffer_pool(|pool| {
-                                                        pool.save_buffer(buffer_id)
-                                                    });
-                                                match save_result {
-                                                    Ok(()) => {}
-                                                    Err(error)
-                                                        if error.kind()
-                                                            == io::ErrorKind::InvalidInput =>
-                                                    {
-                                                        tracing::info!(
-                                                            "Skipping save for unnamed buffer {:?}",
-                                                            buffer_id
-                                                        );
-                                                    }
-                                                    Err(error) => {
-                                                        tracing::warn!(
-                                                            "Failed to save buffer {:?}: {}",
-                                                            buffer_id,
-                                                            error
-                                                        );
-                                                    }
-                                                }
-                                                handled = true;
+                                                handled = handle_save_buffer_action(
+                                                    &mut layout,
+                                                    dispatch_action.kind.as_ref(),
+                                                );
                                             }
                                             _ if matches!(
                                                 dispatch_action.kind.as_ref(),
@@ -292,7 +273,7 @@ fn main() -> io::Result<()> {
                                             }
                                             _ => { /* Should have been handled by window */ }
                                         }
-                                    } else if action_result == ActionResult::Handled {
+                                    } else {
                                         let pending_repeat_suffix =
                                             layout.take_pending_repeat_suffix();
                                         if let Some(suffix) = pending_repeat_suffix.as_deref() {
@@ -410,6 +391,37 @@ fn select_active_theme(
     })
 }
 
+fn handle_save_buffer_action(layout: &mut Layout, kind: Option<&ActionKind>) -> bool {
+    let target = match kind {
+        Some(ActionKind::SaveBuffer(target)) => *target,
+        _ => None,
+    };
+
+    let buffer_id = target.unwrap_or_else(|| layout.active_buffer_view().buffer_id());
+    let save_result = globals::with_buffer_pool(|pool| pool.save_buffer(buffer_id));
+
+    match save_result {
+        Ok(()) => {
+            let label = globals::with_buffer(buffer_id, |buffer| {
+                buffer
+                    .file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| "Untitled".to_string())
+            })
+            .unwrap_or_else(|| "Untitled".to_string());
+            urvim::notify_info!("Saved {}", label);
+        }
+        Err(error) if error.kind() == io::ErrorKind::InvalidInput => {
+            tracing::info!("Skipping save for unnamed buffer {:?}", buffer_id);
+        }
+        Err(error) => {
+            urvim::notify_error!("Failed to save buffer {:?}: {}", buffer_id, error);
+        }
+    }
+
+    true
+}
+
 fn render_frame_if_needed<I: io::Read + AsFd, O: io::Write + AsFd>(
     needs_redraw: bool,
     layout: &mut Layout,
@@ -501,7 +513,7 @@ fn replay_repeat_action(layout: &mut Layout, replay: &RepeatReplay) -> bool {
             {
                 true
             }
-            _ => layout.process_action(&structural_action) == ActionResult::Handled,
+            _ => process_intent_queue(layout, vec![Intent::Action(structural_action.clone())]),
         };
 
         if !handled {
@@ -543,6 +555,19 @@ fn cursor_after_text(mut cursor: Cursor, text: &str) -> Cursor {
     cursor
 }
 
+fn process_intent_queue(layout: &mut Layout, intents: Vec<Intent>) -> bool {
+    let mut queue: std::collections::VecDeque<Intent> = intents.into();
+    let mut handled_all = true;
+    let mut saw_intent = false;
+
+    while let Some(intent) = queue.pop_front() {
+        saw_intent = true;
+        handled_all &= layout.dispatch_intent(&intent);
+    }
+
+    saw_intent && handled_all
+}
+
 fn raw_paste_action_for_mode(mode: ModeKind, text: String) -> Option<Action> {
     match mode {
         ModeKind::Insert | ModeKind::Normal => {
@@ -561,8 +586,9 @@ mod tests {
     use std::collections::VecDeque;
     use std::io::{Read, Write};
     use std::sync::{Arc, Mutex, OnceLock};
-    use urvim::buffer::Buffer;
+    use urvim::buffer::{Buffer, BufferId};
     use urvim::editor::ModeKind;
+    use urvim::terminal::Event;
     use urvim::window::VisualSelectionKind;
     use urvim::window_group::WindowGroup;
 
@@ -574,6 +600,13 @@ mod tests {
     fn repeat_state_lock() -> std::sync::MutexGuard<'static, ()> {
         static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
         LOCK.get_or_init(|| Mutex::new(())).lock().unwrap()
+    }
+
+    fn notification_state_lock() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
     }
 
     impl TestBackend {
@@ -755,6 +788,102 @@ mod tests {
 
         assert!(error.contains("missing"));
         assert!(error.contains("Friday Night"));
+    }
+
+    #[test]
+    fn terminal_event_adapter_converts_event_variants() {
+        let key_event = Event::Key(urvim::terminal::Key::new(urvim::terminal::KeyCode::Char(
+            'x',
+        )));
+        assert!(matches!(
+            UiEvent::from(key_event),
+            UiEvent::Key(key) if key.code == urvim::terminal::KeyCode::Char('x')
+        ));
+
+        let resize_event = Event::Resize(40, 120);
+        assert_eq!(UiEvent::from(resize_event), UiEvent::Resize(40, 120));
+
+        let paste_event = Event::Paste("abc".to_string());
+        assert_eq!(
+            UiEvent::from(paste_event),
+            UiEvent::Paste("abc".to_string())
+        );
+
+        assert_eq!(UiEvent::from(Event::Tick), UiEvent::Tick);
+    }
+
+    #[test]
+    fn process_intent_queue_dispatches_actions() {
+        let mut layout = Layout::new(WindowGroup::from_buffers(vec![
+            Buffer::new(),
+            Buffer::new(),
+        ]));
+
+        assert!(process_intent_queue(
+            &mut layout,
+            vec![Intent::Action(Action::new(ActionKind::NextTab))],
+        ));
+        assert_eq!(layout.window_group().active_tab_index(), 1);
+    }
+
+    #[test]
+    fn process_intent_queue_returns_false_when_any_intent_is_unhandled() {
+        let mut layout = Layout::new(WindowGroup::from_buffers(vec![Buffer::new()]));
+
+        let handled = process_intent_queue(
+            &mut layout,
+            vec![
+                Intent::Command(urvim::ui::Command::EnqueueNotification {
+                    level: urvim::notification::NotificationLevel::Info,
+                    message: "queued".to_string(),
+                }),
+                Intent::Action(Action::new(ActionKind::SaveBuffer(None))),
+            ],
+        );
+
+        assert!(!handled);
+    }
+
+    #[test]
+    fn handle_save_buffer_action_emits_success_notification() {
+        let _guard = notification_state_lock();
+        globals::clear_notifications();
+
+        let unique = format!(
+            "urvim-save-success-{}-{}.txt",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time should be after epoch")
+                .as_nanos()
+        );
+        let path = std::env::temp_dir().join(unique);
+        let absolute_path = urvim::AbsolutePath::from_path(path.as_path())
+            .expect("temp path should resolve absolutely");
+
+        let mut buffer = Buffer::with_path(absolute_path);
+        buffer.insert_text(Cursor::new(0, 0), "hello");
+
+        let mut layout = Layout::new(WindowGroup::from_buffers(vec![buffer]));
+        assert!(handle_save_buffer_action(
+            &mut layout,
+            Some(&ActionKind::SaveBuffer(None))
+        ));
+
+        let saved_text = std::fs::read_to_string(path).expect("saved file should be readable");
+        assert_eq!(saved_text, "hello");
+    }
+
+    #[test]
+    fn handle_save_buffer_action_emits_error_notification_for_missing_buffer() {
+        let _guard = notification_state_lock();
+        globals::clear_notifications();
+        let mut layout = Layout::new(WindowGroup::from_buffers(vec![Buffer::new()]));
+
+        assert!(handle_save_buffer_action(
+            &mut layout,
+            Some(&ActionKind::SaveBuffer(Some(BufferId::new(usize::MAX))))
+        ));
     }
 
     #[test]

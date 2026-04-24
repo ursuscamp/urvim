@@ -14,7 +14,7 @@ use crate::editor::{Action, ActionKind, ModeKind};
 use crate::screen::Screen;
 use crate::status_bar::StatusBar;
 use crate::terminal::CursorStyle;
-use crate::widget::Widget;
+use crate::ui::{Command, Intent, UiEvent, UiEventResult};
 use crate::window::{BufferView, Position, Size};
 use std::path::PathBuf;
 
@@ -162,10 +162,27 @@ impl Layout {
     }
 }
 
-impl Widget for Layout {
-    fn process_action(&mut self, action: &Action) -> ActionResult {
+impl Layout {
+    /// Dispatches a unified intent through the root layout.
+    pub fn dispatch_intent(&mut self, intent: &Intent) -> bool {
+        match intent {
+            Intent::Action(action) => self.dispatch_action(action),
+            Intent::Command(command) => self.dispatch_command(command),
+        }
+    }
+
+    fn dispatch_command(&mut self, command: &Command) -> bool {
+        match command {
+            Command::EnqueueNotification { level, message } => {
+                crate::globals::enqueue_notification(*level, message.clone())
+            }
+        }
+    }
+
+    /// Dispatches an action intent through the layout tree.
+    pub fn dispatch_action(&mut self, action: &Action) -> bool {
         self.prune_empty_panes();
-        let handled = match action.kind.as_ref() {
+        match action.kind.as_ref() {
             Some(ActionKind::SplitVertical) => self.split_focused_pane(SplitAxis::Vertical),
             Some(ActionKind::SplitHorizontal) => self.split_focused_pane(SplitAxis::Horizontal),
             Some(ActionKind::FocusPaneLeft) => self.move_focus(geometry::FocusDirection::Left),
@@ -201,7 +218,7 @@ impl Widget for Layout {
                 if self.should_exit() {
                     false
                 } else {
-                    let handled = self.active_window_group_mut().process_action(action)
+                    let handled = self.active_window_group_mut().dispatch_action(action)
                         == ActionResult::Handled;
                     if handled && self.active_window_group().is_empty() {
                         self.close_focused_pane();
@@ -209,17 +226,62 @@ impl Widget for Layout {
                     handled
                 }
             }
-        };
-
-        if handled {
-            ActionResult::Handled
-        } else {
-            ActionResult::NotHandled
         }
     }
-}
 
-impl Layout {
+    /// Routes a UI event with overlay-first precedence.
+    pub fn route_ui_event(&mut self, event: &UiEvent) -> UiEventResult {
+        if matches!(event, UiEvent::Tick) {
+            let overlay = self.route_overlay_ui_event(event);
+            let base = self.route_base_ui_event(event);
+
+            let mut intents = overlay.clone().into_intents();
+            intents.extend(base.clone().into_intents());
+            if overlay.handled() || base.handled() {
+                return UiEventResult::Handled(intents);
+            }
+
+            return UiEventResult::NotHandled;
+        }
+
+        let overlay = self.route_overlay_ui_event(event);
+        if overlay.handled() {
+            return overlay;
+        }
+
+        self.route_base_ui_event(event)
+    }
+
+    fn route_overlay_ui_event(&mut self, event: &UiEvent) -> UiEventResult {
+        match event {
+            UiEvent::Tick => {
+                if crate::globals::prune_notifications() {
+                    UiEventResult::Handled(Vec::new())
+                } else {
+                    UiEventResult::NotHandled
+                }
+            }
+            UiEvent::Key(_) | UiEvent::Paste(_) | UiEvent::Resize(_, _) => {
+                UiEventResult::NotHandled
+            }
+        }
+    }
+
+    fn route_base_ui_event(&mut self, event: &UiEvent) -> UiEventResult {
+        match event {
+            UiEvent::Tick => {
+                if self.prune_expired_yank_flashes() {
+                    UiEventResult::Handled(Vec::new())
+                } else {
+                    UiEventResult::NotHandled
+                }
+            }
+            UiEvent::Key(_) | UiEvent::Paste(_) | UiEvent::Resize(_, _) => {
+                UiEventResult::NotHandled
+            }
+        }
+    }
+
     fn resize_counted_pane(&mut self, count: usize, action: &Action) -> bool {
         let mut handled = false;
         for _ in 0..count {

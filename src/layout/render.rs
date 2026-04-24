@@ -6,6 +6,7 @@ use super::geometry::PaneRegion;
 use super::node::{LayoutNode, SplitAxis, SplitSize};
 use crate::editor::ModeKind;
 use crate::globals;
+use crate::notification;
 use crate::screen::Screen;
 use crate::status_bar::StatusBarContext;
 use crate::terminal::Style;
@@ -132,6 +133,8 @@ impl Layout {
         let footer_origin = Position::new(origin.row.saturating_add(content_rows), origin.col);
         self.status_bar
             .render(screen, footer_origin, Size::new(1, size.cols), &context);
+
+        notification::render_active_banner(screen, origin, size, std::time::Instant::now());
     }
 
     fn render_split_borders(&self, screen: &mut Screen, origin: Position, size: Size) {
