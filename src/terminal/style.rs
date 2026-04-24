@@ -445,33 +445,18 @@ impl Style {
 
     /// Applies foreground-focused accent styling on top of this style.
     ///
-    /// This behaves like [`Self::overlay`] for decorations, underline color,
-    /// and foreground color, but always preserves this style's background.
+    /// This preserves this style's background and any existing decorations,
+    /// while adding foreground, underline, and decoration changes from the
+    /// accent where present.
     pub const fn accent(self, other: Style) -> Self {
         let mut style = self;
-        style.flags = (style.flags
-            & !(BOLD
-                | FAINT
-                | ITALIC
-                | UNDERLINE
-                | SLOW_BLINK
-                | REVERSE
-                | HIDDEN
-                | STRIKETHROUGH
-                | OVERLINE
-                | DOUBLE_UNDERLINE))
-            | (other.flags
-                & (BOLD
-                    | FAINT
-                    | ITALIC
-                    | UNDERLINE
-                    | SLOW_BLINK
-                    | REVERSE
-                    | HIDDEN
-                    | STRIKETHROUGH
-                    | OVERLINE
-                    | DOUBLE_UNDERLINE));
-        style.underline_style = other.underline_style;
+        style.flags |= other.flags;
+        match other.underline_style {
+            UnderlineStyle::None => {}
+            underline_style => {
+                style.underline_style = underline_style;
+            }
+        }
         if other.underline_color.is_some() {
             style.underline_color = other.underline_color;
         }
@@ -873,6 +858,16 @@ mod tests {
         let resolved = style.accent(accent);
 
         assert_eq!(resolved.escape_code(), "\x1b[1;38;5;3;48;5;2m");
+    }
+
+    #[test]
+    fn test_style_accent_preserves_existing_flags() {
+        let style = Style::new().bg(Color::ansi(2)).reverse();
+        let accent = Style::new().fg(Color::ansi(3));
+
+        let resolved = style.accent(accent);
+
+        assert_eq!(resolved.escape_code(), "\x1b[7;38;5;3;48;5;2m");
     }
 
     #[test]

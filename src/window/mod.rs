@@ -473,7 +473,7 @@ impl Window {
                 }
                 cell.text.clear();
                 cell.text.push_str(glyph);
-                cell.style = guide_style;
+                cell.style = cell.style.accent(guide_style);
             }
         }
     }

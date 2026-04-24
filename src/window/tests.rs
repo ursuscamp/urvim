@@ -926,6 +926,38 @@ fn test_window_render_indent_guide_uses_visual_column_for_tabs() {
 }
 
 #[test]
+fn test_window_render_indent_guide_preserves_visual_selection_background() {
+    let mut theme = themed_window();
+    theme.highlights.insert(
+        Tag::parse("ui.selection").expect("valid tag"),
+        Style::new().bg(Color::ansi(99)),
+    );
+    let selection_style = theme.highlight_style_for_name("ui.selection");
+    let guide_style = theme.resolve_name_with_default("ui.window.lines.indent");
+    let expected_style = selection_style.accent(guide_style);
+    let _theme_guard = globals::set_test_active_theme(theme);
+    let _config_guard = globals::set_test_config(Config {
+        indent_guides: true,
+        ..Default::default()
+    });
+
+    let buffer = Buffer::from_str("  outer\n    inner1\n    inner2\n  close\nafter");
+    let mut window = Window::new(buffer);
+    window.buffer_view_mut().set_cursor(Cursor::new(1, 1));
+    window
+        .buffer_view_mut()
+        .begin_visual_selection(VisualSelectionKind::Character);
+    window.buffer_view_mut().set_cursor(Cursor::new(1, 3));
+
+    let mut screen = crate::screen::Screen::new(5, 24);
+    window.render(&mut screen, Position::new(0, 0), Size::new(5, 24));
+
+    let cell = screen.get_cell_mut(1, 5).unwrap();
+    assert_eq!(cell.text, "|");
+    assert_eq!(cell.style, expected_style);
+}
+
+#[test]
 fn test_window_render_skips_indent_guide_without_eligible_scope() {
     let buffer = Buffer::from_str("  outer\n    inner1\n\n    inner2\n  close\nafter");
     let mut window = Window::new(buffer);
