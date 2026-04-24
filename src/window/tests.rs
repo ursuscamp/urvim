@@ -117,6 +117,149 @@ fn test_surround_replace_is_single_undoable_edit() {
     assert_eq!(buffer_text(window.buffer_view()), "foo(bar)baz");
 }
 
+#[test]
+fn test_surround_add_inner_word_with_quotes() {
+    let mut window = Window::new(Buffer::from_str("hello world"));
+    window.set_cursor(Cursor::new(0, 1));
+
+    let action = Action::new(ActionKind::SurroundAdd {
+        target: TextObject::InnerWord,
+        delimiter: DelimiterFamily::DoubleQuote,
+    });
+    assert_eq!(window.process_action(&action), ActionResult::Handled);
+    assert_eq!(buffer_text(window.buffer_view()), "\"hello\" world");
+    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 0));
+}
+
+#[test]
+fn test_surround_add_bracket_selector_result() {
+    let mut window = Window::new(Buffer::from_str("hello world"));
+    window.set_cursor(Cursor::new(0, 1));
+
+    let action = Action::new(ActionKind::SurroundAdd {
+        target: TextObject::InnerWord,
+        delimiter: DelimiterFamily::Paren,
+    });
+    assert_eq!(window.process_action(&action), ActionResult::Handled);
+    assert_eq!(buffer_text(window.buffer_view()), "(hello) world");
+}
+
+#[test]
+fn test_surround_add_noops_when_text_object_unresolvable() {
+    let mut window = Window::new(Buffer::from_str("hello"));
+    window.set_cursor(Cursor::new(0, 0));
+
+    let action = Action::new(ActionKind::SurroundAdd {
+        target: TextObject::InnerBracket(BracketKind::Paren),
+        delimiter: DelimiterFamily::DoubleQuote,
+    });
+    assert_eq!(window.process_action(&action), ActionResult::NotHandled);
+    assert_eq!(buffer_text(window.buffer_view()), "hello");
+}
+
+#[test]
+fn test_surround_add_visual_selection_with_quotes() {
+    let mut window = Window::new(Buffer::from_str("foo bar baz"));
+    window.buffer_view_mut().set_cursor(Cursor::new(0, 4));
+    window
+        .buffer_view_mut()
+        .begin_visual_selection(VisualSelectionKind::Character);
+    window.buffer_view_mut().set_cursor(Cursor::new(0, 6));
+
+    let action = Action::new(ActionKind::SurroundAddSelection {
+        delimiter: DelimiterFamily::DoubleQuote,
+    })
+    .with_from_mode(ModeKind::Visual)
+    .with_to_mode(ModeKind::Normal);
+    assert_eq!(window.process_action(&action), ActionResult::Handled);
+    assert_eq!(buffer_text(window.buffer_view()), "foo \"bar\" baz");
+    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 4));
+}
+
+#[test]
+fn test_surround_add_visual_selection_with_square_brackets() {
+    let mut window = Window::new(Buffer::from_str("foo bar baz"));
+    window.buffer_view_mut().set_cursor(Cursor::new(0, 4));
+    window
+        .buffer_view_mut()
+        .begin_visual_selection(VisualSelectionKind::Character);
+    window.buffer_view_mut().set_cursor(Cursor::new(0, 6));
+
+    let action = Action::new(ActionKind::SurroundAddSelection {
+        delimiter: DelimiterFamily::Square,
+    })
+    .with_from_mode(ModeKind::Visual)
+    .with_to_mode(ModeKind::Normal);
+    assert_eq!(window.process_action(&action), ActionResult::Handled);
+    assert_eq!(buffer_text(window.buffer_view()), "foo [bar] baz");
+}
+
+#[test]
+fn test_surround_add_visual_line_selection_without_auto_indent() {
+    let _config_guard = globals::set_test_config(auto_indent_test_config(AutoIndentMode::Off));
+    let mut window = Window::new(Buffer::from_str("alpha\nbeta"));
+    window.buffer_view_mut().set_cursor(Cursor::new(0, 0));
+    window
+        .buffer_view_mut()
+        .begin_visual_selection(VisualSelectionKind::Line);
+    window.buffer_view_mut().set_cursor(Cursor::new(1, 0));
+
+    let action = Action::new(ActionKind::SurroundAddSelection {
+        delimiter: DelimiterFamily::Curly,
+    })
+    .with_from_mode(ModeKind::VisualLine)
+    .with_to_mode(ModeKind::Normal);
+    assert_eq!(window.process_action(&action), ActionResult::Handled);
+    assert_eq!(buffer_text(window.buffer_view()), "{\nalpha\nbeta\n}");
+    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 0));
+}
+
+#[test]
+fn test_surround_add_visual_line_selection_with_auto_indent() {
+    let _config_guard = globals::set_test_config(auto_indent_test_config(AutoIndentMode::Neighbor));
+    let mut window = Window::new(Buffer::from_str("alpha\nbeta"));
+    window.buffer_view_mut().set_cursor(Cursor::new(0, 0));
+    window
+        .buffer_view_mut()
+        .begin_visual_selection(VisualSelectionKind::Line);
+    window.buffer_view_mut().set_cursor(Cursor::new(1, 0));
+
+    let action = Action::new(ActionKind::SurroundAddSelection {
+        delimiter: DelimiterFamily::Curly,
+    })
+    .with_from_mode(ModeKind::VisualLine)
+    .with_to_mode(ModeKind::Normal);
+    assert_eq!(window.process_action(&action), ActionResult::Handled);
+    assert_eq!(
+        buffer_text(window.buffer_view()),
+        "{\n    alpha\n    beta\n}"
+    );
+    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 0));
+}
+
+#[test]
+fn test_surround_add_is_single_undoable_edit() {
+    let mut window = Window::new(Buffer::from_str("hello world"));
+    window.set_cursor(Cursor::new(0, 1));
+
+    process_action_and_snapshot(
+        &mut window,
+        &Action::new(ActionKind::SurroundAdd {
+            target: TextObject::InnerWord,
+            delimiter: DelimiterFamily::DoubleQuote,
+        }),
+    );
+    assert_eq!(buffer_text(window.buffer_view()), "\"hello\" world");
+
+    let cursor = window
+        .buffer_view
+        .with_buffer_mut(|buffer| buffer.undo())
+        .flatten()
+        .expect("undo should restore previous state");
+    window.set_cursor_synced(cursor);
+    assert_eq!(buffer_text(window.buffer_view()), "hello world");
+}
+
 fn commit_insert_exit_snapshot(window: &mut Window) {
     let cursor = window.buffer_view.cursor();
     let should_snapshot = window

@@ -49,6 +49,7 @@ Register behavior is documented separately in [docs/registers.md](docs/registers
 | `I` | Insert at line start (enter insert mode) |
 | `J` | Join lines with space |
 | `gJ` | Join lines without space |
+| `gsa{text object}{pair}` | Add surrounding pair around a text object |
 | `gsr{from}{to}` | Replace nearest surrounding pair of `{from}` family with `{to}` family |
 | `gsd{pair}` | Delete nearest surrounding pair of `{pair}` family |
 | `gcc` | Toggle line comment on the current line (or N consecutive lines with a count) |
@@ -102,6 +103,7 @@ urvim supports a simple character-wise visual mode.
 - Press `y` to yank the selection into the yank register and return to normal mode.
 - Press `d` to delete the selection and return to normal mode.
 - Press `c` to change the selection and enter insert mode.
+- Press `gsa{pair}` to surround the selection with a delimiter pair and return to normal mode.
 - Press `V` while in visual mode to switch to linewise visual mode.
 - Press `Esc` or `v` again to leave visual mode without editing the buffer.
 
@@ -114,6 +116,7 @@ urvim also supports linewise visual mode.
 - Press `y` to yank the selected lines into the yank register and return to normal mode.
 - Press `d` to delete the selected lines and return to normal mode.
 - Press `c` to replace the selected lines with a blank line and enter insert mode.
+- Press `gsa{pair}` to surround the selected lines with delimiter lines and return to normal mode.
 - Press `v` while in linewise visual mode to switch back to character-wise visual mode.
 - Press `Esc` or `V` again to leave linewise visual mode without editing the buffer.
 
@@ -557,7 +560,28 @@ Examples:
 
 ## Surround Operations
 
-These normal-mode `gs` commands edit an existing surrounding pair without changing the enclosed text.
+These `gs` commands add, replace, or delete surrounding delimiter pairs.
+
+Supported surround selectors are `()`, `[]`, `{}`, `<>`, `"`, `'`, and `` ` ``. Bracket families accept either opener or closer as the selector.
+
+### gsa - Add Surrounding Pair
+
+Adds a surrounding delimiter pair around a text object or active visual selection.
+
+- **Normal form**: `gsa{text object}{pair}`
+- **Visual form**: `gsa{pair}`
+- **Visual Line form**: `gsa{pair}`
+- **Supported selectors**: `()`, `[]`, `{}`, `<>`, `"`, `'`, `` ` ``
+- **Selector symmetry**: bracket families accept opener or closer
+- **No-op behavior**: unsupported selectors, canceled pending sequences, or unresolved text objects leave the buffer unchanged
+
+In Visual Line mode, the selected lines are placed between delimiter lines. When `auto_indent` is enabled, only the originally selected lines are indented by one existing indentation step; the delimiter lines stay at the surrounding level.
+
+Examples:
+- `gsaiw"` transforms `hello world` into `"hello" world` when the cursor is inside `hello`
+- `gsaiw)` transforms `hello world` into `(hello) world` when the cursor is inside `hello`
+- Visual `gsa]` transforms selected `bar` in `foo bar baz` into `foo [bar] baz`
+- Visual Line `gsa{` around `alpha` and `beta` produces `{`, the selected lines, then `}`
 
 ### gsr - Replace Surrounding Pair
 

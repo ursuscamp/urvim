@@ -400,6 +400,31 @@ fn test_visual_mode_text_object_bindings() {
 }
 
 #[test]
+fn test_visual_mode_surround_add_binding() {
+    let mut mode = VisualMode::new();
+
+    assert!(matches!(
+        mode.handle_key(&key('g')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert!(matches!(
+        mode.handle_key(&key('s')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert!(matches!(
+        mode.handle_key(&key('a')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert_eq!(
+        handle_and_unwrap(&mut mode, &key('"')),
+        Action::new(ActionKind::SurroundAddSelection {
+            delimiter: DelimiterFamily::DoubleQuote,
+        })
+        .with_to_mode(ModeKind::Normal)
+    );
+}
+
+#[test]
 fn test_visual_mode_v_exits_to_normal() {
     let mut mode = VisualMode::new();
 
@@ -442,6 +467,31 @@ fn test_visual_line_mode_motion_and_exit_bindings() {
     assert_eq!(
         handle_and_unwrap(&mut mode, &Key::new(crate::terminal::KeyCode::Esc)),
         Action::mode_transition(ModeKind::Normal)
+    );
+}
+
+#[test]
+fn test_visual_line_mode_surround_add_binding_accepts_closer() {
+    let mut mode = VisualLineMode::new();
+
+    assert!(matches!(
+        mode.handle_key(&key('g')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert!(matches!(
+        mode.handle_key(&key('s')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert!(matches!(
+        mode.handle_key(&key('a')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert_eq!(
+        handle_and_unwrap(&mut mode, &key(']')),
+        Action::new(ActionKind::SurroundAddSelection {
+            delimiter: DelimiterFamily::Square,
+        })
+        .with_to_mode(ModeKind::Normal)
     );
 }
 
@@ -914,6 +964,70 @@ fn test_gsr_angle_to_quote_sequence() {
         ActionKind::SurroundReplace {
             target: DelimiterFamily::Angle,
             replacement: DelimiterFamily::DoubleQuote,
+        }
+    );
+}
+
+#[test]
+fn test_gsa_inner_word_to_quote_sequence() {
+    let mut mode = NormalMode::new();
+    assert!(matches!(
+        mode.handle_key(&key('g')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert!(matches!(
+        mode.handle_key(&key('s')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert!(matches!(
+        mode.handle_key(&key('a')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert!(matches!(
+        mode.handle_key(&key('i')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert!(matches!(
+        mode.handle_key(&key('w')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert_eq!(
+        complete_action_kind(mode.handle_key(&key('"'))),
+        ActionKind::SurroundAdd {
+            target: TextObject::InnerWord,
+            delimiter: DelimiterFamily::DoubleQuote,
+        }
+    );
+}
+
+#[test]
+fn test_gsa_bracket_sequence_accepts_closer_text_object_and_delimiter() {
+    let mut mode = NormalMode::new();
+    assert!(matches!(
+        mode.handle_key(&key('g')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert!(matches!(
+        mode.handle_key(&key('s')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert!(matches!(
+        mode.handle_key(&key('a')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert!(matches!(
+        mode.handle_key(&key('a')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert!(matches!(
+        mode.handle_key(&key('}')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert_eq!(
+        complete_action_kind(mode.handle_key(&key(']'))),
+        ActionKind::SurroundAdd {
+            target: TextObject::AroundBracket(BracketKind::Curly),
+            delimiter: DelimiterFamily::Square,
         }
     );
 }
@@ -1773,6 +1887,19 @@ fn test_dot_repeat_source_classification() {
         )
         .is_dot_repeat_source()
     );
+    assert!(
+        Action::new(ActionKind::SurroundAdd {
+            target: TextObject::InnerWord,
+            delimiter: DelimiterFamily::DoubleQuote,
+        })
+        .is_dot_repeat_source()
+    );
+    assert!(
+        Action::new(ActionKind::SurroundAddSelection {
+            delimiter: DelimiterFamily::Curly,
+        })
+        .is_dot_repeat_source()
+    );
     assert!(!Action::new(ActionKind::MoveDown).is_dot_repeat_source());
     assert!(!Action::new(ActionKind::RepeatLastChange).is_dot_repeat_source());
 }
@@ -1789,6 +1916,19 @@ fn test_indent_action_traits() {
     assert!(decrease.is_snapshottable());
     assert!(increase.is_snapshottable());
     assert!(Action::operation(Operator::ToggleCase, OperatorTarget::Selection,).is_snapshottable());
+
+    let surround_add = Action::new(ActionKind::SurroundAdd {
+        target: TextObject::InnerWord,
+        delimiter: DelimiterFamily::DoubleQuote,
+    });
+    assert!(surround_add.resets_remembered_column());
+    assert!(surround_add.is_snapshottable());
+
+    let surround_selection = Action::new(ActionKind::SurroundAddSelection {
+        delimiter: DelimiterFamily::Curly,
+    });
+    assert!(surround_selection.resets_remembered_column());
+    assert!(surround_selection.is_snapshottable());
 }
 
 #[test]

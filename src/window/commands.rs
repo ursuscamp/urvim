@@ -512,6 +512,85 @@ impl Window {
         }
     }
 
+    pub(super) fn add_surround(
+        &mut self,
+        target: TextObject,
+        delimiter: DelimiterFamily,
+    ) -> ActionResult {
+        let cursor = self.buffer_view.cursor();
+        let range = self
+            .buffer_view
+            .with_buffer(|buffer| {
+                buffer.get_operator_target_range(cursor, OperatorTarget::TextObject(target))
+            })
+            .flatten();
+        let Some(range) = range else {
+            return ActionResult::NotHandled;
+        };
+
+        let new_cursor = self
+            .buffer_view
+            .with_buffer_mut(|buffer| buffer.add_surround(range, delimiter))
+            .flatten();
+        if let Some(new_cursor) = new_cursor {
+            self.buffer_view.set_cursor(new_cursor);
+            ActionResult::Handled
+        } else {
+            ActionResult::NotHandled
+        }
+    }
+
+    pub(super) fn add_surround_selection(
+        &mut self,
+        delimiter: DelimiterFamily,
+        from_mode: Option<ModeKind>,
+    ) -> ActionResult {
+        match from_mode {
+            Some(ModeKind::Visual) => {
+                let Some(range) = self.buffer_view.visual_selection_range() else {
+                    return ActionResult::NotHandled;
+                };
+                let new_cursor = self
+                    .buffer_view
+                    .with_buffer_mut(|buffer| buffer.add_surround(range, delimiter))
+                    .flatten();
+                if let Some(new_cursor) = new_cursor {
+                    self.buffer_view.set_cursor(new_cursor);
+                    ActionResult::Handled
+                } else {
+                    ActionResult::NotHandled
+                }
+            }
+            Some(ModeKind::VisualLine) => {
+                let Some((start_line, count)) = self.buffer_view.visual_line_selection_range()
+                else {
+                    return ActionResult::NotHandled;
+                };
+                let new_cursor = self
+                    .buffer_view
+                    .with_buffer_mut(|buffer| {
+                        buffer.add_linewise_surround(start_line, count, delimiter)
+                    })
+                    .flatten();
+                if let Some(new_cursor) = new_cursor {
+                    self.buffer_view.set_cursor(new_cursor);
+                    if self.auto_indent_enabled() {
+                        let indentation_result = self.shift_lines_indentation(
+                            start_line + 1,
+                            count,
+                            IndentDirection::Increase,
+                        );
+                        debug_assert!(indentation_result.is_some());
+                    }
+                    ActionResult::Handled
+                } else {
+                    ActionResult::NotHandled
+                }
+            }
+            _ => ActionResult::NotHandled,
+        }
+    }
+
     /// Deletes the active visual selection and leaves the cursor at the selection start.
     pub fn delete_visual_selection(&mut self) {
         let Some(range) = self.buffer_view.visual_selection_range() else {

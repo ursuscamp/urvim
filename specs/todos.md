@@ -6,7 +6,6 @@ This is a list, in no particular order, of things that need to be addressed whic
 
 - support raw text insertion by paste
 - session support
-- surround keys with "gs"
 
 # Bugs
 

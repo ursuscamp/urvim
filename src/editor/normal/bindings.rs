@@ -1,7 +1,8 @@
 use crate::buffer::Boundary;
+use crate::editor::surround;
 use crate::editor::{
-    Action, ActionKind, BoundaryMotion, BracketKind, DelimiterFamily, LinewiseMotion, ModeKind,
-    Operator, OperatorTarget, QuoteKind, TextObject, TrieKeymap,
+    Action, ActionKind, BoundaryMotion, BracketKind, LinewiseMotion, ModeKind, Operator,
+    OperatorTarget, QuoteKind, TextObject, TrieKeymap,
 };
 
 #[derive(Clone, Copy)]
@@ -166,7 +167,7 @@ fn register_edit_bindings(trie_keymap: &mut TrieKeymap) {
 }
 
 fn register_surround_bindings(trie_keymap: &mut TrieKeymap) {
-    let selectors = surround_selectors();
+    let selectors = surround::delimiter_selectors();
 
     for (selector, target) in selectors {
         trie_keymap.insert_str(
@@ -186,22 +187,18 @@ fn register_surround_bindings(trie_keymap: &mut TrieKeymap) {
             );
         }
     }
-}
 
-fn surround_selectors() -> &'static [(&'static str, DelimiterFamily)] {
-    &[
-        ("(", DelimiterFamily::Paren),
-        (")", DelimiterFamily::Paren),
-        ("[", DelimiterFamily::Square),
-        ("]", DelimiterFamily::Square),
-        ("{", DelimiterFamily::Curly),
-        ("}", DelimiterFamily::Curly),
-        ("<LessThan>", DelimiterFamily::Angle),
-        ("<GreaterThan>", DelimiterFamily::Angle),
-        ("\"", DelimiterFamily::DoubleQuote),
-        ("'", DelimiterFamily::SingleQuote),
-        ("`", DelimiterFamily::Backtick),
-    ]
+    for (target_sequence, target) in surround::text_object_sequences() {
+        for (delimiter_selector, delimiter) in selectors {
+            trie_keymap.insert_str(
+                &format!("gsa{target_sequence}{delimiter_selector}"),
+                Action::new(ActionKind::SurroundAdd {
+                    target: *target,
+                    delimiter: *delimiter,
+                }),
+            );
+        }
+    }
 }
 
 fn register_operator_bindings(trie_keymap: &mut TrieKeymap) {

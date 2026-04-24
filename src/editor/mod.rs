@@ -10,6 +10,7 @@ mod mode;
 mod normal;
 pub mod pairs;
 mod resizing;
+mod surround;
 mod visual;
 mod visual_common;
 mod visual_line;

@@ -2,7 +2,8 @@ use super::*;
 use crate::buffer::operator_target::LinewiseDeleteRange;
 use crate::config::Config;
 use crate::editor::{
-    BoundaryMotion, BracketKind, LinewiseMotion, OperatorTarget, QuoteKind, TextObject,
+    BoundaryMotion, BracketKind, DelimiterFamily, LinewiseMotion, OperatorTarget, QuoteKind,
+    TextObject,
 };
 use crate::globals;
 use crate::globals::{Direction, FindKind, FindState};
@@ -272,6 +273,50 @@ fn test_insert_text() {
     let mut buf = Buffer::from_str("hello");
     buf.insert_text(Cursor::new(0, 5), " world");
     assert_eq!(buf.as_str(), "hello world");
+}
+
+#[test]
+fn test_add_surround_wraps_character_range() {
+    let mut buf = Buffer::from_str("hello world");
+    let cursor = buf
+        .add_surround(
+            TextObjectRange {
+                start: Cursor::new(0, 0),
+                end: Cursor::new(0, 5),
+            },
+            DelimiterFamily::DoubleQuote,
+        )
+        .expect("surround add should succeed");
+
+    assert_eq!(buf.as_str(), "\"hello\" world");
+    assert_eq!(cursor, Cursor::new(0, 0));
+}
+
+#[test]
+fn test_add_surround_rejects_empty_range() {
+    let mut buf = Buffer::from_str("hello");
+    assert_eq!(
+        buf.add_surround(
+            TextObjectRange {
+                start: Cursor::new(0, 2),
+                end: Cursor::new(0, 2),
+            },
+            DelimiterFamily::Paren,
+        ),
+        None
+    );
+    assert_eq!(buf.as_str(), "hello");
+}
+
+#[test]
+fn test_add_linewise_surround_wraps_selected_lines() {
+    let mut buf = Buffer::from_str("alpha\nbeta\ngamma");
+    let cursor = buf
+        .add_linewise_surround(1, 1, DelimiterFamily::Curly)
+        .expect("linewise surround add should succeed");
+
+    assert_eq!(buf.as_str(), "alpha\n{\nbeta\n}\ngamma");
+    assert_eq!(cursor, Cursor::new(1, 0));
 }
 
 #[test]

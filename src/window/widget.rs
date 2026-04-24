@@ -565,6 +565,12 @@ impl Widget for Window {
                     replacement,
                 }) => self.replace_surround(*target, *replacement),
                 Some(ActionKind::SurroundDelete { target }) => self.delete_surround(*target),
+                Some(ActionKind::SurroundAdd { target, delimiter }) => {
+                    self.add_surround(*target, *delimiter)
+                }
+                Some(ActionKind::SurroundAddSelection { delimiter }) => {
+                    self.add_surround_selection(*delimiter, action.from_mode)
+                }
                 Some(ActionKind::Count(count, inner)) => {
                     let mut counted_inner = inner.as_ref().clone();
                     if let Some(from_mode) = action.from_mode {

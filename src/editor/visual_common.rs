@@ -1,4 +1,5 @@
 use super::keymap::{MAX_COUNT, extract_leading_count};
+use super::surround;
 use super::{Action, ActionKind, CountParser, HandleKeyResult, Keymap, ModeKind, TrieKeymap};
 use crate::buffer::Boundary;
 use crate::editor::{BracketKind, Operator, OperatorTarget, QuoteKind, TextObject};
@@ -105,6 +106,7 @@ impl VisualModeState {
                     Operator::ToggleCase,
                     OperatorTarget::Selection,
                 ))
+                | Some(ActionKind::SurroundAddSelection { .. })
         ) || (action.kind.is_none() && action.to_mode == Some(ModeKind::Normal))
     }
 
@@ -232,6 +234,7 @@ fn build_visual_keymap(exit_key: &str, switch_key: &str, switch_to: ModeKind) ->
         "c",
         Action::new(ActionKind::ChangeSelection).with_to_mode(ModeKind::Insert),
     );
+    register_visual_surround_bindings(&mut trie_keymap);
     register_visual_text_object_bindings(&mut trie_keymap);
     trie_keymap.insert_str("<Left>", Action::new(ActionKind::MoveLeft));
     trie_keymap.insert_str("<Down>", Action::new(ActionKind::MoveDown));
@@ -246,6 +249,18 @@ fn build_visual_keymap(exit_key: &str, switch_key: &str, switch_to: ModeKind) ->
     keymap.add(Box::new(trie_keymap));
     keymap.add(Box::new(CharScanKeymap::new()));
     keymap
+}
+
+fn register_visual_surround_bindings(trie_keymap: &mut TrieKeymap) {
+    for (selector, delimiter) in surround::delimiter_selectors() {
+        trie_keymap.insert_str(
+            &format!("gsa{selector}"),
+            Action::new(ActionKind::SurroundAddSelection {
+                delimiter: *delimiter,
+            })
+            .with_to_mode(ModeKind::Normal),
+        );
+    }
 }
 
 fn register_visual_text_object_bindings(trie_keymap: &mut TrieKeymap) {

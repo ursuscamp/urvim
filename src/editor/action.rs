@@ -393,6 +393,13 @@ pub enum ActionKind {
     },
     /// Delete a surrounding delimiter pair around the cursor.
     SurroundDelete { target: DelimiterFamily },
+    /// Add a surrounding delimiter pair around a text object.
+    SurroundAdd {
+        target: TextObject,
+        delimiter: DelimiterFamily,
+    },
+    /// Add a surrounding delimiter pair around the active visual selection.
+    SurroundAddSelection { delimiter: DelimiterFamily },
 }
 
 impl Action {
@@ -620,6 +627,8 @@ impl Action {
                 | Some(ActionKind::RepeatLastFindReverse)
                 | Some(ActionKind::SurroundReplace { .. })
                 | Some(ActionKind::SurroundDelete { .. })
+                | Some(ActionKind::SurroundAdd { .. })
+                | Some(ActionKind::SurroundAddSelection { .. })
         )
     }
 
@@ -751,9 +760,10 @@ impl Action {
             Some(ActionKind::Operation(Operator::Delete, _)) => true,
             Some(ActionKind::Operation(Operator::Change, _)) => false,
             Some(ActionKind::Operation(Operator::Yank, _)) => false,
-            Some(ActionKind::SurroundReplace { .. }) | Some(ActionKind::SurroundDelete { .. }) => {
-                true
-            }
+            Some(ActionKind::SurroundReplace { .. })
+            | Some(ActionKind::SurroundDelete { .. })
+            | Some(ActionKind::SurroundAdd { .. })
+            | Some(ActionKind::SurroundAddSelection { .. }) => true,
             Some(ActionKind::Operation(Operator::Lowercase, _))
             | Some(ActionKind::Operation(Operator::Uppercase, _))
             | Some(ActionKind::Operation(Operator::ToggleCase, _)) => true,
@@ -838,7 +848,9 @@ impl Action {
             | Some(ActionKind::Operation(Operator::Uppercase, _))
             | Some(ActionKind::Operation(Operator::ToggleCase, _))
             | Some(ActionKind::SurroundReplace { .. })
-            | Some(ActionKind::SurroundDelete { .. }) => true,
+            | Some(ActionKind::SurroundDelete { .. })
+            | Some(ActionKind::SurroundAdd { .. })
+            | Some(ActionKind::SurroundAddSelection { .. }) => true,
             Some(ActionKind::Count(_, inner)) => inner.is_dot_repeat_source(),
             _ => false,
         }
