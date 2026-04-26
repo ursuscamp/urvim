@@ -284,6 +284,12 @@ pub fn with_register_store_mut<R>(f: impl FnOnce(&mut RegisterStore) -> R) -> R 
 
 /// Enqueues a user-facing notification.
 pub fn enqueue_notification(level: NotificationLevel, text: String) -> bool {
+    match level {
+        NotificationLevel::Info => tracing::info!("{}", text),
+        NotificationLevel::Warn => tracing::warn!("{}", text),
+        NotificationLevel::Error => tracing::error!("{}", text),
+    }
+
     let now = std::time::Instant::now();
     let Ok(mut state) = notification_state_slot().lock() else {
         tracing::warn!("notification queue unavailable; skipping enqueue");
@@ -430,6 +436,32 @@ mod tests {
     use crate::terminal::Color;
     use crate::terminal::Style;
     use crate::theme::{HighlightStyles, Tag, Theme, ThemeKind};
+    use std::io::{self, Write};
+    use std::sync::{Arc, Mutex};
+    use tracing_subscriber::layer::SubscriberExt;
+
+    struct CapturedWriter(Arc<Mutex<Vec<u8>>>);
+
+    impl Write for CapturedWriter {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            let mut output = self.0.lock().expect("capture buffer lock");
+            output.extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn captured_subscriber(output: Arc<Mutex<Vec<u8>>>) -> impl tracing::Subscriber {
+        tracing_subscriber::registry().with(
+            tracing_subscriber::fmt::layer()
+                .with_writer(move || CapturedWriter(output.clone()))
+                .with_ansi(false)
+                .without_time(),
+        )
+    }
 
     fn themed_theme() -> Theme {
         let default_style = Style::new().fg(Color::ansi(10)).bg(Color::ansi(20));
@@ -667,6 +699,26 @@ mod tests {
         let message = active_notification(std::time::Instant::now()).expect("message");
         assert_eq!(message.text, "Saved");
         assert_eq!(message.level, NotificationLevel::Info);
+    }
+
+    #[test]
+    fn test_notification_enqueue_logs_message() {
+        let _guard = notification_test_lock();
+        clear_notifications();
+
+        let output = Arc::new(Mutex::new(Vec::new()));
+        let subscriber = captured_subscriber(output.clone());
+        let _subscriber_guard = tracing::subscriber::set_default(subscriber);
+
+        assert!(enqueue_notification(
+            NotificationLevel::Error,
+            "Unknown command: foo".to_string()
+        ));
+
+        let output = String::from_utf8(output.lock().expect("capture buffer lock").clone())
+            .expect("captured log should be valid utf-8");
+        assert!(output.contains("ERROR"));
+        assert!(output.contains("Unknown command: foo"));
     }
 
     #[test]

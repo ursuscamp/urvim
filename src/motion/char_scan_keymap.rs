@@ -6,6 +6,7 @@
 
 use crate::editor::{Action, Keymap};
 use crate::globals::{Direction, FindKind, FindState};
+use crate::ui::Intent;
 
 /// A stateless keymap for character scan motions (f, F, t, T).
 ///
@@ -61,7 +62,7 @@ impl CharScanKeymap {
 }
 
 impl Keymap for CharScanKeymap {
-    fn get_action(&self, keys: &[String]) -> Option<Action> {
+    fn get_action(&self, keys: &[String]) -> Option<Intent> {
         Self::parse_find_state(keys).map(|find_state| {
             match (find_state.kind, find_state.direction) {
                 (FindKind::Find, Direction::Forward) => {
@@ -77,6 +78,7 @@ impl Keymap for CharScanKeymap {
                     Action::till_backward(find_state.target_char)
                 }
             }
+            .into()
         })
     }
 
@@ -98,28 +100,28 @@ mod tests {
     fn test_get_action_finds_forward() {
         let keymap = CharScanKeymap::new();
         let action = keymap.get_action(&["f".to_string(), "x".to_string()]);
-        assert_eq!(action, Some(Action::find_forward('x')));
+        assert_eq!(action, Some(Action::find_forward('x').into()));
     }
 
     #[test]
     fn test_get_action_finds_backward() {
         let keymap = CharScanKeymap::new();
         let action = keymap.get_action(&["F".to_string(), "y".to_string()]);
-        assert_eq!(action, Some(Action::find_backward('y')));
+        assert_eq!(action, Some(Action::find_backward('y').into()));
     }
 
     #[test]
     fn test_get_action_till_forward() {
         let keymap = CharScanKeymap::new();
         let action = keymap.get_action(&["t".to_string(), "z".to_string()]);
-        assert_eq!(action, Some(Action::till_forward('z')));
+        assert_eq!(action, Some(Action::till_forward('z').into()));
     }
 
     #[test]
     fn test_get_action_till_backward() {
         let keymap = CharScanKeymap::new();
         let action = keymap.get_action(&["T".to_string(), "w".to_string()]);
-        assert_eq!(action, Some(Action::till_backward('w')));
+        assert_eq!(action, Some(Action::till_backward('w').into()));
     }
 
     #[test]

@@ -20,9 +20,10 @@ fn ctrl_key(c: char) -> Key {
 
 fn handle_and_unwrap(mode: &mut impl Mode, k: &Key) -> Action {
     match mode.handle_key(k) {
-        HandleKeyResult::Complete(action) => {
+        HandleKeyResult::Complete(intent) => {
+            let action = intent.as_action().expect("expected a complete action");
             let to_mode = action.to_mode;
-            action.with_mode(None, to_mode)
+            action.clone().with_mode(None, to_mode)
         }
         HandleKeyResult::WaitForMore => Action::none(),
         HandleKeyResult::InvalidSequence => Action::none(),
@@ -31,7 +32,12 @@ fn handle_and_unwrap(mode: &mut impl Mode, k: &Key) -> Action {
 
 fn complete_action_kind(mode_result: HandleKeyResult) -> ActionKind {
     match mode_result {
-        HandleKeyResult::Complete(action) => action.kind.expect("expected a complete action"),
+        HandleKeyResult::Complete(intent) => intent
+            .as_action()
+            .expect("expected a complete action")
+            .kind
+            .clone()
+            .expect("expected a complete action"),
         HandleKeyResult::WaitForMore => panic!("expected a complete action, got wait"),
         HandleKeyResult::InvalidSequence => panic!("expected a complete action, got invalid"),
     }
@@ -128,40 +134,44 @@ fn test_normal_mode_split_management_bindings() {
         mode.handle_key(&ctrl_key('w')),
         HandleKeyResult::WaitForMore
     ));
-    assert_eq!(
-        handle_and_unwrap(&mut mode, &key('v')),
-        Action::new(ActionKind::SplitVertical)
-    );
+    assert!(matches!(
+        mode.handle_key(&key('v')),
+        HandleKeyResult::Complete(intent)
+            if matches!(intent, crate::ui::Intent::Command(crate::ui::Command::SplitVertical))
+    ));
 
     let mut mode = NormalMode::new();
     assert!(matches!(
         mode.handle_key(&ctrl_key('w')),
         HandleKeyResult::WaitForMore
     ));
-    assert_eq!(
-        handle_and_unwrap(&mut mode, &key('s')),
-        Action::new(ActionKind::SplitHorizontal)
-    );
+    assert!(matches!(
+        mode.handle_key(&key('s')),
+        HandleKeyResult::Complete(intent)
+            if matches!(intent, crate::ui::Intent::Command(crate::ui::Command::SplitHorizontal))
+    ));
 
     let mut mode = NormalMode::new();
     assert!(matches!(
         mode.handle_key(&ctrl_key('w')),
         HandleKeyResult::WaitForMore
     ));
-    assert_eq!(
-        handle_and_unwrap(&mut mode, &key('h')),
-        Action::new(ActionKind::FocusPaneLeft)
-    );
+    assert!(matches!(
+        mode.handle_key(&key('h')),
+        HandleKeyResult::Complete(intent)
+            if matches!(intent, crate::ui::Intent::Command(crate::ui::Command::FocusPaneLeft))
+    ));
 
     let mut mode = NormalMode::new();
     assert!(matches!(
         mode.handle_key(&ctrl_key('w')),
         HandleKeyResult::WaitForMore
     ));
-    assert_eq!(
-        handle_and_unwrap(&mut mode, &key('q')),
-        Action::new(ActionKind::ClosePane)
-    );
+    assert!(matches!(
+        mode.handle_key(&key('q')),
+        HandleKeyResult::Complete(intent)
+            if matches!(intent, crate::ui::Intent::Command(crate::ui::Command::ClosePane))
+    ));
 
     let mut mode = NormalMode::new();
     assert!(matches!(
@@ -181,10 +191,11 @@ fn test_normal_mode_equalize_binding() {
         mode.handle_key(&ctrl_key('w')),
         HandleKeyResult::WaitForMore
     ));
-    assert_eq!(
-        handle_and_unwrap(&mut mode, &key('=')),
-        Action::new(ActionKind::EqualizeSplits)
-    );
+    assert!(matches!(
+        mode.handle_key(&key('=')),
+        HandleKeyResult::Complete(intent)
+            if matches!(intent, crate::ui::Intent::Command(crate::ui::Command::EqualizeSplits))
+    ));
 }
 
 #[test]
@@ -285,42 +296,51 @@ fn test_resizing_mode_key_bindings() {
         mode.cursor_style(),
         crate::terminal::CursorStyle::SteadyUnderline
     );
-    assert_eq!(
-        handle_and_unwrap(&mut mode, &key('h')),
-        Action::new(ActionKind::ResizePaneLeft)
-    );
-    assert_eq!(
-        handle_and_unwrap(&mut mode, &key('H')),
-        Action::count(5, Box::new(Action::new(ActionKind::ResizePaneLeft)))
-    );
-    assert_eq!(
-        handle_and_unwrap(&mut mode, &key('l')),
-        Action::new(ActionKind::ResizePaneRight)
-    );
-    assert_eq!(
-        handle_and_unwrap(&mut mode, &key('L')),
-        Action::count(5, Box::new(Action::new(ActionKind::ResizePaneRight)))
-    );
-    assert_eq!(
-        handle_and_unwrap(&mut mode, &key('k')),
-        Action::new(ActionKind::ResizePaneUp)
-    );
-    assert_eq!(
-        handle_and_unwrap(&mut mode, &key('j')),
-        Action::new(ActionKind::ResizePaneDown)
-    );
-    assert_eq!(
-        handle_and_unwrap(&mut mode, &key('K')),
-        Action::count(5, Box::new(Action::new(ActionKind::ResizePaneUp)))
-    );
-    assert_eq!(
-        handle_and_unwrap(&mut mode, &key('J')),
-        Action::count(5, Box::new(Action::new(ActionKind::ResizePaneDown)))
-    );
-    assert_eq!(
-        handle_and_unwrap(&mut mode, &key('=')),
-        Action::new(ActionKind::EqualizeSplits)
-    );
+    assert!(matches!(
+        mode.handle_key(&key('h')),
+        HandleKeyResult::Complete(intent)
+            if matches!(intent, crate::ui::Intent::Command(crate::ui::Command::ResizePaneLeft(1)))
+    ));
+    assert!(matches!(
+        mode.handle_key(&key('H')),
+        HandleKeyResult::Complete(intent)
+            if matches!(intent, crate::ui::Intent::Command(crate::ui::Command::ResizePaneLeft(5)))
+    ));
+    assert!(matches!(
+        mode.handle_key(&key('l')),
+        HandleKeyResult::Complete(intent)
+            if matches!(intent, crate::ui::Intent::Command(crate::ui::Command::ResizePaneRight(1)))
+    ));
+    assert!(matches!(
+        mode.handle_key(&key('L')),
+        HandleKeyResult::Complete(intent)
+            if matches!(intent, crate::ui::Intent::Command(crate::ui::Command::ResizePaneRight(5)))
+    ));
+    assert!(matches!(
+        mode.handle_key(&key('k')),
+        HandleKeyResult::Complete(intent)
+            if matches!(intent, crate::ui::Intent::Command(crate::ui::Command::ResizePaneUp(1)))
+    ));
+    assert!(matches!(
+        mode.handle_key(&key('j')),
+        HandleKeyResult::Complete(intent)
+            if matches!(intent, crate::ui::Intent::Command(crate::ui::Command::ResizePaneDown(1)))
+    ));
+    assert!(matches!(
+        mode.handle_key(&key('K')),
+        HandleKeyResult::Complete(intent)
+            if matches!(intent, crate::ui::Intent::Command(crate::ui::Command::ResizePaneUp(5)))
+    ));
+    assert!(matches!(
+        mode.handle_key(&key('J')),
+        HandleKeyResult::Complete(intent)
+            if matches!(intent, crate::ui::Intent::Command(crate::ui::Command::ResizePaneDown(5)))
+    ));
+    assert!(matches!(
+        mode.handle_key(&key('=')),
+        HandleKeyResult::Complete(intent)
+            if matches!(intent, crate::ui::Intent::Command(crate::ui::Command::EqualizeSplits))
+    ));
     assert_eq!(
         handle_and_unwrap(&mut mode, &Key::new(KeyCode::Esc)),
         Action::mode_transition(ModeKind::Normal)
@@ -700,7 +720,8 @@ fn test_insert_mode_tab_simple_uses_configured_insertion_setting() {
     let mut mode = InsertMode::new();
 
     match mode.handle_key(&Key::new(KeyCode::Tab)) {
-        HandleKeyResult::Complete(action) => {
+        HandleKeyResult::Complete(intent) => {
+            let action = intent.as_action().expect("expected a complete action");
             assert_eq!(
                 action.kind,
                 Some(ActionKind::InsertText("    ".to_string()))
@@ -721,7 +742,8 @@ fn test_insert_mode_tab_smart_infers_tabs_from_buffer_contents() {
     let mut mode = InsertMode::new();
 
     match mode.handle_key(&Key::new(KeyCode::Tab)) {
-        HandleKeyResult::Complete(action) => {
+        HandleKeyResult::Complete(intent) => {
+            let action = intent.as_action().expect("expected a complete action");
             assert_eq!(action.kind, Some(ActionKind::InsertText("\t".to_string())));
         }
         other => panic!("expected complete action, got {other:?}"),
@@ -739,7 +761,8 @@ fn test_insert_mode_tab_smart_falls_back_to_configured_insertion_setting() {
     let mut mode = InsertMode::new();
 
     match mode.handle_key(&Key::new(KeyCode::Tab)) {
-        HandleKeyResult::Complete(action) => {
+        HandleKeyResult::Complete(intent) => {
+            let action = intent.as_action().expect("expected a complete action");
             assert_eq!(action.kind, Some(ActionKind::InsertText("\t".to_string())));
         }
         other => panic!("expected complete action, got {other:?}"),
@@ -1186,7 +1209,8 @@ fn test_cf_space_sequence_enters_insert_mode() {
 
     let result = mode.handle_key(&key(' '));
     match result {
-        HandleKeyResult::Complete(action) => {
+        HandleKeyResult::Complete(intent) => {
+            let action = intent.as_action().expect("expected a complete action");
             assert_eq!(action.to_mode, Some(ModeKind::Insert));
             match action.kind.as_ref() {
                 Some(ActionKind::Operation(
@@ -1221,7 +1245,8 @@ fn test_ct_sequence() {
     ));
     let result = mode.handle_key(&key(':'));
     match result {
-        HandleKeyResult::Complete(action) => {
+        HandleKeyResult::Complete(intent) => {
+            let action = intent.as_action().expect("expected a complete action");
             assert_eq!(action.to_mode, Some(ModeKind::Insert));
             match action.kind.as_ref() {
                 Some(ActionKind::Operation(
@@ -1477,7 +1502,12 @@ fn test_bracket_text_object_sequences() {
         ));
         let result = mode.handle_key(&key(delimiter));
         match result {
-            HandleKeyResult::Complete(action) => match action.kind.as_ref() {
+            HandleKeyResult::Complete(intent) => match intent
+                .as_action()
+                .expect("expected a complete action")
+                .kind
+                .as_ref()
+            {
                 Some(ActionKind::Operation(
                     Operator::Delete,
                     OperatorTarget::TextObject(TextObject::InnerBracket(actual)),
@@ -1507,7 +1537,12 @@ fn test_bracket_text_object_sequences() {
         ));
         let result = mode.handle_key(&key(delimiter));
         match result {
-            HandleKeyResult::Complete(action) => match action.kind.as_ref() {
+            HandleKeyResult::Complete(intent) => match intent
+                .as_action()
+                .expect("expected a complete action")
+                .kind
+                .as_ref()
+            {
                 Some(ActionKind::Operation(
                     Operator::Change,
                     OperatorTarget::TextObject(TextObject::AroundBracket(actual)),
@@ -1539,7 +1574,12 @@ fn test_quote_text_object_sequences() {
         ));
         let result = mode.handle_key(&key(delimiter));
         match result {
-            HandleKeyResult::Complete(action) => match action.kind.as_ref() {
+            HandleKeyResult::Complete(intent) => match intent
+                .as_action()
+                .expect("expected a complete action")
+                .kind
+                .as_ref()
+            {
                 Some(ActionKind::Operation(
                     Operator::Delete,
                     OperatorTarget::TextObject(TextObject::InnerQuote(actual)),
@@ -1562,7 +1602,12 @@ fn test_quote_text_object_sequences() {
         ));
         let result = mode.handle_key(&key(delimiter));
         match result {
-            HandleKeyResult::Complete(action) => match action.kind.as_ref() {
+            HandleKeyResult::Complete(intent) => match intent
+                .as_action()
+                .expect("expected a complete action")
+                .kind
+                .as_ref()
+            {
                 Some(ActionKind::Operation(
                     Operator::Change,
                     OperatorTarget::TextObject(TextObject::AroundQuote(actual)),
@@ -2035,7 +2080,8 @@ fn test_register_prefix_uses_configured_default_and_named_registers() {
     ));
     let result = mode.handle_key(&key('p'));
     match result {
-        HandleKeyResult::Complete(action) => {
+        HandleKeyResult::Complete(intent) => {
+            let action = intent.as_action().expect("expected a complete action");
             assert_eq!(action.register, Some(RegisterName('m')));
             assert!(matches!(action.kind.as_ref(), Some(ActionKind::PasteAfter)));
         }
@@ -2052,7 +2098,8 @@ fn test_register_prefix_uses_configured_default_and_named_registers() {
     ));
     let result = mode.handle_key(&key('p'));
     match result {
-        HandleKeyResult::Complete(action) => {
+        HandleKeyResult::Complete(intent) => {
+            let action = intent.as_action().expect("expected a complete action");
             assert_eq!(action.register, Some(RegisterName('a')));
             assert!(matches!(action.kind.as_ref(), Some(ActionKind::PasteAfter)));
         }
@@ -2081,7 +2128,8 @@ fn test_visual_mode_register_prefix_applies_to_yank() {
         HandleKeyResult::WaitForMore
     ));
     match mode.handle_key(&key('y')) {
-        HandleKeyResult::Complete(action) => {
+        HandleKeyResult::Complete(intent) => {
+            let action = intent.as_action().expect("expected a complete action");
             assert_eq!(action.register, Some(RegisterName('a')));
             assert!(matches!(
                 action.kind.as_ref(),
@@ -2114,7 +2162,8 @@ fn test_visual_line_mode_register_prefix_applies_to_yank() {
         HandleKeyResult::WaitForMore
     ));
     match mode.handle_key(&key('y')) {
-        HandleKeyResult::Complete(action) => {
+        HandleKeyResult::Complete(intent) => {
+            let action = intent.as_action().expect("expected a complete action");
             assert_eq!(action.register, Some(RegisterName('b')));
             assert!(matches!(
                 action.kind.as_ref(),

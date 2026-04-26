@@ -162,25 +162,36 @@ impl NormalMode {
         } else {
             count
         };
-        if let Some(mut action) = self.keymap.get_action(&action_keys) {
+        if let Some(intent) = self.keymap.get_action(&action_keys) {
             if self.keymap.has_children(&action_keys) {
                 return HandleKeyResult::WaitForMore;
             }
 
-            if let Some(register) = register_prefix {
-                action = action.with_register(register);
+            if let Some(action) = intent.as_action().cloned() {
+                let mut action = action;
+                if let Some(register) = register_prefix {
+                    action = action.with_register(register);
+                }
+
+                if Self::ignores_count_wrapping(&action) {
+                    return HandleKeyResult::complete(action.with_from_mode(ModeKind::Normal));
+                }
+
+                if total_count > 1
+                    && let Some(counted_action) = action.clone().with_count(total_count)
+                {
+                    return HandleKeyResult::complete(
+                        counted_action.with_from_mode(ModeKind::Normal),
+                    );
+                }
+                return HandleKeyResult::complete(action.with_from_mode(ModeKind::Normal));
             }
 
-            if Self::ignores_count_wrapping(&action) {
-                return HandleKeyResult::Complete(action.with_from_mode(ModeKind::Normal));
+            if register_prefix.is_some() || total_count > 1 {
+                return HandleKeyResult::InvalidSequence;
             }
 
-            if total_count > 1
-                && let Some(counted_action) = action.clone().with_count(total_count)
-            {
-                return HandleKeyResult::Complete(counted_action.with_from_mode(ModeKind::Normal));
-            }
-            return HandleKeyResult::Complete(action.with_from_mode(ModeKind::Normal));
+            return HandleKeyResult::complete(intent);
         }
 
         if Self::character_scan_operator_waits_for_more(&action_keys) {
@@ -190,7 +201,7 @@ impl NormalMode {
         if let Some(action) =
             self.character_scan_operation(&action_keys, total_count, register_prefix)
         {
-            return HandleKeyResult::Complete(action.with_from_mode(ModeKind::Normal));
+            return HandleKeyResult::complete(action.with_from_mode(ModeKind::Normal));
         }
 
         if self.keymap.is_prefix(&action_keys) {
@@ -241,10 +252,10 @@ impl Mode for NormalMode {
                 self.waiting = true;
                 HandleKeyResult::WaitForMore
             }
-            HandleKeyResult::Complete(action) => {
+            HandleKeyResult::Complete(intent) => {
                 self.buffer.clear();
                 self.waiting = false;
-                HandleKeyResult::Complete(action)
+                HandleKeyResult::Complete(intent)
             }
             HandleKeyResult::InvalidSequence => {
                 self.buffer.clear();

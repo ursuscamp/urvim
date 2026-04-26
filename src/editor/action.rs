@@ -2,6 +2,7 @@ use crate::buffer::{Boundary, BufferId};
 use crate::editor::ModeKind;
 use crate::globals;
 use crate::register::RegisterName;
+use crate::ui::{Command, Intent};
 
 /// Operators that wait for a motion or text object to define the target region.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -232,32 +233,6 @@ pub enum ActionKind {
     MoveUp,
     /// Move the cursor one character to the right.
     MoveRight,
-    /// Shrink the focused pane horizontally.
-    ResizePaneLeft,
-    /// Grow the focused pane horizontally.
-    ResizePaneRight,
-    /// Shrink the focused pane vertically.
-    ResizePaneUp,
-    /// Grow the focused pane vertically.
-    ResizePaneDown,
-    /// Equalize all split ratios in the layout.
-    EqualizeSplits,
-    /// Toggle visual wrapping for the focused window.
-    ToggleWrap,
-    /// Split the focused pane vertically.
-    SplitVertical,
-    /// Split the focused pane horizontally.
-    SplitHorizontal,
-    /// Focus the pane to the left.
-    FocusPaneLeft,
-    /// Focus the pane below.
-    FocusPaneDown,
-    /// Focus the pane above.
-    FocusPaneUp,
-    /// Focus the pane to the right.
-    FocusPaneRight,
-    /// Close the focused pane.
-    ClosePane,
     /// Insert a single character at the cursor.
     InsertChar(char),
     /// Insert a string at the cursor.
@@ -269,7 +244,6 @@ pub enum ActionKind {
     /// Insert a newline, letting the window decide whether to auto-indent it.
     InsertNewline,
     /// Exit the editor.
-    Quit,
     /// Move forward to the next boundary of the requested kind.
     ForwardTo(Boundary),
     /// Move backward to the previous boundary of the requested kind.
@@ -382,6 +356,7 @@ pub enum ActionKind {
     Redo,
     /// Save the current buffer or a specific buffer when provided.
     SaveBuffer(Option<BufferId>),
+    /// Open the command-line overlay in normal mode.
     /// Wrap another action in a repeat count.
     Count(usize, Box<Action>),
     /// Apply an operator to the given target region.
@@ -587,8 +562,6 @@ impl Action {
             self.kind_ref(),
             Some(ActionKind::MoveLeft)
                 | Some(ActionKind::MoveRight)
-                | Some(ActionKind::FocusPaneLeft)
-                | Some(ActionKind::FocusPaneRight)
                 | Some(ActionKind::ForwardTo(_))
                 | Some(ActionKind::BackTo(_))
                 | Some(ActionKind::MoveToLineEnd)
@@ -638,8 +611,6 @@ impl Action {
             self.kind_ref(),
             Some(ActionKind::MoveUp)
                 | Some(ActionKind::MoveDown)
-                | Some(ActionKind::FocusPaneUp)
-                | Some(ActionKind::FocusPaneDown)
                 | Some(ActionKind::MoveToFirstLine)
                 | Some(ActionKind::MoveToLastLine)
                 | Some(ActionKind::MovePageUp)
@@ -662,10 +633,6 @@ impl Action {
                 | Some(ActionKind::MoveRight)
                 | Some(ActionKind::MoveUp)
                 | Some(ActionKind::MoveDown)
-                | Some(ActionKind::FocusPaneLeft)
-                | Some(ActionKind::FocusPaneRight)
-                | Some(ActionKind::FocusPaneUp)
-                | Some(ActionKind::FocusPaneDown)
                 | Some(ActionKind::ForwardTo(_))
                 | Some(ActionKind::BackTo(_))
                 | Some(ActionKind::MoveToFirstLine)
@@ -718,9 +685,6 @@ impl Action {
                 | Some(ActionKind::IndentIncrease)
                 | Some(ActionKind::PreviousTab)
                 | Some(ActionKind::NextTab)
-                | Some(ActionKind::SplitVertical)
-                | Some(ActionKind::SplitHorizontal)
-                | Some(ActionKind::ClosePane)
         )
     }
 
@@ -777,10 +741,6 @@ impl Action {
             | Some(ActionKind::MoveDown)
             | Some(ActionKind::MoveUp)
             | Some(ActionKind::MoveRight)
-            | Some(ActionKind::FocusPaneLeft)
-            | Some(ActionKind::FocusPaneDown)
-            | Some(ActionKind::FocusPaneUp)
-            | Some(ActionKind::FocusPaneRight)
             | Some(ActionKind::ForwardTo(_))
             | Some(ActionKind::BackTo(_))
             | Some(ActionKind::MoveToLineEnd)
@@ -911,9 +871,34 @@ impl Action {
 /// Result of processing a key in a mode.
 #[derive(Debug, Clone, PartialEq)]
 pub enum HandleKeyResult {
-    Complete(Action),
+    Complete(Intent),
     WaitForMore,
     InvalidSequence,
+}
+
+impl HandleKeyResult {
+    /// Creates a completed key handling result from any action or command payload.
+    pub fn complete<T: Into<Intent>>(payload: T) -> Self {
+        HandleKeyResult::Complete(payload.into())
+    }
+}
+
+impl From<Action> for HandleKeyResult {
+    fn from(action: Action) -> Self {
+        HandleKeyResult::Complete(Intent::from(action))
+    }
+}
+
+impl From<Command> for HandleKeyResult {
+    fn from(command: Command) -> Self {
+        HandleKeyResult::Complete(Intent::from(command))
+    }
+}
+
+impl From<Intent> for HandleKeyResult {
+    fn from(intent: Intent) -> Self {
+        HandleKeyResult::Complete(intent)
+    }
 }
 
 /// A resolved dot-repeat replay.

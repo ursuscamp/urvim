@@ -3,6 +3,8 @@
 //! These types provide a unified dispatch envelope that carries either editing
 //! actions or UI orchestration commands.
 
+pub mod floating_window;
+
 use crate::editor::Action;
 use crate::notification::NotificationLevel;
 use crate::terminal::{Event, Key};
@@ -54,6 +56,41 @@ pub enum Intent {
     Command(Command),
 }
 
+impl Intent {
+    /// Creates an intent from any action or command payload.
+    pub fn new<T: Into<Intent>>(payload: T) -> Self {
+        payload.into()
+    }
+
+    /// Returns the contained action, if this is an action intent.
+    pub fn as_action(&self) -> Option<&Action> {
+        match self {
+            Intent::Action(action) => Some(action),
+            Intent::Command(_) => None,
+        }
+    }
+
+    /// Returns the contained command, if this is a command intent.
+    pub fn as_command(&self) -> Option<&Command> {
+        match self {
+            Intent::Action(_) => None,
+            Intent::Command(command) => Some(command),
+        }
+    }
+}
+
+impl From<Action> for Intent {
+    fn from(action: Action) -> Self {
+        Intent::Action(action)
+    }
+}
+
+impl From<Command> for Intent {
+    fn from(command: Command) -> Self {
+        Intent::Command(command)
+    }
+}
+
 /// UI/app orchestration command.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
@@ -64,6 +101,36 @@ pub enum Command {
         /// Notification message text.
         message: String,
     },
+    /// Open the command-line overlay.
+    OpenCommandLine,
+    /// Shrink the focused pane horizontally by the provided count.
+    ResizePaneLeft(usize),
+    /// Grow the focused pane horizontally by the provided count.
+    ResizePaneRight(usize),
+    /// Shrink the focused pane vertically by the provided count.
+    ResizePaneUp(usize),
+    /// Grow the focused pane vertically by the provided count.
+    ResizePaneDown(usize),
+    /// Equalize all split ratios in the layout.
+    EqualizeSplits,
+    /// Toggle visual wrapping for the focused window.
+    ToggleWrap,
+    /// Split the focused pane vertically.
+    SplitVertical,
+    /// Split the focused pane horizontally.
+    SplitHorizontal,
+    /// Focus the pane to the left.
+    FocusPaneLeft,
+    /// Focus the pane below.
+    FocusPaneDown,
+    /// Focus the pane above.
+    FocusPaneUp,
+    /// Focus the pane to the right.
+    FocusPaneRight,
+    /// Close the focused pane.
+    ClosePane,
+    /// Exit the editor.
+    Quit,
 }
 
 /// Widget focus policy.
@@ -125,7 +192,6 @@ pub struct UiContext;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::editor::ActionKind;
 
     #[test]
     fn ui_event_result_reports_handled_state() {
@@ -135,8 +201,7 @@ mod tests {
 
     #[test]
     fn ui_event_result_extracts_intents() {
-        let intents = UiEventResult::Handled(vec![Intent::Action(Action::new(ActionKind::Quit))])
-            .into_intents();
+        let intents = UiEventResult::Handled(vec![Intent::Command(Command::Quit)]).into_intents();
         assert_eq!(intents.len(), 1);
 
         let intents = UiEventResult::NotHandled.into_intents();

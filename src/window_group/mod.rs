@@ -241,6 +241,21 @@ impl WindowGroup {
         self.tabs.len() - 1
     }
 
+    /// Activates the tab for `buffer_id`, or opens a new tab for it when absent.
+    pub fn activate_or_open_buffer(&mut self, buffer_id: BufferId) {
+        let index = self
+            .tab_index_for_buffer_id(buffer_id)
+            .unwrap_or_else(|| self.open_buffer_tab(buffer_id));
+        self.active_tab = index;
+    }
+
+    /// Opens a new unnamed buffer in a new tab and activates it.
+    pub fn open_unnamed_buffer_tab(&mut self) -> BufferId {
+        let buffer_id = crate::globals::with_buffer_pool(|pool| pool.create_buffer());
+        self.active_tab = self.open_buffer_tab(buffer_id);
+        buffer_id
+    }
+
     fn activate_jump_target(&mut self, buffer_id: BufferId, cursor: Cursor) -> bool {
         if !self.active_buffer_exists(buffer_id) {
             return false;

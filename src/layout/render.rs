@@ -10,6 +10,7 @@ use crate::notification;
 use crate::screen::Screen;
 use crate::status_bar::StatusBarContext;
 use crate::terminal::Style;
+use crate::ui::floating_window::{FloatingAnchor, FloatingWindowFrame, render_bordered_frame};
 use crate::window::{Position, Size};
 
 #[derive(Clone, Copy, Default)]
@@ -135,6 +136,51 @@ impl Layout {
             .render(screen, footer_origin, Size::new(1, size.cols), &context);
 
         notification::render_active_banner(screen, origin, size, std::time::Instant::now());
+        self.render_command_line_overlay(screen, origin, size);
+    }
+
+    fn render_command_line_overlay(&mut self, screen: &mut Screen, origin: Position, size: Size) {
+        self.set_command_line_cursor(None);
+        let Some(input) = self.command_line_input() else {
+            return;
+        };
+
+        let border_style: Style = globals::with_active_theme(|theme| {
+            theme
+                .map(|theme| theme.resolve_name_with_default("ui.window.lines.border"))
+                .unwrap_or_default()
+        });
+        let body_style: Style = globals::with_active_theme(|theme| {
+            theme
+                .map(|theme| theme.resolve_name_with_default("ui.window"))
+                .unwrap_or_default()
+        });
+
+        let frame_cols = size.cols.min(55);
+        let content_cols = frame_cols.saturating_sub(2);
+        let frame =
+            FloatingWindowFrame::resolve(origin, size, 1, content_cols, FloatingAnchor::Center);
+        let Some(frame) = frame else {
+            return;
+        };
+
+        let (rendered_text, rendered_width) =
+            super::command_line::command_line_render_text(input, frame.content_size.cols);
+
+        render_bordered_frame(screen, frame, border_style, body_style);
+        screen.write_string(
+            frame.content_origin.row,
+            frame.content_origin.col,
+            border_style,
+            rendered_text.as_str(),
+        );
+
+        let cursor_col = frame
+            .content_origin
+            .col
+            .saturating_add(rendered_width)
+            .min(frame.content_origin.col + frame.content_size.cols.saturating_sub(1));
+        self.set_command_line_cursor(Some(Position::new(frame.content_origin.row, cursor_col)));
     }
 
     fn render_split_borders(&self, screen: &mut Screen, origin: Position, size: Size) {

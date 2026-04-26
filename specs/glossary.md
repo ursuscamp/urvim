@@ -391,6 +391,13 @@ A rendering component that owns a Buffer View and displays its buffer on screen.
 
 **Related Terms:** Tab Group, Buffer, Screen
 
+### Widget
+A reusable UI component that encapsulates its own event handling, layout behavior, focus policy, and rendering lifecycle behind the `Widget` trait.
+
+**Context:** UI composition, overlays, contained UI components, future component reuse
+
+**Related Terms:** UI Event, Intent, Command, Window, Layout
+
 ### Screen
 A double-buffered terminal renderer. Maintains current and previous frame buffers for diff-based rendering - only writes changed cells to the terminal.
 

@@ -13,6 +13,7 @@ urvim is a terminal based text editor.
 - when asked to do a code review, also fix clippy lints
 - create documentation comments for public modules, types and methods
 - keep future changes separated by concern; prefer focused sub-modules over growing mixed-responsibility files
+- for contained UI components, implement them as widgets (avoid ad-hoc layout-managed UI logic)
 - prefer calling trait methods like `value.trait_method()` rather than `TraitType::method(value)`
 - struct methods should be ordered: constructor/new, static methods, getters, setters, public methods, private methods
 - when adding/update vim motions, update docs/motions.md

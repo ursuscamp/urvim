@@ -464,10 +464,6 @@ impl Window {
                     }
                     ActionResult::Handled
                 }
-                Some(ActionKind::ToggleWrap) => {
-                    self.toggle_wrap();
-                    ActionResult::Handled
-                }
                 Some(ActionKind::MoveToPreviousParagraph) => {
                     self.move_cursor_to_previous_paragraph();
                     ActionResult::Handled
@@ -582,8 +578,7 @@ impl Window {
                 Some(ActionKind::Operation(op, target)) => {
                     return self.handle_operation(op, target, action.from_mode, action.register);
                 }
-                Some(ActionKind::Quit)
-                | Some(ActionKind::Undo)
+                Some(ActionKind::Undo)
                 | Some(ActionKind::Redo)
                 | Some(ActionKind::SaveBuffer(_))
                 | Some(ActionKind::RepeatLastChange)
@@ -591,18 +586,6 @@ impl Window {
                 | Some(ActionKind::JumpForward)
                 | Some(ActionKind::PreviousTab)
                 | Some(ActionKind::NextTab)
-                | Some(ActionKind::SplitVertical)
-                | Some(ActionKind::SplitHorizontal)
-                | Some(ActionKind::FocusPaneLeft)
-                | Some(ActionKind::FocusPaneDown)
-                | Some(ActionKind::FocusPaneUp)
-                | Some(ActionKind::FocusPaneRight)
-                | Some(ActionKind::ResizePaneLeft)
-                | Some(ActionKind::ResizePaneRight)
-                | Some(ActionKind::ResizePaneUp)
-                | Some(ActionKind::ResizePaneDown)
-                | Some(ActionKind::EqualizeSplits)
-                | Some(ActionKind::ClosePane)
                 | None => ActionResult::NotHandled,
             };
 

@@ -1,5 +1,6 @@
-use super::{Action, ActionKind, HandleKeyResult, Mode, ModeKind};
+use super::{Action, HandleKeyResult, Mode, ModeKind};
 use crate::terminal::{CursorStyle, Key};
+use crate::ui::Command;
 
 /// Pane resizing mode for split-layout adjustments.
 pub struct ResizingMode;
@@ -16,37 +17,32 @@ impl ResizingMode {
         Self
     }
 
-    fn resize_action(kind: ActionKind, larger_step: bool) -> Action {
-        let action = Action::new(kind);
-        if larger_step {
-            Action::count(5, Box::new(action))
-        } else {
-            action
-        }
-    }
-
-    fn action_for_key(&self, key: &Key) -> HandleKeyResult {
-        let action = match key.canonical_string().as_str() {
-            "h" => Self::resize_action(ActionKind::ResizePaneLeft, false),
-            "H" => Self::resize_action(ActionKind::ResizePaneLeft, true),
-            "l" => Self::resize_action(ActionKind::ResizePaneRight, false),
-            "L" => Self::resize_action(ActionKind::ResizePaneRight, true),
-            "j" => Self::resize_action(ActionKind::ResizePaneDown, false),
-            "J" => Self::resize_action(ActionKind::ResizePaneDown, true),
-            "k" => Self::resize_action(ActionKind::ResizePaneUp, false),
-            "K" => Self::resize_action(ActionKind::ResizePaneUp, true),
-            "=" => Action::new(ActionKind::EqualizeSplits),
-            "<Esc>" => Action::mode_transition(ModeKind::Normal),
+    fn command_for_key(&self, key: &Key) -> HandleKeyResult {
+        let intent = match key.canonical_string().as_str() {
+            "h" => Command::ResizePaneLeft(1),
+            "H" => Command::ResizePaneLeft(5),
+            "l" => Command::ResizePaneRight(1),
+            "L" => Command::ResizePaneRight(5),
+            "j" => Command::ResizePaneDown(1),
+            "J" => Command::ResizePaneDown(5),
+            "k" => Command::ResizePaneUp(1),
+            "K" => Command::ResizePaneUp(5),
+            "=" => Command::EqualizeSplits,
+            "<Esc>" => {
+                return HandleKeyResult::complete(
+                    Action::mode_transition(ModeKind::Normal).with_from_mode(ModeKind::Resizing),
+                );
+            }
             _ => return HandleKeyResult::InvalidSequence,
         };
 
-        HandleKeyResult::Complete(action.with_from_mode(ModeKind::Resizing))
+        HandleKeyResult::complete(intent)
     }
 }
 
 impl Mode for ResizingMode {
     fn handle_key(&mut self, key: &Key) -> HandleKeyResult {
-        self.action_for_key(key)
+        self.command_for_key(key)
     }
 
     fn cursor_style(&self) -> CursorStyle {

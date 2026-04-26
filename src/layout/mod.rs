@@ -4,13 +4,15 @@
 //! tree of pane-hosted window groups, routes split-management actions, and renders
 //! a footer status bar below the active editor region.
 
+mod command_line;
 mod geometry;
 mod node;
 mod render;
 mod tree;
 
+use self::command_line::CommandLineState;
 use crate::action::ActionResult;
-use crate::editor::{Action, ActionKind, ModeKind};
+use crate::editor::{Action, ModeKind};
 use crate::screen::Screen;
 use crate::status_bar::StatusBar;
 use crate::terminal::CursorStyle;
@@ -34,6 +36,9 @@ pub struct Layout {
     status_bar: StatusBar,
     origin: Position,
     size: Size,
+    command_line: CommandLineState,
+    command_line_open: bool,
+    command_line_cursor: Option<Position>,
 }
 
 impl Layout {
@@ -47,6 +52,9 @@ impl Layout {
             status_bar: StatusBar::new(),
             origin: Position::default(),
             size: Size::default(),
+            command_line: CommandLineState::new(),
+            command_line_open: false,
+            command_line_cursor: None,
         }
     }
 
@@ -149,6 +157,10 @@ impl Layout {
 
     /// Returns the visual cursor for the focused pane, if any.
     pub fn visual_cursor(&self) -> Option<Position> {
+        if let Some(position) = self.command_line_cursor {
+            return Some(position);
+        }
+
         let pane_region = self.pane_region(self.focused_pane)?;
         let mut pos = self.active_window_group().visual_cursor()?;
         pos.row = pos.row.saturating_add(pane_region.origin.row);
@@ -176,6 +188,41 @@ impl Layout {
             Command::EnqueueNotification { level, message } => {
                 crate::globals::enqueue_notification(*level, message.clone())
             }
+            Command::OpenCommandLine => {
+                self.open_command_line();
+                true
+            }
+            Command::ResizePaneLeft(count) => {
+                self.resize_counted_pane(*count, SplitAxis::Vertical, ResizeDirection::Left)
+            }
+            Command::ResizePaneRight(count) => {
+                self.resize_counted_pane(*count, SplitAxis::Vertical, ResizeDirection::Right)
+            }
+            Command::ResizePaneUp(count) => {
+                self.resize_counted_pane(*count, SplitAxis::Horizontal, ResizeDirection::Up)
+            }
+            Command::ResizePaneDown(count) => {
+                self.resize_counted_pane(*count, SplitAxis::Horizontal, ResizeDirection::Down)
+            }
+            Command::EqualizeSplits => self.equalize_splits(),
+            Command::ToggleWrap => {
+                if self.should_exit() {
+                    false
+                } else {
+                    self.active_window_group_mut()
+                        .active_window_mut()
+                        .toggle_wrap();
+                    true
+                }
+            }
+            Command::SplitVertical => self.split_focused_pane(SplitAxis::Vertical),
+            Command::SplitHorizontal => self.split_focused_pane(SplitAxis::Horizontal),
+            Command::FocusPaneLeft => self.move_focus(geometry::FocusDirection::Left),
+            Command::FocusPaneDown => self.move_focus(geometry::FocusDirection::Down),
+            Command::FocusPaneUp => self.move_focus(geometry::FocusDirection::Up),
+            Command::FocusPaneRight => self.move_focus(geometry::FocusDirection::Right),
+            Command::ClosePane => self.close_focused_pane(),
+            Command::Quit => true,
         }
     }
 
@@ -183,37 +230,6 @@ impl Layout {
     pub fn dispatch_action(&mut self, action: &Action) -> bool {
         self.prune_empty_panes();
         match action.kind.as_ref() {
-            Some(ActionKind::SplitVertical) => self.split_focused_pane(SplitAxis::Vertical),
-            Some(ActionKind::SplitHorizontal) => self.split_focused_pane(SplitAxis::Horizontal),
-            Some(ActionKind::FocusPaneLeft) => self.move_focus(geometry::FocusDirection::Left),
-            Some(ActionKind::FocusPaneDown) => self.move_focus(geometry::FocusDirection::Down),
-            Some(ActionKind::FocusPaneUp) => self.move_focus(geometry::FocusDirection::Up),
-            Some(ActionKind::FocusPaneRight) => self.move_focus(geometry::FocusDirection::Right),
-            Some(ActionKind::ResizePaneLeft) => {
-                self.resize_focused_pane(SplitAxis::Vertical, ResizeDirection::Left)
-            }
-            Some(ActionKind::ResizePaneRight) => {
-                self.resize_focused_pane(SplitAxis::Vertical, ResizeDirection::Right)
-            }
-            Some(ActionKind::ResizePaneUp) => {
-                self.resize_focused_pane(SplitAxis::Horizontal, ResizeDirection::Up)
-            }
-            Some(ActionKind::ResizePaneDown) => {
-                self.resize_focused_pane(SplitAxis::Horizontal, ResizeDirection::Down)
-            }
-            Some(ActionKind::Count(count, inner))
-                if matches!(
-                    inner.kind.as_ref(),
-                    Some(ActionKind::ResizePaneLeft)
-                        | Some(ActionKind::ResizePaneRight)
-                        | Some(ActionKind::ResizePaneUp)
-                        | Some(ActionKind::ResizePaneDown)
-                ) =>
-            {
-                self.resize_counted_pane(*count, inner.as_ref())
-            }
-            Some(ActionKind::EqualizeSplits) => self.equalize_splits(),
-            Some(ActionKind::ClosePane) => self.close_focused_pane(),
             _ => {
                 if self.should_exit() {
                     false
@@ -261,9 +277,21 @@ impl Layout {
                     UiEventResult::NotHandled
                 }
             }
-            UiEvent::Key(_) | UiEvent::Paste(_) | UiEvent::Resize(_, _) => {
-                UiEventResult::NotHandled
+            UiEvent::Key(key) => {
+                if self.command_line_should_capture_events() {
+                    self.handle_command_line_key(key)
+                } else {
+                    UiEventResult::NotHandled
+                }
             }
+            UiEvent::Paste(text) => {
+                if self.command_line_should_capture_events() {
+                    self.handle_command_line_paste(text.as_str())
+                } else {
+                    UiEventResult::NotHandled
+                }
+            }
+            UiEvent::Resize(_, _) => UiEventResult::NotHandled,
         }
     }
 
@@ -282,24 +310,15 @@ impl Layout {
         }
     }
 
-    fn resize_counted_pane(&mut self, count: usize, action: &Action) -> bool {
+    fn resize_counted_pane(
+        &mut self,
+        count: usize,
+        axis: SplitAxis,
+        direction: ResizeDirection,
+    ) -> bool {
         let mut handled = false;
         for _ in 0..count {
-            handled |= match action.kind.as_ref() {
-                Some(ActionKind::ResizePaneLeft) => {
-                    self.resize_focused_pane(SplitAxis::Vertical, ResizeDirection::Left)
-                }
-                Some(ActionKind::ResizePaneRight) => {
-                    self.resize_focused_pane(SplitAxis::Vertical, ResizeDirection::Right)
-                }
-                Some(ActionKind::ResizePaneUp) => {
-                    self.resize_focused_pane(SplitAxis::Horizontal, ResizeDirection::Up)
-                }
-                Some(ActionKind::ResizePaneDown) => {
-                    self.resize_focused_pane(SplitAxis::Horizontal, ResizeDirection::Down)
-                }
-                _ => false,
-            };
+            handled |= self.resize_focused_pane(axis, direction);
         }
 
         handled

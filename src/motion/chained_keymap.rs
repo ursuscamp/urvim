@@ -3,7 +3,8 @@
 //! This module provides a keymap wrapper that tries multiple sub-keymaps
 //! in order until one returns a non-None result.
 
-use crate::editor::{Action, Keymap};
+use crate::editor::Keymap;
+use crate::ui::Intent;
 
 /// A keymap wrapper that chains multiple keymaps together.
 ///
@@ -39,10 +40,10 @@ impl ChainedKeymap {
 }
 
 impl Keymap for ChainedKeymap {
-    fn get_action(&self, keys: &[String]) -> Option<Action> {
+    fn get_action(&self, keys: &[String]) -> Option<Intent> {
         for keymap in &self.keymaps {
-            if let Some(action) = keymap.get_action(keys) {
-                return Some(action);
+            if let Some(intent) = keymap.get_action(keys) {
+                return Some(intent);
             }
         }
         None
@@ -70,8 +71,7 @@ impl Keymap for ChainedKeymap {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::editor::ActionKind;
-    use crate::editor::TrieKeymap;
+    use crate::editor::{Action, ActionKind, TrieKeymap};
     use crate::motion::char_scan_keymap::CharScanKeymap;
 
     #[test]
@@ -85,7 +85,7 @@ mod tests {
 
         // gg should match trie first
         let action = chained.get_action(&["g".to_string(), "g".to_string()]);
-        assert_eq!(action, Some(Action::new(ActionKind::MoveUp)));
+        assert_eq!(action, Some(Action::new(ActionKind::MoveUp).into()));
     }
 
     #[test]
@@ -98,7 +98,7 @@ mod tests {
 
         // fx should fall back to char scan
         let action = chained.get_action(&["f".to_string(), "x".to_string()]);
-        assert_eq!(action, Some(Action::find_forward('x')));
+        assert_eq!(action, Some(Action::find_forward('x').into()));
     }
 
     #[test]

@@ -1,177 +1,24 @@
-//! Notification primitives for user-facing runtime messages.
-//!
-//! This module provides queue-backed notification state, top-right floating
-//! popup rendering, and helper APIs used by notification macros.
+//! Notification banner rendering.
 
 use crate::globals;
 use crate::screen::Screen;
 use crate::terminal::{Color, Style};
 use crate::ui::floating_window::{FloatingAnchor, FloatingWindowFrame, render_bordered_frame};
 use crate::window::{Position, Size};
-use std::collections::VecDeque;
-use std::time::{Duration, Instant};
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
-const NORMAL_TTL: Duration = Duration::from_secs(3);
-const BACKLOG_TTL: Duration = Duration::from_secs(1);
+use super::{NotificationLevel, NotificationMessage};
+
 const MAX_POPUP_CONTENT_WIDTH: usize = 48;
 
-/// Notification severity level.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum NotificationLevel {
-    /// Informational notification.
-    Info,
-    /// Warning notification.
-    Warn,
-    /// Error notification.
-    Error,
-}
-
-/// A notification currently shown to the user.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct NotificationMessage {
-    /// Notification severity.
-    pub level: NotificationLevel,
-    /// Rendered notification text.
-    pub text: String,
-    /// Message creation timestamp.
-    pub created_at: Instant,
-    /// Timestamp at which the message expires.
-    pub expires_at: Instant,
-}
-
-impl NotificationMessage {
-    /// Creates a notification message with an explicit TTL.
-    pub fn new(level: NotificationLevel, text: String, created_at: Instant, ttl: Duration) -> Self {
-        Self {
-            level,
-            text,
-            created_at,
-            expires_at: created_at + ttl,
-        }
-    }
-
-    /// Returns true when this message is expired at `now`.
-    pub fn expired(&self, now: Instant) -> bool {
-        now >= self.expires_at
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct PendingNotification {
-    level: NotificationLevel,
-    text: String,
-    created_at: Instant,
-    backlog_ttl: bool,
-}
-
-/// In-memory notification queue state.
-#[derive(Debug, Default)]
-pub struct NotificationState {
-    active: Option<NotificationMessage>,
-    pending: VecDeque<PendingNotification>,
-    redraw_requested: bool,
-}
-
-impl NotificationState {
-    /// Creates an empty notification queue state.
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Returns the active notification, if one is currently displayed.
-    pub fn active(&self) -> Option<&NotificationMessage> {
-        self.active.as_ref()
-    }
-
-    /// Returns the number of queued pending notifications.
-    pub fn pending_len(&self) -> usize {
-        self.pending.len()
-    }
-
-    /// Enqueues a notification message.
-    ///
-    /// Empty or whitespace-only messages are ignored.
-    pub fn enqueue(&mut self, level: NotificationLevel, text: String, now: Instant) -> bool {
-        if text.trim().is_empty() {
-            return false;
-        }
-
-        if self.active.is_none() {
-            self.active = Some(NotificationMessage::new(level, text, now, NORMAL_TTL));
-            self.redraw_requested = true;
-            return true;
-        }
-
-        let pending = PendingNotification {
-            level,
-            text,
-            created_at: now,
-            backlog_ttl: true,
-        };
-
-        self.pending.push_back(pending);
-        self.redraw_requested = true;
-        true
-    }
-
-    /// Prunes expired active notifications and advances the queue.
-    pub fn prune_and_advance(&mut self, now: Instant) -> bool {
-        let mut changed = false;
-
-        while self
-            .active
-            .as_ref()
-            .is_some_and(|active| active.expired(now))
-        {
-            changed = true;
-            if let Some(next) = self.pending.pop_front() {
-                let ttl = if next.backlog_ttl {
-                    BACKLOG_TTL
-                } else {
-                    NORMAL_TTL
-                };
-                self.active = Some(NotificationMessage::new(next.level, next.text, now, ttl));
-            } else {
-                self.active = None;
-            }
-        }
-
-        if changed {
-            self.redraw_requested = true;
-        }
-
-        changed
-    }
-
-    /// Clears active and pending notifications.
-    pub fn clear(&mut self) {
-        self.active = None;
-        self.pending.clear();
-        self.redraw_requested = false;
-    }
-
-    /// Requests a redraw for the notification surface.
-    pub fn request_redraw(&mut self) {
-        self.redraw_requested = true;
-    }
-
-    /// Returns and clears the redraw-requested flag.
-    pub fn take_redraw_requested(&mut self) -> bool {
-        let requested = self.redraw_requested;
-        self.redraw_requested = false;
-        requested
-    }
-}
-
-/// Logs and enqueues a user-facing notification.
-pub fn notify_message(level: NotificationLevel, message: String) {
-    globals::enqueue_notification(level, message);
-}
-
 /// Renders the currently active notification as a top-right floating popup.
-pub fn render_active_banner(screen: &mut Screen, origin: Position, size: Size, now: Instant) {
+pub fn render_active_banner(
+    screen: &mut Screen,
+    origin: Position,
+    size: Size,
+    now: std::time::Instant,
+) {
     if size.rows < 3 || size.cols < 3 {
         return;
     }
@@ -371,111 +218,6 @@ struct GraphemeSlice {
 mod tests {
     use super::*;
     use crate::config::Config;
-    use crate::screen::Screen;
-    use crate::window::{Position, Size};
-
-    #[test]
-    fn enqueue_sets_active_message() {
-        let mut state = NotificationState::new();
-        let now = Instant::now();
-
-        assert!(state.enqueue(NotificationLevel::Info, "Saved".to_string(), now));
-        let active = state.active().expect("active notification");
-        assert_eq!(active.text, "Saved");
-        assert_eq!(active.level, NotificationLevel::Info);
-        assert!(active.expires_at.duration_since(active.created_at) >= NORMAL_TTL);
-    }
-
-    #[test]
-    fn enqueue_multiple_messages_keeps_fifo_pending() {
-        let mut state = NotificationState::new();
-        let now = Instant::now();
-
-        assert!(state.enqueue(NotificationLevel::Info, "one".to_string(), now));
-        assert!(state.enqueue(NotificationLevel::Warn, "two".to_string(), now));
-        assert!(state.enqueue(NotificationLevel::Error, "three".to_string(), now));
-
-        assert_eq!(state.pending_len(), 2);
-        assert_eq!(
-            state.active().map(|message| message.text.as_str()),
-            Some("one")
-        );
-    }
-
-    #[test]
-    fn prune_advances_queue_in_order() {
-        let mut state = NotificationState::new();
-        let now = Instant::now();
-        assert!(state.enqueue(NotificationLevel::Info, "one".to_string(), now));
-        assert!(state.enqueue(NotificationLevel::Warn, "two".to_string(), now));
-
-        let first_expiry = state.active().expect("active").expires_at;
-        assert!(state.prune_and_advance(first_expiry));
-        assert_eq!(
-            state.active().map(|message| message.text.as_str()),
-            Some("two")
-        );
-
-        let second_expiry = state.active().expect("active").expires_at;
-        assert!(state.prune_and_advance(second_expiry));
-        assert!(state.active().is_none());
-    }
-
-    #[test]
-    fn backlog_messages_use_shorter_ttl() {
-        let mut state = NotificationState::new();
-        let now = Instant::now();
-
-        assert!(state.enqueue(NotificationLevel::Info, "one".to_string(), now));
-        assert!(state.enqueue(NotificationLevel::Warn, "two".to_string(), now));
-        assert!(state.enqueue(NotificationLevel::Error, "three".to_string(), now));
-
-        let first_expiry = state.active().expect("active").expires_at;
-        assert!(state.prune_and_advance(first_expiry));
-
-        let second = state.active().expect("active");
-        assert_eq!(
-            second.expires_at.duration_since(second.created_at),
-            BACKLOG_TTL
-        );
-    }
-
-    #[test]
-    fn empty_messages_are_ignored() {
-        let mut state = NotificationState::new();
-
-        assert!(!state.enqueue(NotificationLevel::Info, "   ".to_string(), Instant::now()));
-        assert!(state.active().is_none());
-    }
-
-    #[test]
-    fn backlog_messages_keep_short_ttl_until_queue_clears() {
-        let mut state = NotificationState::new();
-        let now = Instant::now();
-
-        assert!(state.enqueue(NotificationLevel::Info, "one".to_string(), now));
-        assert!(state.enqueue(NotificationLevel::Warn, "two".to_string(), now));
-
-        let first_expiry = state.active().expect("active").expires_at;
-        assert!(state.prune_and_advance(first_expiry));
-        let second = state.active().expect("active");
-        assert_eq!(
-            second.expires_at.duration_since(second.created_at),
-            BACKLOG_TTL
-        );
-
-        let second_expiry = second.expires_at;
-        assert!(state.prune_and_advance(second_expiry));
-        assert!(state.active().is_none());
-
-        let after_clear = second_expiry + Duration::from_millis(10);
-        assert!(state.enqueue(NotificationLevel::Info, "three".to_string(), after_clear));
-        let third = state.active().expect("active");
-        assert_eq!(
-            third.expires_at.duration_since(third.created_at),
-            NORMAL_TTL
-        );
-    }
 
     #[test]
     fn wrap_notification_text_prefers_whitespace_boundaries() {
@@ -497,8 +239,8 @@ mod tests {
         let message = NotificationMessage::new(
             NotificationLevel::Info,
             "ok".to_string(),
-            Instant::now(),
-            Duration::from_secs(3),
+            std::time::Instant::now(),
+            std::time::Duration::from_secs(3),
         );
         let mut screen = Screen::new(4, 8);
         render_notification_popup(&mut screen, Position::new(0, 0), Size::new(4, 8), &message);
@@ -535,8 +277,8 @@ mod tests {
         let message = NotificationMessage::new(
             NotificationLevel::Warn,
             "hello world".to_string(),
-            Instant::now(),
-            Duration::from_secs(3),
+            std::time::Instant::now(),
+            std::time::Duration::from_secs(3),
         );
         let mut screen = Screen::new(5, 12);
         render_notification_popup(&mut screen, Position::new(0, 0), Size::new(5, 12), &message);

@@ -2440,16 +2440,10 @@ fn test_toggle_wrap_action_toggles_window_state() {
     let mut window = Window::new(Buffer::from_str("line"));
     assert!(!window.wrap_enabled());
 
-    assert_eq!(
-        window.dispatch_action(&Action::new(ActionKind::ToggleWrap)),
-        ActionResult::Handled
-    );
+    window.toggle_wrap();
     assert!(window.wrap_enabled());
 
-    assert_eq!(
-        window.dispatch_action(&Action::new(ActionKind::ToggleWrap)),
-        ActionResult::Handled
-    );
+    window.toggle_wrap();
     assert!(!window.wrap_enabled());
 }
 

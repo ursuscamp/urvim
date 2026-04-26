@@ -1,11 +1,11 @@
-use super::Action;
+use crate::ui::Intent;
 use std::collections::BTreeMap;
 use std::fmt;
 
-/// A mapping from key sequences to actions.
+/// A mapping from key sequences to intents.
 pub trait Keymap {
-    /// Returns the action for an exact key sequence, if present.
-    fn get_action(&self, keys: &[String]) -> Option<Action>;
+    /// Returns the intent for an exact key sequence, if present.
+    fn get_action(&self, keys: &[String]) -> Option<Intent>;
     /// Returns `true` when the key sequence is a prefix of at least one binding.
     fn is_prefix(&self, keys: &[String]) -> bool;
     /// Returns `true` when the key sequence has one or more child bindings.
@@ -45,14 +45,14 @@ pub(super) fn extract_leading_count(keys: &[String]) -> (usize, Vec<String>) {
 
 struct TrieNode {
     children: BTreeMap<String, TrieNode>,
-    action: Option<Action>,
+    intent: Option<Intent>,
 }
 
 impl TrieNode {
     fn new() -> Self {
         Self {
             children: BTreeMap::new(),
-            action: None,
+            intent: None,
         }
     }
 }
@@ -71,21 +71,21 @@ impl TrieKeymap {
     }
 
     /// Inserts a single-key binding.
-    pub fn insert(&mut self, key: String, action: Action) {
-        self.insert_str(&key, action);
+    pub fn insert<T: Into<Intent>>(&mut self, key: String, intent: T) {
+        self.insert_str(&key, intent);
     }
 
     /// Inserts a binding from a canonical key string.
     ///
     /// The string uses the same canonical notation produced by
     /// `Key::canonical_string()`.
-    pub fn insert_str(&mut self, keys: &str, action: Action) {
+    pub fn insert_str<T: Into<Intent>>(&mut self, keys: &str, intent: T) {
         let parsed = validate_key_string(keys).expect("invalid canonical key string");
-        self.insert_sequence(parsed, action);
+        self.insert_sequence(parsed, intent);
     }
 
     /// Inserts a multi-key binding from an already parsed sequence.
-    pub fn insert_sequence(&mut self, keys: Vec<String>, action: Action) {
+    pub fn insert_sequence<T: Into<Intent>>(&mut self, keys: Vec<String>, intent: T) {
         let mut current = &mut self.root;
         for key in &keys {
             current = current
@@ -93,11 +93,11 @@ impl TrieKeymap {
                 .entry(key.clone())
                 .or_insert_with(TrieNode::new);
         }
-        current.action = Some(action);
+        current.intent = Some(intent.into());
     }
 
-    /// Returns the action bound to an exact key sequence.
-    pub fn get_action(&self, keys: &[String]) -> Option<Action> {
+    /// Returns the intent bound to an exact key sequence.
+    pub fn get_action(&self, keys: &[String]) -> Option<Intent> {
         let mut current = &self.root;
         for key in keys {
             match current.children.get(key) {
@@ -105,7 +105,7 @@ impl TrieKeymap {
                 None => return None,
             }
         }
-        current.action.clone()
+        current.intent.clone()
     }
 
     /// Returns `true` if the provided key sequence is a valid prefix in the trie.
@@ -117,7 +117,7 @@ impl TrieKeymap {
                 None => return false,
             }
         }
-        !current.children.is_empty() || current.action.is_some()
+        !current.children.is_empty() || current.intent.is_some()
     }
 
     /// Returns `true` if the provided key sequence has at least one child binding.
@@ -134,7 +134,7 @@ impl TrieKeymap {
 }
 
 impl Keymap for TrieKeymap {
-    fn get_action(&self, keys: &[String]) -> Option<Action> {
+    fn get_action(&self, keys: &[String]) -> Option<Intent> {
         TrieKeymap::get_action(self, keys)
     }
 
@@ -282,7 +282,7 @@ impl CountParser {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::editor::ActionKind;
+    use crate::editor::{Action, ActionKind};
 
     #[test]
     fn test_parse_key_string_single_key() {
@@ -323,7 +323,7 @@ mod tests {
 
         assert_eq!(
             keymap.get_action(&["g".to_string(), "g".to_string()]),
-            Some(Action::new(ActionKind::MoveUp))
+            Some(Action::new(ActionKind::MoveUp).into())
         );
     }
 

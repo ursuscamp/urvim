@@ -4,6 +4,7 @@ use crate::editor::{
     Action, ActionKind, BoundaryMotion, BracketKind, LinewiseMotion, ModeKind, Operator,
     OperatorTarget, QuoteKind, TextObject, TrieKeymap,
 };
+use crate::ui::Command;
 
 #[derive(Clone, Copy)]
 struct OperatorSequenceSpec {
@@ -133,15 +134,15 @@ fn register_mode_bindings(trie_keymap: &mut TrieKeymap) {
 fn register_window_bindings(trie_keymap: &mut TrieKeymap) {
     trie_keymap.insert_str("<C-o>", Action::jump_backward());
     trie_keymap.insert_str("<C-i>", Action::jump_forward());
-    trie_keymap.insert_str("<C-w>v", Action::new(ActionKind::SplitVertical));
-    trie_keymap.insert_str("<C-w>s", Action::new(ActionKind::SplitHorizontal));
-    trie_keymap.insert_str("<C-w>h", Action::new(ActionKind::FocusPaneLeft));
-    trie_keymap.insert_str("<C-w>j", Action::new(ActionKind::FocusPaneDown));
-    trie_keymap.insert_str("<C-w>k", Action::new(ActionKind::FocusPaneUp));
-    trie_keymap.insert_str("<C-w>l", Action::new(ActionKind::FocusPaneRight));
-    trie_keymap.insert_str("<C-w>q", Action::new(ActionKind::ClosePane));
-    trie_keymap.insert_str("<C-w>=", Action::new(ActionKind::EqualizeSplits));
-    trie_keymap.insert_str("<C-w>w", Action::new(ActionKind::ToggleWrap));
+    trie_keymap.insert_str("<C-w>v", Command::SplitVertical);
+    trie_keymap.insert_str("<C-w>s", Command::SplitHorizontal);
+    trie_keymap.insert_str("<C-w>h", Command::FocusPaneLeft);
+    trie_keymap.insert_str("<C-w>j", Command::FocusPaneDown);
+    trie_keymap.insert_str("<C-w>k", Command::FocusPaneUp);
+    trie_keymap.insert_str("<C-w>l", Command::FocusPaneRight);
+    trie_keymap.insert_str("<C-w>q", Command::ClosePane);
+    trie_keymap.insert_str("<C-w>=", Command::EqualizeSplits);
+    trie_keymap.insert_str("<C-w>w", Command::ToggleWrap);
     trie_keymap.insert_str("<C-w>r", Action::mode_transition(ModeKind::Resizing));
 }
 
@@ -387,10 +388,11 @@ fn register_misc_bindings(trie_keymap: &mut TrieKeymap) {
     trie_keymap.insert_str("%", Action::new(ActionKind::MoveToMatchingBracket));
     trie_keymap.insert_str(";", Action::new(ActionKind::RepeatLastFind));
     trie_keymap.insert_str(",", Action::new(ActionKind::RepeatLastFindReverse));
-    trie_keymap.insert_str("<C-q>", Action::new(ActionKind::Quit));
+    trie_keymap.insert_str("<C-q>", Command::Quit);
     trie_keymap.insert_str("u", Action::new(ActionKind::Undo));
     trie_keymap.insert_str("U", Action::new(ActionKind::Redo));
     trie_keymap.insert_str(".", Action::new(ActionKind::RepeatLastChange));
+    trie_keymap.insert_str(":", Command::OpenCommandLine);
     trie_keymap.insert_str("<Left>", Action::new(ActionKind::MoveLeft));
     trie_keymap.insert_str("<Down>", Action::new(ActionKind::MoveDown));
     trie_keymap.insert_str("<Up>", Action::new(ActionKind::MoveUp));

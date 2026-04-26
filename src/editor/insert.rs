@@ -5,6 +5,7 @@ use crate::editor::pairs;
 use crate::editor::validate_key_string;
 use crate::globals;
 use crate::terminal::{CursorStyle, Key, KeyCode};
+use crate::ui::Command;
 
 /// Insert mode for text input.
 pub struct InsertMode {
@@ -24,7 +25,7 @@ impl InsertMode {
     pub fn new() -> Self {
         let mut keymap = TrieKeymap::new();
         keymap.insert_str("<Esc>", Action::mode_transition(ModeKind::Normal));
-        keymap.insert_str("<C-q>", Action::new(ActionKind::Quit));
+        keymap.insert_str("<C-q>", Command::Quit);
         keymap.insert_str("<C-s>", Action::save_buffer(None));
         keymap.insert_str("<Left>", Action::new(ActionKind::MoveLeft));
         keymap.insert_str("<Down>", Action::new(ActionKind::MoveDown));
@@ -260,7 +261,7 @@ impl Mode for InsertMode {
         if key.code == KeyCode::Esc {
             self.buffer.clear();
             self.waiting = false;
-            return HandleKeyResult::Complete(
+            return HandleKeyResult::complete(
                 Action::mode_transition(ModeKind::Normal).with_from_mode(ModeKind::Insert),
             );
         }
@@ -270,7 +271,7 @@ impl Mode for InsertMode {
             self.waiting = false;
             let action = Action::insert_newline().with_from_mode(ModeKind::Insert);
             self.record_action(&action);
-            return HandleKeyResult::Complete(action);
+            return HandleKeyResult::complete(action);
         }
 
         if key.code == KeyCode::Tab && !key.modifiers.has_shift() {
@@ -279,17 +280,21 @@ impl Mode for InsertMode {
             let action =
                 Action::insert_text(self.insert_tab_text()).with_from_mode(ModeKind::Insert);
             self.record_action(&action);
-            return HandleKeyResult::Complete(action);
+            return HandleKeyResult::complete(action);
         }
 
         let key_str = key.canonical_string();
         let prior_buffer = self.buffer.clone();
         self.buffer.push(key_str);
-        if let Some(action) = self.keymap.get_action(&self.buffer) {
+        if let Some(intent) = self.keymap.get_action(&self.buffer) {
             self.buffer.clear();
             self.waiting = false;
-            self.record_action(&action);
-            return HandleKeyResult::Complete(action.with_from_mode(ModeKind::Insert));
+            if let Some(action) = intent.as_action().cloned() {
+                self.record_action(&action);
+                return HandleKeyResult::complete(action.with_from_mode(ModeKind::Insert));
+            }
+
+            return HandleKeyResult::complete(intent);
         }
 
         if self.keymap.is_prefix(&self.buffer) {
@@ -308,7 +313,7 @@ impl Mode for InsertMode {
             inserted.push_str(&self.insert_text_for_char(c));
             let action = Action::insert_text(inserted).with_from_mode(ModeKind::Insert);
             self.record_action(&action);
-            return HandleKeyResult::Complete(action);
+            return HandleKeyResult::complete(action);
         }
 
         if let KeyCode::Char(c) = key.code
@@ -320,7 +325,7 @@ impl Mode for InsertMode {
                 .insert_action_for_char(c)
                 .with_from_mode(ModeKind::Insert);
             self.record_action(&action);
-            return HandleKeyResult::Complete(action);
+            return HandleKeyResult::complete(action);
         }
 
         self.buffer.clear();

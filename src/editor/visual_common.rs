@@ -34,7 +34,7 @@ impl VisualModeState {
     pub(super) fn handle_key(&mut self, key: &Key) -> HandleKeyResult {
         if key.code == KeyCode::Esc {
             self.clear_buffer();
-            return HandleKeyResult::Complete(
+            return HandleKeyResult::complete(
                 Action::mode_transition(ModeKind::Normal).with_from_mode(self.mode_kind),
             );
         }
@@ -60,10 +60,10 @@ impl VisualModeState {
                 self.waiting = true;
                 HandleKeyResult::WaitForMore
             }
-            HandleKeyResult::Complete(action) => {
+            HandleKeyResult::Complete(intent) => {
                 self.buffer.clear();
                 self.waiting = false;
-                HandleKeyResult::Complete(action)
+                HandleKeyResult::Complete(intent)
             }
             HandleKeyResult::InvalidSequence => {
                 self.buffer.clear();
@@ -147,25 +147,34 @@ impl VisualModeState {
         } else {
             count
         };
-        if let Some(mut action) = self.keymap.get_action(&action_keys) {
+        if let Some(intent) = self.keymap.get_action(&action_keys) {
             if self.keymap.has_children(&action_keys) {
                 return HandleKeyResult::WaitForMore;
             }
 
+            let Some(action) = intent.as_action().cloned() else {
+                return if leading_count > 0 || register_prefix.is_some() {
+                    HandleKeyResult::InvalidSequence
+                } else {
+                    HandleKeyResult::complete(intent)
+                };
+            };
+
+            let mut action = action;
             if let Some(register) = register_prefix {
                 action = action.with_register(register);
             }
 
             if Self::ignores_count_wrapping(&action) {
-                return HandleKeyResult::Complete(action.with_from_mode(self.mode_kind));
+                return HandleKeyResult::complete(action.with_from_mode(self.mode_kind));
             }
 
             if total_count > 1
                 && let Some(counted_action) = action.clone().with_count(total_count)
             {
-                return HandleKeyResult::Complete(counted_action.with_from_mode(self.mode_kind));
+                return HandleKeyResult::complete(counted_action.with_from_mode(self.mode_kind));
             }
-            return HandleKeyResult::Complete(action.with_from_mode(self.mode_kind));
+            return HandleKeyResult::complete(action.with_from_mode(self.mode_kind));
         }
 
         if self.keymap.is_prefix(&action_keys) || leading_count > 0 || register_prefix.is_some() {
