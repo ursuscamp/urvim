@@ -388,7 +388,7 @@ fn register_misc_bindings(trie_keymap: &mut TrieKeymap) {
     trie_keymap.insert_str("%", Action::new(ActionKind::MoveToMatchingBracket));
     trie_keymap.insert_str(";", Action::new(ActionKind::RepeatLastFind));
     trie_keymap.insert_str(",", Action::new(ActionKind::RepeatLastFindReverse));
-    trie_keymap.insert_str("<C-q>", Command::Quit);
+    trie_keymap.insert_str("<C-q>", Command::TryQuit);
     trie_keymap.insert_str("u", Action::new(ActionKind::Undo));
     trie_keymap.insert_str("U", Action::new(ActionKind::Redo));
     trie_keymap.insert_str(".", Action::new(ActionKind::RepeatLastChange));

@@ -11,6 +11,7 @@ use crate::screen::Screen;
 use crate::status_bar::StatusBarContext;
 use crate::terminal::Style;
 use crate::ui::floating_window::{FloatingAnchor, FloatingWindowFrame, render_bordered_frame};
+use crate::ui::{UiContext, UiRect};
 use crate::window::{Position, Size};
 
 #[derive(Clone, Copy, Default)]
@@ -137,6 +138,7 @@ impl Layout {
 
         notification::render_active_banner(screen, origin, size, std::time::Instant::now());
         self.render_command_line_overlay(screen, origin, size);
+        self.render_confirmation_box_overlay(screen, origin, size);
     }
 
     fn render_command_line_overlay(&mut self, screen: &mut Screen, origin: Position, size: Size) {
@@ -181,6 +183,20 @@ impl Layout {
             .saturating_add(rendered_width)
             .min(frame.content_origin.col + frame.content_size.cols.saturating_sub(1));
         self.set_command_line_cursor(Some(Position::new(frame.content_origin.row, cursor_col)));
+    }
+
+    fn render_confirmation_box_overlay(
+        &mut self,
+        screen: &mut Screen,
+        origin: Position,
+        size: Size,
+    ) {
+        let Some(prompt) = self.confirmation_box_mut() else {
+            return;
+        };
+
+        let ctx = UiContext;
+        prompt.render_widget(screen, UiRect::new(origin, size), &ctx);
     }
 
     fn render_split_borders(&self, screen: &mut Screen, origin: Position, size: Size) {

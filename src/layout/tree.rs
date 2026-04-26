@@ -621,6 +621,24 @@ impl Layout {
         Self::prune_expired_yank_flashes_in_node(self.root.as_mut(), now)
     }
 
+    pub(super) fn has_modified_buffers(&self) -> bool {
+        Self::has_modified_buffers_in_node(self.root.as_ref())
+    }
+
+    fn has_modified_buffers_in_node(node: Option<&LayoutNode>) -> bool {
+        let Some(node) = node else {
+            return false;
+        };
+
+        match node {
+            LayoutNode::Pane(pane) => pane.window_group.active_buffer_view().is_modified(),
+            LayoutNode::Split(split) => {
+                Self::has_modified_buffers_in_node(Some(split.first.as_ref()))
+                    || Self::has_modified_buffers_in_node(Some(split.second.as_ref()))
+            }
+        }
+    }
+
     fn prune_expired_yank_flashes_in_node(node: Option<&mut LayoutNode>, now: Instant) -> bool {
         let Some(node) = node else {
             return false;

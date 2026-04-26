@@ -5,7 +5,7 @@ use crate::config::Config;
 use crate::editor::{Action, ActionKind, ModeKind};
 use crate::globals;
 use crate::path::AbsolutePath;
-use crate::terminal::{Color, Style};
+use crate::terminal::{Color, Key, KeyCode, Modifiers, Style};
 use crate::theme::{HighlightStyles, Tag, Theme, ThemeKind};
 use crate::ui::{Command, Intent, UiEvent, UiEventResult};
 use crate::window::{Position, Size};
@@ -79,6 +79,13 @@ fn border_theme() -> Theme {
     );
 
     Theme::new("demo", ThemeKind::Ansi256, default_style, highlights)
+}
+
+fn key(code: KeyCode) -> Key {
+    Key {
+        code,
+        modifiers: Modifiers::default(),
+    }
 }
 
 fn border_config(unicode_borders: bool) -> Config {
@@ -181,6 +188,64 @@ fn test_layout_dispatch_intent_handles_command_notifications() {
 
     let message = globals::active_notification(std::time::Instant::now()).expect("notification");
     assert_eq!(message.text, "saved");
+}
+
+#[test]
+fn test_layout_dispatch_intent_quit_exits_immediately() {
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("one")]);
+
+    assert!(layout.dispatch_intent(&Intent::Command(Command::Quit)));
+    assert!(layout.should_exit());
+}
+
+#[test]
+fn test_layout_try_quit_without_modified_buffers_exits_immediately() {
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("one")]);
+
+    assert!(layout.dispatch_intent(&Intent::Command(Command::TryQuit)));
+    assert!(layout.should_exit());
+}
+
+#[test]
+fn test_layout_try_quit_with_modified_buffers_opens_confirmation_prompt() {
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("one")]);
+    let cursor = crate::buffer::Cursor::new(0, 1);
+    layout
+        .active_buffer_view_mut()
+        .with_buffer_mut(|buffer| buffer.insert_text(cursor, "x"));
+
+    assert!(layout.dispatch_intent(&Intent::Command(Command::TryQuit)));
+    assert!(!layout.should_exit());
+    assert!(layout.confirmation_box_is_open());
+}
+
+#[test]
+fn test_layout_confirmation_prompt_returns_quit_intent_on_enter() {
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("one")]);
+    let cursor = crate::buffer::Cursor::new(0, 1);
+    layout
+        .active_buffer_view_mut()
+        .with_buffer_mut(|buffer| buffer.insert_text(cursor, "x"));
+    assert!(layout.dispatch_intent(&Intent::Command(Command::TryQuit)));
+
+    let result = layout.route_ui_event(&UiEvent::Key(key(KeyCode::Enter)));
+    assert!(result.handled());
+    assert_eq!(result.into_intents(), vec![Intent::Command(Command::Quit)]);
+}
+
+#[test]
+fn test_layout_confirmation_prompt_cancels_on_n() {
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("one")]);
+    let cursor = crate::buffer::Cursor::new(0, 1);
+    layout
+        .active_buffer_view_mut()
+        .with_buffer_mut(|buffer| buffer.insert_text(cursor, "x"));
+    assert!(layout.dispatch_intent(&Intent::Command(Command::TryQuit)));
+
+    let result = layout.route_ui_event(&UiEvent::Key(key(KeyCode::Char('n'))));
+    assert!(result.handled());
+    assert!(result.into_intents().is_empty());
+    assert!(!layout.should_exit());
 }
 
 #[test]

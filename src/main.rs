@@ -125,6 +125,10 @@ fn main() -> io::Result<()> {
                 let ui_result = layout.route_ui_event(&UiEvent::Tick);
                 if handle_ui_result(&mut layout, ui_result) {
                     needs_redraw = true;
+                    if layout.should_exit() {
+                        globals::shutdown_job_manager();
+                        break;
+                    }
                 }
                 continue;
             }
@@ -132,6 +136,10 @@ fn main() -> io::Result<()> {
                 let overlay_result = layout.route_ui_event(&UiEvent::Paste(text.clone()));
                 if handle_ui_result(&mut layout, overlay_result) {
                     needs_redraw = true;
+                    if layout.should_exit() {
+                        globals::shutdown_job_manager();
+                        break;
+                    }
                     continue;
                 }
 
@@ -195,6 +203,10 @@ fn main() -> io::Result<()> {
                 let overlay_result = layout.route_ui_event(&UiEvent::Key(key));
                 if handle_ui_result(&mut layout, overlay_result) {
                     needs_redraw = true;
+                    if layout.should_exit() {
+                        globals::shutdown_job_manager();
+                        break;
+                    }
                     terminal.set_cursor_style(layout.active_window_cursor_style())?;
                     continue;
                 }
@@ -640,7 +652,7 @@ mod tests {
     use std::sync::{Arc, Mutex, OnceLock};
     use urvim::buffer::{Buffer, BufferId};
     use urvim::editor::ModeKind;
-    use urvim::terminal::Event;
+    use urvim::terminal::{Event, Key, KeyCode};
     use urvim::window::VisualSelectionKind;
     use urvim::window_group::WindowGroup;
 
@@ -894,6 +906,22 @@ mod tests {
         );
 
         assert!(!handled);
+    }
+
+    #[test]
+    fn confirmed_try_quit_flows_through_ui_result_handling_and_exits() {
+        let mut layout = Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("one")]));
+        let cursor = Cursor::new(0, 1);
+        layout
+            .active_buffer_view_mut()
+            .with_buffer_mut(|buffer| buffer.insert_text(cursor, "x"));
+
+        assert!(layout.dispatch_intent(&Intent::Command(Command::TryQuit)));
+        assert!(!layout.should_exit());
+
+        let ui_result = layout.route_ui_event(&UiEvent::Key(Key::new(KeyCode::Char('y'))));
+        assert!(handle_ui_result(&mut layout, ui_result));
+        assert!(layout.should_exit());
     }
 
     #[test]

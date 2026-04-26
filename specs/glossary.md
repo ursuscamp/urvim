@@ -133,6 +133,13 @@ The syntax metadata value named `comment_prefix` that identifies the token inser
 
 **Related Terms:** Action, Filetype, Syntax Definition
 
+### Confirmation Box
+A reusable yes/no confirmation UI component that asks the user to explicitly approve or cancel a potentially disruptive action. A confirmation box presents a query, accepts keyboard confirmation or cancellation, and can return a caller-supplied positive intent when the user chooses Yes.
+
+**Context:** Quit-with-unsaved-files flow, reusable UI prompts, modal confirmation
+
+**Related Terms:** Intent, Command, Widget
+
 ### Command
 A UI/app orchestration instruction emitted by widgets and consumed by the root dispatcher. Commands coordinate cross-component behavior such as focus changes, overlay visibility, or notification enqueues.
 

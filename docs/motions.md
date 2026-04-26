@@ -41,6 +41,7 @@ Register behavior is documented separately in [docs/registers.md](docs/registers
 | `Ctrl-W w` | Toggle visual wrapping in the focused pane |
 | `Ctrl-W r` | Enter resize mode |
 | `Ctrl-W q` | Close the current pane |
+| `Ctrl-Q` | Attempt to quit the editor; prompts for confirmation when modified buffers exist |
 | `Ctrl-W =` | Equalize all splits |
 | `{` | Move to blank line before the previous paragraph, or clamp to BOF when there is no previous paragraph |
 | `}` | Move to blank line before the next paragraph, or clamp to EOF when there is no next paragraph |
@@ -182,6 +183,14 @@ Closes the current pane. If that removes one child from a split, the surviving s
 
 - **Count**: No
 - **Vim difference**: If the final pane is closed, urvim exits the editor.
+
+### Ctrl-Q - Try Quit
+
+Attempts to quit the editor from normal or insert mode.
+
+- **Count**: No
+- **Behavior**: if any open buffer is modified, urvim shows a confirmation prompt before quitting
+- **Behavior**: confirming the prompt quits immediately; declining leaves the editor open
 
 ### Ctrl-W w - Toggle Visual Wrap
 

@@ -4,10 +4,9 @@ This is a list, in no particular order, of things that need to be addressed whic
 
 ## Features
 
-- support raw text insertion by paste
 - session support
 - fuzzy finder
-- confirmation box (use for saving)
+- should panes hold dynamic widgets?
 
 # Bugs
 

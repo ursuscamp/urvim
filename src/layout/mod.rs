@@ -5,6 +5,7 @@
 //! a footer status bar below the active editor region.
 
 mod command_line;
+mod confirmation;
 mod geometry;
 mod node;
 mod render;
@@ -16,6 +17,7 @@ use crate::editor::{Action, ModeKind};
 use crate::screen::Screen;
 use crate::status_bar::StatusBar;
 use crate::terminal::CursorStyle;
+use crate::ui::confirmation_box::ConfirmationBox;
 use crate::ui::{Command, Intent, UiEvent, UiEventResult};
 use crate::window::{BufferView, Position, Size};
 use std::path::PathBuf;
@@ -39,6 +41,7 @@ pub struct Layout {
     command_line: CommandLineState,
     command_line_open: bool,
     command_line_cursor: Option<Position>,
+    confirmation_box: Option<ConfirmationBox>,
 }
 
 impl Layout {
@@ -55,6 +58,7 @@ impl Layout {
             command_line: CommandLineState::new(),
             command_line_open: false,
             command_line_cursor: None,
+            confirmation_box: None,
         }
     }
 
@@ -222,7 +226,21 @@ impl Layout {
             Command::FocusPaneUp => self.move_focus(geometry::FocusDirection::Up),
             Command::FocusPaneRight => self.move_focus(geometry::FocusDirection::Right),
             Command::ClosePane => self.close_focused_pane(),
-            Command::Quit => true,
+            Command::TryQuit => {
+                if self.has_modified_buffers() {
+                    self.open_confirmation_box("Quit without saving?", Command::Quit);
+                    true
+                } else {
+                    self.close_confirmation_box();
+                    self.root = None;
+                    true
+                }
+            }
+            Command::Quit => {
+                self.close_confirmation_box();
+                self.root = None;
+                true
+            }
         }
     }
 
@@ -278,14 +296,18 @@ impl Layout {
                 }
             }
             UiEvent::Key(key) => {
-                if self.command_line_should_capture_events() {
+                if self.confirmation_box_is_open() {
+                    self.handle_confirmation_box_event(event)
+                } else if self.command_line_should_capture_events() {
                     self.handle_command_line_key(key)
                 } else {
                     UiEventResult::NotHandled
                 }
             }
             UiEvent::Paste(text) => {
-                if self.command_line_should_capture_events() {
+                if self.confirmation_box_is_open() {
+                    self.handle_confirmation_box_event(event)
+                } else if self.command_line_should_capture_events() {
                     self.handle_command_line_paste(text.as_str())
                 } else {
                     UiEventResult::NotHandled

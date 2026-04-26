@@ -3,6 +3,7 @@
 //! These types provide a unified dispatch envelope that carries either editing
 //! actions or UI orchestration commands.
 
+pub mod confirmation_box;
 pub mod floating_window;
 
 use crate::editor::Action;
@@ -129,6 +130,8 @@ pub enum Command {
     FocusPaneRight,
     /// Close the focused pane.
     ClosePane,
+    /// Attempt to exit the editor, allowing the app to confirm first if needed.
+    TryQuit,
     /// Exit the editor.
     Quit,
 }

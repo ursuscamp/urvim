@@ -25,7 +25,7 @@ impl InsertMode {
     pub fn new() -> Self {
         let mut keymap = TrieKeymap::new();
         keymap.insert_str("<Esc>", Action::mode_transition(ModeKind::Normal));
-        keymap.insert_str("<C-q>", Command::Quit);
+        keymap.insert_str("<C-q>", Command::TryQuit);
         keymap.insert_str("<C-s>", Action::save_buffer(None));
         keymap.insert_str("<Left>", Action::new(ActionKind::MoveLeft));
         keymap.insert_str("<Down>", Action::new(ActionKind::MoveDown));
