@@ -3887,10 +3887,10 @@ fn test_cursor_paragraph_backward_from_paragraph() {
     let result = buf.cursor_paragraph_backward(cursor);
     assert_eq!(result, Some(Cursor::new(1, 0)));
 
-    // From Para 1 (line 0), should find no previous blank line
+    // From Para 1 (line 0), should clamp to BOF instead of stopping early.
     let cursor = Cursor::new(0, 5);
     let result = buf.cursor_paragraph_backward(cursor);
-    assert_eq!(result, None);
+    assert_eq!(result, Some(Cursor::new(0, 0)));
 }
 
 #[test]
@@ -3904,12 +3904,12 @@ fn test_cursor_paragraph_backward_from_blank_line() {
     // 5: "Para 3 line 1"
     let buf = Buffer::from_str("Para 1 line 1\n\nPara 2 line 1\nPara 2 line 2\n\nPara 3 line 1");
 
-    // From blank line 1, should find blank line before Para 1 (none, returns None)
+    // From blank line 1, should clamp to BOF instead of stopping early.
     let cursor = Cursor::new(1, 0);
     let result = buf.cursor_paragraph_backward(cursor);
-    assert_eq!(result, None);
+    assert_eq!(result, Some(Cursor::new(0, 0)));
 
-    // From blank line 4, should find blank line before Para 2 (line 1)
+    // From blank line 4, should find blank line before Para 2 (line 1).
     let cursor = Cursor::new(4, 0);
     let result = buf.cursor_paragraph_backward(cursor);
     assert_eq!(result, Some(Cursor::new(1, 0)));
@@ -3935,10 +3935,10 @@ fn test_cursor_paragraph_backward_multiple_paragraphs() {
     let result = buf.cursor_paragraph_backward(cursor);
     assert_eq!(result, Some(Cursor::new(1, 0)));
 
-    // From Para 1 (line 0), no previous paragraph
+    // From Para 1 (line 0), clamp to BOF instead of stopping early.
     let cursor = Cursor::new(0, 0);
     let result = buf.cursor_paragraph_backward(cursor);
-    assert_eq!(result, None);
+    assert_eq!(result, Some(Cursor::new(0, 0)));
 }
 
 #[test]
@@ -3974,15 +3974,15 @@ fn test_cursor_paragraph_forward_from_blank_line() {
     // 5: "Para 3 line 1"
     let buf = Buffer::from_str("Para 1 line 1\n\nPara 2 line 1\nPara 2 line 2\n\nPara 3 line 1");
 
-    // From blank line 1, should find blank line after Para 2 (line 4)
+    // From blank line 1, should find blank line after Para 2 (line 4).
     let cursor = Cursor::new(1, 0);
     let result = buf.cursor_paragraph_forward(cursor);
     assert_eq!(result, Some(Cursor::new(4, 0)));
 
-    // From blank line 4, should find no next paragraph (None)
+    // From blank line 4, should clamp to EOF instead of stopping early.
     let cursor = Cursor::new(4, 0);
     let result = buf.cursor_paragraph_forward(cursor);
-    assert_eq!(result, None);
+    assert_eq!(result, Some(Cursor::new(5, 13)));
 }
 
 #[test]
@@ -3995,20 +3995,40 @@ fn test_cursor_paragraph_forward_multiple_paragraphs() {
     // 4: "Para 3"
     let buf = Buffer::from_str("Para 1\n\nPara 2\n\nPara 3");
 
-    // From Para 1 (line 0), one paragraph forward
+    // From Para 1 (line 0), one paragraph forward.
     let cursor = Cursor::new(0, 0);
     let result = buf.cursor_paragraph_forward(cursor);
     assert_eq!(result, Some(Cursor::new(1, 0)));
 
-    // From Para 2 (line 2), one paragraph forward
+    // From Para 2 (line 2), one paragraph forward.
     let cursor = Cursor::new(2, 0);
     let result = buf.cursor_paragraph_forward(cursor);
     assert_eq!(result, Some(Cursor::new(3, 0)));
 
-    // From Para 3 (line 4), no next paragraph
+    // From Para 3 (line 4), clamp to EOF instead of stopping early.
     let cursor = Cursor::new(4, 0);
     let result = buf.cursor_paragraph_forward(cursor);
-    assert_eq!(result, None);
+    assert_eq!(result, Some(Cursor::new(4, 6)));
+}
+
+#[test]
+fn test_cursor_paragraph_forward_clamps_to_eof() {
+    // Buffer ends with two blank lines, which should be skipped all the way to EOF.
+    let buf = Buffer::from_str("Para 1\n\nPara 2\n \n ");
+
+    let cursor = Cursor::new(2, 0);
+    let result = buf.cursor_paragraph_forward(cursor);
+    assert_eq!(result, Some(Cursor::new(4, 1)));
+}
+
+#[test]
+fn test_cursor_paragraph_backward_clamps_to_bof() {
+    // Buffer begins with two blank lines, which should be skipped all the way to BOF.
+    let buf = Buffer::from_str(" \n \nPara 1\n\nPara 2");
+
+    let cursor = Cursor::new(2, 0);
+    let result = buf.cursor_paragraph_backward(cursor);
+    assert_eq!(result, Some(Cursor::new(0, 0)));
 }
 
 #[test]
@@ -4044,6 +4064,12 @@ fn test_cursor_paragraph_single_line() {
     let buf = Buffer::from_str("Single line");
 
     let cursor = Cursor::new(0, 5);
-    assert_eq!(buf.cursor_paragraph_backward(cursor), None);
-    assert_eq!(buf.cursor_paragraph_forward(cursor), None);
+    assert_eq!(
+        buf.cursor_paragraph_backward(cursor),
+        Some(Cursor::new(0, 0))
+    );
+    assert_eq!(
+        buf.cursor_paragraph_forward(cursor),
+        Some(Cursor::new(0, 11))
+    );
 }

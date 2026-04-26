@@ -42,8 +42,8 @@ Register behavior is documented separately in [docs/registers.md](docs/registers
 | `Ctrl-W r` | Enter resize mode |
 | `Ctrl-W q` | Close the current pane |
 | `Ctrl-W =` | Equalize all splits |
-| `{` | Move to blank line before the previous paragraph |
-| `}` | Move to blank line before the next paragraph |
+| `{` | Move to blank line before the previous paragraph, or clamp to BOF when there is no previous paragraph |
+| `}` | Move to blank line before the next paragraph, or clamp to EOF when there is no next paragraph |
 | `a` | Append after cursor (enter insert mode) |
 | `A` | Append to line end (enter insert mode) |
 | `I` | Insert at line start (enter insert mode) |

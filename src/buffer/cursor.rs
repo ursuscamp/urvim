@@ -252,37 +252,44 @@ impl Buffer {
         line.chars().all(|c| c.is_whitespace())
     }
 
+    fn file_start_cursor(&self) -> Cursor {
+        Cursor::new(0, 0)
+    }
+
+    fn file_end_cursor(&self) -> Cursor {
+        let last_line = self.line_count().saturating_sub(1);
+        Cursor::new(last_line, self.line_len(last_line))
+    }
+
     pub fn cursor_paragraph_backward(&self, cursor: Cursor) -> Option<Cursor> {
         let total_lines = self.line_count();
         if total_lines == 0 {
             return None;
         }
-        let mut line_idx = cursor.line;
-        if !self.is_blank_line(line_idx) {
-            while line_idx > 0 && !self.is_blank_line(line_idx) {
-                line_idx -= 1;
-            }
-            if self.is_blank_line(line_idx) {
-                return Some(Cursor::new(line_idx, 0));
-            }
+        if total_lines == 1 && self.is_blank_line(0) {
             return None;
         }
+
+        let mut line_idx = cursor.line.min(total_lines - 1);
+
+        // If the cursor starts on a blank run, skip to the first non-blank line above it.
         while line_idx > 0 && self.is_blank_line(line_idx) {
             line_idx -= 1;
         }
+
+        // Walk upward through the paragraph until we find the preceding blank line.
         while line_idx > 0 && !self.is_blank_line(line_idx) {
             line_idx -= 1;
         }
-        if line_idx == 0 && !self.is_blank_line(0) {
-            return None;
-        }
-        if line_idx == 0 {
-            return None;
-        }
+
         if self.is_blank_line(line_idx) {
-            Some(Cursor::new(line_idx, 0))
+            if (0..line_idx).any(|idx| !self.is_blank_line(idx)) {
+                Some(Cursor::new(line_idx, 0))
+            } else {
+                Some(self.file_start_cursor())
+            }
         } else {
-            None
+            Some(self.file_start_cursor())
         }
     }
 
@@ -291,26 +298,30 @@ impl Buffer {
         if total_lines == 0 {
             return None;
         }
-        let mut line_idx = cursor.line;
-        if !self.is_blank_line(line_idx) {
-            while line_idx < total_lines && !self.is_blank_line(line_idx) {
-                line_idx += 1;
-            }
-            if line_idx < total_lines && self.is_blank_line(line_idx) {
-                return Some(Cursor::new(line_idx, 0));
-            }
+        if total_lines == 1 && self.is_blank_line(0) {
             return None;
         }
-        while line_idx < total_lines && self.is_blank_line(line_idx) {
+
+        let mut line_idx = cursor.line.min(total_lines - 1);
+
+        // If the cursor starts on a blank run, skip to the first non-blank line below it.
+        while line_idx + 1 < total_lines && self.is_blank_line(line_idx) {
             line_idx += 1;
         }
+
+        // Walk downward through the paragraph until we find the following blank line.
         while line_idx < total_lines && !self.is_blank_line(line_idx) {
             line_idx += 1;
         }
-        if line_idx < total_lines && self.is_blank_line(line_idx) {
-            Some(Cursor::new(line_idx, 0))
+
+        if line_idx < total_lines {
+            if ((line_idx + 1)..total_lines).any(|idx| !self.is_blank_line(idx)) {
+                Some(Cursor::new(line_idx, 0))
+            } else {
+                Some(self.file_end_cursor())
+            }
         } else {
-            None
+            Some(self.file_end_cursor())
         }
     }
 
