@@ -10,7 +10,9 @@ use crate::editor::{
 use crate::editor::{Operator, OperatorTarget, QuoteKind, TextObject};
 use crate::globals;
 use crate::globals::{Direction, FindKind, FindState};
-use crate::job::{Job, JobContext, JobKind, JobManager, JobPriority, JobToken};
+use crate::job::{
+    Job, JobContext, JobDelivery, JobKind, JobManager, JobPayload, JobPriority, JobToken,
+};
 use crate::path::AbsolutePath;
 use crate::register::{RegisterContent, RegisterContentKind, RegisterName, RegisterStore};
 use crate::terminal::{Color, Style};
@@ -461,7 +463,7 @@ struct GateJob {
 impl Job for GateJob {
     type Output = ();
 
-    fn run(self, _context: &JobContext) -> Self::Output {
+    fn run(self, _context: &JobContext, _emit: &mut dyn FnMut(Self::Output)) {
         let (lock, cvar) = &*self.gate;
         let mut open = lock.lock().unwrap();
         while !*open {
@@ -1492,6 +1494,7 @@ fn test_window_render_uses_background_syntax_after_tick() {
                 JobKind::new("gate"),
                 JobPriority::Foreground,
                 JobToken::new(1),
+                JobDelivery::Once,
                 GateJob {
                     gate: std::sync::Arc::clone(&gate),
                 },
@@ -1539,9 +1542,11 @@ fn test_window_render_uses_background_syntax_after_tick() {
     while !applied {
         globals::with_job_manager(|job_manager| {
             if let Some(job_manager) = job_manager {
-                let _ = job_manager.process_completed(|event| {
-                    if let Ok((_kind, _token, result)) =
-                        event.into_completed_output::<crate::buffer::BufferCacheRefreshResult>()
+                let _ = job_manager.process_events(|event| {
+                    if let crate::job::JobEvent::Completed {
+                        payload: Some(JobPayload::BufferCacheRefresh(result)),
+                        ..
+                    } = event
                     {
                         globals::with_buffer_mut(result.buffer_id, |buffer| {
                             applied = buffer.apply_buffer_cache_refresh_result(result);

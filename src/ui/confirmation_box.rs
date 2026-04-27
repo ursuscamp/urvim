@@ -6,7 +6,7 @@
 
 use crate::screen::Screen;
 use crate::terminal::{KeyCode, Style};
-use crate::ui::floating_window::{FloatingAnchor, FloatingWindowFrame, render_bordered_frame};
+use crate::ui::floating_window::{FloatingAnchor, FloatingWindowFrame};
 use crate::ui::{FocusPolicy, Intent, UiContext, UiEvent, UiEventResult, UiRect};
 use crate::widget::Widget;
 use unicode_segmentation::UnicodeSegmentation;
@@ -52,10 +52,14 @@ impl ConfirmationBox {
             UiEvent::Key(key) => match key.code {
                 KeyCode::Enter => self.confirm(),
                 KeyCode::Esc => self.cancel(),
-                KeyCode::Char('y') | KeyCode::Char('Y') if !key.modifiers.has_ctrl() && !key.modifiers.has_alt() => {
+                KeyCode::Char('y') | KeyCode::Char('Y')
+                    if !key.modifiers.has_ctrl() && !key.modifiers.has_alt() =>
+                {
                     self.confirm()
                 }
-                KeyCode::Char('n') | KeyCode::Char('N') if !key.modifiers.has_ctrl() && !key.modifiers.has_alt() => {
+                KeyCode::Char('n') | KeyCode::Char('N')
+                    if !key.modifiers.has_ctrl() && !key.modifiers.has_alt() =>
+                {
                     self.cancel()
                 }
                 _ => UiEventResult::Handled(Vec::new()),
@@ -86,7 +90,10 @@ impl ConfirmationBox {
             return;
         }
 
-        let content_height = prompt_lines.len().saturating_add(1).min(usize::from(rect.size.rows.saturating_sub(2)));
+        let content_height = prompt_lines
+            .len()
+            .saturating_add(1)
+            .min(usize::from(rect.size.rows.saturating_sub(2)));
         if content_height < 2 {
             return;
         }
@@ -102,8 +109,12 @@ impl ConfirmationBox {
             return;
         };
 
-        render_bordered_frame(screen, frame, border_style, body_style);
-        for (line_idx, line) in prompt_lines.iter().take(content_height.saturating_sub(1)).enumerate() {
+        frame.render_bordered(screen, border_style, body_style);
+        for (line_idx, line) in prompt_lines
+            .iter()
+            .take(content_height.saturating_sub(1))
+            .enumerate()
+        {
             let row = frame.content_origin.row + line_idx as u16;
             write_centered_line(
                 screen,
@@ -285,18 +296,26 @@ mod tests {
         let mut ctx = UiContext;
         let result = prompt.handle_ui_event(&UiEvent::Key(key(KeyCode::Enter)), &mut ctx);
         assert!(matches!(result, UiEventResult::Handled(_)));
-        assert_eq!(result.into_intents(), vec![Intent::Command(crate::ui::Command::Quit)]);
+        assert_eq!(
+            result.into_intents(),
+            vec![Intent::Command(crate::ui::Command::Quit)]
+        );
         assert!(!prompt.is_open());
     }
 
     #[test]
     fn y_and_n_keys_confirm_and_cancel() {
-        let mut yes_prompt = ConfirmationBox::new("Quit?", Intent::Command(crate::ui::Command::Quit));
+        let mut yes_prompt =
+            ConfirmationBox::new("Quit?", Intent::Command(crate::ui::Command::Quit));
         let mut ctx = UiContext;
         let result = yes_prompt.handle_ui_event(&UiEvent::Key(key(KeyCode::Char('y'))), &mut ctx);
-        assert_eq!(result.into_intents(), vec![Intent::Command(crate::ui::Command::Quit)]);
+        assert_eq!(
+            result.into_intents(),
+            vec![Intent::Command(crate::ui::Command::Quit)]
+        );
 
-        let mut no_prompt = ConfirmationBox::new("Quit?", Intent::Command(crate::ui::Command::Quit));
+        let mut no_prompt =
+            ConfirmationBox::new("Quit?", Intent::Command(crate::ui::Command::Quit));
         let result = no_prompt.handle_ui_event(&UiEvent::Key(key(KeyCode::Char('N'))), &mut ctx);
         assert!(result.into_intents().is_empty());
         assert!(!no_prompt.is_open());

@@ -403,7 +403,8 @@ fn test_tab_bar_renders_glyph_when_enabled() {
     let mut group = WindowGroup::from_buffers(vec![buffer]);
     let theme = themed_group();
     let expected_tab_style = theme.resolve_name_with_default("ui.tab.active");
-    let expected_glyph_style = expected_tab_style.fg(Color::rgb(222, 165, 132));
+    let expected_glyph_style =
+        expected_tab_style.accent(Style::default().fg(Color::rgb(222, 165, 132)));
     let _theme_guard = globals::set_test_active_theme(theme);
     let _config_guard = globals::set_test_config(Config {
         theme: "demo".to_string(),

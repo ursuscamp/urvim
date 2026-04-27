@@ -8,6 +8,7 @@ mod command_line;
 mod confirmation;
 mod geometry;
 mod node;
+mod picker;
 mod render;
 mod tree;
 
@@ -18,10 +19,12 @@ use crate::screen::Screen;
 use crate::status_bar::StatusBar;
 use crate::terminal::CursorStyle;
 use crate::ui::confirmation_box::ConfirmationBox;
+use crate::ui::file_picker::FilePickerWidget;
 use crate::ui::{Command, Intent, UiEvent, UiEventResult};
 use crate::window::{BufferView, Position, Size};
 use std::path::PathBuf;
 
+pub use self::picker::FILE_PICKER_SEARCH_JOB_KIND;
 use self::tree::ResizeDirection;
 pub use node::{LayoutNode, PaneId, PaneNode, SplitAxis, SplitNode, SplitSize};
 
@@ -40,7 +43,7 @@ pub struct Layout {
     size: Size,
     command_line: CommandLineState,
     command_line_open: bool,
-    command_line_cursor: Option<Position>,
+    file_picker: Option<FilePickerWidget>,
     confirmation_box: Option<ConfirmationBox>,
 }
 
@@ -57,7 +60,7 @@ impl Layout {
             size: Size::default(),
             command_line: CommandLineState::new(),
             command_line_open: false,
-            command_line_cursor: None,
+            file_picker: None,
             confirmation_box: None,
         }
     }
@@ -161,7 +164,11 @@ impl Layout {
 
     /// Returns the visual cursor for the focused pane, if any.
     pub fn visual_cursor(&self) -> Option<Position> {
-        if let Some(position) = self.command_line_cursor {
+        if let Some(position) = self.file_picker.as_ref().and_then(|picker| picker.cursor()) {
+            return Some(position);
+        }
+
+        if let Some(position) = self.command_line.cursor() {
             return Some(position);
         }
 
@@ -195,6 +202,23 @@ impl Layout {
             Command::OpenCommandLine => {
                 self.open_command_line();
                 true
+            }
+            Command::OpenFilePicker => {
+                self.open_file_picker();
+                true
+            }
+            Command::OpenFile(path) => {
+                match crate::globals::with_buffer_pool(|pool| pool.open_buffer(path)) {
+                    Ok(buffer_id) => {
+                        self.active_window_group_mut()
+                            .activate_or_open_buffer(buffer_id);
+                        true
+                    }
+                    Err(error) => {
+                        crate::notify_error!("Failed to open file {:?}: {}", path, error);
+                        true
+                    }
+                }
             }
             Command::ResizePaneLeft(count) => {
                 self.resize_counted_pane(*count, SplitAxis::Vertical, ResizeDirection::Left)
@@ -266,16 +290,30 @@ impl Layout {
     /// Routes a UI event with overlay-first precedence.
     pub fn route_ui_event(&mut self, event: &UiEvent) -> UiEventResult {
         if matches!(event, UiEvent::Tick) {
-            let overlay = self.route_overlay_ui_event(event);
+            let picker = self.route_picker_ui_event(event);
+            let picker_handled = picker.handled();
+            let overlay = if picker_handled {
+                UiEventResult::NotHandled
+            } else {
+                self.route_overlay_ui_event(event)
+            };
+            let overlay_handled = overlay.handled();
             let base = self.route_base_ui_event(event);
+            let base_handled = base.handled();
 
-            let mut intents = overlay.clone().into_intents();
-            intents.extend(base.clone().into_intents());
-            if overlay.handled() || base.handled() {
+            let mut intents = picker.into_intents();
+            intents.extend(overlay.into_intents());
+            intents.extend(base.into_intents());
+            if picker_handled || overlay_handled || base_handled {
                 return UiEventResult::Handled(intents);
             }
 
             return UiEventResult::NotHandled;
+        }
+
+        let picker = self.route_picker_ui_event(event);
+        if picker.handled() {
+            return picker;
         }
 
         let overlay = self.route_overlay_ui_event(event);
@@ -315,6 +353,14 @@ impl Layout {
             }
             UiEvent::Resize(_, _) => UiEventResult::NotHandled,
         }
+    }
+
+    fn route_picker_ui_event(&mut self, event: &UiEvent) -> UiEventResult {
+        if self.file_picker_is_open() {
+            return self.handle_file_picker_event(event);
+        }
+
+        UiEventResult::NotHandled
     }
 
     fn route_base_ui_event(&mut self, event: &UiEvent) -> UiEventResult {

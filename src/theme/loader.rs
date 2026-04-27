@@ -374,6 +374,10 @@ bold = true
 "ui.window" = { fg = "base" }
 "ui.window.lines" = { fg = "base" }
 "ui.window.lines.resize" = { fg = "accent", bold = true }
+"ui.input.prompt" = { fg = "accent", bold = true }
+"ui.input.prompt.exact" = { fg = "accent", bold = true }
+"ui.input.prompt.fuzzy" = { fg = "accent", italic = true }
+"ui.input.prompt.separator" = { fg = "base" }
 "syntax.comment" = { fg = "base" }
 "syntax.constant" = { fg = "base" }
 "syntax.function" = { fg = "base" }

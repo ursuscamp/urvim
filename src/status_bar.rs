@@ -5,7 +5,7 @@
 
 use crate::globals;
 use crate::screen::Screen;
-use crate::syntax::builtin_syntax_registry;
+use crate::syntax::{FiletypeGlyph, builtin_syntax_registry};
 use crate::terminal::Style;
 use crate::window::{Position, Size};
 use unicode_width::UnicodeWidthStr;
@@ -178,16 +178,14 @@ impl StatusBar {
         nerdfont_enabled: bool,
         syntax_label: &str,
     ) -> u16 {
-        if let Some(metadata) = metadata
-            && nerdfont_enabled
-            && let Some(glyph) = metadata.glyph.as_deref()
-        {
-            let glyph_style = metadata
-                .glyph_color
-                .map(|color| style.fg(color))
-                .unwrap_or(style);
-            screen.write_string(origin.row, origin.col, glyph_style, glyph);
-            let mut next_col = origin.col + UnicodeWidthStr::width(glyph) as u16;
+        if let Some(glyph) = FiletypeGlyph::from_metadata(metadata, nerdfont_enabled) {
+            screen.write_string(
+                origin.row,
+                origin.col,
+                style.accent(glyph.style),
+                glyph.glyph.as_str(),
+            );
+            let mut next_col = origin.col + UnicodeWidthStr::width(glyph.glyph.as_str()) as u16;
             screen.write_string(origin.row, next_col, style, " ");
             next_col += 1;
             screen.write_string(origin.row, next_col, style, syntax_label);

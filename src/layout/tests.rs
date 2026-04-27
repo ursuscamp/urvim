@@ -191,6 +191,18 @@ fn test_layout_dispatch_intent_handles_command_notifications() {
 }
 
 #[test]
+fn test_layout_file_picker_opens_and_closes() {
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("one")]);
+
+    assert!(layout.dispatch_intent(&Intent::Command(Command::OpenFilePicker)));
+    assert!(layout.file_picker_is_open());
+
+    let result = layout.route_ui_event(&UiEvent::Key(key(KeyCode::Esc)));
+    assert!(result.handled());
+    assert!(!layout.file_picker_is_open());
+}
+
+#[test]
 fn test_layout_dispatch_intent_quit_exits_immediately() {
     let mut layout = layout_with_buffers(vec![Buffer::from_str("one")]);
 
@@ -470,8 +482,8 @@ fn test_layout_render_uses_a_fixed_width_command_line_frame() {
     layout.open_command_line();
     layout
         .command_line
-        .input_mut()
-        .push_str("1234567890123456789012345678901234567890123456789012345678901234");
+        .input_widget_mut()
+        .set_text("1234567890123456789012345678901234567890123456789012345678901234");
 
     let mut screen = crate::screen::Screen::new(4, 60);
     layout.render(&mut screen, Position::new(0, 0), Size::new(4, 60));

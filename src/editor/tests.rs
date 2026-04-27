@@ -185,6 +185,23 @@ fn test_normal_mode_split_management_bindings() {
 }
 
 #[test]
+fn test_picker_open_binding_is_available_in_modes() {
+    let mut normal = NormalMode::new();
+    assert!(matches!(
+        normal.handle_key(&Key::new(KeyCode::F1)),
+        HandleKeyResult::Complete(intent)
+            if matches!(intent, crate::ui::Intent::Command(crate::ui::Command::OpenFilePicker))
+    ));
+
+    let mut insert = InsertMode::new();
+    assert!(matches!(
+        insert.handle_key(&Key::new(KeyCode::F1)),
+        HandleKeyResult::Complete(intent)
+            if matches!(intent, crate::ui::Intent::Command(crate::ui::Command::OpenFilePicker))
+    ));
+}
+
+#[test]
 fn test_normal_mode_equalize_binding() {
     let mut mode = NormalMode::new();
     assert!(matches!(

@@ -385,6 +385,7 @@ fn register_case_operator_bindings(trie_keymap: &mut TrieKeymap) {
 }
 
 fn register_misc_bindings(trie_keymap: &mut TrieKeymap) {
+    trie_keymap.insert_str("<F1>", Command::OpenFilePicker);
     trie_keymap.insert_str("%", Action::new(ActionKind::MoveToMatchingBracket));
     trie_keymap.insert_str(";", Action::new(ActionKind::RepeatLastFind));
     trie_keymap.insert_str(",", Action::new(ActionKind::RepeatLastFindReverse));

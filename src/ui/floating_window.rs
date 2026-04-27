@@ -14,6 +14,8 @@ use crate::window::{Position, Size};
 pub enum FloatingAnchor {
     /// Place the floating window centered inside the bounds.
     Center,
+    /// Place the floating window near the top, centered horizontally.
+    TopCenter { top_margin: u16 },
     /// Place the floating window at the top-right corner inside the bounds.
     TopRight,
 }
@@ -59,6 +61,14 @@ impl FloatingWindowFrame {
                     .col
                     .saturating_add(bounds_size.cols.saturating_sub(frame_cols) / 2),
             ),
+            FloatingAnchor::TopCenter { top_margin } => Position::new(
+                bounds_origin
+                    .row
+                    .saturating_add(top_margin.min(bounds_size.rows.saturating_sub(frame_rows))),
+                bounds_origin
+                    .col
+                    .saturating_add(bounds_size.cols.saturating_sub(frame_cols) / 2),
+            ),
             FloatingAnchor::TopRight => Position::new(
                 bounds_origin.row,
                 bounds_origin
@@ -74,69 +84,117 @@ impl FloatingWindowFrame {
             content_size: Size::new(frame_rows - 2, frame_cols - 2),
         })
     }
+
+    /// Draws the bordered floating frame and fills its body region.
+    pub fn render_bordered(self, screen: &mut Screen, border_style: Style, body_style: Style) {
+        if self.size.rows < 3 || self.size.cols < 3 {
+            return;
+        }
+
+        if self.content_size.rows > 0 && self.content_size.cols > 0 {
+            screen.fill_region(
+                self.content_origin.row,
+                self.content_origin.col,
+                self.content_size.rows,
+                self.content_size.cols,
+                body_style,
+            );
+        }
+
+        let glyphs = FloatingWindowGlyphs::active();
+
+        let top_row = self.origin.row;
+        let bottom_row = self.origin.row + self.size.rows - 1;
+        let left_col = self.origin.col;
+        let right_col = self.origin.col + self.size.cols - 1;
+
+        screen.write_string(top_row, left_col, border_style, glyphs.top_left);
+        screen.write_string(top_row, right_col, border_style, glyphs.top_right);
+        screen.write_string(bottom_row, left_col, border_style, glyphs.bottom_left);
+        screen.write_string(bottom_row, right_col, border_style, glyphs.bottom_right);
+
+        for col in left_col + 1..right_col {
+            screen.write_string(top_row, col, border_style, glyphs.horizontal);
+            screen.write_string(bottom_row, col, border_style, glyphs.horizontal);
+        }
+
+        for row in top_row + 1..bottom_row {
+            screen.write_string(row, left_col, border_style, glyphs.vertical);
+            screen.write_string(row, right_col, border_style, glyphs.vertical);
+        }
+    }
+
+    /// Draws a horizontal separator connected to this frame's side borders.
+    pub fn render_separator(self, screen: &mut Screen, row: u16, style: Style) {
+        if row <= self.origin.row || row >= self.origin.row + self.size.rows - 1 {
+            return;
+        }
+
+        let glyphs = FloatingWindowGlyphs::active();
+        let right_col = self.origin.col + self.size.cols - 1;
+
+        screen.write_string(row, self.origin.col, style, glyphs.separator_left);
+        for col in self.content_origin.col..right_col {
+            screen.write_string(row, col, style, glyphs.horizontal);
+        }
+        screen.write_string(row, right_col, style, glyphs.separator_right);
+    }
 }
 
-/// Draws a bordered floating frame and fills its body region.
-pub fn render_bordered_frame(
-    screen: &mut Screen,
-    frame: FloatingWindowFrame,
-    border_style: Style,
-    body_style: Style,
-) {
-    if frame.size.rows < 3 || frame.size.cols < 3 {
-        return;
-    }
-
-    if frame.content_size.rows > 0 && frame.content_size.cols > 0 {
-        screen.fill_region(
-            frame.content_origin.row,
-            frame.content_origin.col,
-            frame.content_size.rows,
-            frame.content_size.cols,
-            body_style,
-        );
-    }
-
-    let unicode_borders =
-        globals::with_config(|config| config.unicode_borders_enabled()).unwrap_or(false);
-    let (top_left, top_right, bottom_left, bottom_right, horizontal, vertical) =
-        border_glyphs(unicode_borders);
-
-    let top_row = frame.origin.row;
-    let bottom_row = frame.origin.row + frame.size.rows - 1;
-    let left_col = frame.origin.col;
-    let right_col = frame.origin.col + frame.size.cols - 1;
-
-    screen.write_string(top_row, left_col, border_style, top_left);
-    screen.write_string(top_row, right_col, border_style, top_right);
-    screen.write_string(bottom_row, left_col, border_style, bottom_left);
-    screen.write_string(bottom_row, right_col, border_style, bottom_right);
-
-    for col in left_col + 1..right_col {
-        screen.write_string(top_row, col, border_style, horizontal);
-        screen.write_string(bottom_row, col, border_style, horizontal);
-    }
-
-    for row in top_row + 1..bottom_row {
-        screen.write_string(row, left_col, border_style, vertical);
-        screen.write_string(row, right_col, border_style, vertical);
-    }
+/// Glyph set used to draw bordered floating windows and internal separators.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FloatingWindowGlyphs {
+    /// Top-left corner glyph.
+    pub top_left: &'static str,
+    /// Top-right corner glyph.
+    pub top_right: &'static str,
+    /// Bottom-left corner glyph.
+    pub bottom_left: &'static str,
+    /// Bottom-right corner glyph.
+    pub bottom_right: &'static str,
+    /// Horizontal line glyph.
+    pub horizontal: &'static str,
+    /// Vertical line glyph.
+    pub vertical: &'static str,
+    /// Left separator junction glyph.
+    pub separator_left: &'static str,
+    /// Right separator junction glyph.
+    pub separator_right: &'static str,
 }
 
-fn border_glyphs(
-    unicode_borders: bool,
-) -> (
-    &'static str,
-    &'static str,
-    &'static str,
-    &'static str,
-    &'static str,
-    &'static str,
-) {
-    if unicode_borders {
-        ("┌", "┐", "└", "┘", "─", "│")
-    } else {
-        ("+", "+", "+", "+", "-", "|")
+impl FloatingWindowGlyphs {
+    /// Returns the floating window glyphs enabled by the active configuration.
+    pub fn active() -> Self {
+        let unicode_borders =
+            globals::with_config(|config| config.unicode_borders_enabled()).unwrap_or(false);
+        Self::for_unicode_borders(unicode_borders)
+    }
+
+    /// Returns floating window glyphs for the requested border capability.
+    pub fn for_unicode_borders(unicode_borders: bool) -> Self {
+        if unicode_borders {
+            return Self {
+                top_left: "┌",
+                top_right: "┐",
+                bottom_left: "└",
+                bottom_right: "┘",
+                horizontal: "─",
+                vertical: "│",
+                separator_left: "├",
+                separator_right: "┤",
+            };
+        }
+
+        Self {
+            top_left: "+",
+            top_right: "+",
+            bottom_left: "+",
+            bottom_right: "+",
+            horizontal: "-",
+            vertical: "|",
+            separator_left: "|",
+            separator_right: "|",
+        }
     }
 }
 
@@ -174,5 +232,53 @@ mod tests {
 
         assert_eq!(frame.origin, Position::new(2, 9));
         assert_eq!(frame.size, Size::new(3, 6));
+    }
+
+    #[test]
+    fn resolve_top_center_frame() {
+        let frame = FloatingWindowFrame::resolve(
+            Position::new(2, 3),
+            Size::new(20, 40),
+            6,
+            10,
+            FloatingAnchor::TopCenter { top_margin: 5 },
+        )
+        .expect("frame should resolve");
+
+        assert_eq!(frame.origin, Position::new(7, 17));
+        assert_eq!(frame.size, Size::new(8, 12));
+    }
+
+    #[test]
+    fn resolve_top_center_clamps_margin_to_bounds() {
+        let frame = FloatingWindowFrame::resolve(
+            Position::new(2, 3),
+            Size::new(10, 40),
+            6,
+            10,
+            FloatingAnchor::TopCenter { top_margin: 20 },
+        )
+        .expect("frame should resolve");
+
+        assert_eq!(frame.origin, Position::new(4, 17));
+        assert_eq!(frame.size, Size::new(8, 12));
+    }
+
+    #[test]
+    fn glyphs_follow_ascii_border_capability() {
+        let glyphs = FloatingWindowGlyphs::for_unicode_borders(false);
+
+        assert_eq!(glyphs.horizontal, "-");
+        assert_eq!(glyphs.separator_left, "|");
+        assert_eq!(glyphs.separator_right, "|");
+    }
+
+    #[test]
+    fn glyphs_follow_unicode_border_capability() {
+        let glyphs = FloatingWindowGlyphs::for_unicode_borders(true);
+
+        assert_eq!(glyphs.horizontal, "─");
+        assert_eq!(glyphs.separator_left, "├");
+        assert_eq!(glyphs.separator_right, "┤");
     }
 }

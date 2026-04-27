@@ -3,7 +3,7 @@
 use crate::buffer::Buffer;
 use crate::buffer::BufferId;
 use crate::globals;
-use crate::job::{Job, JobContext, JobKind, JobPriority, JobToken};
+use crate::job::{Job, JobContext, JobDelivery, JobKind, JobPriority, JobToken};
 use crate::syntax::{
     ContextControl, InjectedSyntaxFallback, InjectedSyntaxSelector, SyntaxDefinition, SyntaxRule,
     builtin_syntax_registry,
@@ -624,7 +624,7 @@ impl BufferCacheRefreshJob {
 impl Job for BufferCacheRefreshJob {
     type Output = BufferCacheRefreshResult;
 
-    fn run(mut self, context: &JobContext) -> Self::Output {
+    fn run(mut self, context: &JobContext, emit: &mut dyn FnMut(Self::Output)) {
         let line_refs: Vec<&str> = self.line_texts.iter().map(|line| line.as_ref()).collect();
         if !line_refs.is_empty() {
             if self.cache.syntax_cache.lines.len() > line_refs.len() {
@@ -672,11 +672,11 @@ impl Job for BufferCacheRefreshJob {
             self.cache.set_syntax_name(self.syntax_name.as_str());
         }
 
-        BufferCacheRefreshResult {
+        emit(BufferCacheRefreshResult {
             buffer_id: self.buffer_id,
             generation: self.generation,
             cache: self.cache,
-        }
+        });
     }
 }
 
@@ -1386,7 +1386,7 @@ impl Buffer {
             job_manager
                 .map(|job_manager| {
                     job_manager
-                        .submit_latest_only(kind.clone(), priority, token, job)
+                        .submit_latest_only(kind.clone(), priority, token, JobDelivery::Once, job)
                         .is_ok()
                 })
                 .unwrap_or(false)
@@ -1436,7 +1436,7 @@ mod tests {
     use crate::buffer::{BufferId, Cursor};
     use crate::config::Config;
     use crate::globals;
-    use crate::job::{JobEvent, JobHandle, JobKind, JobPriority, JobToken};
+    use crate::job::{JobEvent, JobHandle, JobKind, JobPayload, JobPriority, JobToken};
     use crate::path::AbsolutePath;
     use std::sync::Mutex;
     use std::thread;
@@ -1459,7 +1459,7 @@ mod tests {
     fn wait_for_event(handle: &JobHandle) -> JobEvent {
         let deadline = Instant::now() + Duration::from_secs(10);
         loop {
-            if let Some(event) = handle.poll_completion() {
+            if let Some(event) = handle.poll_event() {
                 return event;
             }
             assert!(Instant::now() < deadline, "timed out waiting for job event");
@@ -1914,14 +1914,19 @@ mod tests {
                 JobKind::new("syntax:background"),
                 JobPriority::Background,
                 token,
+                JobDelivery::Once,
                 job,
             )
             .expect("syntax catch-up job should submit");
 
         let event = wait_for_event(&handle);
-        let (_kind, _token, result) = event
-            .into_completed_output::<SyntaxCatchUpResult>()
-            .expect("syntax catch-up output should downcast");
+        let result = match event {
+            JobEvent::Completed {
+                payload: Some(JobPayload::BufferCacheRefresh(result)),
+                ..
+            } => result,
+            other => panic!("expected syntax catch-up completion, got {:?}", other),
+        };
 
         assert!(result.cache.cached_spans_for_line(50).is_some());
         assert!(result.cache.is_complete_for_line_count(64));
@@ -1942,7 +1947,7 @@ mod tests {
         impl Job for GateJob {
             type Output = ();
 
-            fn run(self, _context: &JobContext) -> Self::Output {
+            fn run(self, _context: &JobContext, _emit: &mut dyn FnMut(Self::Output)) {
                 let (lock, cvar) = &*self.gate;
                 let mut open = lock.lock().unwrap();
                 while !*open {
@@ -1956,6 +1961,7 @@ mod tests {
                 JobKind::new("blocker"),
                 JobPriority::Foreground,
                 JobToken::new(1),
+                JobDelivery::Once,
                 GateJob {
                     gate: gate_for_blocker,
                 },
@@ -1980,6 +1986,7 @@ mod tests {
                 JobKind::new("syntax:1"),
                 JobPriority::Background,
                 JobToken::new(1),
+                JobDelivery::Once,
                 BufferCacheRefreshJob::new(
                     BufferId::new(1),
                     old_buffer.syntax_generation(),
@@ -1995,6 +2002,7 @@ mod tests {
                 JobKind::new("syntax:1"),
                 JobPriority::Background,
                 JobToken::new(2),
+                JobDelivery::Once,
                 BufferCacheRefreshJob::new(
                     BufferId::new(1),
                     new_buffer.syntax_generation(),
@@ -2016,9 +2024,14 @@ mod tests {
         assert_eq!(blocker_event.kind().as_str(), "blocker");
 
         let syntax_event = wait_for_event(&handle);
-        let (_kind, token, result) = syntax_event
-            .into_completed_output::<SyntaxCatchUpResult>()
-            .expect("latest syntax job should complete");
+        let (token, result) = match syntax_event {
+            JobEvent::Completed {
+                token,
+                payload: Some(JobPayload::BufferCacheRefresh(result)),
+                ..
+            } => (token, result),
+            other => panic!("expected latest syntax completion, got {:?}", other),
+        };
         assert_eq!(token.generation(), 2);
         assert!(result.cache.is_complete_for_line_count(32));
 

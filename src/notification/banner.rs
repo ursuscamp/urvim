@@ -3,7 +3,7 @@
 use crate::globals;
 use crate::screen::Screen;
 use crate::terminal::{Color, Style};
-use crate::ui::floating_window::{FloatingAnchor, FloatingWindowFrame, render_bordered_frame};
+use crate::ui::floating_window::{FloatingAnchor, FloatingWindowFrame};
 use crate::window::{Position, Size};
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
@@ -92,7 +92,7 @@ fn render_notification_popup(
 
     let border_style = level_style(message.level);
     let body_style = notification_body_style();
-    render_bordered_frame(screen, frame, border_style, body_style);
+    frame.render_bordered(screen, border_style, body_style);
 
     for (line_idx, line) in rendered_lines.iter().enumerate() {
         let row = frame.content_origin.row + line_idx as u16;

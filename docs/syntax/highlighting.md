@@ -108,6 +108,7 @@ After the syntax spans are available, urvim can layer comment-scoped todo highli
 Theme highlights use the unified hierarchical naming model:
 
 - UI chrome uses `ui.*` names such as `ui.status_bar` and `ui.window.active_line`
+- input prompts use `ui.input.prompt` as the base style, with optional refinements like `ui.input.prompt.exact`, `ui.input.prompt.fuzzy`, and `ui.input.prompt.separator`
 - gutter row emphasis uses `ui.window.gutter.active_line`
 - syntax styling uses `syntax.*` names such as `syntax.comment` and `syntax.string.interpolation`
 - the lookup rules are hierarchical, so the nearest defined parent wins when a specific highlight is missing

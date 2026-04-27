@@ -30,7 +30,7 @@ use std::fmt;
 use std::time::Instant;
 use unicode_segmentation::UnicodeSegmentation;
 
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Position {
     pub row: u16,
     pub col: u16,
@@ -38,7 +38,7 @@ pub struct Position {
 
 impl Position {}
 
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Size {
     pub rows: u16,
     pub cols: u16,

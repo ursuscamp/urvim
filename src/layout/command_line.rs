@@ -3,35 +3,38 @@
 use super::Layout;
 use crate::notification::NotificationLevel;
 use crate::terminal::{Key, KeyCode};
+use crate::ui::inputs::InputWidget;
 use crate::ui::{Command, Intent, UiEventResult};
 use std::io;
 use std::path::Path;
-use unicode_segmentation::UnicodeSegmentation;
-use unicode_width::UnicodeWidthStr;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug)]
 pub struct CommandLineState {
-    input: String,
+    input: InputWidget,
     history: Vec<String>,
     history_index: Option<usize>,
     history_draft: String,
+    cursor: Option<crate::window::Position>,
 }
 
 impl CommandLineState {
     pub fn new() -> Self {
+        let mut input = InputWidget::new("");
+        input.set_prompt(":");
         Self {
-            input: String::new(),
+            input,
             history: Vec::new(),
             history_index: None,
             history_draft: String::new(),
+            cursor: None,
         }
     }
 
     pub fn input(&self) -> &str {
-        self.input.as_str()
+        self.input.text()
     }
 
-    pub fn input_mut(&mut self) -> &mut String {
+    pub fn input_widget_mut(&mut self) -> &mut InputWidget {
         &mut self.input
     }
 
@@ -55,13 +58,13 @@ impl CommandLineState {
         let next_index = match self.history_index {
             Some(index) => index.saturating_sub(1),
             None => {
-                self.history_draft = self.input.clone();
+                self.history_draft = self.input.text().to_string();
                 self.history.len() - 1
             }
         };
 
         self.history_index = Some(next_index);
-        self.input = self.history[next_index].clone();
+        self.input.set_text(self.history[next_index].as_str());
     }
 
     pub fn history_next(&mut self) {
@@ -72,18 +75,26 @@ impl CommandLineState {
         if index + 1 < self.history.len() {
             let next_index = index + 1;
             self.history_index = Some(next_index);
-            self.input = self.history[next_index].clone();
+            self.input.set_text(self.history[next_index].as_str());
             return;
         }
 
         self.history_index = None;
-        self.input = self.history_draft.clone();
+        self.input.set_text(self.history_draft.as_str());
     }
 
     pub fn reset_input(&mut self) {
         self.input.clear();
         self.history_index = None;
         self.history_draft.clear();
+    }
+
+    pub fn cursor(&self) -> Option<crate::window::Position> {
+        self.cursor
+    }
+
+    pub fn set_cursor(&mut self, cursor: Option<crate::window::Position>) {
+        self.cursor = cursor;
     }
 }
 
@@ -92,8 +103,6 @@ impl Default for CommandLineState {
         Self::new()
     }
 }
-
-const COMMAND_LINE_PROMPT: &str = ":";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ParsedCommand {
@@ -125,50 +134,16 @@ impl ParseCommandError {
     }
 }
 
-pub(super) fn command_line_render_text(input: &str, content_cols: u16) -> (String, u16) {
-    let prompt_width = UnicodeWidthStr::width(COMMAND_LINE_PROMPT) as u16;
-    let visible_input_cols = content_cols.saturating_sub(prompt_width);
-    let (visible_input, visible_input_width) =
-        visible_command_line_input(input, visible_input_cols);
-    let rendered_text = format!("{COMMAND_LINE_PROMPT}{visible_input}");
-    let rendered_width = prompt_width.saturating_add(visible_input_width);
-    (rendered_text, rendered_width)
-}
-
-fn visible_command_line_input(input: &str, max_cols: u16) -> (String, u16) {
-    if input.is_empty() || max_cols == 0 {
-        return (String::new(), 0);
-    }
-
-    let mut start_byte = input.len();
-    let mut visible_cols = 0u16;
-
-    for (byte_idx, grapheme) in input.grapheme_indices(true).rev() {
-        let width = UnicodeWidthStr::width(grapheme) as u16;
-        if visible_cols > 0 && visible_cols.saturating_add(width) > max_cols {
-            break;
-        }
-
-        start_byte = byte_idx;
-        visible_cols = visible_cols.saturating_add(width);
-
-        if visible_cols >= max_cols {
-            break;
-        }
-    }
-
-    (input[start_byte..].to_string(), visible_cols)
-}
-
 impl Layout {
     pub(super) fn open_command_line(&mut self) {
         self.command_line_open = true;
         self.command_line.reset_input();
+        self.close_file_picker();
     }
 
     pub(super) fn close_command_line(&mut self) {
         self.command_line_open = false;
-        self.command_line_cursor = None;
+        self.command_line.set_cursor(None);
     }
 
     pub fn command_line_is_open(&self) -> bool {
@@ -209,7 +184,7 @@ impl Layout {
                 }
             }
             KeyCode::Backspace => {
-                self.command_line.input_mut().pop();
+                self.command_line.input_widget_mut().handle_key(key.clone());
                 UiEventResult::Handled(Vec::new())
             }
             KeyCode::Up => {
@@ -228,11 +203,10 @@ impl Layout {
                 self.command_line.history_next();
                 UiEventResult::Handled(Vec::new())
             }
-            KeyCode::Char(ch) if !key.modifiers.has_ctrl() && !key.modifiers.has_alt() => {
-                self.command_line.input_mut().push(ch);
+            _ => {
+                let _ = self.command_line.input_widget_mut().handle_key(*key);
                 UiEventResult::Handled(Vec::new())
             }
-            _ => UiEventResult::Handled(Vec::new()),
         }
     }
 
@@ -241,7 +215,7 @@ impl Layout {
             return UiEventResult::NotHandled;
         }
 
-        self.command_line.input_mut().push_str(text);
+        self.command_line.input_widget_mut().insert_str(text);
         UiEventResult::Handled(Vec::new())
     }
 
@@ -291,6 +265,7 @@ impl Layout {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub(super) fn command_line_input(&self) -> Option<&str> {
         if self.command_line_open {
             return Some(self.command_line.input());
@@ -299,12 +274,16 @@ impl Layout {
         None
     }
 
-    pub(super) fn command_line_should_capture_events(&self) -> bool {
-        self.command_line_open
+    pub(super) fn command_line_input_widget_mut(&mut self) -> Option<&mut InputWidget> {
+        if self.command_line_open {
+            return Some(self.command_line.input_widget_mut());
+        }
+
+        None
     }
 
-    pub(super) fn set_command_line_cursor(&mut self, cursor: Option<crate::window::Position>) {
-        self.command_line_cursor = cursor;
+    pub(super) fn command_line_should_capture_events(&self) -> bool {
+        self.command_line_open
     }
 }
 
@@ -477,7 +456,7 @@ mod tests {
     fn enter_on_unknown_command_emits_error_and_closes_overlay() {
         let mut layout = Layout::new(WindowGroup::from_buffers(vec![Buffer::new()]));
         layout.open_command_line();
-        layout.command_line.input_mut().push_str("unknown");
+        layout.command_line.input_widget_mut().set_text("unknown");
 
         let result = layout.handle_command_line_key(&KeyCode::Enter.key());
         let intents = result.into_intents();
@@ -509,13 +488,5 @@ mod tests {
 
         layout.handle_command_line_key(&ctrl_n);
         assert_eq!(layout.command_line_input(), Some("edit one.txt"));
-    }
-
-    #[test]
-    fn command_line_render_text_keeps_a_fixed_visible_width() {
-        let (rendered, rendered_width) = command_line_render_text("abcdefghijklmnopqrstuvwxyz", 10);
-
-        assert_eq!(rendered, ":rstuvwxyz");
-        assert_eq!(rendered_width, 10);
     }
 }

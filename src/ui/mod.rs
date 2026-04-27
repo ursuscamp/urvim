@@ -4,12 +4,16 @@
 //! actions or UI orchestration commands.
 
 pub mod confirmation_box;
+pub mod file_picker;
 pub mod floating_window;
+pub mod inputs;
+pub mod picker;
 
 use crate::editor::Action;
 use crate::notification::NotificationLevel;
 use crate::terminal::{Event, Key};
 use crate::window::{Position, Size};
+use std::path::PathBuf;
 
 /// Internal UI event routed between widgets.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -104,6 +108,10 @@ pub enum Command {
     },
     /// Open the command-line overlay.
     OpenCommandLine,
+    /// Open the file picker overlay.
+    OpenFilePicker,
+    /// Open a file selected from a picker.
+    OpenFile(PathBuf),
     /// Shrink the focused pane horizontally by the provided count.
     ResizePaneLeft(usize),
     /// Grow the focused pane horizontally by the provided count.

@@ -9,7 +9,7 @@ use crate::editor::Action;
 use crate::globals;
 use crate::jumplist::JumpList;
 use crate::screen::Screen;
-use crate::syntax::builtin_syntax_registry;
+use crate::syntax::{FiletypeGlyph, builtin_syntax_registry};
 use crate::terminal::CursorStyle;
 use crate::terminal::Style;
 use crate::window::{BufferView, Position, Size, Window};
@@ -615,15 +615,11 @@ impl WindowGroup {
 
         let label = self.tab_label(index);
         let metadata = self.tab_metadata(index);
-        let glyph = if options.nerdfont_enabled {
-            metadata
-                .as_ref()
-                .and_then(|metadata| metadata.glyph.as_deref())
-        } else {
-            None
-        };
-        let glyph_color = metadata.as_ref().and_then(|metadata| metadata.glyph_color);
-        let glyph_width = glyph.map(UnicodeWidthStr::width).unwrap_or(0);
+        let glyph = FiletypeGlyph::from_metadata(metadata.as_ref(), options.nerdfont_enabled);
+        let glyph_width = glyph
+            .as_ref()
+            .map(|glyph| UnicodeWidthStr::width(glyph.glyph.as_str()))
+            .unwrap_or(0);
         let prefix_width = if glyph.is_some() { glyph_width + 2 } else { 1 };
         let label_width_budget = if glyph.is_some() {
             usize::from(options.available).saturating_sub(glyph_width + 3)
@@ -641,10 +637,12 @@ impl WindowGroup {
         let mut current_col = origin.col + 1;
 
         if let Some(glyph) = glyph {
-            let glyph_style = glyph_color
-                .map(|color| options.style.fg(color))
-                .unwrap_or(options.style);
-            screen.write_string(origin.row, current_col, glyph_style, glyph);
+            screen.write_string(
+                origin.row,
+                current_col,
+                options.style.accent(glyph.style),
+                glyph.glyph.as_str(),
+            );
             current_col += glyph_width as u16;
             screen.write_string(origin.row, current_col, options.style, " ");
             current_col += 1;

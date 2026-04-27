@@ -3,10 +3,11 @@ use rustix::fd::AsFd;
 use std::io;
 
 use urvim::Layout;
-use urvim::buffer::{BufferCacheRefreshResult, Cursor};
+use urvim::buffer::Cursor;
 use urvim::config::Config;
 use urvim::editor::{Action, ActionKind, HandleKeyResult, ModeKind, RepeatReplay};
 use urvim::globals;
+use urvim::layout::FILE_PICKER_SEARCH_JOB_KIND;
 use urvim::screen::Screen;
 use urvim::terminal::{Terminal, size::get_terminal_size};
 use urvim::theme::ThemeRegistry;
@@ -83,17 +84,29 @@ fn main() -> io::Result<()> {
     loop {
         let background_requested_redraw = globals::with_job_manager(|job_manager| {
             if let Some(job_manager) = job_manager {
-                let accepted_redraw = job_manager.process_completed(|event| {
-                    match event.into_completed_output::<BufferCacheRefreshResult>() {
-                        Ok((_kind, _token, result)) => {
-                            globals::with_buffer_mut(result.buffer_id, |buffer| {
-                                buffer.apply_buffer_cache_refresh_result(result);
-                            });
-                        }
-                        Err(error) => {
-                            urvim::notify_error!("Background job error: {:?}", error);
-                        }
+                let accepted_redraw = job_manager.process_events(|event| match event {
+                    e @ _ if e.kind().as_str() == FILE_PICKER_SEARCH_JOB_KIND => {
+                        layout.dispatch_job_event(e);
                     }
+                    urvim::job::JobEvent::Completed {
+                        payload: Some(urvim::job::JobPayload::BufferCacheRefresh(result)),
+                        ..
+                    } => {
+                        globals::with_buffer_mut(result.buffer_id, |buffer| {
+                            buffer.apply_buffer_cache_refresh_result(result);
+                        });
+                    }
+                    urvim::job::JobEvent::Completed { payload: None, .. } => {}
+                    urvim::job::JobEvent::Completed {
+                        payload: Some(payload),
+                        ..
+                    } => {
+                        urvim::notify_error!("Unexpected background job payload: {:?}", payload);
+                    }
+                    urvim::job::JobEvent::Failed { error, .. } => {
+                        urvim::notify_error!("Background job error: {:?}", error);
+                    }
+                    _ => {}
                 });
 
                 accepted_redraw || job_manager.take_redraw_requested()

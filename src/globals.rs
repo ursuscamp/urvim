@@ -510,6 +510,22 @@ mod tests {
             Tag::parse("ui.window.lines.resize").expect("valid tag"),
             Style::new().fg(Color::ansi(17)).bg(Color::ansi(18)),
         );
+        highlights.insert(
+            Tag::parse("ui.input.prompt").expect("valid tag"),
+            Style::new().fg(Color::ansi(19)).bold(),
+        );
+        highlights.insert(
+            Tag::parse("ui.input.prompt.exact").expect("valid tag"),
+            Style::new().fg(Color::ansi(20)).bold(),
+        );
+        highlights.insert(
+            Tag::parse("ui.input.prompt.fuzzy").expect("valid tag"),
+            Style::new().fg(Color::ansi(21)).italic(),
+        );
+        highlights.insert(
+            Tag::parse("ui.input.prompt.separator").expect("valid tag"),
+            Style::new().fg(Color::ansi(22)).faint(),
+        );
 
         Theme::new("demo", ThemeKind::Ansi256, default_style, highlights)
     }

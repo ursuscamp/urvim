@@ -10,8 +10,9 @@ use crate::notification;
 use crate::screen::Screen;
 use crate::status_bar::StatusBarContext;
 use crate::terminal::Style;
-use crate::ui::floating_window::{FloatingAnchor, FloatingWindowFrame, render_bordered_frame};
+use crate::ui::floating_window::{FloatingAnchor, FloatingWindowFrame};
 use crate::ui::{UiContext, UiRect};
+use crate::widget::Widget;
 use crate::window::{Position, Size};
 
 #[derive(Clone, Copy, Default)]
@@ -137,13 +138,23 @@ impl Layout {
             .render(screen, footer_origin, Size::new(1, size.cols), &context);
 
         notification::render_active_banner(screen, origin, size, std::time::Instant::now());
+        self.render_file_picker_overlay(screen, origin, size);
         self.render_command_line_overlay(screen, origin, size);
         self.render_confirmation_box_overlay(screen, origin, size);
     }
 
+    fn render_file_picker_overlay(&mut self, screen: &mut Screen, origin: Position, size: Size) {
+        let Some(picker) = self.file_picker_mut() else {
+            return;
+        };
+
+        let ctx = UiContext;
+        let rect = UiRect::new(origin, size);
+        picker.render_widget(screen, rect, &ctx);
+    }
+
     fn render_command_line_overlay(&mut self, screen: &mut Screen, origin: Position, size: Size) {
-        self.set_command_line_cursor(None);
-        let Some(input) = self.command_line_input() else {
+        let Some(input) = self.command_line_input_widget_mut() else {
             return;
         };
 
@@ -166,23 +177,23 @@ impl Layout {
             return;
         };
 
-        let (rendered_text, rendered_width) =
-            super::command_line::command_line_render_text(input, frame.content_size.cols);
+        frame.render_bordered(screen, border_style, body_style);
+        let cursor = {
+            input.set_text_style(body_style);
+            input.render_widget(
+                screen,
+                UiRect::new(frame.content_origin, frame.content_size),
+                &UiContext,
+            );
+            input.render_cursor()
+        };
 
-        render_bordered_frame(screen, frame, border_style, body_style);
-        screen.write_string(
-            frame.content_origin.row,
-            frame.content_origin.col,
-            border_style,
-            rendered_text.as_str(),
-        );
-
-        let cursor_col = frame
-            .content_origin
-            .col
-            .saturating_add(rendered_width)
-            .min(frame.content_origin.col + frame.content_size.cols.saturating_sub(1));
-        self.set_command_line_cursor(Some(Position::new(frame.content_origin.row, cursor_col)));
+        if let Some(cursor) = cursor {
+            self.command_line
+                .set_cursor(Some(Position::new(cursor.row, cursor.col)));
+        } else {
+            self.command_line.set_cursor(None);
+        }
     }
 
     fn render_confirmation_box_overlay(

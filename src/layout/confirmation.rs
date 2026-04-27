@@ -9,7 +9,7 @@ impl Layout {
         positive_intent: impl Into<Intent>,
     ) {
         self.command_line_open = false;
-        self.command_line_cursor = None;
+        self.close_file_picker();
         self.confirmation_box = Some(ConfirmationBox::new(query, positive_intent));
     }
 

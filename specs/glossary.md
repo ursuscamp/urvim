@@ -18,6 +18,27 @@ The internal editor subsystem that executes deferred jobs off the main input/ren
 
 **Related Terms:** Job, Syntax Highlighting, Buffer, Window
 
+### Streaming Job
+A deferred job that can emit multiple ordered events while it runs, instead of producing a single final output. Streaming jobs currently support `start`, `chunk`, and `complete` events.
+
+**Context:** Background scanning, incremental result delivery, reusable async workloads
+
+**Related Terms:** Job, Job Framework, Streaming Job Event, Streaming Job Framework
+
+### Streaming Job Event
+An event emitted by a streaming job during execution. The initial event kinds are `start`, `chunk`, and `complete`.
+
+**Context:** Background scanning, incremental result delivery
+
+**Related Terms:** Streaming Job, Streaming Job Framework, Job
+
+### Streaming Job Framework
+A general-purpose extension to the job framework that supports jobs emitting ordered `start`, `chunk`, and `complete` events while preserving the existing one-shot job API for non-streaming callers.
+
+**Context:** Background scanning, picker search refactor, future streaming work
+
+**Related Terms:** Job Framework, Streaming Job, Streaming Job Event
+
 ### Buffer
 A text storage data structure backed by `imbl::Vector<Arc<str>>`. Each line is stored as an `Arc<str>` without trailing newline characters. Newlines exist implicitly between lines. The buffer supports efficient text manipulation with proper Unicode handling including grapheme clusters, combining characters, and emoji.
 
@@ -393,6 +414,55 @@ The default foreground color associated with a filetype glyph when the editor re
 
 **Related Terms:** Filetype Glyph, Theme, Tab Group, Status Bar
 
+### File Picker
+The first concrete picker implementation, used to search for files under the current working directory and open the selected file in the editor.
+
+**Context:** File navigation, picker selection, tab switching
+
+**Related Terms:** Picker, Fuzzy Picker, Buffer, Tab Group, Window
+
+### Fuzzy Picker
+A picker variant that narrows a live result set as the user types and refreshes its results asynchronously while search is in progress.
+
+**Context:** Incremental search UI, async result streaming, interactive filtering
+
+**Related Terms:** Picker, File Picker, Widget
+
+### Picker
+A reusable overlay UI component that accepts search input, shows a ranked list of results, and emits a selection action for the highlighted item. Pickers are generic over the result type and the action taken when a result is chosen.
+
+**Context:** Search overlays, reusable result lists, command-driven UI flows
+
+**Related Terms:** Fuzzy Picker, File Picker, Widget, Intent, Command
+
+### Picker Chunk
+A streamed picker search event carrying one batch of results from the background search worker to the live picker overlay.
+
+**Context:** Picker search streaming, async result delivery
+
+**Related Terms:** Picker Search Complete, Picker Search Started, Picker Search Stale, Picker
+
+### Picker Search Complete
+A streamed picker search event indicating that the current search generation finished delivering results.
+
+**Context:** Picker search lifecycle, async result delivery
+
+**Related Terms:** Picker Chunk, Picker Search Started, Picker Search Stale, Picker
+
+### Picker Search Started
+A streamed picker search event indicating that a new search generation has begun.
+
+**Context:** Picker search lifecycle, async result delivery
+
+**Related Terms:** Picker Chunk, Picker Search Complete, Picker Search Stale, Picker
+
+### Picker Search Stale
+A streamed picker search event indicating that the worker output is stale for the active picker generation and should be ignored.
+
+**Context:** Picker search lifecycle, stale-result filtering
+
+**Related Terms:** Picker Chunk, Picker Search Complete, Picker Search Started, Picker
+
 ### Window
 A rendering component that owns a Buffer View and displays its buffer on screen. It handles cursor positioning, scrolling, and text rendering with gutter.
 
@@ -407,6 +477,13 @@ A reusable UI component that encapsulates its own event handling, layout behavio
 
 ### Screen
 A double-buffered terminal renderer. Maintains current and previous frame buffers for diff-based rendering - only writes changed cells to the terminal.
+
+### Single-Line Input
+A reusable shell-style one-line text entry component that handles cursor movement, deletion, and text insertion for command-line and picker overlays. Consumers can override any key handling and receive live text updates as the input changes.
+
+**Context:** Command-line overlays, picker overlays, shared input editing
+
+**Related Terms:** Widget, Picker, Command, Intent
 
 ### Status Bar
 A one-line footer rendered by the root layout that shows editor metadata such as the active mode, active buffer name, cursor position, and file progress.
