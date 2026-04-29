@@ -383,14 +383,19 @@ impl InputWidget {
             return (self.text.clone(), cursor_width as u16);
         }
 
+        let max_start_col = if self.cursor == self.text.len() && max_cols > 1 {
+            total_width.saturating_sub(max_cols.saturating_sub(1))
+        } else {
+            total_width.saturating_sub(max_cols)
+        };
         let mut start_col = if cursor_width <= max_cols / 2 {
             0
         } else if cursor_width.saturating_add(max_cols / 2) >= total_width {
-            total_width.saturating_sub(max_cols)
+            max_start_col
         } else {
             cursor_width.saturating_sub(max_cols / 2)
         };
-        start_col = start_col.min(total_width.saturating_sub(max_cols));
+        start_col = start_col.min(max_start_col);
 
         let start_byte = byte_index_at_visual_col(&spans, start_col);
         let end_byte = byte_index_at_visual_col(&spans, start_col.saturating_add(max_cols));
@@ -400,19 +405,14 @@ impl InputWidget {
     }
 }
 
-impl Widget for InputWidget {
-    fn handle_ui_event(&mut self, event: &UiEvent, _ctx: &mut UiContext) -> UiEventResult {
-        match event {
-            UiEvent::Key(key) if self.handle_key(*key) => UiEventResult::Handled(Vec::new()),
-            UiEvent::Paste(text) => {
-                self.insert_str(text);
-                UiEventResult::Handled(Vec::new())
-            }
-            _ => UiEventResult::NotHandled,
-        }
-    }
-
-    fn render_widget(&mut self, screen: &mut Screen, rect: UiRect, _ctx: &UiContext) {
+impl InputWidget {
+    /// Renders the prompt and visible text while reserving a cell for a block cursor at end-of-line.
+    pub fn render_widget_with_cursor_padding(
+        &mut self,
+        screen: &mut Screen,
+        rect: UiRect,
+        _ctx: &UiContext,
+    ) {
         self.render_cursor = None;
         if rect.size.rows == 0 || rect.size.cols == 0 {
             return;
@@ -454,6 +454,23 @@ impl Widget for InputWidget {
                         .saturating_add(rect.size.cols.saturating_sub(1)),
                 ),
         ));
+    }
+}
+
+impl Widget for InputWidget {
+    fn handle_ui_event(&mut self, event: &UiEvent, _ctx: &mut UiContext) -> UiEventResult {
+        match event {
+            UiEvent::Key(key) if self.handle_key(*key) => UiEventResult::Handled(Vec::new()),
+            UiEvent::Paste(text) => {
+                self.insert_str(text);
+                UiEventResult::Handled(Vec::new())
+            }
+            _ => UiEventResult::NotHandled,
+        }
+    }
+
+    fn render_widget(&mut self, screen: &mut Screen, rect: UiRect, ctx: &UiContext) {
+        self.render_widget_with_cursor_padding(screen, rect, ctx);
     }
 
     fn focus_policy(&self) -> FocusPolicy {
@@ -632,6 +649,25 @@ mod tests {
         assert_eq!(segments[1].style, base.accent(Style::new().faint()));
         assert_eq!(segments[2].style, base);
         assert_eq!(cursor_col, 11);
+    }
+
+    #[test]
+    fn keeps_the_cursor_after_scrolled_end_of_line() {
+        let mut input = InputWidget::new("abcdefghij");
+        input.set_prompt(">");
+        input.handle_key(KeyCode::End.key());
+
+        let mut screen = Screen::new(1, 8);
+        let ctx = UiContext;
+        input.render_widget(
+            &mut screen,
+            UiRect::new(Position::new(0, 0), crate::window::Size::new(1, 8)),
+            &ctx,
+        );
+
+        let cursor = input.render_cursor().expect("cursor should render");
+        assert_eq!(cursor, Position::new(0, 7));
+        assert_eq!(screen.get_cell_mut(0, 7).unwrap().text, " ");
     }
 
     #[test]

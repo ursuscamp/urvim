@@ -6,7 +6,7 @@ This is a list, in no particular order, of things that need to be addressed whic
 
 - session support
 - should panes hold dynamic widgets?
-
+- add a GLOBAL_VARIABLE highlight in rust
 
 # Bugs
 

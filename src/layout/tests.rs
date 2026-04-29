@@ -540,7 +540,8 @@ fn test_layout_render_uses_a_fixed_width_command_line_frame() {
     assert_eq!(screen.get_cell_mut(0, 56).unwrap().text, "+");
     assert_eq!(screen.get_cell_mut(1, 3).unwrap().text, ":");
     assert_eq!(layout.visual_cursor(), Some(Position::new(1, 55)));
-    assert_eq!(screen.get_cell_mut(1, 55).unwrap().text, "4");
+    assert_eq!(screen.get_cell_mut(1, 54).unwrap().text, "4");
+    assert_eq!(screen.get_cell_mut(1, 55).unwrap().text, " ");
 }
 
 #[test]
