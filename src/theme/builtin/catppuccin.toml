@@ -53,6 +53,7 @@ bg = "bg"
 "ui.input.prompt.exact" = { fg = "accent", bold = true }
 "ui.input.prompt.fuzzy" = { fg = "accent", italic = true }
 "ui.input.prompt.separator" = { fg = "muted" }
+"ui.picker.location" = { fg = "muted" }
 "ui.notification.info" = { fg = "blue" }
 "ui.notification.warn" = { fg = "yellow", bold = true }
 "ui.notification.error" = { fg = "red", bold = true }

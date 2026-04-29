@@ -540,5 +540,21 @@ mod tests {
         assert!(registry.get("Dracula").is_some());
         assert!(registry.get("Tokyo Night").is_some());
         assert!(registry.get("Catppuccin").is_some());
+
+        for name in [
+            "Friday Night",
+            "Saturday Morning",
+            "Rose Pine",
+            "Dracula",
+            "Tokyo Night",
+            "Catppuccin",
+        ] {
+            let theme = registry.get(name).expect("builtin theme should exist");
+            assert_ne!(
+                theme.resolve_name_with_default("ui.picker.location"),
+                theme.default_style(),
+                "{name} should define a muted picker location style",
+            );
+        }
     }
 }

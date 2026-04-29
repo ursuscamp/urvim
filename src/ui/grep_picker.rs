@@ -205,7 +205,7 @@ impl PickerItem for GrepPickerItem {
         let suffix_style = base_style.faint().accent(location_style());
         let suffix_cols = unicode_width::UnicodeWidthStr::width(suffix.as_str());
 
-        if remaining_cols <= suffix_cols + 1 {
+        if remaining_cols <= suffix_cols {
             let (visible_suffix, _) =
                 crate::ui::picker::visible_tail_text(suffix.as_str(), remaining_cols, true);
             return vec![PickerRenderSegment::new(visible_suffix, suffix_style)];
@@ -223,11 +223,10 @@ impl PickerItem for GrepPickerItem {
             }
         }
 
-        let path_budget = remaining_cols.saturating_sub(suffix_cols + 1);
+        let path_budget = remaining_cols.saturating_sub(suffix_cols);
         let (visible_label, _) =
             crate::ui::picker::visible_tail_text(label.as_str(), path_budget, true);
         segments.push(PickerRenderSegment::new(visible_label, base_style));
-        segments.push(PickerRenderSegment::new(" ", base_style));
         segments.push(PickerRenderSegment::new(suffix, suffix_style));
         segments
     }
@@ -448,6 +447,11 @@ mod tests {
             segments
                 .iter()
                 .any(|segment| segment.text.contains(":10:5"))
+        );
+        assert!(
+            !segments
+                .windows(2)
+                .any(|pair| pair[0].text.ends_with(' ') && pair[1].text.starts_with(":"))
         );
     }
 
