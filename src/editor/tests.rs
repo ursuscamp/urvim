@@ -192,12 +192,22 @@ fn test_picker_open_binding_is_available_in_modes() {
         HandleKeyResult::Complete(intent)
             if matches!(intent, crate::ui::Intent::Command(crate::ui::Command::OpenFilePicker))
     ));
+    assert!(matches!(
+        normal.handle_key(&Key::new(KeyCode::F2)),
+        HandleKeyResult::Complete(intent)
+            if matches!(intent, crate::ui::Intent::Command(crate::ui::Command::OpenGrepPicker))
+    ));
 
     let mut insert = InsertMode::new();
     assert!(matches!(
         insert.handle_key(&Key::new(KeyCode::F1)),
         HandleKeyResult::Complete(intent)
             if matches!(intent, crate::ui::Intent::Command(crate::ui::Command::OpenFilePicker))
+    ));
+    assert!(matches!(
+        insert.handle_key(&Key::new(KeyCode::F2)),
+        HandleKeyResult::Complete(intent)
+            if matches!(intent, crate::ui::Intent::Command(crate::ui::Command::OpenGrepPicker))
     ));
 }
 

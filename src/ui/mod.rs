@@ -6,9 +6,11 @@
 pub mod confirmation_box;
 pub mod file_picker;
 pub mod floating_window;
+pub mod grep_picker;
 pub mod inputs;
 pub mod picker;
 
+use crate::buffer::Cursor;
 use crate::editor::Action;
 use crate::notification::NotificationLevel;
 use crate::terminal::{Event, Key};
@@ -110,8 +112,12 @@ pub enum Command {
     OpenCommandLine,
     /// Open the file picker overlay.
     OpenFilePicker,
+    /// Open the live grep picker overlay.
+    OpenGrepPicker,
     /// Open a file selected from a picker.
     OpenFile(PathBuf),
+    /// Open a file and place the cursor at the provided position.
+    OpenFileAtCursor(PathBuf, Cursor),
     /// Shrink the focused pane horizontally by the provided count.
     ResizePaneLeft(usize),
     /// Grow the focused pane horizontally by the provided count.

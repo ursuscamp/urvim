@@ -203,6 +203,47 @@ fn test_layout_file_picker_opens_and_closes() {
 }
 
 #[test]
+fn test_layout_grep_picker_opens_and_closes() {
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("one")]);
+
+    assert!(layout.dispatch_intent(&Intent::Command(Command::OpenGrepPicker)));
+    assert!(layout.grep_picker_is_open());
+
+    let result = layout.route_ui_event(&UiEvent::Key(key(KeyCode::Esc)));
+    assert!(result.handled());
+    assert!(!layout.grep_picker_is_open());
+}
+
+#[test]
+fn test_layout_open_file_at_cursor_sets_cursor_position() {
+    let temp_dir = std::env::temp_dir().join(format!(
+        "urvim-open-file-at-cursor-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock before epoch")
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&temp_dir).unwrap();
+    let path = temp_dir.join("match.txt");
+    std::fs::write(&path, "hello world\n").unwrap();
+
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("one")]);
+    assert!(
+        layout.dispatch_intent(&Intent::Command(Command::OpenFileAtCursor(
+            path.clone(),
+            crate::buffer::Cursor::new(0, 6),
+        )))
+    );
+    assert_eq!(
+        layout.active_buffer_view().cursor(),
+        crate::buffer::Cursor::new(0, 6)
+    );
+
+    let _ = std::fs::remove_file(path);
+    let _ = std::fs::remove_dir_all(temp_dir);
+}
+
+#[test]
 fn test_layout_dispatch_intent_quit_exits_immediately() {
     let mut layout = layout_with_buffers(vec![Buffer::from_str("one")]);
 

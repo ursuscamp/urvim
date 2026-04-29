@@ -7,6 +7,7 @@
 
 use crate::buffer::BufferCacheRefreshResult;
 use crate::ui::file_picker::FilePickerItem;
+use crate::ui::grep_picker::GrepPickerItem;
 use smol_str::SmolStr;
 use std::collections::BTreeMap;
 use std::collections::VecDeque;
@@ -71,6 +72,8 @@ pub enum JobPayload {
     BufferCacheRefresh(BufferCacheRefreshResult),
     /// File picker search chunk.
     FilePickerChunk(Vec<FilePickerItem>),
+    /// Live grep picker search chunk.
+    GrepPickerChunk(Vec<GrepPickerItem>),
     /// Empty payload for jobs that only signal completion.
     Unit,
     #[cfg(test)]
@@ -87,6 +90,12 @@ impl From<BufferCacheRefreshResult> for JobPayload {
 impl From<Vec<FilePickerItem>> for JobPayload {
     fn from(value: Vec<FilePickerItem>) -> Self {
         Self::FilePickerChunk(value)
+    }
+}
+
+impl From<Vec<GrepPickerItem>> for JobPayload {
+    fn from(value: Vec<GrepPickerItem>) -> Self {
+        Self::GrepPickerChunk(value)
     }
 }
 

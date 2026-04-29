@@ -7,7 +7,7 @@ use urvim::buffer::Cursor;
 use urvim::config::Config;
 use urvim::editor::{Action, ActionKind, HandleKeyResult, ModeKind, RepeatReplay};
 use urvim::globals;
-use urvim::layout::FILE_PICKER_SEARCH_JOB_KIND;
+use urvim::layout::{FILE_PICKER_SEARCH_JOB_KIND, GREP_PICKER_SEARCH_JOB_KIND};
 use urvim::screen::Screen;
 use urvim::terminal::{Terminal, size::get_terminal_size};
 use urvim::theme::ThemeRegistry;
@@ -85,7 +85,10 @@ fn main() -> io::Result<()> {
         let background_requested_redraw = globals::with_job_manager(|job_manager| {
             if let Some(job_manager) = job_manager {
                 let accepted_redraw = job_manager.process_events(|event| match event {
-                    e @ _ if e.kind().as_str() == FILE_PICKER_SEARCH_JOB_KIND => {
+                    e @ _
+                        if e.kind().as_str() == FILE_PICKER_SEARCH_JOB_KIND
+                            || e.kind().as_str() == GREP_PICKER_SEARCH_JOB_KIND =>
+                    {
                         layout.dispatch_job_event(e);
                     }
                     urvim::job::JobEvent::Completed {

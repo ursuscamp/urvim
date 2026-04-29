@@ -25,6 +25,7 @@ impl InsertMode {
     pub fn new() -> Self {
         let mut keymap = TrieKeymap::new();
         keymap.insert_str("<F1>", Command::OpenFilePicker);
+        keymap.insert_str("<F2>", Command::OpenGrepPicker);
         keymap.insert_str("<Esc>", Action::mode_transition(ModeKind::Normal));
         keymap.insert_str("<C-q>", Command::TryQuit);
         keymap.insert_str("<C-s>", Action::save_buffer(None));

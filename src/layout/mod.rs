@@ -7,6 +7,7 @@
 mod command_line;
 mod confirmation;
 mod geometry;
+mod grep_picker;
 mod node;
 mod picker;
 mod render;
@@ -20,12 +21,14 @@ use crate::status_bar::StatusBar;
 use crate::terminal::CursorStyle;
 use crate::ui::confirmation_box::ConfirmationBox;
 use crate::ui::file_picker::FilePickerWidget;
+use crate::ui::grep_picker::GrepPickerWidget;
 use crate::ui::{Command, Intent, UiEvent, UiEventResult};
 use crate::window::{BufferView, Position, Size};
 use std::path::PathBuf;
 
 pub use self::picker::FILE_PICKER_SEARCH_JOB_KIND;
 use self::tree::ResizeDirection;
+pub use crate::ui::grep_picker::GREP_PICKER_SEARCH_JOB_KIND;
 pub use node::{LayoutNode, PaneId, PaneNode, SplitAxis, SplitNode, SplitSize};
 
 /// Root layout container for urvim.
@@ -44,6 +47,7 @@ pub struct Layout {
     command_line: CommandLineState,
     command_line_open: bool,
     file_picker: Option<FilePickerWidget>,
+    grep_picker: Option<GrepPickerWidget>,
     confirmation_box: Option<ConfirmationBox>,
 }
 
@@ -61,6 +65,7 @@ impl Layout {
             command_line: CommandLineState::new(),
             command_line_open: false,
             file_picker: None,
+            grep_picker: None,
             confirmation_box: None,
         }
     }
@@ -207,11 +212,29 @@ impl Layout {
                 self.open_file_picker();
                 true
             }
+            Command::OpenGrepPicker => {
+                self.open_grep_picker();
+                true
+            }
             Command::OpenFile(path) => {
                 match crate::globals::with_buffer_pool(|pool| pool.open_buffer(path)) {
                     Ok(buffer_id) => {
                         self.active_window_group_mut()
                             .activate_or_open_buffer(buffer_id);
+                        true
+                    }
+                    Err(error) => {
+                        crate::notify_error!("Failed to open file {:?}: {}", path, error);
+                        true
+                    }
+                }
+            }
+            Command::OpenFileAtCursor(path, cursor) => {
+                match crate::globals::with_buffer_pool(|pool| pool.open_buffer(path)) {
+                    Ok(buffer_id) => {
+                        let window_group = self.active_window_group_mut();
+                        window_group.activate_or_open_buffer(buffer_id);
+                        window_group.active_window_mut().set_cursor_synced(*cursor);
                         true
                     }
                     Err(error) => {
@@ -356,6 +379,10 @@ impl Layout {
     }
 
     fn route_picker_ui_event(&mut self, event: &UiEvent) -> UiEventResult {
+        if self.grep_picker_is_open() {
+            return self.handle_grep_picker_event(event);
+        }
+
         if self.file_picker_is_open() {
             return self.handle_file_picker_event(event);
         }
