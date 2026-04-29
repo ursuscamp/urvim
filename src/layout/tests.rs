@@ -209,6 +209,13 @@ fn test_layout_grep_picker_opens_and_closes() {
     assert!(layout.dispatch_intent(&Intent::Command(Command::OpenGrepPicker)));
     assert!(layout.grep_picker_is_open());
 
+    let mut screen = crate::screen::Screen::new(8, 40);
+    layout.render(&mut screen, Position::new(0, 0), Size::new(8, 40));
+    assert!(
+        layout.visual_cursor().is_some(),
+        "grep picker prompt cursor should be visible"
+    );
+
     let result = layout.route_ui_event(&UiEvent::Key(key(KeyCode::Esc)));
     assert!(result.handled());
     assert!(!layout.grep_picker_is_open());

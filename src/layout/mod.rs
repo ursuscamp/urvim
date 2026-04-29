@@ -169,6 +169,10 @@ impl Layout {
 
     /// Returns the visual cursor for the focused pane, if any.
     pub fn visual_cursor(&self) -> Option<Position> {
+        if let Some(position) = self.grep_picker.as_ref().and_then(|picker| picker.cursor()) {
+            return Some(position);
+        }
+
         if let Some(position) = self.file_picker.as_ref().and_then(|picker| picker.cursor()) {
             return Some(position);
         }
