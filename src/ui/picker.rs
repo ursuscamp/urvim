@@ -272,9 +272,9 @@ impl<S: PickerSource> PickerWidget<S> {
             return;
         }
 
-        let len = self.results.len();
+        let len = self.results.len() as isize;
         let current = self.highlighted.unwrap_or(0) as isize;
-        let next = (current + delta).clamp(0, len.saturating_sub(1) as isize) as usize;
+        let next = (current + delta).rem_euclid(len) as usize;
         self.highlighted = Some(next);
         self.ensure_highlight_visible();
     }
@@ -814,6 +814,30 @@ mod tests {
         );
         assert!(result.handled());
         assert!(!picker.is_open());
+    }
+
+    #[test]
+    fn picker_wraps_highlight_when_moving_above_first_item() {
+        let source = TestSource::new();
+        let mut picker = PickerWidget::new(source);
+        picker.results = vec!["one".to_string(), "two".to_string(), "three".to_string()];
+        picker.highlighted = Some(0);
+
+        picker.move_highlight(-1);
+
+        assert_eq!(picker.highlighted_index(), Some(2));
+    }
+
+    #[test]
+    fn picker_wraps_highlight_when_moving_below_last_item() {
+        let source = TestSource::new();
+        let mut picker = PickerWidget::new(source);
+        picker.results = vec!["one".to_string(), "two".to_string(), "three".to_string()];
+        picker.highlighted = Some(2);
+
+        picker.move_highlight(1);
+
+        assert_eq!(picker.highlighted_index(), Some(0));
     }
 
     #[test]
