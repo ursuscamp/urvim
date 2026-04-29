@@ -1,5 +1,6 @@
 use super::Layout;
 use crate::job::{JobEvent, JobPayload};
+use crate::terminal::KeyCode;
 use crate::ui::grep_picker::{GREP_PICKER_SEARCH_JOB_KIND, GrepPickerSource, GrepPickerWidget};
 use crate::ui::picker::PickerSearchEvent;
 use crate::ui::{UiEvent, UiEventResult};
@@ -17,6 +18,7 @@ impl Layout {
             Ok(cwd) => {
                 let picker = GrepPickerWidget::new(GrepPickerSource::new(cwd));
                 self.grep_picker = Some(picker);
+                self.refresh_grep_picker_prompt();
             }
             Err(error) => {
                 crate::notify_error!("Failed to open live grep picker: {}", error);
@@ -49,6 +51,15 @@ impl Layout {
         let Some(picker) = self.grep_picker.as_mut() else {
             return UiEventResult::NotHandled;
         };
+
+        if let UiEvent::Key(key) = event {
+            if key.code == KeyCode::Tab {
+                let mode = picker.source_mut().toggle_query_mode();
+                picker.set_query_prompt_segments(GrepPickerSource::query_prompt_segments(mode));
+                picker.restart_search();
+                return UiEventResult::Handled(Vec::new());
+            }
+        }
 
         let mut ctx = crate::ui::UiContext;
         let result = picker.handle_ui_event(event, &mut ctx);
@@ -94,6 +105,13 @@ impl Layout {
                 }
             }
             _ => {}
+        }
+    }
+
+    fn refresh_grep_picker_prompt(&mut self) {
+        if let Some(picker) = self.grep_picker.as_mut() {
+            let mode = picker.source_mut().query_mode();
+            picker.set_query_prompt_segments(GrepPickerSource::query_prompt_segments(mode));
         }
     }
 }

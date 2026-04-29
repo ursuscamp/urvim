@@ -5,6 +5,7 @@ use crate::globals;
 use crate::job::{Job, JobContext, JobDelivery, JobKind, JobPriority, JobToken};
 use crate::syntax::FiletypeGlyph;
 use crate::terminal::Style;
+use crate::ui::inputs::PromptSegment;
 use crate::ui::picker::{
     PickerItem, PickerRenderSegment, PickerSearchEvent, PickerSource, PickerWidget,
 };
@@ -14,7 +15,7 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::Sender;
 
 const PICKER_CHUNK_SIZE: usize = 32;
@@ -38,6 +39,25 @@ pub struct GrepPickerItem {
 pub struct GrepPickerSource {
     root: PathBuf,
     current_generation: Arc<AtomicU64>,
+    fuzzy_mode: Arc<AtomicBool>,
+}
+
+/// Search mode used by the live grep picker.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QueryMode {
+    /// Exact substring search.
+    Exact,
+    /// Fuzzy subsequence search.
+    Fuzzy,
+}
+
+/// Query passed to the live grep search job.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum QueryStyle {
+    /// Exact substring search.
+    Exact(String),
+    /// Fuzzy subsequence search.
+    Fuzzy(String),
 }
 
 /// Concrete live grep picker widget.
@@ -51,7 +71,45 @@ impl GrepPickerSource {
             current_generation: Arc::new(AtomicU64::new(
                 NEXT_GREP_PICKER_GENERATION.fetch_add(1, Ordering::SeqCst),
             )),
+            fuzzy_mode: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    /// Returns the current search mode.
+    pub fn query_mode(&self) -> QueryMode {
+        if self.fuzzy_mode.load(Ordering::SeqCst) {
+            QueryMode::Fuzzy
+        } else {
+            QueryMode::Exact
+        }
+    }
+
+    /// Sets the current search mode.
+    pub fn set_query_mode(&self, mode: QueryMode) {
+        self.fuzzy_mode
+            .store(matches!(mode, QueryMode::Fuzzy), Ordering::SeqCst);
+    }
+
+    /// Toggles the current search mode.
+    pub fn toggle_query_mode(&self) -> QueryMode {
+        let next = matches!(self.query_mode(), QueryMode::Exact)
+            .then_some(QueryMode::Fuzzy)
+            .unwrap_or(QueryMode::Exact);
+        self.set_query_mode(next);
+        next
+    }
+
+    /// Returns prompt segments for the current search mode.
+    pub fn query_prompt_segments(mode: QueryMode) -> Vec<PromptSegment> {
+        let label = match mode {
+            QueryMode::Exact => "Exact",
+            QueryMode::Fuzzy => "Fuzzy",
+        };
+
+        vec![
+            PromptSegment::new(label, highlight_style(mode_prompt_tag(mode))),
+            PromptSegment::new(" > ", highlight_style("ui.input.prompt.separator")),
+        ]
     }
 }
 
@@ -88,7 +146,10 @@ impl PickerSource for GrepPickerSource {
         }
 
         let root = self.root.clone();
-        let query = query.to_string();
+        let query = match self.query_mode() {
+            QueryMode::Exact => QueryStyle::Exact(query.to_string()),
+            QueryMode::Fuzzy => QueryStyle::Fuzzy(query.to_string()),
+        };
         let token = JobToken::new(generation);
         globals::with_job_manager(|manager| {
             if let Some(manager) = manager {
@@ -179,6 +240,68 @@ fn display_label(root: &Path, path: &Path) -> String {
         .into_owned()
 }
 
+fn highlight_style(name: &str) -> Style {
+    globals::with_active_theme(|theme| {
+        theme
+            .map(|theme| theme.highlight_style_for_name(name))
+            .unwrap_or_default()
+    })
+}
+
+fn mode_prompt_tag(mode: QueryMode) -> &'static str {
+    match mode {
+        QueryMode::Exact => "ui.input.prompt.exact",
+        QueryMode::Fuzzy => "ui.input.prompt.fuzzy",
+    }
+}
+
+fn exact_matches(query: &str, candidate: &str) -> bool {
+    candidate
+        .to_lowercase()
+        .contains(query.to_lowercase().as_str())
+}
+
+fn fuzzy_matches(query: &str, candidate: &str) -> bool {
+    let mut query_chars = query.chars().flat_map(char::to_lowercase);
+    let Some(mut needle) = query_chars.next() else {
+        return true;
+    };
+
+    for hay in candidate.chars().flat_map(char::to_lowercase) {
+        if hay == needle {
+            match query_chars.next() {
+                Some(next) => needle = next,
+                None => return true,
+            }
+        }
+    }
+
+    false
+}
+
+fn fuzzy_match_column(query: &str, candidate: &str) -> usize {
+    let mut query_chars = query.chars().flat_map(char::to_lowercase);
+    let Some(mut needle) = query_chars.next() else {
+        return 0;
+    };
+
+    let mut first_match = None;
+    for (byte_idx, hay) in candidate
+        .char_indices()
+        .flat_map(|(idx, ch)| ch.to_lowercase().map(move |lower| (idx, lower)))
+    {
+        if hay == needle {
+            first_match.get_or_insert(byte_idx);
+            match query_chars.next() {
+                Some(next) => needle = next,
+                None => return first_match.unwrap_or(0),
+            }
+        }
+    }
+
+    first_match.unwrap_or(0)
+}
+
 fn location_style() -> Style {
     globals::with_active_theme(|theme| {
         theme
@@ -192,7 +315,7 @@ pub const GREP_PICKER_SEARCH_JOB_KIND: &str = "grep-picker-search";
 #[derive(Debug)]
 struct GrepPickerSearchJob {
     root: PathBuf,
-    query: String,
+    query: QueryStyle,
     chunk_size: usize,
 }
 
@@ -242,7 +365,18 @@ impl Job for GrepPickerSearchJob {
                     break;
                 }
 
-                if let Some(column) = line.find(query.as_str()) {
+                let matched_column = match &query {
+                    QueryStyle::Exact(query) => {
+                        let lower_line = line.to_lowercase();
+                        let lower_query = query.to_lowercase();
+                        exact_matches(query.as_str(), line.as_str())
+                            .then(|| lower_line.find(lower_query.as_str()).unwrap_or(0))
+                    }
+                    QueryStyle::Fuzzy(query) => fuzzy_matches(query.as_str(), line.as_str())
+                        .then(|| fuzzy_match_column(query.as_str(), line.as_str())),
+                };
+
+                if let Some(column) = matched_column {
                     chunk.push(GrepPickerItem {
                         path: path.clone(),
                         root: self.root.clone(),
@@ -333,7 +467,7 @@ mod tests {
                 JobDelivery::Streaming,
                 GrepPickerSearchJob {
                     root: temp_root.clone(),
-                    query: "target".to_string(),
+                    query: QueryStyle::Exact("target".to_string()),
                     chunk_size: 2,
                 },
             )
@@ -371,6 +505,82 @@ mod tests {
     }
 
     #[test]
+    fn grep_picker_source_toggles_query_mode() {
+        let source = GrepPickerSource::new(PathBuf::from("/tmp"));
+
+        assert_eq!(source.query_mode(), QueryMode::Exact);
+        assert_eq!(source.toggle_query_mode(), QueryMode::Fuzzy);
+        assert_eq!(source.query_mode(), QueryMode::Fuzzy);
+        source.set_query_mode(QueryMode::Exact);
+        assert_eq!(source.query_mode(), QueryMode::Exact);
+    }
+
+    #[test]
+    fn query_prompt_segments_include_mode_label() {
+        let theme = crate::theme::Theme::new(
+            "prompt-test",
+            crate::theme::ThemeKind::Ansi256,
+            Style::default(),
+            crate::theme::HighlightStyles::new(
+                [
+                    (
+                        "ui.input.prompt.exact",
+                        Style::new().fg(crate::terminal::Color::ansi(1)).bold(),
+                    ),
+                    (
+                        "ui.input.prompt.fuzzy",
+                        Style::new().fg(crate::terminal::Color::ansi(2)).italic(),
+                    ),
+                    (
+                        "ui.input.prompt.separator",
+                        Style::new().fg(crate::terminal::Color::ansi(3)).faint(),
+                    ),
+                ]
+                .into_iter()
+                .map(|(name, style)| (crate::theme::Tag::parse(name).expect("valid tag"), style))
+                .collect(),
+            ),
+        );
+        let _theme_guard = globals::set_test_active_theme(theme);
+
+        let exact = GrepPickerSource::query_prompt_segments(QueryMode::Exact);
+        let fuzzy = GrepPickerSource::query_prompt_segments(QueryMode::Fuzzy);
+
+        assert_eq!(exact.len(), 2);
+        assert_eq!(exact[0].text, "Exact");
+        assert_eq!(exact[1].text, " > ");
+        assert_eq!(fuzzy[0].text, "Fuzzy");
+        assert_eq!(fuzzy[1].text, " > ");
+        assert_eq!(
+            exact[0].style,
+            Style::new().fg(crate::terminal::Color::ansi(1)).bold()
+        );
+        assert_eq!(
+            fuzzy[0].style,
+            Style::new().fg(crate::terminal::Color::ansi(2)).italic()
+        );
+        assert_eq!(
+            exact[1].style,
+            Style::new().fg(crate::terminal::Color::ansi(3)).faint()
+        );
+        assert_eq!(
+            fuzzy[1].style,
+            Style::new().fg(crate::terminal::Color::ansi(3)).faint()
+        );
+    }
+
+    #[test]
+    fn grep_picker_fuzzy_matches_subsequence_case_insensitively() {
+        assert!(fuzzy_matches("fp", "src/ui/file_picker.rs"));
+        assert!(fuzzy_matches("GM", "gamma target"));
+    }
+
+    #[test]
+    fn grep_picker_fuzzy_matches_rejects_out_of_order_characters() {
+        assert!(!fuzzy_matches("pf", "src/ui/file_picker.rs"));
+    }
+
+    #[test]
     fn grep_picker_streams_results_through_the_job_manager() {
         let temp_root = unique_temp_dir();
         fs::create_dir_all(&temp_root).unwrap();
@@ -387,7 +597,7 @@ mod tests {
                 JobDelivery::Streaming,
                 GrepPickerSearchJob {
                     root: temp_root.clone(),
-                    query: "needle".to_string(),
+                    query: QueryStyle::Exact("needle".to_string()),
                     chunk_size: 1,
                 },
             )
