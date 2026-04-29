@@ -3,6 +3,7 @@
 //! This module provides a generic overlay picker that can stream results from a
 //! background source and emit selection intents for different result types.
 
+use crate::config::AdvancedGlyphCapability;
 use crate::screen::Screen;
 use crate::terminal::{KeyCode, Style};
 use crate::ui::floating_window::{FloatingAnchor, FloatingWindowFrame};
@@ -489,11 +490,13 @@ impl<S: PickerSource> Widget for PickerWidget<S> {
             return;
         }
 
+        let selected_prefix = selection_prefix();
+
         for (offset, item) in visible_results.iter().enumerate() {
             let index = start_index + offset;
             let row = results_start_row + offset as u16;
             let prefix = if Some(index) == self.highlighted {
-                "> "
+                selected_prefix.as_str()
             } else {
                 "  "
             };
@@ -528,6 +531,24 @@ fn theme_style(name: &str) -> Style {
             .map(|theme| theme.resolve_name_with_default(name))
             .unwrap_or_default()
     })
+}
+
+pub fn picker_indicator_glyph() -> &'static str {
+    if crate::globals::with_config(|config| {
+        config
+            .advanced_glyphs
+            .contains(&AdvancedGlyphCapability::Nerdfont)
+    })
+    .unwrap_or(false)
+    {
+        ""
+    } else {
+        ">"
+    }
+}
+
+fn selection_prefix() -> String {
+    format!("{} ", picker_indicator_glyph())
 }
 
 fn render_result_line<T: PickerItem>(
@@ -630,6 +651,7 @@ pub fn visible_tail_text(text: &str, max_cols: usize, ellipsize: bool) -> (Strin
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::{AdvancedGlyphCapability, Config};
     use crate::ui::{Intent, UiContext, UiEvent};
     use std::sync::{Arc, Mutex};
 
@@ -792,6 +814,25 @@ mod tests {
         );
         assert!(result.handled());
         assert!(!picker.is_open());
+    }
+
+    #[test]
+    fn picker_uses_nerdfont_selection_prefix_when_enabled() {
+        let _config_guard = crate::globals::set_test_config(Config {
+            advanced_glyphs: std::collections::BTreeSet::from([AdvancedGlyphCapability::Nerdfont]),
+            ..Config::default()
+        });
+
+        assert_eq!(picker_indicator_glyph(), "");
+        assert_eq!(selection_prefix(), " ");
+    }
+
+    #[test]
+    fn picker_uses_ascii_selection_prefix_when_nerdfont_is_disabled() {
+        let _config_guard = crate::globals::set_test_config(Config::default());
+
+        assert_eq!(picker_indicator_glyph(), ">");
+        assert_eq!(selection_prefix(), "> ");
     }
 
     #[test]

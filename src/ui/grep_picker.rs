@@ -8,6 +8,7 @@ use crate::terminal::Style;
 use crate::ui::inputs::PromptSegment;
 use crate::ui::picker::{
     PickerItem, PickerRenderSegment, PickerSearchEvent, PickerSource, PickerWidget,
+    picker_indicator_glyph,
 };
 use crate::ui::{Command, Intent};
 use ignore::WalkBuilder;
@@ -108,7 +109,10 @@ impl GrepPickerSource {
 
         vec![
             PromptSegment::new(label, highlight_style(mode_prompt_tag(mode))),
-            PromptSegment::new(" > ", highlight_style("ui.input.prompt.separator")),
+            PromptSegment::new(
+                format!(" {} ", picker_indicator_glyph()),
+                highlight_style("ui.input.prompt.separator"),
+            ),
         ]
     }
 }
