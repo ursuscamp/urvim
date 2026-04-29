@@ -4,6 +4,7 @@ name = "Catppuccin"
 bg = "#1e1e2e"
 fg = "#cdd6f4"
 panel = "#313244"
+selection = "#45475a"
 accent = "#cba6f7"
 muted = "#6c7086"
 comment = "#6c7086"
@@ -13,7 +14,22 @@ yellow = "#f9e2af"
 blue = "#89b4fa"
 magenta = "#f5c2e7"
 cyan = "#94e2d5"
+teal = "#94e2d5"
 orange = "#fab387"
+rosewater = "#f5e0dc"
+flamingo = "#f2cdcd"
+mauve = "#cba6f7"
+peach = "#fab387"
+sapphire = "#74c7ec"
+lavender = "#b4befe"
+subtext0 = "#a6adc8"
+subtext1 = "#bac2de"
+overlay0 = "#6c7086"
+overlay1 = "#7f849c"
+overlay2 = "#9399b2"
+surface0 = "#313244"
+surface1 = "#45475a"
+surface2 = "#585b70"
 
 [default]
 fg = "fg"
@@ -21,12 +37,12 @@ bg = "bg"
 
 [highlights]
 # UI
-"ui.status_bar" = { fg = "fg", bg = "panel", bold = true }
+"ui.status_bar" = { fg = "fg", bg = "surface0", bold = true }
 "ui.status_bar.modified_marker" = { fg = "orange", bold = true }
-"ui.selection" = { bg = "panel" }
-"ui.window.active_line" = { bg = "panel", overlay = true }
+"ui.selection" = { bg = "selection" }
+"ui.window.active_line" = { bg = "surface0", overlay = true }
 "ui.tab.active" = { fg = "bg", bg = "accent", bold = true }
-"ui.tab.inactive" = { fg = "fg", bg = "panel" }
+"ui.tab.inactive" = { fg = "fg", bg = "surface0" }
 "ui.tab.scroll_indicator" = { fg = "muted", bg = "bg" }
 "ui.window.gutter" = { fg = "muted", bg = "bg" }
 "ui.window.gutter.active_line" = { fg = "fg" }
@@ -34,6 +50,9 @@ bg = "bg"
 "ui.window.lines" = { fg = "muted" }
 "ui.window.lines.resize" = { fg = "accent", bold = true }
 "ui.input.prompt" = { fg = "accent", bold = true }
+"ui.input.prompt.exact" = { fg = "accent", bold = true }
+"ui.input.prompt.fuzzy" = { fg = "accent", italic = true }
+"ui.input.prompt.separator" = { fg = "muted" }
 "ui.notification.info" = { fg = "blue" }
 "ui.notification.warn" = { fg = "yellow", bold = true }
 "ui.notification.error" = { fg = "red", bold = true }
@@ -44,25 +63,26 @@ bg = "bg"
 "syntax.comment.fixme" = { fg = "bg", bg = "red", bold = true }
 "syntax.comment.bug" = { fg = "bg", bg = "orange", bold = true }
 "syntax.comment.note" = { fg = "bg", bg = "cyan", bold = true }
-"syntax.constant" = { fg = "orange" }
+"syntax.constant" = { fg = "yellow" }
 "syntax.function" = { fg = "blue" }
-"syntax.namespace" = { fg = "cyan" }
-"syntax.keyword" = { fg = "magenta" }
-"syntax.markup" = { fg = "accent" }
-"syntax.markup.code" = { fg = "orange" }
-"syntax.markup.code.inline" = { fg = "orange" }
-"syntax.markup.emphasis" = { fg = "accent", italic = true }
+"syntax.namespace" = { fg = "sapphire" }
+"syntax.keyword" = { fg = "mauve" }
+"syntax.markup" = { fg = "fg" }
+"syntax.markup.code" = { fg = "peach" }
+"syntax.markup.code.inline" = { fg = "peach" }
+"syntax.markup.emphasis" = { fg = "flamingo", italic = true }
 "syntax.markup.heading" = { fg = "blue", bold = true }
-"syntax.markup.link" = { fg = "cyan", underline = true }
-"syntax.markup.list" = { fg = "magenta" }
+"syntax.markup.link" = { fg = "lavender", underline = true }
+"syntax.markup.list" = { fg = "teal" }
 "syntax.markup.quote" = { fg = "comment", italic = true }
-"syntax.markup.strong" = { fg = "accent", bold = true }
+"syntax.markup.strong" = { fg = "flamingo", bold = true }
 "syntax.markup.thematic_break" = { fg = "muted" }
-"syntax.number" = { fg = "yellow" }
-"syntax.operator" = { fg = "red" }
-"syntax.punctuation" = { fg = "muted" }
+"syntax.number" = { fg = "peach" }
+"syntax.operator" = { fg = "sapphire" }
+"syntax.punctuation" = { fg = "overlay1" }
 "syntax.string" = { fg = "green" }
-"syntax.string.escape" = { fg = "muted" }
+"syntax.string.escape" = { fg = "magenta" }
 "syntax.string.interpolation" = { fg = "accent" }
-"syntax.type" = { fg = "accent" }
+"syntax.type" = { fg = "yellow" }
 "syntax.variable" = { fg = "fg" }
+"syntax.variable.builtin" = { fg = "flamingo" }

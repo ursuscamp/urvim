@@ -3,7 +3,8 @@ name = "Dracula"
 [palette]
 bg = "#282a36"
 fg = "#f8f8f2"
-panel = "#44475a"
+panel = "#21222c"
+selection = "#44475a"
 accent = "#bd93f9"
 muted = "#6272a4"
 comment = "#6272a4"
@@ -14,6 +15,19 @@ blue = "#8be9fd"
 magenta = "#ff79c6"
 cyan = "#8be9fd"
 orange = "#ffb86c"
+bright_red = "#ff6e6e"
+bright_green = "#69ff94"
+bright_yellow = "#ffffa5"
+bright_blue = "#d6acff"
+bright_magenta = "#ff92df"
+bright_cyan = "#a4ffff"
+bright_white = "#ffffff"
+visual = "#3e4452"
+gutter_fg = "#4b5263"
+nontext = "#3b4048"
+white = "#abb2bf"
+black = "#191a21"
+menu = "#21222c"
 
 [default]
 fg = "fg"
@@ -21,10 +35,10 @@ bg = "bg"
 
 [highlights]
 # UI
-"ui.status_bar" = { fg = "fg", bg = "panel", bold = true }
+"ui.status_bar" = { fg = "white", bg = "selection", bold = true }
 "ui.status_bar.modified_marker" = { fg = "orange", bold = true }
-"ui.selection" = { bg = "panel" }
-"ui.window.active_line" = { bg = "panel", overlay = true }
+"ui.selection" = { bg = "selection" }
+"ui.window.active_line" = { bg = "selection", overlay = true }
 "ui.tab.active" = { fg = "bg", bg = "accent", bold = true }
 "ui.tab.inactive" = { fg = "fg", bg = "panel" }
 "ui.tab.scroll_indicator" = { fg = "muted", bg = "bg" }
@@ -34,6 +48,9 @@ bg = "bg"
 "ui.window.lines" = { fg = "muted" }
 "ui.window.lines.resize" = { fg = "accent", bold = true }
 "ui.input.prompt" = { fg = "accent", bold = true }
+"ui.input.prompt.exact" = { fg = "accent", bold = true }
+"ui.input.prompt.fuzzy" = { fg = "accent", italic = true }
+"ui.input.prompt.separator" = { fg = "muted" }
 "ui.notification.info" = { fg = "blue" }
 "ui.notification.warn" = { fg = "yellow", bold = true }
 "ui.notification.error" = { fg = "red", bold = true }
@@ -44,25 +61,26 @@ bg = "bg"
 "syntax.comment.fixme" = { fg = "bg", bg = "red", bold = true }
 "syntax.comment.bug" = { fg = "bg", bg = "orange", bold = true }
 "syntax.comment.note" = { fg = "bg", bg = "cyan", bold = true }
-"syntax.constant" = { fg = "orange" }
-"syntax.function" = { fg = "blue" }
+"syntax.constant" = { fg = "yellow" }
+"syntax.function" = { fg = "yellow" }
 "syntax.namespace" = { fg = "cyan" }
-"syntax.keyword" = { fg = "magenta" }
-"syntax.markup" = { fg = "accent" }
-"syntax.markup.code" = { fg = "orange" }
-"syntax.markup.code.inline" = { fg = "orange" }
-"syntax.markup.emphasis" = { fg = "accent", italic = true }
-"syntax.markup.heading" = { fg = "blue", bold = true }
+"syntax.keyword" = { fg = "cyan" }
+"syntax.markup" = { fg = "fg" }
+"syntax.markup.code" = { fg = "yellow" }
+"syntax.markup.code.inline" = { fg = "yellow" }
+"syntax.markup.emphasis" = { fg = "magenta", italic = true }
+"syntax.markup.heading" = { fg = "magenta", bold = true }
 "syntax.markup.link" = { fg = "cyan", underline = true }
-"syntax.markup.list" = { fg = "magenta" }
+"syntax.markup.list" = { fg = "cyan" }
 "syntax.markup.quote" = { fg = "comment", italic = true }
-"syntax.markup.strong" = { fg = "accent", bold = true }
+"syntax.markup.strong" = { fg = "magenta", bold = true }
 "syntax.markup.thematic_break" = { fg = "muted" }
-"syntax.number" = { fg = "yellow" }
-"syntax.operator" = { fg = "red" }
-"syntax.punctuation" = { fg = "muted" }
-"syntax.string" = { fg = "green" }
-"syntax.string.escape" = { fg = "muted" }
+"syntax.number" = { fg = "orange" }
+"syntax.operator" = { fg = "magenta" }
+"syntax.punctuation" = { fg = "fg" }
+"syntax.string" = { fg = "yellow" }
+"syntax.string.escape" = { fg = "cyan" }
 "syntax.string.interpolation" = { fg = "accent" }
-"syntax.type" = { fg = "accent" }
+"syntax.type" = { fg = "cyan" }
 "syntax.variable" = { fg = "fg" }
+"syntax.variable.builtin" = { fg = "red" }
