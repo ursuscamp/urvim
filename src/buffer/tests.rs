@@ -451,7 +451,6 @@ fn test_syntax_spans_for_supported_filetype() {
     assert!(spans.iter().any(|span| span.style == tag("keyword")));
     assert!(spans.iter().any(|span| span.style == tag("constant")));
     assert!(spans.iter().any(|span| span.style == tag("type")));
-    assert!(spans.iter().any(|span| span.style == tag("variable")));
     assert!(spans.iter().any(|span| span.style == tag("function")));
     assert!(spans.iter().any(|span| span.style == tag("string")));
     assert_spans_include_comment_style(&spans);

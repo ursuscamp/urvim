@@ -10,6 +10,7 @@ mod geometry;
 mod gutter;
 mod motions;
 mod render;
+pub mod renderer;
 mod view;
 mod widget;
 mod wrap;
@@ -102,7 +103,7 @@ pub struct RenderData {
 #[derive(Debug, Clone)]
 /// A window-local view of a shared buffer plus scroll and cursor state.
 pub struct BufferView {
-    buffer_id: BufferId,
+    buffer: view::BufferBacking,
     scroll_offset: Position,
     wrapped_row_offset: u16,
     cursor: Cursor,
@@ -176,6 +177,18 @@ impl Window {
         let buffer_view = BufferView::new(buffer);
         Self {
             buffer_view,
+            render_data: RenderData::new(0),
+            size: Size::default(),
+            wrap_enabled: false,
+            pending_repeat_suffix: None,
+            mode: Box::new(NormalMode::new()),
+        }
+    }
+
+    /// Creates a window backed by an owned buffer that stays outside the global pool.
+    pub fn from_owned_buffer(buffer: Buffer) -> Self {
+        Self {
+            buffer_view: BufferView::from_owned_buffer(buffer),
             render_data: RenderData::new(0),
             size: Size::default(),
             wrap_enabled: false,
@@ -289,26 +302,27 @@ impl Window {
     }
 
     pub fn render(&mut self, screen: &mut Screen, origin: Position, size: Size) {
-        self.buffer_view.prune_yank_flash(std::time::Instant::now());
         self.size = size;
-        let (gutter_style, default_style) = globals::with_active_theme(|theme| {
-            theme
-                .map(|theme| {
-                    (
-                        theme.resolve_name_with_default("ui.window.gutter"),
-                        theme.default_style(),
-                    )
-                })
-                .unwrap_or_else(|| {
-                    (
-                        Style::new().bg(Color::ansi(236)).fg(Color::ansi(245)),
-                        Style::default(),
-                    )
-                })
-        });
-        let total_lines = self.buffer_view.line_count();
-        let gutter_width =
-            Gutter::new_with_style(0, size.rows, total_lines, gutter_style).calculate_width();
+        let (gutter_style, default_style, active_gutter_style, active_line_style) =
+            globals::with_active_theme(|theme| {
+                theme
+                    .map(|theme| {
+                        (
+                            theme.resolve_name_with_default("ui.window.gutter"),
+                            theme.default_style(),
+                            theme.highlight_style_for_name("ui.window.gutter.active_line"),
+                            theme.resolve_name_with_default("ui.window.active_line"),
+                        )
+                    })
+                    .unwrap_or_else(|| {
+                        (
+                            Style::new().bg(Color::ansi(236)).fg(Color::ansi(245)),
+                            Style::default(),
+                            Style::default(),
+                            Style::default(),
+                        )
+                    })
+            });
         let wrap_mode = globals::with_config(|config| config.wrap_mode).unwrap_or_default();
         let relative_number =
             globals::with_config(|config| config.relative_number).unwrap_or(false);
@@ -316,75 +330,49 @@ impl Window {
             globals::with_config(|config| config.active_line).unwrap_or(false);
         let is_normal_mode = self.mode.kind() == ModeKind::Normal;
 
-        // Resolve scrolling before building the gutter so line numbers and
-        // visible content are derived from the same viewport.
-        self.buffer_view.scroll_to_cursor_with_wrap(
+        let total_lines = self.buffer_view.line_count();
+        let gutter_width =
+            Gutter::new_with_style(0, size.rows, total_lines, gutter_style).calculate_width();
+        let mut render_state = renderer::BufferRenderState {
+            cursor: self.buffer_view.cursor(),
+            scroll_offset: self.buffer_view.scroll_offset(),
+            wrapped_row_offset: self.buffer_view.wrapped_row_offset(),
             size,
-            gutter_width,
-            self.wrap_enabled,
+            wrap_enabled: self.wrap_enabled,
             wrap_mode,
-        );
-        let start_line = self.buffer_view.scroll_offset().row as usize;
-
-        // Create gutter with the finalized viewport state.
-        let mut gutter = Gutter::new_with_style(start_line, size.rows, total_lines, gutter_style);
-
-        // Render buffer content offset by gutter width
-        let content_origin = Position::new(origin.row, origin.col + gutter_width);
-        let content_size = Size::new(size.rows, size.cols.saturating_sub(gutter_width));
-        screen.fill_region(
-            content_origin.row,
-            content_origin.col,
-            content_size.rows,
-            content_size.cols,
-            default_style,
-        );
-
-        self.render_data = self.buffer_view.build_render_data_with_options(
-            content_size,
-            default_style,
-            self.wrap_enabled,
-            wrap_mode,
-        );
-        let active_cursor_row = if active_line_enabled {
-            self.render_data
-                .cursor_screen_position(self.buffer_view.cursor())
-                .map(|position| position.row as usize)
-        } else {
-            None
+            relative_number,
+            scroll_to_cursor: true,
+            active_line_enabled,
+            is_normal_mode,
+            syntax_warmup: true,
         };
-        let active_gutter_style = if active_line_enabled {
-            globals::with_active_theme(|theme| {
-                theme.map(|theme| theme.highlight_style_for_name("ui.window.gutter.active_line"))
-            })
-        } else {
-            None
-        };
-        gutter.render_for_render_data(
+
+        renderer::render_buffer_view(
             screen,
             origin,
-            &self.render_data,
-            GutterRenderState {
-                cursor_line: self.buffer_view.cursor().line,
-                relative_number,
-                active_screen_row: active_cursor_row,
-                active_line_style: active_gutter_style,
+            &mut self.buffer_view,
+            &mut self.render_data,
+            renderer::WindowRenderTheme {
+                gutter_style,
+                default_style,
+                active_gutter_style: if active_line_enabled {
+                    Some(active_gutter_style)
+                } else {
+                    None
+                },
+                active_line_style: if active_line_enabled && is_normal_mode {
+                    Some(active_line_style)
+                } else {
+                    None
+                },
             },
+            &mut render_state,
         );
-        if active_line_enabled
-            && is_normal_mode
-            && let Some(cursor_row) = active_cursor_row
-            && let Some(active_line_style) = globals::with_active_theme(|theme| {
-                theme.map(|theme| theme.resolve_name_with_default("ui.window.active_line"))
-            })
-        {
-            self.render_data
-                .set_line_base_style(cursor_row, active_line_style);
-        }
-
-        self.render_data
-            .render_with_base_style(screen, content_origin, default_style);
-        self.render_indent_guides(screen, content_origin, content_size);
+        self.render_indent_guides(
+            screen,
+            Position::new(origin.row, origin.col + gutter_width),
+            Size::new(size.rows, size.cols.saturating_sub(gutter_width)),
+        );
     }
 
     pub fn set_cursor(&mut self, cursor: Cursor) {

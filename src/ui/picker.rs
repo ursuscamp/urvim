@@ -8,9 +8,10 @@ use crate::screen::Screen;
 use crate::terminal::{KeyCode, Style};
 use crate::ui::floating_window::{FloatingAnchor, FloatingWindowFrame};
 use crate::ui::inputs::{InputWidget, PromptSegment};
+use crate::ui::picker_preview::PickerPreviewAdapter;
 use crate::ui::{FocusPolicy, Intent, UiContext, UiEvent, UiEventResult, UiRect};
 use crate::widget::Widget;
-use crate::window::Position;
+use crate::window::{Position, Size};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender, TryRecvError};
 use unicode_segmentation::UnicodeSegmentation;
@@ -22,6 +23,12 @@ const PICKER_TOP_MARGIN: u16 = 5;
 const PROMPT_ROWS: u16 = 1;
 const SEPARATOR_ROWS: u16 = 1;
 static NEXT_PICKER_GENERATION: AtomicU64 = AtomicU64::new(1);
+static NEXT_PICKER_PREVIEW_GENERATION: AtomicU64 = AtomicU64::new(1);
+
+const PREVIEW_MIN_COLS: u16 = 48;
+const PREVIEW_PREFERRED_COLS: u16 = 80;
+const PREVIEW_MIN_ROWS: u16 = 5;
+const PREVIEW_PREFERRED_CONTENT_ROWS: u16 = 20;
 
 /// Picker search events streamed from the background worker.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -34,6 +41,61 @@ pub enum PickerSearchEvent<T> {
     PickerSearchStale { generation: u64 },
     /// The search finished for the current generation.
     PickerSearchComplete { generation: u64 },
+}
+
+/// Preview loading events streamed from a picker source.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PickerPreviewEvent {
+    /// A preview request has started.
+    Started { generation: u64 },
+    /// A preview request finished successfully.
+    Loaded {
+        /// Preview generation.
+        generation: u64,
+        /// Loaded preview contents.
+        preview: PickerPreview,
+    },
+    /// A preview request failed.
+    Failed {
+        /// Preview generation.
+        generation: u64,
+        /// Human-readable failure message.
+        message: String,
+    },
+}
+
+/// Syntax-highlightable preview content for a picker item.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PickerPreview {
+    /// Preview title displayed above the text.
+    pub title: String,
+    /// One-based line number for the first preview line.
+    pub start_line: usize,
+    /// One-based line number to draw with active-line styling.
+    pub highlighted_line: Option<usize>,
+}
+
+impl PickerPreview {
+    /// Creates picker preview content.
+    pub fn new(
+        title: impl Into<String>,
+        start_line: usize,
+        highlighted_line: Option<usize>,
+    ) -> Self {
+        Self {
+            title: title.into(),
+            start_line,
+            highlighted_line,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum PickerPreviewState {
+    Empty,
+    Loading,
+    Ready(PickerPreview),
+    Error(String),
 }
 
 /// A styled text segment rendered inside a picker result row.
@@ -92,6 +154,23 @@ pub trait PickerSource: Send + 'static {
     /// Cancels any active search, if the source supports it.
     fn cancel_search(&self) {}
 
+    /// Returns a stable key for the selected item's preview.
+    fn preview_key(&self, _item: &Self::Item) -> Option<String> {
+        None
+    }
+
+    /// Starts loading preview content for an item without blocking the UI thread.
+    fn start_preview(
+        &self,
+        _item: Self::Item,
+        _generation: u64,
+        _sender: Sender<PickerPreviewEvent>,
+    ) {
+    }
+
+    /// Cancels any active preview work, if the source supports it.
+    fn cancel_preview(&self) {}
+
     /// Converts a selected item into an editor intent.
     fn select(&self, item: &Self::Item) -> Intent;
 }
@@ -112,12 +191,35 @@ pub struct PickerWidget<S: PickerSource> {
     cursor: Option<Position>,
     receiver: Receiver<PickerSearchEvent<S::Item>>,
     sender: Sender<PickerSearchEvent<S::Item>>,
+    preview_generation: u64,
+    preview_key: Option<String>,
+    preview_highlighted: Option<usize>,
+    preview_state: PickerPreviewState,
+    preview_adapter: PickerPreviewAdapter,
+    preview_receiver: Receiver<PickerPreviewEvent>,
+    preview_sender: Sender<PickerPreviewEvent>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct PickerLayout {
+    picker: FloatingWindowFrame,
+    preview: Option<FloatingWindowFrame>,
+}
+
+fn frame_from_outer(origin: Position, size: Size) -> FloatingWindowFrame {
+    FloatingWindowFrame {
+        origin,
+        size,
+        content_origin: Position::new(origin.row.saturating_add(1), origin.col.saturating_add(1)),
+        content_size: Size::new(size.rows.saturating_sub(2), size.cols.saturating_sub(2)),
+    }
 }
 
 impl<S: PickerSource> PickerWidget<S> {
     /// Creates a new picker widget backed by a source.
     pub fn new(source: S) -> Self {
         let (sender, receiver) = std::sync::mpsc::channel();
+        let (preview_sender, preview_receiver) = std::sync::mpsc::channel();
         let mut query_input = InputWidget::new("");
         query_input.set_prompt(">");
         Self {
@@ -134,6 +236,13 @@ impl<S: PickerSource> PickerWidget<S> {
             cursor: None,
             receiver,
             sender,
+            preview_generation: 0,
+            preview_key: None,
+            preview_highlighted: None,
+            preview_state: PickerPreviewState::Empty,
+            preview_adapter: PickerPreviewAdapter::new(),
+            preview_receiver,
+            preview_sender,
         }
     }
 
@@ -160,6 +269,8 @@ impl<S: PickerSource> PickerWidget<S> {
     /// Closes the picker and cancels any active search.
     pub fn close(&mut self) {
         self.source.cancel_search();
+        self.source.cancel_preview();
+        self.preview_adapter.clear();
         self.open = false;
     }
 
@@ -189,6 +300,28 @@ impl<S: PickerSource> PickerWidget<S> {
         &mut self.source
     }
 
+    fn reset_preview_scroll_for_key(&mut self, key: &str) {
+        if let Some(pane) = self.preview_adapter.preview_pane_mut(key) {
+            pane.set_follow_highlight(true);
+        }
+    }
+
+    fn scroll_current_preview(&mut self, upwards: bool) -> bool {
+        let Some(key) = self.preview_key.clone() else {
+            return false;
+        };
+        let Some(pane) = self.preview_adapter.preview_pane_mut(key.as_str()) else {
+            return false;
+        };
+
+        if upwards {
+            pane.page_up();
+        } else {
+            pane.page_down();
+        }
+        true
+    }
+
     /// Sets the search prompt text.
     pub fn set_query_prompt(&mut self, prompt: impl Into<String>) {
         self.query_input.set_prompt(prompt);
@@ -200,6 +333,10 @@ impl<S: PickerSource> PickerWidget<S> {
     }
 
     fn resolve_frame(&self, rect: UiRect) -> Option<FloatingWindowFrame> {
+        self.resolve_layout(rect).map(|layout| layout.picker)
+    }
+
+    fn resolve_layout(&self, rect: UiRect) -> Option<PickerLayout> {
         if rect.size.rows < 3 || rect.size.cols < 3 {
             return None;
         }
@@ -207,21 +344,79 @@ impl<S: PickerSource> PickerWidget<S> {
         let page_size = self.page_size(rect.size.rows);
         let visible_results = self.visible_results(page_size);
         let status_line = self.status_line();
-        let content_cols = PICKER_CONTENT_COLS.min(rect.size.cols.saturating_sub(2).max(1));
+        let picker_content_cols = PICKER_CONTENT_COLS.min(rect.size.cols.saturating_sub(2).max(1));
         let result_rows = visible_results
             .len()
             .max(usize::from(status_line.is_some()));
-        let content_rows = usize::from(PROMPT_ROWS + SEPARATOR_ROWS) + result_rows;
+        let picker_content_rows = usize::from(PROMPT_ROWS + SEPARATOR_ROWS) + result_rows;
+        let picker_outer = Size::new(
+            (picker_content_rows as u16)
+                .saturating_add(2)
+                .min(rect.size.rows),
+            picker_content_cols.saturating_add(2).min(rect.size.cols),
+        );
 
-        FloatingWindowFrame::resolve(
+        if self.highlighted.is_some() && rect.size.cols >= picker_outer.cols + PREVIEW_MIN_COLS + 2
+        {
+            let preview_outer_cols = PREVIEW_PREFERRED_COLS
+                .min(rect.size.cols.saturating_sub(picker_outer.cols))
+                .max(PREVIEW_MIN_COLS)
+                .min(rect.size.cols.saturating_sub(picker_outer.cols));
+            let combined_cols = picker_outer.cols.saturating_add(preview_outer_cols);
+            let top = rect.origin.row.saturating_add(
+                PICKER_TOP_MARGIN.min(rect.size.rows.saturating_sub(picker_outer.rows)),
+            );
+            let left = rect
+                .origin
+                .col
+                .saturating_add(rect.size.cols.saturating_sub(combined_cols) / 2);
+            let picker = frame_from_outer(Position::new(top, left), picker_outer);
+            let preview_outer_rows = picker_outer
+                .rows
+                .max(PREVIEW_PREFERRED_CONTENT_ROWS.saturating_add(2))
+                .min(
+                    rect.size
+                        .rows
+                        .saturating_sub(top.saturating_sub(rect.origin.row)),
+                );
+            let preview = frame_from_outer(
+                Position::new(top, left.saturating_add(picker_outer.cols)),
+                Size::new(preview_outer_rows, preview_outer_cols),
+            );
+            return Some(PickerLayout {
+                picker,
+                preview: Some(preview),
+            });
+        }
+
+        let picker = FloatingWindowFrame::resolve(
             rect.origin,
             rect.size,
-            content_rows as u16,
-            content_cols,
+            picker_content_rows as u16,
+            picker_content_cols,
             FloatingAnchor::TopCenter {
                 top_margin: PICKER_TOP_MARGIN,
             },
-        )
+        )?;
+
+        let below_rows = rect
+            .origin
+            .row
+            .saturating_add(rect.size.rows)
+            .saturating_sub(picker.origin.row.saturating_add(picker.size.rows));
+        let preview = if self.highlighted.is_some() && below_rows >= PREVIEW_MIN_ROWS {
+            Some(frame_from_outer(
+                Position::new(
+                    picker.origin.row.saturating_add(picker.size.rows),
+                    picker.origin.col,
+                ),
+                Size::new(below_rows, picker.size.cols),
+            ))
+        } else {
+            None
+        };
+
+        Some(PickerLayout { picker, preview })
     }
 
     fn page_size(&self, rows: u16) -> usize {
@@ -277,6 +472,7 @@ impl<S: PickerSource> PickerWidget<S> {
         let next = (current + delta).rem_euclid(len) as usize;
         self.highlighted = Some(next);
         self.ensure_highlight_visible();
+        self.refresh_preview_for_highlight();
     }
 
     /// Restarts the active search using the current query text.
@@ -293,6 +489,7 @@ impl<S: PickerSource> PickerWidget<S> {
             self.highlighted = None;
             self.visible_start = 0;
             self.pending_result_replacement = false;
+            self.refresh_preview_for_highlight();
             return;
         }
 
@@ -321,6 +518,115 @@ impl<S: PickerSource> PickerWidget<S> {
         handled
     }
 
+    fn drain_preview_events(&mut self) -> bool {
+        let mut handled = false;
+        loop {
+            match self.preview_receiver.try_recv() {
+                Ok(event) => {
+                    handled = true;
+                    self.handle_preview_event(event);
+                }
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Disconnected) => break,
+            }
+        }
+
+        handled
+    }
+
+    fn refresh_preview_for_highlight(&mut self) {
+        let Some(index) = self.highlighted else {
+            self.source.cancel_preview();
+            self.preview_key = None;
+            self.preview_highlighted = None;
+            self.preview_state = PickerPreviewState::Empty;
+            return;
+        };
+
+        let Some(item) = self.results.get(index).cloned() else {
+            self.source.cancel_preview();
+            self.preview_key = None;
+            self.preview_highlighted = None;
+            self.preview_state = PickerPreviewState::Empty;
+            return;
+        };
+
+        let Some(key) = self.source.preview_key(&item) else {
+            self.source.cancel_preview();
+            self.preview_key = None;
+            self.preview_highlighted = None;
+            self.preview_state = PickerPreviewState::Empty;
+            return;
+        };
+
+        if self.preview_key.as_deref() == Some(key.as_str())
+            && self.preview_highlighted == Some(index)
+        {
+            return;
+        }
+
+        self.source.cancel_preview();
+        self.preview_generation = NEXT_PICKER_PREVIEW_GENERATION.fetch_add(1, Ordering::SeqCst);
+        self.reset_preview_scroll_for_key(key.as_str());
+        self.preview_key = Some(key.clone());
+        self.preview_highlighted = Some(index);
+        self.preview_state = PickerPreviewState::Loading;
+
+        let _ = self
+            .preview_adapter
+            .request_syntax_refresh_for_path(std::path::Path::new(key.as_str()));
+
+        self.source
+            .start_preview(item, self.preview_generation, self.preview_sender.clone());
+    }
+
+    fn handle_preview_event(&mut self, event: PickerPreviewEvent) {
+        match event {
+            PickerPreviewEvent::Started { generation } if generation == self.preview_generation => {
+                self.preview_state = PickerPreviewState::Loading;
+            }
+            PickerPreviewEvent::Loaded {
+                generation,
+                preview,
+            } if generation == self.preview_generation => {
+                self.preview_state = PickerPreviewState::Ready(preview);
+            }
+            PickerPreviewEvent::Failed {
+                generation,
+                message,
+            } if generation == self.preview_generation => {
+                self.preview_state = PickerPreviewState::Error(message);
+            }
+            _ => {}
+        }
+    }
+
+    /// Applies a background syntax refresh to the currently highlighted preview.
+    pub fn handle_preview_syntax_refresh(
+        &mut self,
+        _generation: u64,
+        result: crate::buffer::BufferCacheRefreshResult,
+    ) {
+        let Some(key) = self.preview_key.as_deref() else {
+            return;
+        };
+
+        let _ = self
+            .preview_adapter
+            .apply_syntax_refresh_result_for_key(key, result);
+    }
+
+    /// Marks a background preview syntax refresh as failed.
+    pub fn handle_preview_syntax_refresh_failed(&mut self, _generation: u64) {
+        let Some(key) = self.preview_key.as_deref() else {
+            return;
+        };
+
+        let _ = self
+            .preview_adapter
+            .clear_syntax_refresh_pending_for_key(key);
+    }
+
     /// Applies a streamed search event to the picker state.
     pub fn handle_search_event(&mut self, event: PickerSearchEvent<S::Item>) {
         match event {
@@ -338,6 +644,7 @@ impl<S: PickerSource> PickerWidget<S> {
                         self.results.clear();
                         self.highlighted = None;
                         self.visible_start = 0;
+                        self.preview_highlighted = None;
                         self.pending_result_replacement = false;
                     }
                     self.results.extend(chunk);
@@ -345,6 +652,7 @@ impl<S: PickerSource> PickerWidget<S> {
                         self.highlighted = Some(0);
                     }
                     self.ensure_highlight_visible();
+                    self.refresh_preview_for_highlight();
                 }
             }
             PickerSearchEvent::PickerSearchComplete { generation }
@@ -357,10 +665,12 @@ impl<S: PickerSource> PickerWidget<S> {
                     self.pending_result_replacement = false;
                     self.highlighted = None;
                     self.visible_start = 0;
+                    self.preview_highlighted = None;
                 } else if self.results.is_empty() {
                     self.highlighted = None;
                     self.visible_start = 0;
                 }
+                self.refresh_preview_for_highlight();
             }
             PickerSearchEvent::PickerSearchStale { .. } => {}
             _ => {}
@@ -389,7 +699,10 @@ impl<S: PickerSource> Widget for PickerWidget<S> {
 
         match event {
             UiEvent::Tick => {
-                if self.drain_search_events() {
+                let handled_search = self.drain_search_events();
+                self.refresh_preview_for_highlight();
+                let handled_preview = self.drain_preview_events();
+                if handled_search || handled_preview {
                     UiEventResult::Handled(Vec::new())
                 } else {
                     UiEventResult::NotHandled
@@ -397,6 +710,12 @@ impl<S: PickerSource> Widget for PickerWidget<S> {
             }
             UiEvent::Key(key) => {
                 match key.code {
+                    KeyCode::PageUp => {
+                        self.scroll_current_preview(true);
+                    }
+                    KeyCode::PageDown => {
+                        self.scroll_current_preview(false);
+                    }
                     KeyCode::Esc => {
                         self.close();
                     }
@@ -445,10 +764,12 @@ impl<S: PickerSource> Widget for PickerWidget<S> {
         }
 
         let _ = self.drain_search_events();
-        let Some(frame) = self.resolve_frame(rect) else {
+        let _ = self.drain_preview_events();
+        let Some(layout) = self.resolve_layout(rect) else {
             self.cursor = None;
             return;
         };
+        let frame = layout.picker;
 
         let border_style = theme_style("ui.window.lines.border");
         let body_style = theme_style("ui.window");
@@ -517,6 +838,17 @@ impl<S: PickerSource> Widget for PickerWidget<S> {
                 screen.write_string(row, col, segment.style, segment.text.as_str());
                 col = col.saturating_add(UnicodeWidthStr::width(segment.text.as_str()) as u16);
             }
+        }
+
+        if let Some(preview) = layout.preview {
+            render_preview_frame(
+                screen,
+                preview,
+                &self.preview_state,
+                &mut self.preview_adapter,
+                border_style,
+                body_style,
+            );
         }
     }
 
@@ -603,6 +935,80 @@ fn segment_width(segments: &[PickerRenderSegment]) -> usize {
         .sum()
 }
 
+fn render_preview_frame(
+    screen: &mut Screen,
+    frame: FloatingWindowFrame,
+    state: &PickerPreviewState,
+    preview_adapter: &mut PickerPreviewAdapter,
+    border_style: Style,
+    body_style: Style,
+) {
+    frame.render_bordered(screen, border_style, body_style);
+
+    let PickerPreviewState::Ready(preview) = state else {
+        return;
+    };
+
+    let Some(pane) = preview_adapter.preview_pane_mut(preview.title.as_str()) else {
+        return;
+    };
+
+    pane.render(
+        screen,
+        frame.content_origin,
+        frame.content_size,
+        preview
+            .highlighted_line
+            .unwrap_or(preview.start_line)
+            .saturating_sub(1),
+        preview.highlighted_line.is_some(),
+    );
+}
+
+/// Returns the visible head of text within a column budget.
+pub fn visible_head_text(text: &str, max_cols: usize, ellipsize: bool) -> (String, u16) {
+    if text.is_empty() || max_cols == 0 {
+        return (String::new(), 0);
+    }
+
+    let text_width = UnicodeWidthStr::width(text);
+    if text_width <= max_cols {
+        return (text.to_string(), text.len() as u16);
+    }
+
+    let ellipsis = "…";
+    let ellipsis_width = UnicodeWidthStr::width(ellipsis);
+    let available_cols = if ellipsize && max_cols > ellipsis_width {
+        max_cols - ellipsis_width
+    } else {
+        max_cols
+    };
+
+    let mut end_byte = 0usize;
+    let mut visible_cols = 0u16;
+    for (byte_idx, grapheme) in text.grapheme_indices(true) {
+        let width = UnicodeWidthStr::width(grapheme) as u16;
+        if visible_cols > 0 && usize::from(visible_cols.saturating_add(width)) > available_cols {
+            break;
+        }
+
+        end_byte = byte_idx + grapheme.len();
+        visible_cols = visible_cols.saturating_add(width);
+        if usize::from(visible_cols) >= available_cols {
+            break;
+        }
+    }
+
+    if ellipsize && max_cols > ellipsis_width {
+        return (
+            format!("{}{}", &text[..end_byte], ellipsis),
+            end_byte as u16,
+        );
+    }
+
+    (text[..end_byte].to_string(), end_byte as u16)
+}
+
 /// Returns the visible tail of text within a column budget.
 pub fn visible_tail_text(text: &str, max_cols: usize, ellipsize: bool) -> (String, u16) {
     if text.is_empty() || max_cols == 0 {
@@ -652,8 +1058,11 @@ pub fn visible_tail_text(text: &str, max_cols: usize, ellipsize: bool) -> (Strin
 mod tests {
     use super::*;
     use crate::config::{AdvancedGlyphCapability, Config};
+    use crate::globals;
+    use crate::job::JobManager;
     use crate::ui::{Intent, UiContext, UiEvent};
     use std::sync::{Arc, Mutex};
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[derive(Clone)]
     struct TestSource {
@@ -692,6 +1101,10 @@ mod tests {
                 chunk: vec![format!("{query}-one"), format!("{query}-two")],
             });
             let _ = sender.send(PickerSearchEvent::PickerSearchComplete { generation });
+        }
+
+        fn preview_key(&self, item: &Self::Item) -> Option<String> {
+            Some(item.clone())
         }
 
         fn select(&self, item: &Self::Item) -> Intent {
@@ -841,6 +1254,179 @@ mod tests {
     }
 
     #[test]
+    fn picker_page_keys_scroll_the_visible_preview_without_changing_selection() {
+        let source = TestSource::new();
+        let mut picker = PickerWidget::new(source);
+        let key = String::from("/tmp/example.txt");
+        picker.results = vec![key.clone()];
+        picker.highlighted = Some(0);
+        picker.preview_key = Some(key.clone());
+        picker.preview_highlighted = Some(0);
+        picker.preview_state = PickerPreviewState::Ready(PickerPreview::new(key.clone(), 1, None));
+        picker.preview_adapter.insert(
+            key.clone(),
+            crate::ui::picker_preview::PreviewPane::new(crate::buffer::Buffer::from_str(
+                "one\ntwo\nthree\nfour\nfive\n",
+            )),
+        );
+        picker
+            .preview_adapter
+            .preview_pane_mut(key.as_str())
+            .unwrap()
+            .render(
+                &mut crate::screen::Screen::new(2, 20),
+                Position::new(0, 0),
+                Size::new(2, 20),
+                0,
+                false,
+            );
+        let mut ctx = UiContext;
+
+        let result = picker.handle_ui_event(
+            &UiEvent::Key(crate::terminal::Key::new(KeyCode::PageDown)),
+            &mut ctx,
+        );
+        assert!(result.handled());
+        assert_eq!(picker.highlighted_index(), Some(0));
+        assert_eq!(
+            picker
+                .preview_adapter
+                .preview_pane_mut(key.as_str())
+                .unwrap()
+                .buffer_view()
+                .scroll_offset()
+                .row,
+            2
+        );
+
+        let _ = picker.handle_ui_event(
+            &UiEvent::Key(crate::terminal::Key::new(KeyCode::PageUp)),
+            &mut ctx,
+        );
+        assert_eq!(
+            picker
+                .preview_adapter
+                .preview_pane_mut(key.as_str())
+                .unwrap()
+                .buffer_view()
+                .scroll_offset()
+                .row,
+            0
+        );
+    }
+
+    #[test]
+    fn picker_resets_preview_follow_when_switching_items() {
+        let source = TestSource::new();
+        let mut picker = PickerWidget::new(source);
+        let old_key = String::from("/tmp/old.txt");
+        let new_key = String::from("/tmp/new.txt");
+        picker.results = vec![old_key.clone(), new_key.clone()];
+        picker.highlighted = Some(1);
+        picker.preview_key = Some(old_key.clone());
+        picker.preview_highlighted = Some(0);
+        picker.preview_state =
+            PickerPreviewState::Ready(PickerPreview::new(old_key.clone(), 1, None));
+        picker.preview_adapter.insert(
+            new_key.clone(),
+            crate::ui::picker_preview::PreviewPane::new(crate::buffer::Buffer::from_str(
+                "one\ntwo\nthree\nfour\n",
+            )),
+        );
+        picker
+            .preview_adapter
+            .preview_pane_mut(new_key.as_str())
+            .unwrap()
+            .set_follow_highlight(false);
+
+        picker.refresh_preview_for_highlight();
+
+        assert!(
+            picker
+                .preview_adapter
+                .preview_pane_mut(new_key.as_str())
+                .unwrap()
+                .follows_highlight()
+        );
+        assert_eq!(picker.preview_highlighted, Some(1));
+        assert!(matches!(picker.preview_state, PickerPreviewState::Loading));
+    }
+
+    #[test]
+    fn picker_clears_pending_preview_syntax_refresh_on_failure() {
+        globals::set_job_manager(JobManager::new());
+        let source = TestSource::new();
+        let mut picker = PickerWidget::new(source);
+        let key = String::from("/tmp/example.txt");
+        picker.results = vec![key.clone()];
+        picker.highlighted = Some(0);
+        picker.preview_key = Some(key.clone());
+        picker.preview_highlighted = Some(0);
+        picker.preview_state = PickerPreviewState::Ready(PickerPreview::new(key.clone(), 1, None));
+        picker.preview_adapter.insert(
+            key.clone(),
+            crate::ui::picker_preview::PreviewPane::new(crate::buffer::Buffer::from_str(
+                "one\ntwo\nthree\n",
+            )),
+        );
+        picker
+            .preview_adapter
+            .preview_pane_mut(key.as_str())
+            .unwrap()
+            .request_syntax_refresh();
+
+        picker.handle_preview_syntax_refresh_failed(picker.preview_generation);
+
+        assert!(
+            !picker
+                .preview_adapter
+                .preview_pane_mut(key.as_str())
+                .unwrap()
+                .syntax_refresh_pending()
+        );
+    }
+
+    #[test]
+    fn picker_applies_preview_syntax_refresh_for_current_preview_key() {
+        globals::set_job_manager(JobManager::new());
+        let source = TestSource::new();
+        let mut picker = PickerWidget::new(source);
+        let key = String::from("/tmp/example.txt");
+        picker.results = vec![key.clone()];
+        picker.highlighted = Some(0);
+        picker.preview_key = Some(key.clone());
+        picker.preview_highlighted = Some(0);
+        picker.preview_state = PickerPreviewState::Ready(PickerPreview::new(key.clone(), 1, None));
+        picker.preview_adapter.insert(
+            key.clone(),
+            crate::ui::picker_preview::PreviewPane::new(crate::buffer::Buffer::from_str(
+                "one\ntwo\nthree\n",
+            )),
+        );
+        picker
+            .preview_adapter
+            .preview_pane_mut(key.as_str())
+            .unwrap()
+            .request_syntax_refresh();
+
+        let result = crate::buffer::BufferCacheRefreshResult {
+            buffer_id: crate::buffer::BufferId::new(0),
+            generation: 999,
+            cache: crate::buffer::BufferCache::new("rust"),
+        };
+
+        picker.handle_preview_syntax_refresh(1, result);
+
+        assert!(
+            picker
+                .preview_adapter
+                .preview_pane_mut(key.as_str())
+                .unwrap()
+                .syntax_refresh_pending()
+        );
+    }
+
+    #[test]
     fn picker_uses_nerdfont_selection_prefix_when_enabled() {
         let _config_guard = crate::globals::set_test_config(Config {
             advanced_glyphs: std::collections::BTreeSet::from([AdvancedGlyphCapability::Nerdfont]),
@@ -903,6 +1489,57 @@ mod tests {
     }
 
     #[test]
+    fn picker_preview_attaches_to_right_when_wide() {
+        let source = TestSource::new();
+        let mut picker = PickerWidget::new(source);
+        picker.results = vec!["src/main.rs".to_string()];
+        picker.highlighted = Some(0);
+        let rect = UiRect::new(Position::new(0, 0), crate::window::Size::new(30, 180));
+
+        let layout = picker.resolve_layout(rect).expect("picker layout");
+        let preview = layout.preview.expect("preview frame");
+
+        assert_eq!(preview.origin.row, layout.picker.origin.row);
+        assert_eq!(
+            preview.origin.col,
+            layout.picker.origin.col + layout.picker.size.cols
+        );
+        assert_eq!(preview.content_size.rows, PREVIEW_PREFERRED_CONTENT_ROWS);
+    }
+
+    #[test]
+    fn picker_preview_clamps_preferred_height_to_screen_space() {
+        let source = TestSource::new();
+        let mut picker = PickerWidget::new(source);
+        picker.results = vec!["src/main.rs".to_string()];
+        picker.highlighted = Some(0);
+        let rect = UiRect::new(Position::new(0, 0), crate::window::Size::new(18, 180));
+
+        let layout = picker.resolve_layout(rect).expect("picker layout");
+        let preview = layout.preview.expect("preview frame");
+
+        assert_eq!(preview.size.rows, rect.size.rows - preview.origin.row);
+    }
+
+    #[test]
+    fn picker_preview_attaches_to_bottom_when_slim() {
+        let source = TestSource::new();
+        let mut picker = PickerWidget::new(source);
+        picker.results = vec!["src/main.rs".to_string()];
+        picker.highlighted = Some(0);
+        let rect = UiRect::new(Position::new(0, 0), crate::window::Size::new(30, 90));
+
+        let layout = picker.resolve_layout(rect).expect("picker layout");
+        let preview = layout.preview.expect("preview frame");
+
+        assert_eq!(
+            preview.origin.row,
+            layout.picker.origin.row + layout.picker.size.rows
+        );
+        assert_eq!(preview.origin.col, layout.picker.origin.col);
+    }
+
+    #[test]
     fn result_line_preserves_prefix_and_ellipsizes_label_tail() {
         let line = render_result_line(
             "> ",
@@ -935,10 +1572,101 @@ mod tests {
         assert_eq!(segment_text(line.as_slice()), "> main.rs   ");
     }
 
+    #[test]
+    fn preview_render_matches_window_body_layout() {
+        let temp_root = unique_temp_dir();
+        std::fs::create_dir_all(&temp_root).unwrap();
+        let file_path = temp_root.join("preview.rs");
+        std::fs::write(&file_path, "alpha\nbeta\n").unwrap();
+
+        let mut adapter = crate::ui::picker_preview::PickerPreviewAdapter::new();
+        let pane = adapter.preview_for_path(file_path.as_path()).unwrap();
+        let mut preview_screen = crate::screen::Screen::new(5, 20);
+        pane.render(
+            &mut preview_screen,
+            Position::new(1, 1),
+            Size::new(3, 18),
+            0,
+            false,
+        );
+
+        let mut window = crate::window::Window::new(crate::buffer::Buffer::from_str_with_path(
+            "alpha\nbeta\n",
+            crate::path::AbsolutePath::from_path(file_path.as_path()).unwrap(),
+        ));
+        let mut window_screen = crate::screen::Screen::new(3, 18);
+        window.set_cursor(crate::buffer::Cursor::new(0, 0));
+        window.render(&mut window_screen, Position::new(1, 1), Size::new(3, 18));
+
+        assert_eq!(
+            row_text(&mut preview_screen, 1, 0).trim_end(),
+            row_text(&mut window_screen, 1, 0).trim_end()
+        );
+        assert_eq!(
+            row_text(&mut preview_screen, 2, 0).trim_end(),
+            row_text(&mut window_screen, 2, 0).trim_end()
+        );
+
+        let _ = std::fs::remove_file(file_path);
+        let _ = std::fs::remove_dir_all(temp_root);
+    }
+
+    #[test]
+    fn preview_render_is_separate_from_widget_focus() {
+        let preview = PickerPreview::new("/tmp/example.txt", 1, None);
+        let mut adapter = crate::ui::picker_preview::PickerPreviewAdapter::new();
+        adapter.insert(
+            preview.title.clone(),
+            crate::ui::picker_preview::PreviewPane::new(crate::buffer::Buffer::from_str(
+                "hello\nworld\n",
+            )),
+        );
+        let frame = crate::ui::floating_window::FloatingWindowFrame::resolve(
+            Position::new(0, 0),
+            Size::new(4, 16),
+            2,
+            14,
+            crate::ui::floating_window::FloatingAnchor::Center,
+        )
+        .expect("preview frame");
+        let mut screen = crate::screen::Screen::new(4, 16);
+
+        let preview_pane = adapter
+            .preview_for_path(std::path::Path::new(preview.title.as_str()))
+            .unwrap();
+        preview_pane.render(
+            &mut screen,
+            Position::new(frame.content_origin.row + 1, frame.content_origin.col),
+            Size::new(
+                frame.content_size.rows.saturating_sub(1),
+                frame.content_size.cols,
+            ),
+            0,
+            false,
+        );
+
+        assert!(!row_text(&mut screen, 2, 1).trim().is_empty());
+    }
+
+    fn row_text(screen: &mut crate::screen::Screen, row: u16, start_col: u16) -> String {
+        let (_, cols) = screen.size();
+        (start_col..cols)
+            .map(|col| screen.get_cell_mut(row, col).unwrap().text.clone())
+            .collect()
+    }
+
     fn segment_text(segments: &[PickerRenderSegment]) -> String {
         segments
             .iter()
             .map(|segment| segment.text.as_str())
             .collect()
+    }
+
+    fn unique_temp_dir() -> std::path::PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("urvim-picker-tests-{nanos}"))
     }
 }

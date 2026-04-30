@@ -6,8 +6,8 @@ use crate::syntax::FiletypeGlyph;
 use crate::terminal::Style;
 use crate::ui::inputs::PromptSegment;
 use crate::ui::picker::{
-    PickerItem, PickerRenderSegment, PickerSearchEvent, PickerSource, PickerWidget,
-    picker_indicator_glyph,
+    PickerItem, PickerPreview, PickerPreviewEvent, PickerRenderSegment, PickerSearchEvent,
+    PickerSource, PickerWidget, picker_indicator_glyph,
 };
 use crate::ui::{Command, Intent};
 use ignore::WalkBuilder;
@@ -15,6 +15,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::Sender;
+use std::thread;
 
 const PICKER_CHUNK_SIZE: usize = 32;
 static NEXT_FILE_PICKER_GENERATION: AtomicU64 = AtomicU64::new(1);
@@ -32,6 +33,7 @@ pub struct FilePickerItem {
 pub struct FilePickerSource {
     root: PathBuf,
     current_generation: Arc<AtomicU64>,
+    preview_generation: Arc<AtomicU64>,
     fuzzy_mode: Arc<AtomicBool>,
 }
 
@@ -64,6 +66,7 @@ impl FilePickerSource {
             current_generation: Arc::new(AtomicU64::new(
                 NEXT_FILE_PICKER_GENERATION.fetch_add(1, Ordering::SeqCst),
             )),
+            preview_generation: Arc::new(AtomicU64::new(0)),
             fuzzy_mode: Arc::new(AtomicBool::new(false)),
         }
     }
@@ -179,6 +182,41 @@ impl PickerSource for FilePickerSource {
         });
     }
 
+    fn preview_key(&self, item: &Self::Item) -> Option<String> {
+        Some(item.path.to_string_lossy().into_owned())
+    }
+
+    fn start_preview(&self, item: Self::Item, generation: u64, sender: Sender<PickerPreviewEvent>) {
+        self.preview_generation.store(generation, Ordering::SeqCst);
+        let current_generation = self.preview_generation.clone();
+        thread::spawn(move || {
+            sender.send(PickerPreviewEvent::Started { generation }).ok();
+            let result = build_file_preview(item.path.as_path());
+            if current_generation.load(Ordering::SeqCst) != generation {
+                return;
+            }
+
+            match result {
+                Ok(preview) => sender
+                    .send(PickerPreviewEvent::Loaded {
+                        generation,
+                        preview,
+                    })
+                    .ok(),
+                Err(error) => sender
+                    .send(PickerPreviewEvent::Failed {
+                        generation,
+                        message: error.to_string(),
+                    })
+                    .ok(),
+            };
+        });
+    }
+
+    fn cancel_preview(&self) {
+        self.preview_generation.fetch_add(1, Ordering::SeqCst);
+    }
+
     fn select(&self, item: &Self::Item) -> Intent {
         Intent::Command(Command::OpenFile(item.path.clone()))
     }
@@ -227,6 +265,12 @@ impl PickerItem for FilePickerItem {
         segments.push(PickerRenderSegment::new(visible_label, base_style));
         segments
     }
+}
+
+fn build_file_preview(path: &Path) -> std::io::Result<PickerPreview> {
+    let _ = std::fs::metadata(path)?;
+
+    Ok(PickerPreview::new(path.to_string_lossy(), 1, None))
 }
 
 fn display_label(root: &Path, path: &Path) -> String {
@@ -372,6 +416,32 @@ mod tests {
 
         assert_eq!(segments.len(), 1);
         assert_eq!(segments[0].text, "…eep/main.rs");
+    }
+
+    #[test]
+    fn file_picker_preview_reads_start_of_file() {
+        let temp_root = unique_temp_dir();
+        fs::create_dir_all(&temp_root).unwrap();
+        let file_path = temp_root.join("preview.rs");
+        fs::write(&file_path, "fn main() {}\nlet tail = true;\n").unwrap();
+
+        let preview = build_file_preview(file_path.as_path()).expect("preview");
+
+        assert_eq!(preview.start_line, 1);
+        assert_eq!(preview.highlighted_line, None);
+    }
+
+    #[test]
+    fn file_picker_preview_keeps_full_file_contents() {
+        let temp_root = unique_temp_dir();
+        fs::create_dir_all(&temp_root).unwrap();
+        let file_path = temp_root.join("preview.rs");
+        fs::write(&file_path, "one\ntwo\nthree\nfour\n").unwrap();
+
+        let preview = build_file_preview(file_path.as_path()).expect("preview");
+
+        assert_eq!(preview.start_line, 1);
+        assert_eq!(preview.highlighted_line, None);
     }
 
     #[test]

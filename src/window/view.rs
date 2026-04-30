@@ -7,8 +7,15 @@ use crate::theme::Tag;
 use crate::window::wrap::WrappedLineSegment;
 use imbl::Vector;
 use smol_str::SmolStr;
+use std::cell::RefCell;
 use std::ops::Range;
 use std::time::{Duration, Instant};
+
+#[derive(Debug, Clone)]
+pub(super) enum BufferBacking {
+    Pooled(BufferId),
+    Owned(RefCell<Buffer>),
+}
 
 impl BufferView {
     /// Creates a new view and registers the buffer in the global pool.
@@ -20,7 +27,7 @@ impl BufferView {
     /// Creates a view for an already-registered buffer ID.
     pub fn from_buffer_id(buffer_id: BufferId) -> Self {
         Self {
-            buffer_id,
+            buffer: BufferBacking::Pooled(buffer_id),
             scroll_offset: Position::new(0, 0),
             wrapped_row_offset: 0,
             cursor: Cursor::new(0, 0),
@@ -30,19 +37,47 @@ impl BufferView {
         }
     }
 
+    /// Creates a view backed by an owned buffer that is not stored in the global pool.
+    pub fn from_owned_buffer(buffer: Buffer) -> Self {
+        Self {
+            buffer: BufferBacking::Owned(RefCell::new(buffer)),
+            scroll_offset: Position::new(0, 0),
+            wrapped_row_offset: 0,
+            cursor: Cursor::new(0, 0),
+            remembered_visual_col: None,
+            visual_selection: None,
+            yank_flash: None,
+        }
+    }
+
+    /// Returns the buffer ID owned by this view, if it is pooled.
+    pub fn buffer_id_opt(&self) -> Option<BufferId> {
+        match &self.buffer {
+            BufferBacking::Pooled(buffer_id) => Some(*buffer_id),
+            BufferBacking::Owned(_) => None,
+        }
+    }
+
     /// Returns the buffer ID owned by this view.
     pub fn buffer_id(&self) -> BufferId {
-        self.buffer_id
+        self.buffer_id_opt()
+            .expect("owned preview buffers do not have a global buffer id")
     }
 
     /// Runs a closure with shared access to the shared buffer.
     pub fn with_buffer<R>(&self, f: impl FnOnce(&Buffer) -> R) -> Option<R> {
-        crate::globals::with_buffer(self.buffer_id, f)
+        match &self.buffer {
+            BufferBacking::Pooled(buffer_id) => crate::globals::with_buffer(*buffer_id, f),
+            BufferBacking::Owned(buffer) => Some(f(&buffer.borrow())),
+        }
     }
 
     /// Runs a closure with mutable access to the shared buffer.
     pub fn with_buffer_mut<R>(&self, f: impl FnOnce(&mut Buffer) -> R) -> Option<R> {
-        crate::globals::with_buffer_mut(self.buffer_id, f)
+        match &self.buffer {
+            BufferBacking::Pooled(buffer_id) => crate::globals::with_buffer_mut(*buffer_id, f),
+            BufferBacking::Owned(buffer) => Some(f(&mut buffer.borrow_mut())),
+        }
     }
 
     /// Returns the number of lines in the shared buffer, or `0` if it no longer exists.
@@ -303,7 +338,10 @@ impl BufferView {
             (stale, scope_dump)
         }) else {
             tracing::debug!(
-                buffer_id = self.buffer_id.get(),
+                buffer_id = self
+                    .buffer_id_opt()
+                    .map(|buffer_id| buffer_id.get())
+                    .unwrap_or(usize::MAX),
                 line = cursor.line,
                 col = cursor.col,
                 "cursor moved but buffer is unavailable for indent scope logging"
@@ -312,7 +350,7 @@ impl BufferView {
         };
 
         tracing::debug!(
-            buffer_id = self.buffer_id.get(),
+            buffer_id = self.buffer_id_opt().map(|buffer_id| buffer_id.get()).unwrap_or(usize::MAX),
             line = cursor.line,
             col = cursor.col,
             indent_scope_cache_stale = stale,
@@ -570,7 +608,7 @@ impl BufferView {
 
     /// Builds render data for the visible buffer region using a base style.
     pub fn build_render_data_with_style(&self, size: Size, default_style: Style) -> RenderData {
-        self.build_render_data_with_options(size, default_style, false, WrapMode::Hard)
+        self.build_render_data_with_options(size, default_style, false, WrapMode::Hard, true)
     }
 
     /// Builds render data for the visible buffer region using a base style and
@@ -581,6 +619,7 @@ impl BufferView {
         default_style: Style,
         wrap_enabled: bool,
         wrap_mode: WrapMode,
+        warm_syntax: bool,
     ) -> RenderData {
         if size.rows == 0 || size.cols == 0 {
             return RenderData::new(0);
@@ -604,7 +643,7 @@ impl BufferView {
             let mut rendered_rows = 0usize;
             let horizontal_offset = self.scroll_offset.col as usize;
 
-            if syntax_enabled {
+            if syntax_enabled && warm_syntax {
                 let visible_end_line = start_line + size.rows.saturating_sub(1) as usize;
                 let cached_line_count = buffer.cached_syntax_line_count();
                 let warmup_window = size.rows as usize + 32;
@@ -613,7 +652,9 @@ impl BufferView {
                 if near_cached_frontier {
                     buffer.ensure_syntax_through(visible_end_line);
                 }
-                buffer.request_buffer_cache_refresh(self.buffer_id());
+                if let Some(buffer_id) = self.buffer_id_opt() {
+                    buffer.request_buffer_cache_refresh(buffer_id);
+                }
             }
 
             let mut buffer_line_idx = if wrap_enabled { 0 } else { start_line };

@@ -1034,7 +1034,12 @@ fn test_window_render_expands_tabs_using_configured_width() {
         .buffer_view()
         .build_render_data_with_style(Size::new(1, 8), Style::default());
     let mut screen = crate::screen::Screen::new(1, 8);
-    render_data.render(&mut screen, Position::new(0, 0));
+    render_data.render(
+        &mut screen,
+        Position::new(0, 0),
+        Size::new(1, 8),
+        Style::default(),
+    );
 
     assert_eq!(screen.get_cell_mut(0, 0).unwrap().text, "a");
     assert_eq!(screen.get_cell_mut(0, 1).unwrap().text, " ");
@@ -2460,6 +2465,7 @@ fn test_build_render_data_wraps_hard_mode() {
         Style::default(),
         true,
         WrapMode::Hard,
+        true,
     );
 
     assert_eq!(render_data.line_count(), 2);
@@ -2475,6 +2481,7 @@ fn test_build_render_data_wraps_soft_mode_at_word_boundary() {
         Style::default(),
         true,
         WrapMode::Soft,
+        true,
     );
 
     assert_eq!(render_data.line_count(), 2);
@@ -2490,6 +2497,7 @@ fn test_build_render_data_soft_wrap_falls_back_to_hard_break() {
         Style::default(),
         true,
         WrapMode::Soft,
+        true,
     );
 
     assert_eq!(render_data.get_line(0).unwrap()[0].text, "supe");
@@ -3348,7 +3356,7 @@ fn test_gutter_then_buffer_render() {
     let buffer = crate::buffer::Buffer::from_str("line1\nline2\nline3");
     let view = BufferView::new(buffer);
     let render_data = view.build_render_data(content_size);
-    render_data.render(&mut screen, content_origin);
+    render_data.render(&mut screen, content_origin, content_size, Style::default());
 
     // After buffer rendering, gutter cells should STILL have correct gutter content
     // Gutter is at columns 0-3, buffer is at column 4+

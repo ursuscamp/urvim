@@ -1,0 +1,968 @@
+use crate::buffer::{Buffer, BufferCache, BufferCacheRefreshResult, BufferId, Cursor};
+use crate::globals;
+use crate::job::{Job, JobContext, JobDelivery, JobKind, JobPriority, JobToken};
+use crate::screen::Screen;
+use crate::terminal::{Color, Style};
+use crate::window::renderer::{self, BufferRenderState, WindowRenderTheme};
+use crate::window::{BufferView, Position, RenderData, Size};
+use imbl::Vector;
+use smol_str::SmolStr;
+use std::collections::HashMap;
+use std::fs;
+use std::path::Path;
+use std::sync::Arc;
+
+/// Temporary preview pane backed by an owned buffer outside the global pool.
+#[derive(Debug)]
+pub struct PreviewPane {
+    buffer_view: BufferView,
+    render_data: RenderData,
+    wrap_enabled: bool,
+    follow_highlight: bool,
+    syntax_refresh_pending: bool,
+    last_viewport_rows: u16,
+}
+
+impl PreviewPane {
+    /// Creates a preview pane from an owned buffer.
+    pub fn new(buffer: Buffer) -> Self {
+        Self {
+            buffer_view: BufferView::from_owned_buffer(buffer),
+            render_data: RenderData::new(0),
+            wrap_enabled: false,
+            follow_highlight: true,
+            syntax_refresh_pending: false,
+            last_viewport_rows: 0,
+        }
+    }
+
+    /// Returns the pane's buffer view.
+    pub fn buffer_view(&self) -> &BufferView {
+        &self.buffer_view
+    }
+
+    /// Returns the pane's buffer view mutably.
+    pub fn buffer_view_mut(&mut self) -> &mut BufferView {
+        &mut self.buffer_view
+    }
+
+    /// Returns whether wrapping is enabled for this preview pane.
+    pub fn wrap_enabled(&self) -> bool {
+        self.wrap_enabled
+    }
+
+    /// Enables or disables wrapping for this preview pane.
+    pub fn set_wrap_enabled(&mut self, enabled: bool) {
+        self.wrap_enabled = enabled;
+    }
+
+    /// Toggles wrapping for this preview pane.
+    pub fn toggle_wrap(&mut self) {
+        self.wrap_enabled = !self.wrap_enabled;
+    }
+
+    /// Returns whether the preview auto-follows the highlighted line.
+    pub fn follows_highlight(&self) -> bool {
+        self.follow_highlight
+    }
+
+    /// Enables or disables auto-following of the highlighted line.
+    pub fn set_follow_highlight(&mut self, enabled: bool) {
+        self.follow_highlight = enabled;
+    }
+
+    /// Returns true when syntax highlighting is still being loaded in the background.
+    pub fn syntax_refresh_pending(&self) -> bool {
+        self.syntax_refresh_pending
+    }
+
+    /// Requests a background syntax refresh for the preview buffer, if needed.
+    pub fn request_syntax_refresh(&mut self) {
+        if self.syntax_refresh_pending {
+            return;
+        }
+
+        let syntax_enabled = globals::with_config(|config| config.syntax).unwrap_or(true);
+        if !syntax_enabled {
+            return;
+        }
+
+        let Some((syntax_name, line_texts, generation)) = self
+            .buffer_view
+            .with_buffer(|buffer| {
+                if buffer.buffer_cache_complete() || buffer.line_count() == 0 {
+                    return None;
+                }
+
+                let line_texts: Vector<Arc<str>> = (0..buffer.line_count())
+                    .map(|line| {
+                        buffer
+                            .line_at(line)
+                            .cloned()
+                            .unwrap_or_else(|| Arc::from(""))
+                    })
+                    .collect();
+
+                Some((
+                    SmolStr::new(buffer.syntax_name()),
+                    line_texts,
+                    buffer.syntax_generation(),
+                ))
+            })
+            .flatten()
+        else {
+            return;
+        };
+
+        let job = PreviewSyntaxRefreshJob::new(syntax_name, generation, line_texts);
+        let submitted = globals::with_job_manager(|manager| {
+            manager
+                .map(|manager| {
+                    manager
+                        .submit_latest_only(
+                            JobKind::new(PICKER_PREVIEW_SYNTAX_JOB_KIND),
+                            JobPriority::Background,
+                            JobToken::new(generation),
+                            JobDelivery::Once,
+                            job,
+                        )
+                        .is_ok()
+                })
+                .unwrap_or(false)
+        });
+
+        if submitted {
+            self.syntax_refresh_pending = true;
+        }
+    }
+
+    /// Applies a completed background syntax refresh to the preview buffer.
+    pub fn apply_syntax_refresh_result(&mut self, result: BufferCacheRefreshResult) -> bool {
+        let applied = self
+            .buffer_view
+            .with_buffer_mut(|buffer| buffer.apply_buffer_cache_refresh_result(result))
+            .unwrap_or(false);
+        if applied {
+            self.syntax_refresh_pending = false;
+        }
+        applied
+    }
+
+    /// Marks a pending syntax refresh as failed.
+    pub fn clear_syntax_refresh_pending(&mut self) {
+        self.syntax_refresh_pending = false;
+    }
+
+    /// Scrolls the preview up by one rendered page.
+    pub fn page_up(&mut self) {
+        self.page_by_pages(true);
+    }
+
+    /// Scrolls the preview down by one rendered page.
+    pub fn page_down(&mut self) {
+        self.page_by_pages(false);
+    }
+
+    /// Renders the shared buffer body using the same renderer as editor windows.
+    pub fn render(
+        &mut self,
+        screen: &mut Screen,
+        origin: Position,
+        size: Size,
+        cursor_line: usize,
+        active_line: bool,
+    ) {
+        let (gutter_style, default_style, active_gutter_style, active_line_style) =
+            resolve_window_styles();
+        let wrap_mode = globals::with_config(|config| config.wrap_mode).unwrap_or_default();
+
+        self.last_viewport_rows = size.rows;
+
+        let line_count = self.buffer_view.line_count();
+        let clamped_cursor_line = cursor_line.min(line_count.saturating_sub(1));
+        if active_line {
+            self.buffer_view
+                .set_cursor_synced(Cursor::new(clamped_cursor_line, 0));
+        } else {
+            self.buffer_view.set_cursor_synced(Cursor::new(0, 0));
+        }
+
+        let mut render_state = BufferRenderState {
+            cursor: self.buffer_view.cursor(),
+            scroll_offset: self.buffer_view.scroll_offset(),
+            wrapped_row_offset: self.buffer_view.wrapped_row_offset(),
+            size,
+            wrap_enabled: self.wrap_enabled,
+            wrap_mode,
+            relative_number: false,
+            scroll_to_cursor: active_line && self.follow_highlight,
+            active_line_enabled: active_line,
+            is_normal_mode: active_line,
+            syntax_warmup: false,
+        };
+
+        renderer::render_buffer_view(
+            screen,
+            origin,
+            &mut self.buffer_view,
+            &mut self.render_data,
+            WindowRenderTheme {
+                gutter_style,
+                default_style,
+                active_gutter_style: Some(active_gutter_style),
+                active_line_style: if active_line {
+                    Some(active_line_style)
+                } else {
+                    None
+                },
+            },
+            &mut render_state,
+        );
+    }
+
+    fn page_by_pages(&mut self, upwards: bool) {
+        let viewport_rows = self.last_viewport_rows as usize;
+        if viewport_rows == 0 {
+            return;
+        }
+
+        self.follow_highlight = false;
+
+        let line_count = self.buffer_view.line_count();
+        if line_count == 0 {
+            self.buffer_view.set_scroll_offset(Position::new(0, 0));
+            return;
+        }
+
+        let current_row = self.buffer_view.scroll_offset().row as usize;
+        let max_top_row = line_count.saturating_sub(viewport_rows);
+        let next_row = if upwards {
+            current_row.saturating_sub(viewport_rows)
+        } else {
+            current_row.saturating_add(viewport_rows).min(max_top_row)
+        };
+        let row = u16::try_from(next_row).unwrap_or(u16::MAX);
+        self.buffer_view
+            .set_scroll_offset(Position::new(row, self.buffer_view.scroll_offset().col));
+    }
+}
+
+/// Owns temporary preview panes for a picker session.
+#[derive(Debug, Default)]
+pub struct PickerPreviewAdapter {
+    panes: HashMap<String, PreviewPane>,
+}
+
+impl PickerPreviewAdapter {
+    /// Creates an empty preview adapter.
+    pub fn new() -> Self {
+        Self {
+            panes: HashMap::new(),
+        }
+    }
+
+    /// Returns the cached preview pane for a file path, loading it on demand.
+    pub fn preview_for_path(&mut self, path: &Path) -> std::io::Result<&mut PreviewPane> {
+        let key = Self::path_key(path);
+        if !self.panes.contains_key(&key) {
+            let buffer = Self::load_buffer(path)?;
+            self.panes.insert(key.clone(), PreviewPane::new(buffer));
+        }
+
+        Ok(self.panes.get_mut(&key).expect("cached preview pane"))
+    }
+
+    /// Requests syntax refresh for a preview path, loading the preview if needed.
+    pub fn request_syntax_refresh_for_path(&mut self, path: &Path) -> std::io::Result<()> {
+        let pane = self.preview_for_path(path)?;
+        pane.request_syntax_refresh();
+        Ok(())
+    }
+
+    /// Applies a completed syntax refresh to the cached preview for a key.
+    pub fn apply_syntax_refresh_result_for_key(
+        &mut self,
+        key: &str,
+        result: BufferCacheRefreshResult,
+    ) -> bool {
+        self.panes
+            .get_mut(key)
+            .is_some_and(|pane| pane.apply_syntax_refresh_result(result))
+    }
+
+    /// Clears the pending syntax-refresh flag for a cached preview.
+    pub fn clear_syntax_refresh_pending_for_key(&mut self, key: &str) -> bool {
+        self.panes
+            .get_mut(key)
+            .map(|pane| {
+                pane.clear_syntax_refresh_pending();
+                true
+            })
+            .unwrap_or(false)
+    }
+
+    /// Inserts or replaces a temporary preview pane.
+    pub fn insert(&mut self, key: impl Into<String>, pane: PreviewPane) {
+        self.panes.insert(key.into(), pane);
+    }
+
+    /// Removes all cached preview panes.
+    pub fn clear(&mut self) {
+        self.panes.clear();
+    }
+
+    /// Returns true when the adapter has a preview pane for the key.
+    pub fn contains(&self, key: &str) -> bool {
+        self.panes.contains_key(key)
+    }
+
+    /// Returns a mutable preview pane for the key, if cached.
+    pub fn preview_pane_mut(&mut self, key: &str) -> Option<&mut PreviewPane> {
+        self.panes.get_mut(key)
+    }
+
+    fn path_key(path: &Path) -> String {
+        path.to_string_lossy().into_owned()
+    }
+
+    fn load_buffer(path: &Path) -> std::io::Result<Buffer> {
+        let contents = fs::read_to_string(path)?;
+        if let Some(abs_path) = crate::path::AbsolutePath::from_path(path) {
+            Ok(Buffer::from_str_with_path(contents.as_str(), abs_path))
+        } else {
+            Ok(Buffer::from_str(contents.as_str()))
+        }
+    }
+}
+
+pub const PICKER_PREVIEW_SYNTAX_JOB_KIND: &str = "picker-preview-syntax";
+
+#[derive(Debug)]
+struct PreviewSyntaxRefreshJob {
+    syntax_name: SmolStr,
+    generation: u64,
+    line_texts: Vector<Arc<str>>,
+}
+
+impl PreviewSyntaxRefreshJob {
+    fn new(syntax_name: SmolStr, generation: u64, line_texts: Vector<Arc<str>>) -> Self {
+        Self {
+            syntax_name,
+            generation,
+            line_texts,
+        }
+    }
+}
+
+impl Job for PreviewSyntaxRefreshJob {
+    type Output = BufferCacheRefreshResult;
+
+    fn run(self, context: &JobContext, emit: &mut dyn FnMut(Self::Output)) {
+        if context.is_stopping() || context.is_aborted() {
+            return;
+        }
+
+        let line_refs: Vec<&str> = self.line_texts.iter().map(|line| line.as_ref()).collect();
+        let mut cache = BufferCache::new(self.syntax_name.clone());
+        if !line_refs.is_empty() {
+            cache.ensure_through(&self.syntax_name, &line_refs, line_refs.len() - 1);
+        }
+
+        emit(BufferCacheRefreshResult {
+            buffer_id: BufferId::new(0),
+            generation: self.generation,
+            cache,
+        });
+    }
+}
+
+fn resolve_window_styles() -> (Style, Style, Style, Style) {
+    globals::with_active_theme(|theme| {
+        theme
+            .map(|theme| {
+                (
+                    theme.resolve_name_with_default("ui.window.gutter"),
+                    theme.default_style(),
+                    theme.highlight_style_for_name("ui.window.gutter.active_line"),
+                    theme.resolve_name_with_default("ui.window.active_line"),
+                )
+            })
+            .unwrap_or_else(|| {
+                (
+                    Style::new().bg(Color::ansi(236)).fg(Color::ansi(245)),
+                    Style::default(),
+                    Style::default(),
+                    Style::default(),
+                )
+            })
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::buffer::Buffer;
+    use crate::config::{Config, WrapMode};
+    use crate::globals;
+    use crate::job::{
+        JobDelivery, JobEvent, JobHandle, JobKind, JobManager, JobPayload, JobPriority, JobToken,
+    };
+    use crate::path::AbsolutePath;
+    use crate::terminal::{Color, Style};
+    use crate::theme::{HighlightStyles, Tag, Theme, ThemeKind};
+    use crate::window::Window;
+    use smol_str::SmolStr;
+    use std::sync::Arc;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn preview_pane_pages_by_last_rendered_viewport_height() {
+        let mut pane = PreviewPane::new(Buffer::from_str("one\ntwo\nthree\nfour\nfive\n"));
+        pane.render(
+            &mut crate::screen::Screen::new(2, 20),
+            Position::new(0, 0),
+            Size::new(2, 20),
+            0,
+            false,
+        );
+
+        pane.page_down();
+        assert_eq!(pane.buffer_view().scroll_offset().row, 2);
+        assert!(!pane.follows_highlight());
+
+        pane.page_up();
+        assert_eq!(pane.buffer_view().scroll_offset().row, 0);
+    }
+
+    #[test]
+    fn preview_pane_stops_following_highlight_after_manual_scroll() {
+        let mut pane = PreviewPane::new(Buffer::from_str("one\ntwo\nthree\nfour\nfive\n"));
+        pane.render(
+            &mut crate::screen::Screen::new(2, 20),
+            Position::new(0, 0),
+            Size::new(2, 20),
+            4,
+            true,
+        );
+        assert_eq!(pane.buffer_view().scroll_offset().row, 3);
+
+        pane.page_up();
+        assert_eq!(pane.buffer_view().scroll_offset().row, 1);
+
+        pane.render(
+            &mut crate::screen::Screen::new(2, 20),
+            Position::new(0, 0),
+            Size::new(2, 20),
+            4,
+            true,
+        );
+
+        assert_eq!(pane.buffer_view().scroll_offset().row, 1);
+        assert!(!pane.follows_highlight());
+    }
+
+    #[test]
+    fn preview_adapter_reuses_buffer_for_path() {
+        let temp_root = unique_temp_dir();
+        fs::create_dir_all(&temp_root).unwrap();
+        let file_path = temp_root.join("preview.rs");
+        fs::write(&file_path, "one\ntwo\nthree\n").unwrap();
+
+        let mut adapter = PickerPreviewAdapter::new();
+        let first =
+            adapter.preview_for_path(file_path.as_path()).unwrap() as *const PreviewPane as usize;
+        let second =
+            adapter.preview_for_path(file_path.as_path()).unwrap() as *const PreviewPane as usize;
+
+        assert_eq!(first, second);
+        assert_eq!(adapter.contains(file_path.to_string_lossy().as_ref()), true);
+        assert_eq!(
+            adapter
+                .panes
+                .get(file_path.to_string_lossy().as_ref())
+                .unwrap()
+                .buffer_view()
+                .line_count(),
+            3
+        );
+
+        let _ = fs::remove_file(file_path);
+        let _ = fs::remove_dir_all(temp_root);
+    }
+
+    #[test]
+    fn preview_adapter_loads_full_file_contents_without_touching_pool() {
+        let temp_root = unique_temp_dir();
+        fs::create_dir_all(&temp_root).unwrap();
+        let file_path = temp_root.join("preview.rs");
+        fs::write(&file_path, "one\ntwo\nthree\nfour\n").unwrap();
+
+        let before = buffer_count_for_path(file_path.as_path());
+        let mut adapter = PickerPreviewAdapter::new();
+        let pane = adapter.preview_for_path(file_path.as_path()).unwrap();
+
+        assert_eq!(
+            pane.buffer_view()
+                .with_buffer(|buffer| buffer.as_str())
+                .unwrap(),
+            "one\ntwo\nthree\nfour"
+        );
+        assert!(
+            pane.buffer_view()
+                .with_buffer(|buffer| buffer.cached_syntax_spans_for_line(3))
+                .unwrap()
+                .is_none()
+        );
+
+        let after = buffer_count_for_path(file_path.as_path());
+        assert_eq!(before, after);
+
+        let _ = fs::remove_file(file_path);
+        let _ = fs::remove_dir_all(temp_root);
+    }
+
+    #[test]
+    fn preview_pane_renders_plain_text_before_syntax_refresh_completes() {
+        let _config_guard = globals::set_test_config(Config {
+            syntax: true,
+            ..Config::default()
+        });
+        let theme = themed_window();
+        let _theme_guard = globals::set_test_active_theme(theme);
+        let file_path = unique_temp_dir().join("preview.rs");
+        fs::create_dir_all(file_path.parent().unwrap()).unwrap();
+        fs::write(&file_path, "fn main() { let value = 1; }\n").unwrap();
+
+        let mut pane = PreviewPane::new(Buffer::from_str_with_path(
+            "fn main() { let value = 1; }\n",
+            AbsolutePath::from_path(file_path.as_path()).unwrap(),
+        ));
+        assert!(
+            pane.buffer_view()
+                .with_buffer(|buffer| buffer.cached_syntax_spans_for_line(0))
+                .unwrap()
+                .is_none()
+        );
+
+        let mut preview_screen = crate::screen::Screen::new(2, 32);
+        pane.render(
+            &mut preview_screen,
+            Position::new(0, 0),
+            Size::new(2, 32),
+            0,
+            false,
+        );
+
+        let mut plain_window = Window::new(Buffer::from_str_with_path(
+            "fn main() { let value = 1; }\n",
+            AbsolutePath::from_path(file_path.as_path()).unwrap(),
+        ));
+        plain_window.set_cursor(crate::buffer::Cursor::new(0, 0));
+        let mut plain_screen = crate::screen::Screen::new(2, 32);
+        plain_window.render(&mut plain_screen, Position::new(0, 0), Size::new(2, 32));
+
+        assert_screen_eq(&mut preview_screen, &mut plain_screen);
+        assert!(
+            pane.buffer_view()
+                .with_buffer(|buffer| buffer.cached_syntax_spans_for_line(0))
+                .unwrap()
+                .is_none()
+        );
+
+        let _ = fs::remove_file(file_path);
+    }
+
+    #[test]
+    fn preview_adapter_requests_and_applies_async_syntax_refresh() {
+        globals::set_job_manager(JobManager::new());
+        let temp_root = unique_temp_dir();
+        fs::create_dir_all(&temp_root).unwrap();
+        let file_path = temp_root.join("preview.rs");
+        fs::write(&file_path, "fn main() { let value = 1; }\n").unwrap();
+
+        let mut adapter = PickerPreviewAdapter::new();
+        adapter
+            .request_syntax_refresh_for_path(file_path.as_path())
+            .unwrap();
+        let key = file_path.to_string_lossy().into_owned();
+        let generation = adapter
+            .preview_pane_mut(&key)
+            .unwrap()
+            .buffer_view()
+            .with_buffer(|buffer| buffer.syntax_generation())
+            .unwrap();
+        assert!(
+            adapter
+                .preview_pane_mut(&key)
+                .unwrap()
+                .syntax_refresh_pending()
+        );
+
+        let handle = JobHandle::new();
+        handle
+            .submit_latest_only(
+                JobKind::new(PICKER_PREVIEW_SYNTAX_JOB_KIND),
+                JobPriority::Background,
+                JobToken::new(generation),
+                JobDelivery::Once,
+                PreviewSyntaxRefreshJob::new(
+                    SmolStr::new("rust"),
+                    generation,
+                    vec![Arc::<str>::from("fn main() { let value = 1; }")]
+                        .into_iter()
+                        .collect(),
+                ),
+            )
+            .unwrap();
+
+        let result = match wait_for_event(&handle) {
+            JobEvent::Completed {
+                payload: Some(JobPayload::BufferCacheRefresh(result)),
+                ..
+            } => result,
+            other => panic!("expected preview syntax completion, got {:?}", other),
+        };
+
+        assert!(adapter.apply_syntax_refresh_result_for_key(&key, result));
+        assert!(
+            !adapter
+                .preview_pane_mut(&key)
+                .unwrap()
+                .syntax_refresh_pending()
+        );
+
+        let _ = fs::remove_file(file_path);
+        let _ = fs::remove_dir_all(temp_root);
+    }
+
+    #[test]
+    fn preview_adapter_ignores_stale_syntax_refresh_results() {
+        globals::set_job_manager(JobManager::new());
+        let temp_root = unique_temp_dir();
+        fs::create_dir_all(&temp_root).unwrap();
+        let file_path = temp_root.join("preview.rs");
+        fs::write(&file_path, "fn main() { let value = 1; }\n").unwrap();
+
+        let mut adapter = PickerPreviewAdapter::new();
+        adapter
+            .request_syntax_refresh_for_path(file_path.as_path())
+            .unwrap();
+        let key = file_path.to_string_lossy().into_owned();
+        assert!(
+            adapter
+                .preview_pane_mut(&key)
+                .unwrap()
+                .syntax_refresh_pending()
+        );
+
+        let stale_result = BufferCacheRefreshResult {
+            buffer_id: BufferId::new(0),
+            generation: 999,
+            cache: BufferCache::new("rust"),
+        };
+
+        assert!(!adapter.apply_syntax_refresh_result_for_key(&key, stale_result));
+        assert!(
+            adapter
+                .preview_pane_mut(&key)
+                .unwrap()
+                .syntax_refresh_pending()
+        );
+
+        let _ = fs::remove_file(file_path);
+        let _ = fs::remove_dir_all(temp_root);
+    }
+
+    #[test]
+    fn preview_pane_marks_syntax_refresh_complete_after_failure_notification() {
+        globals::set_job_manager(JobManager::new());
+        let mut pane = PreviewPane::new(Buffer::from_str("one\ntwo\n"));
+        pane.request_syntax_refresh();
+        assert!(pane.syntax_refresh_pending());
+
+        pane.clear_syntax_refresh_pending();
+
+        assert!(!pane.syntax_refresh_pending());
+    }
+
+    #[test]
+    fn preview_syntax_refresh_job_populates_cached_spans_off_thread() {
+        let handle = JobHandle::new();
+        handle
+            .submit_latest_only(
+                JobKind::new(PICKER_PREVIEW_SYNTAX_JOB_KIND),
+                JobPriority::Background,
+                JobToken::new(7),
+                JobDelivery::Once,
+                PreviewSyntaxRefreshJob::new(
+                    SmolStr::new("rust"),
+                    7,
+                    vec![Arc::<str>::from("fn main() { let value = 1; }")]
+                        .into_iter()
+                        .collect(),
+                ),
+            )
+            .unwrap();
+
+        let event = wait_for_event(&handle);
+        let result = match event {
+            JobEvent::Completed {
+                payload: Some(JobPayload::BufferCacheRefresh(result)),
+                ..
+            } => result,
+            other => panic!("expected preview syntax completion, got {:?}", other),
+        };
+
+        assert_eq!(result.generation, 7);
+        assert!(result.cache.cached_spans_for_line(0).is_some());
+        assert!(result.cache.is_complete_for_line_count(1));
+
+        handle.shutdown();
+    }
+
+    #[test]
+    fn preview_pane_renders_body_like_window() {
+        let _config_guard = globals::set_test_config(Config {
+            wrap_mode: WrapMode::Hard,
+            syntax: false,
+            ..Config::default()
+        });
+        let theme = themed_window();
+        let _theme_guard = globals::set_test_active_theme(theme);
+
+        let mut pane = PreviewPane::new(Buffer::from_str("alpha\nbeta\n"));
+        let mut preview_screen = crate::screen::Screen::new(2, 20);
+        pane.render(
+            &mut preview_screen,
+            Position::new(0, 0),
+            Size::new(2, 20),
+            0,
+            false,
+        );
+
+        let mut window = Window::new(Buffer::from_str("alpha\nbeta\n"));
+        window.set_cursor(crate::buffer::Cursor::new(0, 0));
+        let mut window_screen = crate::screen::Screen::new(2, 20);
+        window.render(&mut window_screen, Position::new(0, 0), Size::new(2, 20));
+
+        assert_eq!(
+            row_text(&mut preview_screen, 0, 0),
+            row_text(&mut window_screen, 0, 0)
+        );
+        assert_eq!(
+            row_text(&mut preview_screen, 1, 0),
+            row_text(&mut window_screen, 1, 0)
+        );
+    }
+
+    #[test]
+    fn preview_pane_matches_window_for_syntax_and_active_line() {
+        let _config_guard = globals::set_test_config(Config {
+            wrap_mode: WrapMode::Hard,
+            syntax: false,
+            active_line: true,
+            ..Config::default()
+        });
+        let theme = themed_window();
+        let _theme_guard = globals::set_test_active_theme(theme);
+        let file_path = unique_temp_dir().join("preview.rs");
+        fs::create_dir_all(file_path.parent().unwrap()).unwrap();
+        fs::write(&file_path, "fn main() { let value = 1; }\n").unwrap();
+
+        let mut pane = PreviewPane::new(Buffer::from_str_with_path(
+            "fn main() { let value = 1; }\n",
+            AbsolutePath::from_path(file_path.as_path()).unwrap(),
+        ));
+        let mut preview_screen = crate::screen::Screen::new(2, 32);
+        pane.render(
+            &mut preview_screen,
+            Position::new(0, 0),
+            Size::new(2, 32),
+            0,
+            true,
+        );
+
+        let mut window = Window::new(Buffer::from_str_with_path(
+            "fn main() { let value = 1; }\n",
+            AbsolutePath::from_path(file_path.as_path()).unwrap(),
+        ));
+        window.set_cursor(crate::buffer::Cursor::new(0, 0));
+        let mut window_screen = crate::screen::Screen::new(2, 32);
+        window.render(&mut window_screen, Position::new(0, 0), Size::new(2, 32));
+
+        assert_screen_eq(&mut preview_screen, &mut window_screen);
+
+        let _ = fs::remove_file(file_path);
+    }
+
+    #[test]
+    fn preview_pane_matches_window_when_wrapping() {
+        let _config_guard = globals::set_test_config(Config {
+            wrap_mode: WrapMode::Hard,
+            syntax: false,
+            ..Config::default()
+        });
+        let theme = themed_window();
+        let _theme_guard = globals::set_test_active_theme(theme);
+        let mut pane = PreviewPane::new(Buffer::from_str("abcdefghij\nklmnop\n"));
+        pane.set_wrap_enabled(true);
+        let mut preview_screen = crate::screen::Screen::new(2, 8);
+        pane.render(
+            &mut preview_screen,
+            Position::new(0, 0),
+            Size::new(2, 8),
+            0,
+            false,
+        );
+
+        let mut window = Window::new(Buffer::from_str("abcdefghij\nklmnop\n"));
+        window.set_wrap_enabled(true);
+        window.set_cursor(crate::buffer::Cursor::new(0, 0));
+        let mut window_screen = crate::screen::Screen::new(2, 8);
+        window.render(&mut window_screen, Position::new(0, 0), Size::new(2, 8));
+
+        assert_eq!(
+            row_text(&mut preview_screen, 0, 0),
+            row_text(&mut window_screen, 0, 0)
+        );
+    }
+
+    #[test]
+    fn preview_pane_reuses_cache_for_same_path_across_match_changes() {
+        let temp_root = unique_temp_dir();
+        fs::create_dir_all(&temp_root).unwrap();
+        let file_path = temp_root.join("preview.rs");
+        fs::write(&file_path, "one\ntwo\nthree\nfour\n").unwrap();
+
+        let mut adapter = PickerPreviewAdapter::new();
+        let first =
+            adapter.preview_for_path(file_path.as_path()).unwrap() as *const PreviewPane as usize;
+        adapter
+            .preview_for_path(file_path.as_path())
+            .unwrap()
+            .render(
+                &mut crate::screen::Screen::new(2, 20),
+                Position::new(0, 0),
+                Size::new(2, 20),
+                0,
+                false,
+            );
+        let second =
+            adapter.preview_for_path(file_path.as_path()).unwrap() as *const PreviewPane as usize;
+        adapter
+            .preview_for_path(file_path.as_path())
+            .unwrap()
+            .render(
+                &mut crate::screen::Screen::new(2, 20),
+                Position::new(0, 0),
+                Size::new(2, 20),
+                1,
+                true,
+            );
+
+        assert_eq!(first, second);
+
+        let _ = fs::remove_file(file_path);
+        let _ = fs::remove_dir_all(temp_root);
+    }
+
+    fn buffer_count_for_path(path: &Path) -> usize {
+        crate::globals::with_buffer_pool(|pool| {
+            pool.buffer_ids()
+                .into_iter()
+                .filter(|id| {
+                    pool.get(*id)
+                        .and_then(|buffer| buffer.path())
+                        .is_some_and(|buffer_path| buffer_path.as_path() == path)
+                })
+                .count()
+        })
+    }
+
+    fn wait_for_event(handle: &JobHandle) -> JobEvent {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            if let Some(event) = handle.poll_event() {
+                return event;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "timed out waiting for job event"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+    }
+
+    fn row_text(screen: &mut crate::screen::Screen, row: u16, start_col: u16) -> String {
+        let (_, cols) = screen.size();
+        (start_col..cols)
+            .map(|col| screen.get_cell_mut(row, col).unwrap().text.clone())
+            .collect()
+    }
+
+    fn assert_screen_eq(left: &mut crate::screen::Screen, right: &mut crate::screen::Screen) {
+        let (rows, cols) = left.size();
+        assert_eq!(left.size(), right.size());
+        for row in 0..rows {
+            for col in 0..cols {
+                let left_cell = left.get_cell_mut(row, col).unwrap().clone();
+                let right_cell = right.get_cell_mut(row, col).unwrap().clone();
+                assert_eq!(
+                    left_cell.text, right_cell.text,
+                    "text mismatch at ({row}, {col})"
+                );
+                assert_eq!(
+                    left_cell.style, right_cell.style,
+                    "style mismatch at ({row}, {col})"
+                );
+            }
+        }
+    }
+
+    fn themed_window() -> Theme {
+        let default_style = Style::new().fg(Color::ansi(15)).bg(Color::ansi(30));
+        let mut highlights = HighlightStyles::default();
+        highlights.insert(
+            Tag::parse("ui.selection").expect("valid tag"),
+            Style::new().reverse(),
+        );
+        highlights.insert(
+            Tag::parse("ui.window.active_line").expect("valid tag"),
+            Style::new().bg(Color::ansi(21)),
+        );
+        highlights.insert(
+            Tag::parse("ui.window.gutter").expect("valid tag"),
+            Style::new().fg(Color::ansi(11)).bg(Color::ansi(12)),
+        );
+        highlights.insert(
+            Tag::parse("ui.window").expect("valid tag"),
+            Style::new().fg(Color::ansi(13)).bg(Color::ansi(14)),
+        );
+        highlights.insert(
+            Tag::parse("ui.window.lines").expect("valid tag"),
+            Style::new().fg(Color::ansi(15)).bg(Color::ansi(16)),
+        );
+        for tag_name in [
+            "syntax.comment",
+            "syntax.constant",
+            "syntax.function",
+            "syntax.keyword",
+            "syntax.operator",
+            "syntax.punctuation",
+            "syntax.string",
+            "syntax.type",
+            "syntax.variable",
+        ] {
+            highlights.insert(Tag::parse(tag_name).expect("valid tag"), Style::new());
+        }
+        Theme::new("demo", ThemeKind::Ansi256, default_style, highlights)
+    }
+
+    fn unique_temp_dir() -> std::path::PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("urvim-preview-adapter-{nanos}"))
+    }
+}

@@ -9,6 +9,7 @@ pub mod floating_window;
 pub mod grep_picker;
 pub mod inputs;
 pub mod picker;
+pub mod picker_preview;
 
 use crate::buffer::Cursor;
 use crate::editor::Action;

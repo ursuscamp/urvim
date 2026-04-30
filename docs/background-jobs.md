@@ -29,7 +29,7 @@ The current design is intentionally simple:
 
 ## How It Is Used
 
-The syntax highlighter is the first built-in user of this framework:
+The syntax highlighter is one built-in user of this framework:
 
 1. The editor renders whatever cached syntax spans it already has.
 2. If the cache is incomplete, it queues a background catch-up job.
@@ -37,6 +37,14 @@ The syntax highlighter is the first built-in user of this framework:
 4. The main thread applies the result only if the generation still matches.
 5. A tick event gives the editor loop a chance to repaint with the updated data.
 6. When a newer latest-only submission arrives for the same scope, older queued work is skipped before it can consume more worker time.
+
+Picker previews also use the same pattern for syntax warmup:
+
+1. The picker loads raw file contents immediately.
+2. If the preview cache is incomplete, it queues a background preview syntax refresh job.
+3. The worker fills in the syntax cache off-thread.
+4. The preview keeps rendering plain text until the job result arrives.
+5. The main thread applies the result only if the generation still matches.
 
 Streaming jobs follow the same main-thread polling model as one-shot jobs, but they can deliver progress incrementally:
 

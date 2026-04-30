@@ -3,6 +3,7 @@ use crate::job::{JobEvent, JobPayload};
 use crate::terminal::KeyCode;
 use crate::ui::file_picker::{FilePickerSource, FilePickerWidget};
 use crate::ui::picker::PickerSearchEvent;
+use crate::ui::picker_preview::PICKER_PREVIEW_SYNTAX_JOB_KIND;
 use crate::ui::{UiEvent, UiEventResult};
 use crate::widget::Widget;
 
@@ -84,6 +85,26 @@ impl Layout {
                         generation: token.generation(),
                         chunk,
                     });
+                }
+            }
+            JobEvent::Completed {
+                kind,
+                token,
+                payload: Some(JobPayload::BufferCacheRefresh(result)),
+            } if kind.as_str() == PICKER_PREVIEW_SYNTAX_JOB_KIND => {
+                if let Some(picker) = self.file_picker.as_mut() {
+                    picker.handle_preview_syntax_refresh(token.generation(), result);
+                } else if let Some(picker) = self.grep_picker.as_mut() {
+                    picker.handle_preview_syntax_refresh(token.generation(), result);
+                }
+            }
+            JobEvent::Failed { kind, token, .. }
+                if kind.as_str() == PICKER_PREVIEW_SYNTAX_JOB_KIND =>
+            {
+                if let Some(picker) = self.file_picker.as_mut() {
+                    picker.handle_preview_syntax_refresh_failed(token.generation());
+                } else if let Some(picker) = self.grep_picker.as_mut() {
+                    picker.handle_preview_syntax_refresh_failed(token.generation());
                 }
             }
             JobEvent::Completed { kind, token, .. }

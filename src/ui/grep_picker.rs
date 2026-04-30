@@ -7,8 +7,8 @@ use crate::syntax::FiletypeGlyph;
 use crate::terminal::Style;
 use crate::ui::inputs::PromptSegment;
 use crate::ui::picker::{
-    PickerItem, PickerRenderSegment, PickerSearchEvent, PickerSource, PickerWidget,
-    picker_indicator_glyph,
+    PickerItem, PickerPreview, PickerPreviewEvent, PickerRenderSegment, PickerSearchEvent,
+    PickerSource, PickerWidget, picker_indicator_glyph,
 };
 use crate::ui::{Command, Intent};
 use ignore::WalkBuilder;
@@ -18,8 +18,10 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::Sender;
+use std::thread;
 
 const PICKER_CHUNK_SIZE: usize = 32;
+const GREP_PREVIEW_CONTEXT_LINES: usize = 100;
 static NEXT_GREP_PICKER_GENERATION: AtomicU64 = AtomicU64::new(1);
 
 /// A grep match displayed by the live grep picker.
@@ -40,6 +42,7 @@ pub struct GrepPickerItem {
 pub struct GrepPickerSource {
     root: PathBuf,
     current_generation: Arc<AtomicU64>,
+    preview_generation: Arc<AtomicU64>,
     fuzzy_mode: Arc<AtomicBool>,
 }
 
@@ -72,6 +75,7 @@ impl GrepPickerSource {
             current_generation: Arc::new(AtomicU64::new(
                 NEXT_GREP_PICKER_GENERATION.fetch_add(1, Ordering::SeqCst),
             )),
+            preview_generation: Arc::new(AtomicU64::new(0)),
             fuzzy_mode: Arc::new(AtomicBool::new(false)),
         }
     }
@@ -172,6 +176,41 @@ impl PickerSource for GrepPickerSource {
         });
     }
 
+    fn preview_key(&self, item: &Self::Item) -> Option<String> {
+        Some(item.path.to_string_lossy().into_owned())
+    }
+
+    fn start_preview(&self, item: Self::Item, generation: u64, sender: Sender<PickerPreviewEvent>) {
+        self.preview_generation.store(generation, Ordering::SeqCst);
+        let current_generation = self.preview_generation.clone();
+        thread::spawn(move || {
+            sender.send(PickerPreviewEvent::Started { generation }).ok();
+            let result = build_grep_preview(&item);
+            if current_generation.load(Ordering::SeqCst) != generation {
+                return;
+            }
+
+            match result {
+                Ok(preview) => sender
+                    .send(PickerPreviewEvent::Loaded {
+                        generation,
+                        preview,
+                    })
+                    .ok(),
+                Err(error) => sender
+                    .send(PickerPreviewEvent::Failed {
+                        generation,
+                        message: error.to_string(),
+                    })
+                    .ok(),
+            };
+        });
+    }
+
+    fn cancel_preview(&self) {
+        self.preview_generation.fetch_add(1, Ordering::SeqCst);
+    }
+
     fn select(&self, item: &Self::Item) -> Intent {
         Intent::Command(Command::OpenFileAtCursor(
             item.path.clone(),
@@ -234,6 +273,17 @@ impl PickerItem for GrepPickerItem {
         segments.push(PickerRenderSegment::new(suffix, suffix_style));
         segments
     }
+}
+
+fn build_grep_preview(item: &GrepPickerItem) -> std::io::Result<PickerPreview> {
+    let start_line = item.line.saturating_sub(GREP_PREVIEW_CONTEXT_LINES);
+    let _ = std::fs::metadata(item.path.as_path())?;
+
+    Ok(PickerPreview::new(
+        item.path.to_string_lossy(),
+        start_line + 1,
+        Some(item.line + 1),
+    ))
 }
 
 fn display_label(root: &Path, path: &Path) -> String {
@@ -457,6 +507,44 @@ mod tests {
                 .windows(2)
                 .any(|pair| pair[0].text.ends_with(' ') && pair[1].text.starts_with(":"))
         );
+    }
+
+    #[test]
+    fn grep_picker_preview_includes_lines_around_match() {
+        let temp_root = unique_temp_dir();
+        fs::create_dir_all(&temp_root).unwrap();
+        let file_path = temp_root.join("preview.rs");
+        fs::write(&file_path, "one\ntwo\nmatch\nfour\nfive\n").unwrap();
+        let item = GrepPickerItem {
+            path: file_path,
+            root: temp_root,
+            line: 2,
+            column: 0,
+        };
+
+        let preview = build_grep_preview(&item).expect("preview");
+
+        assert_eq!(preview.start_line, 1);
+        assert_eq!(preview.highlighted_line, Some(3));
+    }
+
+    #[test]
+    fn grep_picker_preview_key_uses_file_path_only() {
+        let source = GrepPickerSource::new(PathBuf::from("/tmp"));
+        let first = GrepPickerItem {
+            path: PathBuf::from("/tmp/example.txt"),
+            root: PathBuf::from("/tmp"),
+            line: 1,
+            column: 0,
+        };
+        let second = GrepPickerItem {
+            path: PathBuf::from("/tmp/example.txt"),
+            root: PathBuf::from("/tmp"),
+            line: 99,
+            column: 0,
+        };
+
+        assert_eq!(source.preview_key(&first), source.preview_key(&second));
     }
 
     #[test]

@@ -11,6 +11,7 @@ use urvim::layout::{FILE_PICKER_SEARCH_JOB_KIND, GREP_PICKER_SEARCH_JOB_KIND};
 use urvim::screen::Screen;
 use urvim::terminal::{Terminal, size::get_terminal_size};
 use urvim::theme::ThemeRegistry;
+use urvim::ui::picker_preview::PICKER_PREVIEW_SYNTAX_JOB_KIND;
 use urvim::ui::{Command, Intent, UiEvent};
 use urvim::window::{Position, Size};
 
@@ -87,7 +88,8 @@ fn main() -> io::Result<()> {
                 let accepted_redraw = job_manager.process_events(|event| match event {
                     e @ _
                         if e.kind().as_str() == FILE_PICKER_SEARCH_JOB_KIND
-                            || e.kind().as_str() == GREP_PICKER_SEARCH_JOB_KIND =>
+                            || e.kind().as_str() == GREP_PICKER_SEARCH_JOB_KIND
+                            || e.kind().as_str() == PICKER_PREVIEW_SYNTAX_JOB_KIND =>
                     {
                         layout.dispatch_job_event(e);
                     }
