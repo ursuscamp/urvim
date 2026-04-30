@@ -253,6 +253,11 @@ context = { requires = ["format_string"] }
 
 [[rules]]
 kind = "regex"
+pattern = "\\b[A-Z][A-Z0-9_]*\\b"
+tag = "variable.global"
+
+[[rules]]
+kind = "regex"
 pattern = "\\b(?:Option|Result|String|Vec|HashMap|Path|PathBuf|[A-Z][A-Za-z0-9]*)\\b"
 tag = "type"
 
@@ -267,6 +272,12 @@ kind = "regex"
 pattern = "\\b[A-Za-z_][A-Za-z0-9_]*\\b"
 lookahead = "\\s*\\("
 tag = "function"
+
+[[rules]]
+kind = "regex"
+pattern = "\\b[A-Za-z_][A-Za-z0-9_]*\\b"
+lookahead = "\\s*:"
+tag = "variable.global"
 
 [[rules]]
 kind = "regex"

@@ -70,3 +70,4 @@ bg = "bg"
 "syntax.string.interpolation" = { fg = "accent" }
 "syntax.type" = { fg = "accent" }
 "syntax.variable" = { fg = "fg" }
+"syntax.variable.global" = { fg = "cyan" }

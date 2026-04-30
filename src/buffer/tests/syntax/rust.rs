@@ -268,3 +268,38 @@ fn test_rust_function_call_highlights_function_name() {
     assert_spans_include_style(&spans, tag("punctuation"));
     assert_spans_include_style(&spans, tag("variable"));
 }
+
+#[test]
+fn test_rust_fixture_highlights_global_identifiers() {
+    let fixture = include_str!("fixtures/rust.rs");
+    let mut buf = fixture_buffer("syntax-rust-global", "rs", fixture);
+
+    let global_line = buf
+        .syntax_spans_for_line(48)
+        .expect("global variable line should exist");
+    let global_line_text = buf
+        .line_at(48)
+        .expect("global variable line should exist")
+        .to_string();
+    let global_mut_line = buf
+        .syntax_spans_for_line(49)
+        .expect("mutable global variable line should exist");
+    let global_mut_line_text = buf
+        .line_at(49)
+        .expect("mutable global variable line should exist")
+        .to_string();
+
+    assert_spans_include_style(&global_line, tag("keyword"));
+    assert_spans_include_exact_style(
+        &global_line,
+        global_line_text.as_str(),
+        "GLOBAL_VARIABLES",
+        tag("variable.global"),
+    );
+    assert_spans_include_exact_style(
+        &global_mut_line,
+        global_mut_line_text.as_str(),
+        "GLOBAL_STATE",
+        tag("variable.global"),
+    );
+}

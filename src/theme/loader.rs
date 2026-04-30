@@ -730,6 +730,7 @@ bg = "base"
                 theme.highlight_style_for_tag(&tag("syntax.string")),
                 theme.highlight_style_for_tag(&tag("syntax.type")),
                 theme.highlight_style_for_tag(&tag("syntax.variable")),
+                theme.highlight_style_for_tag(&tag("syntax.variable.global")),
             ];
             assert_eq!(
                 theme.highlight_style_for_name("ui.selection"),
@@ -781,6 +782,17 @@ bg = "base"
             friday_night
                 .highlight_style_for_tag(&Tag::parse("syntax.string.interpolation").unwrap()),
             Style::new().fg(Color::ansi(75))
+        );
+        assert_eq!(
+            friday_night.highlight_style_for_tag(&tag("syntax.variable.global")),
+            Style::new().fg(Color::ansi(80))
+        );
+        assert_eq!(
+            registry
+                .get("Saturday Morning")
+                .unwrap()
+                .highlight_style_for_tag(&tag("syntax.variable.global")),
+            Style::new().fg(Color::ansi(31))
         );
     }
 

@@ -45,3 +45,6 @@ second"#;
     std::mem::drop(input);
     input
 }
+
+static GLOBAL_VARIABLES: usize = 0;
+let GLOBAL_STATE = 1;
