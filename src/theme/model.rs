@@ -297,7 +297,7 @@ impl ThemeRegistry {
     }
 }
 
-fn builtin_theme_sources() -> [(&'static str, &'static str, &'static str); 6] {
+fn builtin_theme_sources() -> [(&'static str, &'static str, &'static str); 7] {
     [
         (
             "Friday Night",
@@ -329,6 +329,7 @@ fn builtin_theme_sources() -> [(&'static str, &'static str, &'static str); 6] {
             "catppuccin.toml",
             include_str!("builtin/catppuccin.toml"),
         ),
+        ("Nord", "nord.toml", include_str!("builtin/nord.toml")),
     ]
 }
 
@@ -540,6 +541,7 @@ mod tests {
         assert!(registry.get("Dracula").is_some());
         assert!(registry.get("Tokyo Night").is_some());
         assert!(registry.get("Catppuccin").is_some());
+        assert!(registry.get("Nord").is_some());
 
         for name in [
             "Friday Night",
@@ -548,6 +550,7 @@ mod tests {
             "Dracula",
             "Tokyo Night",
             "Catppuccin",
+            "Nord",
         ] {
             let theme = registry.get(name).expect("builtin theme should exist");
             assert_ne!(

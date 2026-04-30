@@ -860,6 +860,15 @@ mod tests {
     }
 
     #[test]
+    fn select_active_theme_can_select_nord() {
+        let registry = ThemeRegistry::load_builtin().expect("builtins should load");
+
+        let theme = select_active_theme(&registry, Some("Nord")).expect("Nord theme should exist");
+
+        assert_eq!(theme.name(), "Nord");
+    }
+
+    #[test]
     fn select_active_theme_reports_unknown_theme() {
         let registry = ThemeRegistry::load_builtin().expect("builtins should load");
 
