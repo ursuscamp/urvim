@@ -1,9 +1,9 @@
 use super::Layout;
-use crate::job::{JobEvent, JobPayload};
+use crate::background::JobEvent;
+use crate::background::JobPayload;
 use crate::terminal::KeyCode;
 use crate::ui::file_picker::{FilePickerSource, FilePickerWidget};
 use crate::ui::picker::PickerSearchEvent;
-use crate::ui::picker_preview::PICKER_PREVIEW_SYNTAX_JOB_KIND;
 use crate::ui::{UiEvent, UiEventResult};
 use crate::widget::Widget;
 
@@ -17,7 +17,8 @@ impl Layout {
 
         match std::env::current_dir() {
             Ok(cwd) => {
-                let picker = FilePickerWidget::new(FilePickerSource::new(cwd));
+                let picker =
+                    FilePickerWidget::new(FilePickerSource::with_jobs(cwd, self.jobs.clone()));
                 self.file_picker = Some(picker);
                 self.refresh_file_picker_prompt();
             }
@@ -78,8 +79,8 @@ impl Layout {
             JobEvent::Chunk {
                 kind,
                 token,
-                payload: JobPayload::FilePickerChunk(chunk),
-            } if kind.as_str() == FILE_PICKER_SEARCH_JOB_KIND => {
+                payload: JobPayload::FileSearchChunk(chunk),
+            } if kind == crate::background::JobKind::FilePickerSearch => {
                 if let Some(picker) = self.file_picker.as_mut() {
                     picker.handle_search_event(PickerSearchEvent::PickerChunk {
                         generation: token.generation(),
@@ -90,8 +91,8 @@ impl Layout {
             JobEvent::Completed {
                 kind,
                 token,
-                payload: Some(JobPayload::BufferCacheRefresh(result)),
-            } if kind.as_str() == PICKER_PREVIEW_SYNTAX_JOB_KIND => {
+                payload: Some(JobPayload::PreviewSyntax(result)),
+            } if kind == crate::background::JobKind::PickerPreviewSyntax => {
                 if let Some(picker) = self.file_picker.as_mut() {
                     picker.handle_preview_syntax_refresh(token.generation(), result);
                 } else if let Some(picker) = self.grep_picker.as_mut() {
@@ -99,7 +100,7 @@ impl Layout {
                 }
             }
             JobEvent::Failed { kind, token, .. }
-                if kind.as_str() == PICKER_PREVIEW_SYNTAX_JOB_KIND =>
+                if kind == crate::background::JobKind::PickerPreviewSyntax =>
             {
                 if let Some(picker) = self.file_picker.as_mut() {
                     picker.handle_preview_syntax_refresh_failed(token.generation());
@@ -108,7 +109,7 @@ impl Layout {
                 }
             }
             JobEvent::Completed { kind, token, .. }
-                if kind.as_str() == FILE_PICKER_SEARCH_JOB_KIND =>
+                if kind == crate::background::JobKind::FilePickerSearch =>
             {
                 if let Some(picker) = self.file_picker.as_mut() {
                     picker.handle_search_event(PickerSearchEvent::PickerSearchComplete {
@@ -117,7 +118,7 @@ impl Layout {
                 }
             }
             JobEvent::Failed { kind, token, .. }
-                if kind.as_str() == FILE_PICKER_SEARCH_JOB_KIND =>
+                if kind == crate::background::JobKind::FilePickerSearch =>
             {
                 if let Some(picker) = self.file_picker.as_mut() {
                     picker.handle_search_event(PickerSearchEvent::PickerSearchComplete {
@@ -136,6 +137,3 @@ impl Layout {
         }
     }
 }
-
-/// Job kind used for file picker search work.
-pub const FILE_PICKER_SEARCH_JOB_KIND: &str = "file-picker-search";

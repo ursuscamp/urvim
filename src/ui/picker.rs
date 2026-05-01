@@ -3,6 +3,7 @@
 //! This module provides a generic overlay picker that can stream results from a
 //! background source and emit selection intents for different result types.
 
+use crate::background::JobManager;
 use crate::config::AdvancedGlyphCapability;
 use crate::screen::Screen;
 use crate::terminal::{KeyCode, Style};
@@ -151,6 +152,9 @@ pub trait PickerSource: Send + 'static {
         sender: Sender<PickerSearchEvent<Self::Item>>,
     );
 
+    /// Returns the job manager used by this picker source.
+    fn job_manager(&self) -> std::sync::Arc<JobManager>;
+
     /// Cancels any active search, if the source supports it.
     fn cancel_search(&self) {}
 
@@ -218,6 +222,7 @@ fn frame_from_outer(origin: Position, size: Size) -> FloatingWindowFrame {
 impl<S: PickerSource> PickerWidget<S> {
     /// Creates a new picker widget backed by a source.
     pub fn new(source: S) -> Self {
+        let jobs = source.job_manager();
         let (sender, receiver) = std::sync::mpsc::channel();
         let (preview_sender, preview_receiver) = std::sync::mpsc::channel();
         let mut query_input = InputWidget::new("");
@@ -240,7 +245,7 @@ impl<S: PickerSource> PickerWidget<S> {
             preview_key: None,
             preview_highlighted: None,
             preview_state: PickerPreviewState::Empty,
-            preview_adapter: PickerPreviewAdapter::new(),
+            preview_adapter: PickerPreviewAdapter::with_jobs(jobs),
             preview_receiver,
             preview_sender,
         }
@@ -1057,9 +1062,8 @@ pub fn visible_tail_text(text: &str, max_cols: usize, ellipsize: bool) -> (Strin
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::background::JobManager;
     use crate::config::{AdvancedGlyphCapability, Config};
-    use crate::globals;
-    use crate::job::JobManager;
     use crate::ui::{Intent, UiContext, UiEvent};
     use std::sync::{Arc, Mutex};
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -1101,6 +1105,10 @@ mod tests {
                 chunk: vec![format!("{query}-one"), format!("{query}-two")],
             });
             let _ = sender.send(PickerSearchEvent::PickerSearchComplete { generation });
+        }
+
+        fn job_manager(&self) -> std::sync::Arc<JobManager> {
+            std::sync::Arc::new(JobManager::new())
         }
 
         fn preview_key(&self, item: &Self::Item) -> Option<String> {
@@ -1354,7 +1362,6 @@ mod tests {
 
     #[test]
     fn picker_clears_pending_preview_syntax_refresh_on_failure() {
-        globals::set_job_manager(JobManager::new());
         let source = TestSource::new();
         let mut picker = PickerWidget::new(source);
         let key = String::from("/tmp/example.txt");
@@ -1388,7 +1395,6 @@ mod tests {
 
     #[test]
     fn picker_applies_preview_syntax_refresh_for_current_preview_key() {
-        globals::set_job_manager(JobManager::new());
         let source = TestSource::new();
         let mut picker = PickerWidget::new(source);
         let key = String::from("/tmp/example.txt");

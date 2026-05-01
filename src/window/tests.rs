@@ -1,5 +1,6 @@
 use super::*;
 use crate::action::ActionResult;
+use crate::background::{BackgroundJob, JobKind, JobToken};
 use crate::buffer::{BufferId, Cursor};
 use crate::config::{
     AdvancedGlyphCapability, AutoIndentMode, Config, DefaultRegisters, ScrollMargin, WrapMode,
@@ -10,9 +11,6 @@ use crate::editor::{
 use crate::editor::{Operator, OperatorTarget, QuoteKind, TextObject};
 use crate::globals;
 use crate::globals::{Direction, FindKind, FindState};
-use crate::job::{
-    Job, JobContext, JobDelivery, JobKind, JobManager, JobPayload, JobPriority, JobToken,
-};
 use crate::path::AbsolutePath;
 use crate::register::{RegisterContent, RegisterContentKind, RegisterName, RegisterStore};
 use crate::terminal::{Color, Style};
@@ -454,22 +452,6 @@ fn repeated_rust_buffer(lines: usize) -> String {
     )
     .collect::<Vec<_>>()
     .join("\n")
-}
-
-struct GateJob {
-    gate: std::sync::Arc<(Mutex<bool>, std::sync::Condvar)>,
-}
-
-impl Job for GateJob {
-    type Output = ();
-
-    fn run(self, _context: &JobContext, _emit: &mut dyn FnMut(Self::Output)) {
-        let (lock, cvar) = &*self.gate;
-        let mut open = lock.lock().unwrap();
-        while !*open {
-            open = cvar.wait(open).unwrap();
-        }
-    }
 }
 
 fn todo_marker_themed_window() -> Theme {
@@ -958,7 +940,6 @@ fn test_window_render_refreshes_visible_syntax_after_edit() {
 #[test]
 fn test_window_render_refreshes_scrolled_visible_syntax_after_edit() {
     let _lock = syntax_worker_lock();
-    globals::set_job_manager(JobManager::new());
     let path = AbsolutePath::from_path(
         temp_path_with_ext("scrolled-visible-syntax-refresh", "rs").as_path(),
     )
@@ -1364,7 +1345,6 @@ fn test_window_render_does_not_force_full_syntax_warmup_on_bottom_jump() {
         advanced_glyphs: BTreeSet::new(),
         ..Default::default()
     });
-    globals::set_job_manager(JobManager::new());
 
     let path = temp_path_with_ext("bottom-jump", "rs");
     let buffer = Buffer::from_str_with_path(&repeated_rust_buffer(256), path);
@@ -1421,7 +1401,6 @@ fn test_window_render_keeps_top_viewport_syntax_warmup() {
         advanced_glyphs: BTreeSet::new(),
         ..Default::default()
     });
-    globals::set_job_manager(JobManager::new());
 
     let path = temp_path_with_ext("top-warmup", "rs");
     let buffer = Buffer::from_str_with_path(&repeated_rust_buffer(256), path);
@@ -1489,22 +1468,16 @@ fn test_window_render_uses_background_syntax_after_tick() {
         advanced_glyphs: BTreeSet::new(),
         ..Default::default()
     });
-    globals::set_job_manager(JobManager::new());
-
     let gate = std::sync::Arc::new((Mutex::new(false), std::sync::Condvar::new()));
-    globals::with_job_manager(|job_manager| {
-        let job_manager = job_manager.expect("job manager should be configured");
-        job_manager
-            .submit(
-                JobKind::new("gate"),
-                JobPriority::Foreground,
-                JobToken::new(1),
-                JobDelivery::Once,
-                GateJob {
-                    gate: std::sync::Arc::clone(&gate),
-                },
-            )
-            .expect("gate job should submit");
+    globals::with_buffer_pool(|pool| {
+        pool.submit_background_job(
+            JobKind::TestGate,
+            JobToken::new(1),
+            BackgroundJob::Gate {
+                gate: std::sync::Arc::clone(&gate),
+            },
+        )
+        .expect("gate job should submit");
     });
 
     let buffer = Buffer::from_str_with_path(
@@ -1545,21 +1518,7 @@ fn test_window_render_uses_background_syntax_after_tick() {
     let deadline = Instant::now() + Duration::from_secs(2);
     let mut applied = false;
     while !applied {
-        globals::with_job_manager(|job_manager| {
-            if let Some(job_manager) = job_manager {
-                let _ = job_manager.process_events(|event| {
-                    if let crate::job::JobEvent::Completed {
-                        payload: Some(JobPayload::BufferCacheRefresh(result)),
-                        ..
-                    } = event
-                    {
-                        globals::with_buffer_mut(result.buffer_id, |buffer| {
-                            applied = buffer.apply_buffer_cache_refresh_result(result);
-                        });
-                    }
-                });
-            }
-        });
+        applied = globals::with_buffer_pool(|pool| pool.process_background_jobs());
 
         assert!(
             Instant::now() < deadline,
@@ -1569,11 +1528,6 @@ fn test_window_render_uses_background_syntax_after_tick() {
     }
 
     assert!(applied);
-    assert!(globals::with_job_manager(|job_manager| {
-        job_manager
-            .map(|job_manager| job_manager.take_redraw_requested())
-            .unwrap_or(false)
-    }));
 
     window.render(&mut screen, Position::new(0, 0), Size::new(1, 80));
 
@@ -1605,8 +1559,6 @@ fn test_window_render_uses_background_syntax_after_tick() {
         line.iter()
             .any(|chunk| chunk.text.contains("note") && chunk.style == expected_comment_style)
     );
-
-    globals::shutdown_job_manager();
 }
 
 #[test]

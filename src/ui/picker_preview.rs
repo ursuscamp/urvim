@@ -1,6 +1,6 @@
+use crate::background::{JobContext, JobManager, JobToken};
 use crate::buffer::{Buffer, BufferCache, BufferCacheRefreshResult, BufferId, Cursor};
 use crate::globals;
-use crate::job::{Job, JobContext, JobDelivery, JobKind, JobPriority, JobToken};
 use crate::screen::Screen;
 use crate::terminal::{Color, Style};
 use crate::window::renderer::{self, BufferRenderState, WindowRenderTheme};
@@ -21,11 +21,17 @@ pub struct PreviewPane {
     follow_highlight: bool,
     syntax_refresh_pending: bool,
     last_viewport_rows: u16,
+    jobs: Arc<JobManager>,
 }
 
 impl PreviewPane {
     /// Creates a preview pane from an owned buffer.
     pub fn new(buffer: Buffer) -> Self {
+        Self::with_jobs(buffer, Arc::new(JobManager::new()))
+    }
+
+    /// Creates a preview pane from an owned buffer and shared job manager.
+    pub fn with_jobs(buffer: Buffer, jobs: Arc<JobManager>) -> Self {
         Self {
             buffer_view: BufferView::from_owned_buffer(buffer),
             render_data: RenderData::new(0),
@@ -33,6 +39,7 @@ impl PreviewPane {
             follow_highlight: true,
             syntax_refresh_pending: false,
             last_viewport_rows: 0,
+            jobs,
         }
     }
 
@@ -115,21 +122,14 @@ impl PreviewPane {
         };
 
         let job = PreviewSyntaxRefreshJob::new(syntax_name, generation, line_texts);
-        let submitted = globals::with_job_manager(|manager| {
-            manager
-                .map(|manager| {
-                    manager
-                        .submit_latest_only(
-                            JobKind::new(PICKER_PREVIEW_SYNTAX_JOB_KIND),
-                            JobPriority::Background,
-                            JobToken::new(generation),
-                            JobDelivery::Once,
-                            job,
-                        )
-                        .is_ok()
-                })
-                .unwrap_or(false)
-        });
+        let submitted = self
+            .jobs
+            .submit_latest_only(
+                crate::background::JobKind::PickerPreviewSyntax,
+                JobToken::new(generation),
+                job,
+            )
+            .is_ok();
 
         if submitted {
             self.syntax_refresh_pending = true;
@@ -251,13 +251,20 @@ impl PreviewPane {
 #[derive(Debug, Default)]
 pub struct PickerPreviewAdapter {
     panes: HashMap<String, PreviewPane>,
+    jobs: Arc<JobManager>,
 }
 
 impl PickerPreviewAdapter {
     /// Creates an empty preview adapter.
     pub fn new() -> Self {
+        Self::with_jobs(Arc::new(JobManager::new()))
+    }
+
+    /// Creates an empty preview adapter with a shared job manager.
+    pub fn with_jobs(jobs: Arc<JobManager>) -> Self {
         Self {
             panes: HashMap::new(),
+            jobs,
         }
     }
 
@@ -266,7 +273,10 @@ impl PickerPreviewAdapter {
         let key = Self::path_key(path);
         if !self.panes.contains_key(&key) {
             let buffer = Self::load_buffer(path)?;
-            self.panes.insert(key.clone(), PreviewPane::new(buffer));
+            self.panes.insert(
+                key.clone(),
+                PreviewPane::with_jobs(buffer, Arc::clone(&self.jobs)),
+            );
         }
 
         Ok(self.panes.get_mut(&key).expect("cached preview pane"))
@@ -335,10 +345,8 @@ impl PickerPreviewAdapter {
     }
 }
 
-pub const PICKER_PREVIEW_SYNTAX_JOB_KIND: &str = "picker-preview-syntax";
-
 #[derive(Debug)]
-struct PreviewSyntaxRefreshJob {
+pub struct PreviewSyntaxRefreshJob {
     syntax_name: SmolStr,
     generation: u64,
     line_texts: Vector<Arc<str>>,
@@ -354,10 +362,13 @@ impl PreviewSyntaxRefreshJob {
     }
 }
 
-impl Job for PreviewSyntaxRefreshJob {
-    type Output = BufferCacheRefreshResult;
-
-    fn run(self, context: &JobContext, emit: &mut dyn FnMut(Self::Output)) {
+impl PreviewSyntaxRefreshJob {
+    /// Runs the preview syntax refresh job on the worker thread.
+    pub fn run(
+        self,
+        context: &JobContext,
+        event_tx: &std::sync::mpsc::Sender<crate::background::JobEvent>,
+    ) {
         if context.is_stopping() || context.is_aborted() {
             return;
         }
@@ -368,10 +379,16 @@ impl Job for PreviewSyntaxRefreshJob {
             cache.ensure_through(&self.syntax_name, &line_refs, line_refs.len() - 1);
         }
 
-        emit(BufferCacheRefreshResult {
-            buffer_id: BufferId::new(0),
-            generation: self.generation,
-            cache,
+        let _ = event_tx.send(crate::background::JobEvent::Completed {
+            kind: context.kind().clone(),
+            token: context.token(),
+            payload: Some(crate::background::JobPayload::PreviewSyntax(
+                BufferCacheRefreshResult {
+                    buffer_id: BufferId::new(0),
+                    generation: self.generation,
+                    cache,
+                },
+            )),
         });
     }
 }
@@ -401,12 +418,10 @@ fn resolve_window_styles() -> (Style, Style, Style, Style) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::background::{JobEvent, JobHandle, JobToken};
     use crate::buffer::Buffer;
     use crate::config::{Config, WrapMode};
     use crate::globals;
-    use crate::job::{
-        JobDelivery, JobEvent, JobHandle, JobKind, JobManager, JobPayload, JobPriority, JobToken,
-    };
     use crate::path::AbsolutePath;
     use crate::terminal::{Color, Style};
     use crate::theme::{HighlightStyles, Tag, Theme, ThemeKind};
@@ -574,7 +589,6 @@ mod tests {
 
     #[test]
     fn preview_adapter_requests_and_applies_async_syntax_refresh() {
-        globals::set_job_manager(JobManager::new());
         let temp_root = unique_temp_dir();
         fs::create_dir_all(&temp_root).unwrap();
         let file_path = temp_root.join("preview.rs");
@@ -601,10 +615,8 @@ mod tests {
         let handle = JobHandle::new();
         handle
             .submit_latest_only(
-                JobKind::new(PICKER_PREVIEW_SYNTAX_JOB_KIND),
-                JobPriority::Background,
+                crate::background::JobKind::PickerPreviewSyntax,
                 JobToken::new(generation),
-                JobDelivery::Once,
                 PreviewSyntaxRefreshJob::new(
                     SmolStr::new("rust"),
                     generation,
@@ -617,7 +629,7 @@ mod tests {
 
         let result = match wait_for_event(&handle) {
             JobEvent::Completed {
-                payload: Some(JobPayload::BufferCacheRefresh(result)),
+                payload: Some(crate::background::JobPayload::PreviewSyntax(result)),
                 ..
             } => result,
             other => panic!("expected preview syntax completion, got {:?}", other),
@@ -637,7 +649,6 @@ mod tests {
 
     #[test]
     fn preview_adapter_ignores_stale_syntax_refresh_results() {
-        globals::set_job_manager(JobManager::new());
         let temp_root = unique_temp_dir();
         fs::create_dir_all(&temp_root).unwrap();
         let file_path = temp_root.join("preview.rs");
@@ -675,7 +686,6 @@ mod tests {
 
     #[test]
     fn preview_pane_marks_syntax_refresh_complete_after_failure_notification() {
-        globals::set_job_manager(JobManager::new());
         let mut pane = PreviewPane::new(Buffer::from_str("one\ntwo\n"));
         pane.request_syntax_refresh();
         assert!(pane.syntax_refresh_pending());
@@ -690,10 +700,8 @@ mod tests {
         let handle = JobHandle::new();
         handle
             .submit_latest_only(
-                JobKind::new(PICKER_PREVIEW_SYNTAX_JOB_KIND),
-                JobPriority::Background,
+                crate::background::JobKind::PickerPreviewSyntax,
                 JobToken::new(7),
-                JobDelivery::Once,
                 PreviewSyntaxRefreshJob::new(
                     SmolStr::new("rust"),
                     7,
@@ -707,7 +715,7 @@ mod tests {
         let event = wait_for_event(&handle);
         let result = match event {
             JobEvent::Completed {
-                payload: Some(JobPayload::BufferCacheRefresh(result)),
+                payload: Some(crate::background::JobPayload::PreviewSyntax(result)),
                 ..
             } => result,
             other => panic!("expected preview syntax completion, got {:?}", other),

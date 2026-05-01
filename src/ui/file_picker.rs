@@ -1,7 +1,8 @@
 //! File picker source and selection behavior.
 
+use crate::background::JobPayload;
+use crate::background::{JobContext, JobManager, JobToken};
 use crate::globals;
-use crate::job::{Job, JobContext, JobDelivery, JobKind, JobPriority, JobToken};
 use crate::syntax::FiletypeGlyph;
 use crate::terminal::Style;
 use crate::ui::inputs::PromptSegment;
@@ -35,6 +36,7 @@ pub struct FilePickerSource {
     current_generation: Arc<AtomicU64>,
     preview_generation: Arc<AtomicU64>,
     fuzzy_mode: Arc<AtomicBool>,
+    jobs: Arc<JobManager>,
 }
 
 /// Search mode used by the file picker.
@@ -61,6 +63,11 @@ pub type FilePickerWidget = PickerWidget<FilePickerSource>;
 impl FilePickerSource {
     /// Creates a file picker rooted at the given directory.
     pub fn new(root: PathBuf) -> Self {
+        Self::with_jobs(root, Arc::new(JobManager::new()))
+    }
+
+    /// Creates a file picker rooted at the given directory and backed by a shared job manager.
+    pub fn with_jobs(root: PathBuf, jobs: Arc<JobManager>) -> Self {
         Self {
             root,
             current_generation: Arc::new(AtomicU64::new(
@@ -68,6 +75,7 @@ impl FilePickerSource {
             )),
             preview_generation: Arc::new(AtomicU64::new(0)),
             fuzzy_mode: Arc::new(AtomicBool::new(false)),
+            jobs,
         }
     }
 
@@ -134,6 +142,10 @@ impl PickerSource for FilePickerSource {
         self.current_generation.store(generation, Ordering::SeqCst);
     }
 
+    fn job_manager(&self) -> Arc<JobManager> {
+        Arc::clone(&self.jobs)
+    }
+
     fn start_search(
         &self,
         query: &str,
@@ -145,14 +157,10 @@ impl PickerSource for FilePickerSource {
 
         let previous_generation = current_generation.saturating_sub(1);
         if previous_generation > 0 {
-            globals::with_job_manager(|manager| {
-                if let Some(manager) = manager {
-                    manager.abort_generation(
-                        JobKind::new(FILE_PICKER_SEARCH_JOB_KIND),
-                        JobToken::new(previous_generation),
-                    );
-                }
-            });
+            self.jobs.abort_generation(
+                crate::background::JobKind::FilePickerSearch,
+                JobToken::new(previous_generation),
+            );
         }
 
         if query.is_empty() {
@@ -165,21 +173,15 @@ impl PickerSource for FilePickerSource {
             QueryMode::Fuzzy => QueryStyle::Fuzzy(query.to_string()),
         };
         let token = JobToken::new(generation);
-        globals::with_job_manager(|manager| {
-            if let Some(manager) = manager {
-                let _ = manager.submit(
-                    JobKind::new(FILE_PICKER_SEARCH_JOB_KIND),
-                    JobPriority::Background,
-                    token,
-                    JobDelivery::Streaming,
-                    PickerSearchJob {
-                        root,
-                        query,
-                        chunk_size: PICKER_CHUNK_SIZE,
-                    },
-                );
-            }
-        });
+        let _ = self.jobs.submit(
+            crate::background::JobKind::FilePickerSearch,
+            token,
+            PickerSearchJob {
+                root,
+                query,
+                chunk_size: PICKER_CHUNK_SIZE,
+            },
+        );
     }
 
     fn preview_key(&self, item: &Self::Item) -> Option<String> {
@@ -227,14 +229,10 @@ impl PickerSource for FilePickerSource {
             return;
         }
 
-        globals::with_job_manager(|manager| {
-            if let Some(manager) = manager {
-                manager.abort_generation(
-                    JobKind::new(FILE_PICKER_SEARCH_JOB_KIND),
-                    JobToken::new(generation),
-                );
-            }
-        });
+        self.jobs.abort_generation(
+            crate::background::JobKind::FilePickerSearch,
+            JobToken::new(generation),
+        );
     }
 }
 
@@ -304,19 +302,20 @@ fn exact_matches(query: &str, candidate: &str) -> bool {
         .contains(query.to_lowercase().as_str())
 }
 
-const FILE_PICKER_SEARCH_JOB_KIND: &str = "file-picker-search";
-
 #[derive(Debug)]
-struct PickerSearchJob {
+pub struct PickerSearchJob {
     root: PathBuf,
     query: QueryStyle,
     chunk_size: usize,
 }
 
-impl Job for PickerSearchJob {
-    type Output = Vec<FilePickerItem>;
-
-    fn run(self, context: &JobContext, emit: &mut dyn FnMut(Self::Output)) {
+impl PickerSearchJob {
+    /// Runs the file picker search job on the worker thread.
+    pub fn run(
+        self,
+        context: &JobContext,
+        event_tx: &std::sync::mpsc::Sender<crate::background::JobEvent>,
+    ) {
         let mut chunk = Vec::with_capacity(self.chunk_size);
         let query = self.query;
 
@@ -357,7 +356,11 @@ impl Job for PickerSearchJob {
                 root: self.root.clone(),
             });
             if chunk.len() >= self.chunk_size {
-                emit(std::mem::take(&mut chunk));
+                let _ = event_tx.send(crate::background::JobEvent::Chunk {
+                    kind: context.kind().clone(),
+                    token: context.token(),
+                    payload: JobPayload::FileSearchChunk(std::mem::take(&mut chunk)),
+                });
                 if context.is_stopping() || context.is_aborted() {
                     return;
                 }
@@ -369,18 +372,26 @@ impl Job for PickerSearchJob {
         }
 
         if !chunk.is_empty() {
-            emit(chunk);
+            let _ = event_tx.send(crate::background::JobEvent::Chunk {
+                kind: context.kind().clone(),
+                token: context.token(),
+                payload: JobPayload::FileSearchChunk(chunk),
+            });
         }
+
+        let _ = event_tx.send(crate::background::JobEvent::Completed {
+            kind: context.kind().clone(),
+            token: context.token(),
+            payload: None,
+        });
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::background::{JobEvent, JobHandle, JobManager, JobToken};
     use crate::globals;
-    use crate::job::{
-        JobDelivery, JobEvent, JobHandle, JobKind, JobManager, JobPayload, JobPriority, JobToken,
-    };
     use crate::terminal::{Color, Style};
     use crate::theme::{HighlightStyles, Theme, ThemeKind};
     use crate::ui::picker::PickerSearchEvent;
@@ -454,10 +465,8 @@ mod tests {
         let handle = JobHandle::new();
         handle
             .submit(
-                JobKind::new(FILE_PICKER_SEARCH_JOB_KIND),
-                JobPriority::Background,
+                crate::background::JobKind::FilePickerSearch,
                 JobToken::new(1),
-                JobDelivery::Streaming,
                 PickerSearchJob {
                     root: temp_root.clone(),
                     query: QueryStyle::Exact("fuzzy".to_string()),
@@ -471,7 +480,7 @@ mod tests {
         while !saw_match {
             match handle.poll_event() {
                 Some(JobEvent::Chunk {
-                    payload: JobPayload::FilePickerChunk(chunk),
+                    payload: JobPayload::FileSearchChunk(chunk),
                     ..
                 }) => {
                     saw_match = chunk.iter().any(|item| item.path == file_path);
@@ -505,10 +514,8 @@ mod tests {
         let handle = JobHandle::new();
         handle
             .submit(
-                JobKind::new(FILE_PICKER_SEARCH_JOB_KIND),
-                JobPriority::Background,
+                crate::background::JobKind::FilePickerSearch,
                 JobToken::new(1),
-                JobDelivery::Streaming,
                 PickerSearchJob {
                     root: temp_root.clone(),
                     query: QueryStyle::Fuzzy("fp".to_string()),
@@ -522,7 +529,7 @@ mod tests {
         while !saw_match {
             match handle.poll_event() {
                 Some(JobEvent::Chunk {
-                    payload: JobPayload::FilePickerChunk(chunk),
+                    payload: JobPayload::FileSearchChunk(chunk),
                     ..
                 }) => {
                     saw_match = chunk.iter().any(|item| item.path == file_path);
@@ -619,10 +626,8 @@ mod tests {
         let handle = JobHandle::new();
         handle
             .submit(
-                JobKind::new(FILE_PICKER_SEARCH_JOB_KIND),
-                JobPriority::Background,
+                crate::background::JobKind::FilePickerSearch,
                 JobToken::new(1),
-                JobDelivery::Streaming,
                 PickerSearchJob {
                     root: temp_root.clone(),
                     query: QueryStyle::Exact("fuzzy".to_string()),
@@ -636,7 +641,7 @@ mod tests {
         while !saw_match {
             match handle.poll_event() {
                 Some(JobEvent::Chunk {
-                    payload: JobPayload::FilePickerChunk(chunk),
+                    payload: JobPayload::FileSearchChunk(chunk),
                     ..
                 }) => {
                     saw_match = chunk.iter().any(|item| item.path == file_path);
@@ -669,10 +674,8 @@ mod tests {
         let manager = JobManager::new();
         manager
             .submit(
-                JobKind::new(FILE_PICKER_SEARCH_JOB_KIND),
-                JobPriority::Background,
+                crate::background::JobKind::FilePickerSearch,
                 JobToken::new(0),
-                JobDelivery::Streaming,
                 PickerSearchJob {
                     root: temp_root.clone(),
                     query: QueryStyle::Exact("fuzzy".to_string()),
@@ -690,7 +693,7 @@ mod tests {
                 JobEvent::Started { .. } => {}
                 JobEvent::Chunk {
                     token,
-                    payload: JobPayload::FilePickerChunk(chunk),
+                    payload: JobPayload::FileSearchChunk(chunk),
                     ..
                 } => {
                     picker.handle_search_event(PickerSearchEvent::PickerChunk {

@@ -15,6 +15,7 @@ mod tree;
 
 use self::command_line::CommandLineState;
 use crate::action::ActionResult;
+use crate::background::{JobEvent, JobManager};
 use crate::editor::{Action, ModeKind};
 use crate::screen::Screen;
 use crate::status_bar::StatusBar;
@@ -25,10 +26,9 @@ use crate::ui::grep_picker::GrepPickerWidget;
 use crate::ui::{Command, Intent, UiEvent, UiEventResult};
 use crate::window::{BufferView, Position, Size};
 use std::path::PathBuf;
+use std::sync::Arc;
 
-pub use self::picker::FILE_PICKER_SEARCH_JOB_KIND;
 use self::tree::ResizeDirection;
-pub use crate::ui::grep_picker::GREP_PICKER_SEARCH_JOB_KIND;
 pub use node::{LayoutNode, PaneId, PaneNode, SplitAxis, SplitNode, SplitSize};
 
 /// Root layout container for urvim.
@@ -49,6 +49,7 @@ pub struct Layout {
     file_picker: Option<FilePickerWidget>,
     grep_picker: Option<GrepPickerWidget>,
     confirmation_box: Option<ConfirmationBox>,
+    jobs: Arc<JobManager>,
 }
 
 impl Layout {
@@ -67,6 +68,7 @@ impl Layout {
             file_picker: None,
             grep_picker: None,
             confirmation_box: None,
+            jobs: Arc::new(JobManager::new()),
         }
     }
 
@@ -191,6 +193,25 @@ impl Layout {
     /// Renders the layout tree and footer status bar.
     pub fn render(&mut self, screen: &mut Screen, origin: Position, size: Size) {
         self.render_layout(screen, origin, size);
+    }
+
+    /// Processes picker-owned background jobs.
+    pub fn process_background_jobs(&mut self) -> bool {
+        let mut accepted_redraw = false;
+
+        while let Some(event) = self.jobs.poll_event() {
+            match event {
+                JobEvent::Started { .. } => {}
+                event @ JobEvent::Chunk { .. }
+                | event @ JobEvent::Completed { .. }
+                | event @ JobEvent::Failed { .. } => {
+                    self.dispatch_job_event(event);
+                    accepted_redraw = true;
+                }
+            }
+        }
+
+        accepted_redraw
     }
 }
 

@@ -1,7 +1,8 @@
 use super::Layout;
-use crate::job::{JobEvent, JobPayload};
+use crate::background::JobEvent;
+use crate::background::JobPayload;
 use crate::terminal::KeyCode;
-use crate::ui::grep_picker::{GREP_PICKER_SEARCH_JOB_KIND, GrepPickerSource, GrepPickerWidget};
+use crate::ui::grep_picker::{GrepPickerSource, GrepPickerWidget};
 use crate::ui::picker::PickerSearchEvent;
 use crate::ui::{UiEvent, UiEventResult};
 use crate::widget::Widget;
@@ -16,7 +17,8 @@ impl Layout {
 
         match std::env::current_dir() {
             Ok(cwd) => {
-                let picker = GrepPickerWidget::new(GrepPickerSource::new(cwd));
+                let picker =
+                    GrepPickerWidget::new(GrepPickerSource::with_jobs(cwd, self.jobs.clone()));
                 self.grep_picker = Some(picker);
                 self.refresh_grep_picker_prompt();
             }
@@ -77,8 +79,8 @@ impl Layout {
             JobEvent::Chunk {
                 kind,
                 token,
-                payload: JobPayload::GrepPickerChunk(chunk),
-            } if kind.as_str() == GREP_PICKER_SEARCH_JOB_KIND => {
+                payload: JobPayload::GrepSearchChunk(chunk),
+            } if kind == crate::background::JobKind::GrepPickerSearch => {
                 if let Some(picker) = self.grep_picker.as_mut() {
                     picker.handle_search_event(PickerSearchEvent::PickerChunk {
                         generation: token.generation(),
@@ -87,7 +89,7 @@ impl Layout {
                 }
             }
             JobEvent::Completed { kind, token, .. }
-                if kind.as_str() == GREP_PICKER_SEARCH_JOB_KIND =>
+                if kind == crate::background::JobKind::GrepPickerSearch =>
             {
                 if let Some(picker) = self.grep_picker.as_mut() {
                     picker.handle_search_event(PickerSearchEvent::PickerSearchComplete {
@@ -96,7 +98,7 @@ impl Layout {
                 }
             }
             JobEvent::Failed { kind, token, .. }
-                if kind.as_str() == GREP_PICKER_SEARCH_JOB_KIND =>
+                if kind == crate::background::JobKind::GrepPickerSearch =>
             {
                 if let Some(picker) = self.grep_picker.as_mut() {
                     picker.handle_search_event(PickerSearchEvent::PickerSearchComplete {

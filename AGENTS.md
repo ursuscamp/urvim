@@ -28,3 +28,4 @@ urvim is a terminal based text editor.
 - completed specs are a historical document, not a living one. do not update them after later changes invalidate them
 - format project code after edits
 - instead of module_name.rs and module_name/sub_mod.rs pattern, use module_name/mod.rs and module_name/sub_mod.rs pattern
+- backward compatibility isnt import because this is not a publicly release project yet

@@ -1,10 +1,10 @@
 pub mod action;
+pub mod background;
 pub mod buffer;
 pub mod cli;
 pub mod config;
 pub mod editor;
 pub mod globals;
-pub mod job;
 pub mod layout;
 pub mod logger;
 pub mod motion;

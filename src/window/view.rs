@@ -637,6 +637,7 @@ impl BufferView {
         } else {
             Vector::new()
         };
+        let mut request_cache_refresh = false;
         let _applied = self.with_buffer_mut(|buffer| {
             let start_line = self.scroll_offset.row as usize;
             let row_limit = size.rows as usize + 32;
@@ -652,8 +653,8 @@ impl BufferView {
                 if near_cached_frontier {
                     buffer.ensure_syntax_through(visible_end_line);
                 }
-                if let Some(buffer_id) = self.buffer_id_opt() {
-                    buffer.request_buffer_cache_refresh(buffer_id);
+                if self.buffer_id_opt().is_some() {
+                    request_cache_refresh = true;
                 }
             }
 
@@ -741,6 +742,10 @@ impl BufferView {
                 buffer_line_idx += 1;
             }
         });
+
+        if request_cache_refresh && let Some(buffer_id) = self.buffer_id_opt() {
+            globals::with_buffer_pool(|pool| pool.request_buffer_cache_refresh(buffer_id));
+        }
 
         if let Some(selection_style) = selection_style {
             self.apply_visual_selection(&mut render_data, selection_style);

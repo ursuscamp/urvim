@@ -1,8 +1,9 @@
 //! Live grep picker source and selection behavior.
 
+use crate::background::JobPayload;
+use crate::background::{JobContext, JobKind, JobManager, JobToken};
 use crate::buffer::Cursor;
 use crate::globals;
-use crate::job::{Job, JobContext, JobDelivery, JobKind, JobPriority, JobToken};
 use crate::syntax::FiletypeGlyph;
 use crate::terminal::Style;
 use crate::ui::inputs::PromptSegment;
@@ -44,6 +45,7 @@ pub struct GrepPickerSource {
     current_generation: Arc<AtomicU64>,
     preview_generation: Arc<AtomicU64>,
     fuzzy_mode: Arc<AtomicBool>,
+    jobs: Arc<JobManager>,
 }
 
 /// Search mode used by the live grep picker.
@@ -70,6 +72,11 @@ pub type GrepPickerWidget = PickerWidget<GrepPickerSource>;
 impl GrepPickerSource {
     /// Creates a live grep picker rooted at the given directory.
     pub fn new(root: PathBuf) -> Self {
+        Self::with_jobs(root, Arc::new(JobManager::new()))
+    }
+
+    /// Creates a live grep picker rooted at the given directory and backed by a shared job manager.
+    pub fn with_jobs(root: PathBuf, jobs: Arc<JobManager>) -> Self {
         Self {
             root,
             current_generation: Arc::new(AtomicU64::new(
@@ -77,6 +84,7 @@ impl GrepPickerSource {
             )),
             preview_generation: Arc::new(AtomicU64::new(0)),
             fuzzy_mode: Arc::new(AtomicBool::new(false)),
+            jobs,
         }
     }
 
@@ -128,6 +136,10 @@ impl PickerSource for GrepPickerSource {
         self.current_generation.store(generation, Ordering::SeqCst);
     }
 
+    fn job_manager(&self) -> Arc<JobManager> {
+        Arc::clone(&self.jobs)
+    }
+
     fn start_search(
         &self,
         query: &str,
@@ -139,14 +151,10 @@ impl PickerSource for GrepPickerSource {
 
         let previous_generation = current_generation.saturating_sub(1);
         if previous_generation > 0 {
-            globals::with_job_manager(|manager| {
-                if let Some(manager) = manager {
-                    manager.abort_generation(
-                        JobKind::new(GREP_PICKER_SEARCH_JOB_KIND),
-                        JobToken::new(previous_generation),
-                    );
-                }
-            });
+            self.jobs.abort_generation(
+                JobKind::GrepPickerSearch,
+                JobToken::new(previous_generation),
+            );
         }
 
         if query.is_empty() {
@@ -159,21 +167,15 @@ impl PickerSource for GrepPickerSource {
             QueryMode::Fuzzy => QueryStyle::Fuzzy(query.to_string()),
         };
         let token = JobToken::new(generation);
-        globals::with_job_manager(|manager| {
-            if let Some(manager) = manager {
-                let _ = manager.submit(
-                    JobKind::new(GREP_PICKER_SEARCH_JOB_KIND),
-                    JobPriority::Background,
-                    token,
-                    JobDelivery::Streaming,
-                    GrepPickerSearchJob {
-                        root,
-                        query,
-                        chunk_size: PICKER_CHUNK_SIZE,
-                    },
-                );
-            }
-        });
+        let _ = self.jobs.submit(
+            JobKind::GrepPickerSearch,
+            token,
+            GrepPickerSearchJob {
+                root,
+                query,
+                chunk_size: PICKER_CHUNK_SIZE,
+            },
+        );
     }
 
     fn preview_key(&self, item: &Self::Item) -> Option<String> {
@@ -224,14 +226,10 @@ impl PickerSource for GrepPickerSource {
             return;
         }
 
-        globals::with_job_manager(|manager| {
-            if let Some(manager) = manager {
-                manager.abort_generation(
-                    JobKind::new(GREP_PICKER_SEARCH_JOB_KIND),
-                    JobToken::new(generation),
-                );
-            }
-        });
+        self.jobs.abort_generation(
+            JobKind::GrepPickerSearch,
+            JobToken::new(generation),
+        );
     }
 }
 
@@ -363,19 +361,20 @@ fn location_style() -> Style {
     })
 }
 
-pub const GREP_PICKER_SEARCH_JOB_KIND: &str = "grep-picker-search";
-
 #[derive(Debug)]
-struct GrepPickerSearchJob {
+pub struct GrepPickerSearchJob {
     root: PathBuf,
     query: QueryStyle,
     chunk_size: usize,
 }
 
-impl Job for GrepPickerSearchJob {
-    type Output = Vec<GrepPickerItem>;
-
-    fn run(self, context: &JobContext, emit: &mut dyn FnMut(Self::Output)) {
+impl GrepPickerSearchJob {
+    /// Runs the live grep search job on the worker thread.
+    pub fn run(
+        self,
+        context: &JobContext,
+        event_tx: &std::sync::mpsc::Sender<crate::background::JobEvent>,
+    ) {
         let mut chunk = Vec::with_capacity(self.chunk_size);
         let query = self.query;
 
@@ -438,7 +437,11 @@ impl Job for GrepPickerSearchJob {
                     });
 
                     if chunk.len() >= self.chunk_size {
-                        emit(std::mem::take(&mut chunk));
+                        let _ = event_tx.send(crate::background::JobEvent::Chunk {
+                            kind: context.kind().clone(),
+                            token: context.token(),
+                            payload: JobPayload::GrepSearchChunk(std::mem::take(&mut chunk)),
+                        });
                         if context.is_stopping() || context.is_aborted() {
                             return;
                         }
@@ -454,17 +457,25 @@ impl Job for GrepPickerSearchJob {
         }
 
         if !chunk.is_empty() {
-            emit(chunk);
+            let _ = event_tx.send(crate::background::JobEvent::Chunk {
+                kind: context.kind().clone(),
+                token: context.token(),
+                payload: JobPayload::GrepSearchChunk(chunk),
+            });
         }
+
+        let _ = event_tx.send(crate::background::JobEvent::Completed {
+            kind: context.kind().clone(),
+            token: context.token(),
+            payload: None,
+        });
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::job::{
-        JobDelivery, JobEvent, JobHandle, JobKind, JobManager, JobPayload, JobPriority, JobToken,
-    };
+    use crate::background::{JobEvent, JobHandle, JobKind, JobManager, JobToken};
     use crate::terminal::Style;
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -557,10 +568,8 @@ mod tests {
         let handle = JobHandle::new();
         handle
             .submit(
-                JobKind::new(GREP_PICKER_SEARCH_JOB_KIND),
-                JobPriority::Background,
+                JobKind::GrepPickerSearch,
                 JobToken::new(1),
-                JobDelivery::Streaming,
                 GrepPickerSearchJob {
                     root: temp_root.clone(),
                     query: QueryStyle::Exact("target".to_string()),
@@ -574,7 +583,7 @@ mod tests {
         while matches.len() < 2 {
             match handle.poll_event() {
                 Some(JobEvent::Chunk {
-                    payload: JobPayload::GrepPickerChunk(chunk),
+                    payload: JobPayload::GrepSearchChunk(chunk),
                     ..
                 }) => matches.extend(chunk),
                 Some(_) => {}
@@ -687,10 +696,8 @@ mod tests {
         let token = JobToken::new(1);
         manager
             .submit(
-                JobKind::new(GREP_PICKER_SEARCH_JOB_KIND),
-                JobPriority::Background,
+                JobKind::GrepPickerSearch,
                 token,
-                JobDelivery::Streaming,
                 GrepPickerSearchJob {
                     root: temp_root.clone(),
                     query: QueryStyle::Exact("needle".to_string()),
@@ -704,7 +711,7 @@ mod tests {
         while !saw_match {
             manager.process_events(|event| match event {
                 JobEvent::Chunk {
-                    payload: JobPayload::GrepPickerChunk(chunk),
+                    payload: JobPayload::GrepSearchChunk(chunk),
                     ..
                 } => {
                     saw_match = chunk.iter().any(|item| item.path == file_path);

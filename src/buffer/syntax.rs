@@ -1,9 +1,9 @@
 //! Syntax highlighting tokenizers and indent-scope cache primitives.
 
+use crate::background::{JobContext, JobEvent, JobKind, JobPayload, JobToken};
 use crate::buffer::Buffer;
 use crate::buffer::BufferId;
 use crate::globals;
-use crate::job::{Job, JobContext, JobDelivery, JobKind, JobPriority, JobToken};
 use crate::syntax::{
     ContextControl, InjectedSyntaxFallback, InjectedSyntaxSelector, SyntaxDefinition, SyntaxRule,
     builtin_syntax_registry,
@@ -595,7 +595,8 @@ fn leading_indent_width(line: &str, tab_width: usize) -> usize {
         .fold(0, |acc, ch| acc + if ch == '\t' { tab_width } else { 1 })
 }
 
-struct BufferCacheRefreshJob {
+#[derive(Debug)]
+pub struct BufferCacheRefreshJob {
     buffer_id: BufferId,
     generation: u64,
     syntax_name: SmolStr,
@@ -604,7 +605,7 @@ struct BufferCacheRefreshJob {
 }
 
 impl BufferCacheRefreshJob {
-    fn new(
+    pub fn new(
         buffer_id: BufferId,
         generation: u64,
         syntax_name: SmolStr,
@@ -621,10 +622,9 @@ impl BufferCacheRefreshJob {
     }
 }
 
-impl Job for BufferCacheRefreshJob {
-    type Output = BufferCacheRefreshResult;
-
-    fn run(mut self, context: &JobContext, emit: &mut dyn FnMut(Self::Output)) {
+impl BufferCacheRefreshJob {
+    /// Runs the cache refresh job on the worker thread.
+    pub fn run(mut self, context: &JobContext, event_tx: &std::sync::mpsc::Sender<JobEvent>) {
         let line_refs: Vec<&str> = self.line_texts.iter().map(|line| line.as_ref()).collect();
         if !line_refs.is_empty() {
             if self.cache.syntax_cache.lines.len() > line_refs.len() {
@@ -672,10 +672,14 @@ impl Job for BufferCacheRefreshJob {
             self.cache.set_syntax_name(self.syntax_name.as_str());
         }
 
-        emit(BufferCacheRefreshResult {
-            buffer_id: self.buffer_id,
-            generation: self.generation,
-            cache: self.cache,
+        let _ = event_tx.send(JobEvent::Completed {
+            kind: context.kind().clone(),
+            token: context.token(),
+            payload: Some(JobPayload::BufferCacheRefresh(BufferCacheRefreshResult {
+                buffer_id: self.buffer_id,
+                generation: self.generation,
+                cache: self.cache,
+            })),
         });
     }
 }
@@ -1352,18 +1356,6 @@ impl Buffer {
 
     /// Requests background buffer cache refresh when the cache is incomplete.
     pub fn request_buffer_cache_refresh(&mut self, buffer_id: BufferId) {
-        self.request_buffer_cache_refresh_with_priority(buffer_id, JobPriority::Background);
-    }
-
-    /// Requests buffer cache refresh with the given job priority when the cache is incomplete.
-    ///
-    /// Buffer cache refresh uses latest-only job submission so stale queued work for the same buffer
-    /// can be pruned before it consumes worker time.
-    pub fn request_buffer_cache_refresh_with_priority(
-        &mut self,
-        buffer_id: BufferId,
-        priority: JobPriority,
-    ) {
         if self.buffer_cache_complete() {
             return;
         }
@@ -1379,17 +1371,13 @@ impl Buffer {
             self.buffer_cache.clone(),
             self.lines.clone(),
         );
-        let kind = JobKind::new(format!("buffer-cache:{}", buffer_id.get()));
+        let kind = JobKind::BufferCacheRefresh(buffer_id);
         let token = JobToken::new(self.syntax_generation);
 
-        let submitted = globals::with_job_manager(|job_manager| {
-            job_manager
-                .map(|job_manager| {
-                    job_manager
-                        .submit_latest_only(kind.clone(), priority, token, JobDelivery::Once, job)
-                        .is_ok()
-                })
-                .unwrap_or(false)
+        let submitted = globals::with_buffer_pool(|buffer_pool| {
+            buffer_pool
+                .submit_background_job(kind.clone(), token, job)
+                .is_ok()
         });
 
         if submitted {
@@ -1400,18 +1388,6 @@ impl Buffer {
     /// Requests background syntax catch-up when the cache is incomplete.
     pub fn request_syntax_catch_up(&mut self, buffer_id: BufferId) {
         self.request_buffer_cache_refresh(buffer_id);
-    }
-
-    /// Requests syntax catch-up with the given job priority when the cache is incomplete.
-    ///
-    /// Syntax catch-up uses latest-only job submission so stale queued work for the same buffer
-    /// can be pruned before it consumes worker time.
-    pub fn request_syntax_catch_up_with_priority(
-        &mut self,
-        buffer_id: BufferId,
-        priority: JobPriority,
-    ) {
-        self.request_buffer_cache_refresh_with_priority(buffer_id, priority);
     }
 
     /// Ensures syntax data exists through a line without returning it.
@@ -1433,10 +1409,10 @@ impl Buffer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::background::{BackgroundJob, JobEvent, JobHandle, JobKind, JobPayload, JobToken};
     use crate::buffer::{BufferId, Cursor};
     use crate::config::Config;
     use crate::globals;
-    use crate::job::{JobEvent, JobHandle, JobKind, JobPayload, JobPriority, JobToken};
     use crate::path::AbsolutePath;
     use std::sync::Mutex;
     use std::thread;
@@ -1910,13 +1886,7 @@ mod tests {
         );
 
         handle
-            .submit(
-                JobKind::new("syntax:background"),
-                JobPriority::Background,
-                token,
-                JobDelivery::Once,
-                job,
-            )
+            .submit(JobKind::BufferCacheRefresh(BufferId::new(1)), token, job)
             .expect("syntax catch-up job should submit");
 
         let event = wait_for_event(&handle);
@@ -1940,29 +1910,11 @@ mod tests {
         let gate = Arc::new((Mutex::new(false), std::sync::Condvar::new()));
         let gate_for_blocker = Arc::clone(&gate);
 
-        struct GateJob {
-            gate: Arc<(Mutex<bool>, std::sync::Condvar)>,
-        }
-
-        impl Job for GateJob {
-            type Output = ();
-
-            fn run(self, _context: &JobContext, _emit: &mut dyn FnMut(Self::Output)) {
-                let (lock, cvar) = &*self.gate;
-                let mut open = lock.lock().unwrap();
-                while !*open {
-                    open = cvar.wait(open).unwrap();
-                }
-            }
-        }
-
         handle
             .submit(
-                JobKind::new("blocker"),
-                JobPriority::Foreground,
+                JobKind::TestGate,
                 JobToken::new(1),
-                JobDelivery::Once,
-                GateJob {
+                BackgroundJob::Gate {
                     gate: gate_for_blocker,
                 },
             )
@@ -1983,10 +1935,8 @@ mod tests {
 
         handle
             .submit_latest_only(
-                JobKind::new("syntax:1"),
-                JobPriority::Background,
+                JobKind::BufferCacheRefresh(BufferId::new(1)),
                 JobToken::new(1),
-                JobDelivery::Once,
                 BufferCacheRefreshJob::new(
                     BufferId::new(1),
                     old_buffer.syntax_generation(),
@@ -1999,10 +1949,8 @@ mod tests {
 
         handle
             .submit_latest_only(
-                JobKind::new("syntax:1"),
-                JobPriority::Background,
+                JobKind::BufferCacheRefresh(BufferId::new(1)),
                 JobToken::new(2),
-                JobDelivery::Once,
                 BufferCacheRefreshJob::new(
                     BufferId::new(1),
                     new_buffer.syntax_generation(),
@@ -2021,7 +1969,7 @@ mod tests {
         }
 
         let blocker_event = wait_for_event(&handle);
-        assert_eq!(blocker_event.kind().as_str(), "blocker");
+        assert_eq!(blocker_event.kind(), &JobKind::TestGate);
 
         let syntax_event = wait_for_event(&handle);
         let (token, result) = match syntax_event {

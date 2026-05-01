@@ -7,7 +7,8 @@
 //! synchronized across threads.
 
 use super::Buffer;
-use crate::job::JobPriority;
+use crate::background::JobPayload;
+use crate::background::{BackgroundJob, JobEvent, JobKind, JobManager, JobSubmitError, JobToken};
 use crate::path::AbsolutePath;
 use std::collections::HashMap;
 use std::io;
@@ -34,6 +35,7 @@ pub struct BufferPool {
     next_id: usize,
     buffers: HashMap<BufferId, Buffer>,
     paths: HashMap<AbsolutePath, BufferId>,
+    jobs: JobManager,
 }
 
 impl BufferPool {
@@ -43,6 +45,7 @@ impl BufferPool {
             next_id: 0,
             buffers: HashMap::new(),
             paths: HashMap::new(),
+            jobs: JobManager::new(),
         }
     }
 
@@ -120,6 +123,55 @@ impl BufferPool {
         ids
     }
 
+    /// Requests a background job to be scheduled on the buffer-pool engine.
+    pub fn submit_background_job<J>(
+        &mut self,
+        kind: JobKind,
+        token: JobToken,
+        job: J,
+    ) -> Result<(), JobSubmitError>
+    where
+        J: Into<BackgroundJob>,
+    {
+        self.jobs.submit_latest_only(kind, token, job)
+    }
+
+    /// Processes completed background jobs owned by the buffer pool.
+    pub fn process_background_jobs(&mut self) -> bool {
+        let mut accepted_redraw = false;
+
+        while let Some(event) = self.jobs.poll_event() {
+            match event {
+                JobEvent::Completed {
+                    payload: Some(JobPayload::BufferCacheRefresh(result)),
+                    ..
+                } => {
+                    if self
+                        .with_buffer_mut(result.buffer_id, |buffer| {
+                            buffer.apply_buffer_cache_refresh_result(result)
+                        })
+                        .unwrap_or(false)
+                    {
+                        accepted_redraw = true;
+                    }
+                }
+                JobEvent::Completed { payload: None, .. } => {}
+                JobEvent::Completed {
+                    payload: Some(payload),
+                    ..
+                } => {
+                    tracing::error!(?payload, "unexpected buffer-pool job payload");
+                }
+                JobEvent::Failed { error, .. } => {
+                    tracing::warn!(?error, "buffer-pool job failed");
+                }
+                _ => {}
+            }
+        }
+
+        accepted_redraw
+    }
+
     /// Warms syntax for all loaded buffers at startup using a visible/hidden split.
     pub fn warmup_syntax_at_startup(
         &mut self,
@@ -143,10 +195,9 @@ impl BufferPool {
                 if active_scroll_row == 0 && visible_rows > 0 {
                     buffer.ensure_syntax_through(active_prefix_end);
                 }
-                buffer
-                    .request_buffer_cache_refresh_with_priority(buffer_id, JobPriority::Foreground);
+                self.request_buffer_cache_refresh(buffer_id);
             } else {
-                buffer.request_buffer_cache_refresh(buffer_id);
+                self.request_buffer_cache_refresh(buffer_id);
             }
         }
     }
@@ -192,6 +243,38 @@ impl BufferPool {
         result
     }
 
+    /// Requests buffer cache refresh for a buffer using the pool-owned job engine.
+    pub fn request_buffer_cache_refresh(&mut self, buffer_id: BufferId) {
+        let Some((job, generation)) = self.buffers.get_mut(&buffer_id).and_then(|buffer| {
+            if buffer.buffer_cache_complete() || buffer.syntax_background_pending() {
+                return None;
+            }
+
+            let generation = buffer.syntax_generation();
+            Some((
+                crate::buffer::syntax::BufferCacheRefreshJob::new(
+                    buffer_id,
+                    generation,
+                    buffer.syntax_name().to_owned().into(),
+                    buffer.buffer_cache.clone(),
+                    buffer.lines.clone(),
+                ),
+                generation,
+            ))
+        }) else {
+            return;
+        };
+
+        let kind = JobKind::BufferCacheRefresh(buffer_id);
+        let token = JobToken::new(generation);
+
+        if self.submit_background_job(kind, token, job).is_ok()
+            && let Some(buffer) = self.buffers.get_mut(&buffer_id)
+        {
+            buffer.syntax_background_generation = Some(generation);
+        }
+    }
+
     /// Runs a closure with mutable access to a live buffer entry.
     ///
     /// The closure executes while the pool is locked, so edits are serialized
@@ -234,7 +317,6 @@ mod tests {
     use crate::buffer::Buffer;
     use crate::config::Config;
     use crate::globals;
-    use crate::job::JobManager;
     use std::fs;
     use std::sync::{
         Arc, Barrier, Mutex, RwLock,
@@ -374,7 +456,6 @@ mod tests {
             auto_close_pairs: true,
             ..Default::default()
         });
-        globals::set_job_manager(JobManager::new());
 
         let mut pool = BufferPool::new();
         let active_id = pool.register_buffer(Buffer::from_str_with_path(

@@ -7,11 +7,9 @@ use urvim::buffer::Cursor;
 use urvim::config::Config;
 use urvim::editor::{Action, ActionKind, HandleKeyResult, ModeKind, RepeatReplay};
 use urvim::globals;
-use urvim::layout::{FILE_PICKER_SEARCH_JOB_KIND, GREP_PICKER_SEARCH_JOB_KIND};
 use urvim::screen::Screen;
 use urvim::terminal::{Terminal, size::get_terminal_size};
 use urvim::theme::ThemeRegistry;
-use urvim::ui::picker_preview::PICKER_PREVIEW_SYNTAX_JOB_KIND;
 use urvim::ui::{Command, Intent, UiEvent};
 use urvim::window::{Position, Size};
 
@@ -61,7 +59,6 @@ fn main() -> io::Result<()> {
             io::Error::new(io::ErrorKind::InvalidInput, error)
         })?;
     globals::set_active_theme(active_theme);
-    globals::set_job_manager(urvim::job::JobManager::new());
 
     let mut terminal = Terminal::new(stdin, stdout)?;
 
@@ -83,42 +80,10 @@ fn main() -> io::Result<()> {
 
     let mut needs_redraw = true;
     loop {
-        let background_requested_redraw = globals::with_job_manager(|job_manager| {
-            if let Some(job_manager) = job_manager {
-                let accepted_redraw = job_manager.process_events(|event| match event {
-                    e @ _
-                        if e.kind().as_str() == FILE_PICKER_SEARCH_JOB_KIND
-                            || e.kind().as_str() == GREP_PICKER_SEARCH_JOB_KIND
-                            || e.kind().as_str() == PICKER_PREVIEW_SYNTAX_JOB_KIND =>
-                    {
-                        layout.dispatch_job_event(e);
-                    }
-                    urvim::job::JobEvent::Completed {
-                        payload: Some(urvim::job::JobPayload::BufferCacheRefresh(result)),
-                        ..
-                    } => {
-                        globals::with_buffer_mut(result.buffer_id, |buffer| {
-                            buffer.apply_buffer_cache_refresh_result(result);
-                        });
-                    }
-                    urvim::job::JobEvent::Completed { payload: None, .. } => {}
-                    urvim::job::JobEvent::Completed {
-                        payload: Some(payload),
-                        ..
-                    } => {
-                        urvim::notify_error!("Unexpected background job payload: {:?}", payload);
-                    }
-                    urvim::job::JobEvent::Failed { error, .. } => {
-                        urvim::notify_error!("Background job error: {:?}", error);
-                    }
-                    _ => {}
-                });
-
-                accepted_redraw || job_manager.take_redraw_requested()
-            } else {
-                false
-            }
-        }) || globals::take_notification_redraw_requested();
+        let background_requested_redraw =
+            globals::with_buffer_pool(|pool| pool.process_background_jobs())
+                || layout.process_background_jobs()
+                || globals::take_notification_redraw_requested();
 
         if background_requested_redraw {
             needs_redraw = true;
@@ -144,7 +109,6 @@ fn main() -> io::Result<()> {
                 if handle_ui_result(&mut layout, ui_result) {
                     needs_redraw = true;
                     if layout.should_exit() {
-                        globals::shutdown_job_manager();
                         break;
                     }
                 }
@@ -155,7 +119,6 @@ fn main() -> io::Result<()> {
                 if handle_ui_result(&mut layout, overlay_result) {
                     needs_redraw = true;
                     if layout.should_exit() {
-                        globals::shutdown_job_manager();
                         break;
                     }
                     continue;
@@ -205,7 +168,6 @@ fn main() -> io::Result<()> {
                 }
 
                 if layout.should_exit() {
-                    globals::shutdown_job_manager();
                     break;
                 }
 
@@ -222,7 +184,6 @@ fn main() -> io::Result<()> {
                 if handle_ui_result(&mut layout, overlay_result) {
                     needs_redraw = true;
                     if layout.should_exit() {
-                        globals::shutdown_job_manager();
                         break;
                     }
                     terminal.set_cursor_style(layout.active_window_cursor_style())?;
@@ -392,7 +353,6 @@ fn main() -> io::Result<()> {
                                 }
 
                                 if layout.should_exit() {
-                                    globals::shutdown_job_manager();
                                     break;
                                 }
 
@@ -400,7 +360,6 @@ fn main() -> io::Result<()> {
                             }
                             Intent::Command(command) => {
                                 if matches!(command, Command::Quit) {
-                                    globals::shutdown_job_manager();
                                     break;
                                 }
 
@@ -413,7 +372,6 @@ fn main() -> io::Result<()> {
                                 }
 
                                 if layout.should_exit() {
-                                    globals::shutdown_job_manager();
                                     break;
                                 }
 
