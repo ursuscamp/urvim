@@ -335,6 +335,44 @@ impl<S: PickerSource> PickerWidget<S> {
     /// Sets the search prompt as styled segments.
     pub fn set_query_prompt_segments(&mut self, prompt: Vec<PromptSegment>) {
         self.query_input.set_prompt_segments(prompt);
+        self.sync_query_right_prompt();
+    }
+
+    fn sync_query_right_prompt(&mut self) {
+        self.query_input
+            .set_right_prompt_segments(self.query_right_prompt_segments());
+    }
+
+    fn query_right_prompt_segments(&self) -> Vec<PromptSegment> {
+        let Some(current) = self.highlighted.map(|index| index.saturating_add(1)) else {
+            return Vec::new();
+        };
+
+        let total = self.results.len();
+        if total == 0 {
+            return Vec::new();
+        }
+
+        let count_style = self
+            .query_input
+            .prompt_segments()
+            .first()
+            .map(|segment| segment.style)
+            .unwrap_or_else(Style::default);
+        let separator_style = self
+            .query_input
+            .prompt_segments()
+            .get(1)
+            .map(|segment| segment.style)
+            .unwrap_or_else(|| theme_style("ui.input.prompt.separator"));
+
+        vec![
+            PromptSegment::new(
+                format!(" {} ", picker_indicator_glyph_backwards()),
+                separator_style,
+            ),
+            PromptSegment::new(format!("{current}/{total}"), count_style),
+        ]
     }
 
     fn resolve_frame(&self, rect: UiRect) -> Option<FloatingWindowFrame> {
@@ -469,6 +507,7 @@ impl<S: PickerSource> PickerWidget<S> {
 
     fn move_highlight(&mut self, delta: isize) {
         if self.results.is_empty() {
+            self.sync_query_right_prompt();
             return;
         }
 
@@ -478,6 +517,7 @@ impl<S: PickerSource> PickerWidget<S> {
         self.highlighted = Some(next);
         self.ensure_highlight_visible();
         self.refresh_preview_for_highlight();
+        self.sync_query_right_prompt();
     }
 
     /// Restarts the active search using the current query text.
@@ -495,6 +535,7 @@ impl<S: PickerSource> PickerWidget<S> {
             self.visible_start = 0;
             self.pending_result_replacement = false;
             self.refresh_preview_for_highlight();
+            self.sync_query_right_prompt();
             return;
         }
 
@@ -505,6 +546,7 @@ impl<S: PickerSource> PickerWidget<S> {
             self.generation,
             self.sender.clone(),
         );
+        self.sync_query_right_prompt();
     }
 
     fn drain_search_events(&mut self) -> bool {
@@ -680,6 +722,8 @@ impl<S: PickerSource> PickerWidget<S> {
             PickerSearchEvent::PickerSearchStale { .. } => {}
             _ => {}
         }
+
+        self.sync_query_right_prompt();
     }
 
     fn submit_selection(&mut self) -> UiEventResult {
@@ -770,6 +814,7 @@ impl<S: PickerSource> Widget for PickerWidget<S> {
 
         let _ = self.drain_search_events();
         let _ = self.drain_preview_events();
+        self.sync_query_right_prompt();
         let Some(layout) = self.resolve_layout(rect) else {
             self.cursor = None;
             return;
@@ -881,6 +926,20 @@ pub fn picker_indicator_glyph() -> &'static str {
         ""
     } else {
         ">"
+    }
+}
+
+fn picker_indicator_glyph_backwards() -> &'static str {
+    if crate::globals::with_config(|config| {
+        config
+            .advanced_glyphs
+            .contains(&AdvancedGlyphCapability::Nerdfont)
+    })
+    .unwrap_or(false)
+    {
+        "‹"
+    } else {
+        "<"
     }
 }
 
@@ -1458,6 +1517,53 @@ mod tests {
 
         assert_eq!(picker.query_input.prompt(), ">");
         assert_eq!(picker.query(), "");
+    }
+
+    #[test]
+    fn picker_count_prompt_is_right_aligned_and_one_based() {
+        let source = TestSource::new();
+        let mut picker = PickerWidget::new(source);
+        picker.set_query_prompt_segments(vec![
+            PromptSegment::new("Exact", Style::new().bold()),
+            PromptSegment::new(" > ", Style::new().faint()),
+        ]);
+        picker.results = vec!["one".to_string(), "two".to_string(), "three".to_string()];
+        picker.highlighted = Some(1);
+        picker.sync_query_right_prompt();
+
+        let right_prompt = picker.query_input.right_prompt_segments();
+        assert_eq!(right_prompt.len(), 2);
+        assert_eq!(right_prompt[0].text, " < ");
+        assert_eq!(right_prompt[0].style, Style::new().faint());
+        assert_eq!(right_prompt[1].text, "2/3");
+        assert_eq!(right_prompt[1].style, Style::new().bold());
+
+        let rect = UiRect::new(Position::new(0, 0), crate::window::Size::new(12, 40));
+        let layout = picker.resolve_layout(rect).expect("picker layout");
+        let mut screen = crate::screen::Screen::new(12, 40);
+        picker.render_widget(&mut screen, rect, &UiContext);
+
+        let prompt_row = row_text(
+            &mut screen,
+            layout.picker.content_origin.row,
+            layout.picker.content_origin.col,
+        );
+        assert!(prompt_row.contains("< 2/3"));
+    }
+
+    #[test]
+    fn picker_hides_count_prompt_when_no_results_exist() {
+        let source = TestSource::new();
+        let mut picker = PickerWidget::new(source);
+        picker.set_query_prompt_segments(vec![
+            PromptSegment::new("Exact", Style::new().bold()),
+            PromptSegment::new(" > ", Style::new().faint()),
+        ]);
+        picker.highlighted = None;
+        picker.results.clear();
+        picker.sync_query_right_prompt();
+
+        assert!(picker.query_input.right_prompt_segments().is_empty());
     }
 
     #[test]

@@ -226,10 +226,8 @@ impl PickerSource for GrepPickerSource {
             return;
         }
 
-        self.jobs.abort_generation(
-            JobKind::GrepPickerSearch,
-            JobToken::new(generation),
-        );
+        self.jobs
+            .abort_generation(JobKind::GrepPickerSearch, JobToken::new(generation));
     }
 }
 

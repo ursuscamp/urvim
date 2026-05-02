@@ -55,6 +55,7 @@ pub struct InputWidget {
     text: String,
     cursor: usize,
     prompt: Vec<PromptSegment>,
+    right_prompt: Vec<PromptSegment>,
     text_style: Style,
     render_cursor: Option<Position>,
     on_change: Option<ChangeCallback>,
@@ -67,6 +68,7 @@ impl std::fmt::Debug for InputWidget {
             .field("text", &self.text)
             .field("cursor", &self.cursor)
             .field("prompt", &self.prompt)
+            .field("right_prompt", &self.right_prompt)
             .finish()
     }
 }
@@ -80,6 +82,7 @@ impl InputWidget {
             text,
             cursor,
             prompt: Vec::new(),
+            right_prompt: Vec::new(),
             text_style: Style::default(),
             render_cursor: None,
             on_change: None,
@@ -107,6 +110,11 @@ impl InputWidget {
         self.prompt.as_slice()
     }
 
+    /// Returns the styled right-side prompt segments.
+    pub fn right_prompt_segments(&self) -> &[PromptSegment] {
+        self.right_prompt.as_slice()
+    }
+
     /// Returns the rendered cursor position, if the widget has been drawn.
     pub fn render_cursor(&self) -> Option<Position> {
         self.render_cursor
@@ -126,6 +134,17 @@ impl InputWidget {
     /// Sets the styled prompt segments.
     pub fn set_prompt_segments(&mut self, prompt: Vec<PromptSegment>) {
         self.prompt = prompt;
+    }
+
+    /// Sets the display right-side prompt prefix.
+    pub fn set_right_prompt(&mut self, prompt: impl Into<String>) {
+        let prompt = prompt.into();
+        self.right_prompt = vec![PromptSegment::new(prompt, Style::default())];
+    }
+
+    /// Sets the styled right-side prompt segments.
+    pub fn set_right_prompt_segments(&mut self, prompt: Vec<PromptSegment>) {
+        self.right_prompt = prompt;
     }
 
     /// Replaces the current text and moves the cursor to the end.
@@ -270,9 +289,16 @@ impl InputWidget {
             .iter()
             .map(|segment| UnicodeWidthStr::width(segment.text.as_str()))
             .sum::<usize>() as u16;
-        let visible_text_cols = content_cols.saturating_sub(prompt_width);
+        let right_prompt_width = self
+            .right_prompt
+            .iter()
+            .map(|segment| UnicodeWidthStr::width(segment.text.as_str()))
+            .sum::<usize>() as u16;
+        let visible_text_cols =
+            content_cols.saturating_sub(prompt_width.saturating_add(right_prompt_width));
         let (visible_text, cursor_col) =
             self.visible_text_with_cursor(usize::from(visible_text_cols));
+        let visible_text_width = UnicodeWidthStr::width(visible_text.as_str()) as u16;
 
         let mut segments = self
             .prompt
@@ -284,17 +310,32 @@ impl InputWidget {
             segments.push(LineSegment::new(visible_text, text_style));
         }
 
-        (
-            segments,
-            prompt_width.saturating_add(cursor_col).min(content_cols),
-        )
-    }
+        if right_prompt_width > 0 {
+            let gap_width = visible_text_cols.saturating_sub(visible_text_width);
+            if gap_width > 0 {
+                segments.push(LineSegment::new(
+                    " ".repeat(usize::from(gap_width)),
+                    text_style,
+                ));
+            }
+        }
 
-    fn prompt_width(&self) -> u16 {
-        self.prompt
-            .iter()
-            .map(|segment| UnicodeWidthStr::width(segment.text.as_str()) as u16)
-            .sum()
+        segments.extend(
+            self.right_prompt
+                .iter()
+                .cloned()
+                .map(|segment| LineSegment::new(segment.text, text_style.accent(segment.style))),
+        );
+
+        let cursor_col = prompt_width.saturating_add(cursor_col);
+        let right_edge = content_cols.saturating_sub(right_prompt_width);
+        let cursor_col = if right_prompt_width > 0 {
+            cursor_col.min(right_edge.saturating_sub(1))
+        } else {
+            cursor_col.min(content_cols)
+        };
+
+        (segments, cursor_col)
     }
 
     fn prompt_text(&self) -> String {
@@ -418,41 +459,24 @@ impl InputWidget {
             return;
         }
 
-        let prompt_width = self.prompt_width();
-        let visible_text_cols = rect.size.cols.saturating_sub(prompt_width);
-        let (visible_text, cursor_col) =
-            self.visible_text_with_cursor(usize::from(visible_text_cols));
-
+        let (segments, cursor_col) = self.render_segments(rect.size.cols, self.text_style);
         let mut col = rect.origin.col;
-        for segment in &self.prompt {
+        for segment in segments {
             if col >= rect.origin.col.saturating_add(rect.size.cols) {
                 break;
             }
 
-            screen.write_string(
-                rect.origin.row,
-                col,
-                self.text_style.accent(segment.style),
-                segment.text.as_str(),
-            );
+            screen.write_string(rect.origin.row, col, segment.style, segment.text.as_str());
             col = col.saturating_add(UnicodeWidthStr::width(segment.text.as_str()) as u16);
-        }
-
-        if !visible_text.is_empty() && col < rect.origin.col.saturating_add(rect.size.cols) {
-            screen.write_string(rect.origin.row, col, self.text_style, visible_text.as_str());
         }
 
         self.render_cursor = Some(Position::new(
             rect.origin.row,
-            rect.origin
-                .col
-                .saturating_add(prompt_width)
-                .saturating_add(cursor_col)
-                .min(
-                    rect.origin
-                        .col
-                        .saturating_add(rect.size.cols.saturating_sub(1)),
-                ),
+            rect.origin.col.saturating_add(cursor_col).min(
+                rect.origin
+                    .col
+                    .saturating_add(rect.size.cols.saturating_sub(1)),
+            ),
         ));
     }
 }
@@ -649,6 +673,22 @@ mod tests {
         assert_eq!(segments[1].style, base.accent(Style::new().faint()));
         assert_eq!(segments[2].style, base);
         assert_eq!(cursor_col, 11);
+    }
+
+    #[test]
+    fn supports_right_prompt_rendering() {
+        let mut input = InputWidget::new("abc");
+        input.set_prompt(">");
+        input.set_right_prompt_segments(vec![PromptSegment::new("2/3", Style::new().bold())]);
+
+        let (segments, cursor_col) = input.render_segments(12, Style::default());
+
+        assert_eq!(segments.len(), 4);
+        assert_eq!(segments[0].text, ">");
+        assert_eq!(segments[1].text, "abc");
+        assert_eq!(segments[2].text, "     ");
+        assert_eq!(segments[3].text, "2/3");
+        assert_eq!(cursor_col, 4);
     }
 
     #[test]
