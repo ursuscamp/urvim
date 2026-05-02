@@ -85,6 +85,11 @@ impl PreviewPane {
 
     /// Requests a background syntax refresh for the preview buffer, if needed.
     pub fn request_syntax_refresh(&mut self) {
+        self.request_syntax_refresh_for_key(String::new());
+    }
+
+    /// Requests a background syntax refresh associated with a stable preview key.
+    pub fn request_syntax_refresh_for_key(&mut self, key: String) {
         if self.syntax_refresh_pending {
             return;
         }
@@ -121,7 +126,7 @@ impl PreviewPane {
             return;
         };
 
-        let job = PreviewSyntaxRefreshJob::new(syntax_name, generation, line_texts);
+        let job = PreviewSyntaxRefreshJob::new(key, syntax_name, generation, line_texts);
         let submitted = self
             .jobs
             .submit_latest_only(
@@ -284,8 +289,9 @@ impl PickerPreviewAdapter {
 
     /// Requests syntax refresh for a preview path, loading the preview if needed.
     pub fn request_syntax_refresh_for_path(&mut self, path: &Path) -> std::io::Result<()> {
+        let key = Self::path_key(path);
         let pane = self.preview_for_path(path)?;
-        pane.request_syntax_refresh();
+        pane.request_syntax_refresh_for_key(key);
         Ok(())
     }
 
@@ -345,16 +351,32 @@ impl PickerPreviewAdapter {
     }
 }
 
+/// Completed syntax refresh data for a specific picker preview pane.
+#[derive(Debug, Clone)]
+pub struct PreviewSyntaxRefreshResult {
+    /// Stable preview key, normally the file path, that requested the refresh.
+    pub key: String,
+    /// Refreshed syntax cache for that preview buffer snapshot.
+    pub result: BufferCacheRefreshResult,
+}
+
 #[derive(Debug)]
 pub struct PreviewSyntaxRefreshJob {
+    key: String,
     syntax_name: SmolStr,
     generation: u64,
     line_texts: Vector<Arc<str>>,
 }
 
 impl PreviewSyntaxRefreshJob {
-    fn new(syntax_name: SmolStr, generation: u64, line_texts: Vector<Arc<str>>) -> Self {
+    fn new(
+        key: String,
+        syntax_name: SmolStr,
+        generation: u64,
+        line_texts: Vector<Arc<str>>,
+    ) -> Self {
         Self {
+            key,
             syntax_name,
             generation,
             line_texts,
@@ -383,10 +405,13 @@ impl PreviewSyntaxRefreshJob {
             kind: context.kind().clone(),
             token: context.token(),
             payload: Some(crate::background::JobPayload::PreviewSyntax(
-                BufferCacheRefreshResult {
-                    buffer_id: BufferId::new(0),
-                    generation: self.generation,
-                    cache,
+                PreviewSyntaxRefreshResult {
+                    key: self.key,
+                    result: BufferCacheRefreshResult {
+                        buffer_id: BufferId::new(0),
+                        generation: self.generation,
+                        cache,
+                    },
                 },
             )),
         });
@@ -618,6 +643,7 @@ mod tests {
                 crate::background::JobKind::PickerPreviewSyntax,
                 JobToken::new(generation),
                 PreviewSyntaxRefreshJob::new(
+                    key.clone(),
                     SmolStr::new("rust"),
                     generation,
                     vec![Arc::<str>::from("fn main() { let value = 1; }")]
@@ -629,9 +655,12 @@ mod tests {
 
         let result = match wait_for_event(&handle) {
             JobEvent::Completed {
-                payload: Some(crate::background::JobPayload::PreviewSyntax(result)),
+                payload: Some(crate::background::JobPayload::PreviewSyntax(preview_result)),
                 ..
-            } => result,
+            } => {
+                assert_eq!(preview_result.key, key);
+                preview_result.result
+            }
             other => panic!("expected preview syntax completion, got {:?}", other),
         };
 
@@ -703,6 +732,7 @@ mod tests {
                 crate::background::JobKind::PickerPreviewSyntax,
                 JobToken::new(7),
                 PreviewSyntaxRefreshJob::new(
+                    String::from("/tmp/preview.rs"),
                     SmolStr::new("rust"),
                     7,
                     vec![Arc::<str>::from("fn main() { let value = 1; }")]
@@ -715,9 +745,12 @@ mod tests {
         let event = wait_for_event(&handle);
         let result = match event {
             JobEvent::Completed {
-                payload: Some(crate::background::JobPayload::PreviewSyntax(result)),
+                payload: Some(crate::background::JobPayload::PreviewSyntax(preview_result)),
                 ..
-            } => result,
+            } => {
+                assert_eq!(preview_result.key, "/tmp/preview.rs");
+                preview_result.result
+            }
             other => panic!("expected preview syntax completion, got {:?}", other),
         };
 

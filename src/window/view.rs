@@ -934,16 +934,17 @@ impl BufferView {
         todo_markers: &Vector<SmolStr>,
         syntax_styles: Option<&crate::theme::HighlightStyles>,
     ) -> Vec<RenderChunk> {
+        let bounded_span_end = span.end.min(line_text.len());
         let Some((render_start, render_end)) =
-            Self::intersect_byte_ranges(span.start, span.end, visible.start, visible.end)
+            Self::intersect_byte_ranges(span.start, bounded_span_end, visible.start, visible.end)
         else {
             return Vec::new();
         };
 
-        // Scan the full comment span first so offscreen markers still
-        // contribute to the final split points when the viewport clips in the
-        // middle of a comment.
-        let comment_text = &line_text[span.start..span.end];
+        // Syntax cache entries can briefly lag behind previewed or edited text.
+        // Clamp comment spans to the current line before slicing so a stale span
+        // cannot panic during rendering.
+        let comment_text = &line_text[span.start..bounded_span_end];
         let comment_style = syntax_styles
             .map(|styles| styles.style_for_tag(&comment_tag(), Style::default()))
             .unwrap_or_default();
@@ -1448,6 +1449,23 @@ mod tests {
             line.iter()
                 .any(|chunk| chunk.text == "TODO" && chunk.style == expected_comment_style)
         );
+    }
+
+    #[test]
+    fn build_comment_chunks_clamps_stale_spans_to_line_end() {
+        let line_text = "const MAX_PROMPT_CONTENT_WIDTH: usize = 56;";
+        let stale_span = 0..77;
+        let markers = imbl::Vector::from_iter([SmolStr::new("TODO")]);
+        let chunks = BufferView::build_comment_chunks(
+            line_text,
+            stale_span,
+            0..line_text.len(),
+            &markers,
+            None,
+        );
+
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0].text, line_text);
     }
 
     #[test]

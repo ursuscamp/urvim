@@ -652,15 +652,11 @@ impl<S: PickerSource> PickerWidget<S> {
     pub fn handle_preview_syntax_refresh(
         &mut self,
         _generation: u64,
-        result: crate::buffer::BufferCacheRefreshResult,
+        result: crate::ui::picker_preview::PreviewSyntaxRefreshResult,
     ) {
-        let Some(key) = self.preview_key.as_deref() else {
-            return;
-        };
-
         let _ = self
             .preview_adapter
-            .apply_syntax_refresh_result_for_key(key, result);
+            .apply_syntax_refresh_result_for_key(result.key.as_str(), result.result);
     }
 
     /// Marks a background preview syntax refresh as failed.
@@ -1480,7 +1476,13 @@ mod tests {
             cache: crate::buffer::BufferCache::new("rust"),
         };
 
-        picker.handle_preview_syntax_refresh(1, result);
+        picker.handle_preview_syntax_refresh(
+            1,
+            crate::ui::picker_preview::PreviewSyntaxRefreshResult {
+                key: key.clone(),
+                result,
+            },
+        );
 
         assert!(
             picker

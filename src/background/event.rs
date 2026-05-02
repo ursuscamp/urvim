@@ -3,6 +3,7 @@ use std::fmt;
 use crate::buffer::BufferCacheRefreshResult;
 use crate::ui::file_picker::FilePickerItem;
 use crate::ui::grep_picker::GrepPickerItem;
+use crate::ui::picker_preview::PreviewSyntaxRefreshResult;
 
 use super::error::JobError;
 use super::token::{JobKind, JobToken};
@@ -26,7 +27,7 @@ pub enum JobPayload {
     /// Live grep picker search chunk.
     GrepSearchChunk(Vec<GrepPickerItem>),
     /// Picker preview syntax refresh result.
-    PreviewSyntax(BufferCacheRefreshResult),
+    PreviewSyntax(PreviewSyntaxRefreshResult),
 }
 
 /// A job lifecycle event.
