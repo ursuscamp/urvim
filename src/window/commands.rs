@@ -153,19 +153,15 @@ impl Window {
     }
 
     fn paste_characterwise_text(&mut self, text: &str, after: bool) -> Option<Cursor> {
-        let cursor = self.buffer_view.cursor();
-        let insert_cursor = if after {
-            self.buffer_view
-                .with_buffer(|buffer| buffer.next_cursor_line(cursor))
-                .flatten()
-                .unwrap_or(cursor)
-        } else {
-            cursor
-        };
+        let insert_cursor = self.buffer_view.cursor();
 
         self.buffer_view
             .with_buffer_mut(|buffer| buffer.insert_text(insert_cursor, text))
             .unwrap_or(());
+
+        if !after {
+            return Some(insert_cursor);
+        }
 
         let mut new_cursor = insert_cursor;
         for ch in text.chars() {
@@ -195,7 +191,16 @@ impl Window {
             }
         })?;
 
-        Some(start_cursor)
+        if after {
+            let last_line_idx = line_count.saturating_sub(1);
+            let last_line_len = lines.get(last_line_idx).map(|l| l.len()).unwrap_or(0);
+            Some(Cursor::new(
+                start_cursor.line + last_line_idx,
+                last_line_len,
+            ))
+        } else {
+            Some(start_cursor)
+        }
     }
 
     pub(super) fn paste_register_content(

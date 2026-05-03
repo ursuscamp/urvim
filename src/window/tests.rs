@@ -4768,5 +4768,175 @@ fn test_paste_after_uses_explicit_named_register() {
         window.dispatch_action(&Action::paste_after().with_register(RegisterName('z'))),
         ActionResult::Handled
     );
-    assert_eq!(buffer_text(window.buffer_view()), "ahib".to_string());
+    assert_eq!(buffer_text(window.buffer_view()), "hiab".to_string());
+}
+
+// ── Paste cursor-position regression tests ───────────────────────────────
+
+#[test]
+fn paste_after_characterwise_puts_cursor_at_end_of_pasted_text() {
+    let _register_guard = globals::set_test_register_store(RegisterStore::new());
+    globals::with_register_store_mut(|store| {
+        store.set(
+            RegisterName('y'),
+            RegisterContent::new("hello".to_string(), RegisterContentKind::Characterwise),
+        );
+    });
+
+    let buffer = Buffer::from_str("ab");
+    let mut window = Window::new(buffer);
+
+    assert_eq!(
+        window.dispatch_action(&Action::paste_after()),
+        ActionResult::Handled
+    );
+    assert_eq!(buffer_text(window.buffer_view()), "helloab");
+    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 5));
+}
+
+#[test]
+fn paste_before_characterwise_puts_cursor_at_start_of_pasted_text() {
+    let _register_guard = globals::set_test_register_store(RegisterStore::new());
+    globals::with_register_store_mut(|store| {
+        store.set(
+            RegisterName('y'),
+            RegisterContent::new("hello".to_string(), RegisterContentKind::Characterwise),
+        );
+    });
+
+    let buffer = Buffer::from_str("ab");
+    let mut window = Window::new(buffer);
+
+    assert_eq!(
+        window.dispatch_action(&Action::paste_before()),
+        ActionResult::Handled
+    );
+    assert_eq!(buffer_text(window.buffer_view()), "helloab");
+    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 0));
+}
+
+#[test]
+fn paste_after_characterwise_multiline_puts_cursor_at_end() {
+    let _register_guard = globals::set_test_register_store(RegisterStore::new());
+    globals::with_register_store_mut(|store| {
+        store.set(
+            RegisterName('y'),
+            RegisterContent::new("hi\nthere".to_string(), RegisterContentKind::Characterwise),
+        );
+    });
+
+    let buffer = Buffer::from_str("ab");
+    let mut window = Window::new(buffer);
+
+    assert_eq!(
+        window.dispatch_action(&Action::paste_after()),
+        ActionResult::Handled
+    );
+    assert_eq!(buffer_text(window.buffer_view()), "hi\nthereab");
+    assert_eq!(window.buffer_view().cursor(), Cursor::new(1, 5));
+}
+
+#[test]
+fn paste_after_linewise_puts_cursor_at_end_of_last_pasted_line() {
+    let _register_guard = globals::set_test_register_store(RegisterStore::new());
+    globals::with_register_store_mut(|store| {
+        store.set(
+            RegisterName('y'),
+            RegisterContent::new("hello".to_string(), RegisterContentKind::Linewise),
+        );
+    });
+
+    let buffer = Buffer::from_str("ab");
+    let mut window = Window::new(buffer);
+
+    assert_eq!(
+        window.dispatch_action(&Action::paste_after()),
+        ActionResult::Handled
+    );
+    assert_eq!(buffer_text(window.buffer_view()), "ab\nhello");
+    assert_eq!(window.buffer_view().cursor(), Cursor::new(1, 5));
+}
+
+#[test]
+fn paste_before_linewise_puts_cursor_at_start_of_first_pasted_line() {
+    let _register_guard = globals::set_test_register_store(RegisterStore::new());
+    globals::with_register_store_mut(|store| {
+        store.set(
+            RegisterName('y'),
+            RegisterContent::new("hello".to_string(), RegisterContentKind::Linewise),
+        );
+    });
+
+    let buffer = Buffer::from_str("ab");
+    let mut window = Window::new(buffer);
+
+    assert_eq!(
+        window.dispatch_action(&Action::paste_before()),
+        ActionResult::Handled
+    );
+    assert_eq!(buffer_text(window.buffer_view()), "hello\nab");
+    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 0));
+}
+
+#[test]
+fn paste_after_linewise_multiline_puts_cursor_at_end_of_last_line() {
+    let _register_guard = globals::set_test_register_store(RegisterStore::new());
+    globals::with_register_store_mut(|store| {
+        store.set(
+            RegisterName('y'),
+            RegisterContent::new("one\ntwo".to_string(), RegisterContentKind::Linewise),
+        );
+    });
+
+    let buffer = Buffer::from_str("ab");
+    let mut window = Window::new(buffer);
+
+    assert_eq!(
+        window.dispatch_action(&Action::paste_after()),
+        ActionResult::Handled
+    );
+    assert_eq!(buffer_text(window.buffer_view()), "ab\none\ntwo");
+    assert_eq!(window.buffer_view().cursor(), Cursor::new(2, 3));
+}
+
+#[test]
+fn paste_before_linewise_multiline_puts_cursor_at_start_of_first_line() {
+    let _register_guard = globals::set_test_register_store(RegisterStore::new());
+    globals::with_register_store_mut(|store| {
+        store.set(
+            RegisterName('y'),
+            RegisterContent::new("one\ntwo".to_string(), RegisterContentKind::Linewise),
+        );
+    });
+
+    let buffer = Buffer::from_str("ab");
+    let mut window = Window::new(buffer);
+
+    assert_eq!(
+        window.dispatch_action(&Action::paste_before()),
+        ActionResult::Handled
+    );
+    assert_eq!(buffer_text(window.buffer_view()), "one\ntwo\nab");
+    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 0));
+}
+
+#[test]
+fn paste_after_characterwise_inserts_at_cursor_not_after_character() {
+    let _register_guard = globals::set_test_register_store(RegisterStore::new());
+    globals::with_register_store_mut(|store| {
+        store.set(
+            RegisterName('y'),
+            RegisterContent::new("hello".to_string(), RegisterContentKind::Characterwise),
+        );
+    });
+
+    let buffer = Buffer::from_str("hello world");
+    let mut window = Window::new(buffer);
+
+    assert_eq!(
+        window.dispatch_action(&Action::paste_after()),
+        ActionResult::Handled
+    );
+    assert_eq!(buffer_text(window.buffer_view()), "hellohello world");
+    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 5));
 }
