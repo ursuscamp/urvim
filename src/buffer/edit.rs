@@ -11,6 +11,7 @@ impl Buffer {
         let col = cursor.col;
 
         if ch == '\n' {
+            let old_line_count = self.lines.len();
             let before = if let Some(line) = self.lines.get(line_idx) {
                 line[..col].to_string()
             } else {
@@ -28,7 +29,8 @@ impl Buffer {
             left.append(new);
             left.append(right);
             self.lines = left;
-            self.invalidate_syntax_from(line_idx);
+            let line_delta = self.lines.len() as isize - old_line_count as isize;
+            self.invalidate_syntax_from_with_line_delta(line_idx, line_delta);
         } else if let Some(line) = self.lines.get(line_idx) {
             let mut new_line = line.to_string();
             new_line.insert(col, ch);
@@ -37,20 +39,56 @@ impl Buffer {
         }
     }
 
-    pub fn insert_text(&mut self, mut cursor: Cursor, text: &str) {
+    pub fn insert_text(&mut self, cursor: Cursor, text: &str) {
         debug_assert!(
             self.is_valid_cursor(cursor),
             "insert_text called with invalid cursor: {:?}",
             cursor
         );
-        for ch in text.chars() {
-            self.insert_char(cursor, ch);
-            if ch == '\n' {
-                cursor = Cursor::new(cursor.line + 1, 0);
-            } else {
-                cursor = Cursor::new(cursor.line, cursor.col + ch.len_utf8());
-            }
+        if text.is_empty() {
+            return;
         }
+
+        let Some(line) = self.lines.get(cursor.line) else {
+            return;
+        };
+        let old_line_count = self.lines.len();
+        let before = line[..cursor.col].to_string();
+        let after = line[cursor.col..].to_string();
+        let mut inserted_parts = text.split('\n');
+        let first_part = inserted_parts.next().unwrap_or_default();
+        let mut new_lines: Vec<Arc<str>> = Vec::new();
+        new_lines.push(Arc::from(format!("{}{}", before, first_part)));
+
+        for part in inserted_parts {
+            new_lines.push(Arc::from(part));
+        }
+
+        if new_lines.len() == 1 {
+            let mut new_line = new_lines
+                .pop()
+                .expect("single inserted line should be present")
+                .to_string();
+            new_line.push_str(&after);
+            self.lines = self.lines.update(cursor.line, Arc::from(new_line));
+            self.invalidate_syntax_from(cursor.line);
+            return;
+        }
+
+        if let Some(last_line) = new_lines.last_mut() {
+            let mut merged = last_line.to_string();
+            merged.push_str(&after);
+            *last_line = Arc::from(merged);
+        }
+
+        let mut left = self.lines.take(cursor.line);
+        let right = self.lines.skip(cursor.line + 1);
+        let inserted: Vector<Arc<str>> = new_lines.into_iter().collect();
+        left.append(inserted);
+        left.append(right);
+        self.lines = left;
+        let line_delta = self.lines.len() as isize - old_line_count as isize;
+        self.invalidate_syntax_from_with_line_delta(cursor.line, line_delta);
     }
 
     pub fn remove(&mut self, start: Cursor, end: Cursor) {
@@ -80,6 +118,7 @@ impl Buffer {
                 self.invalidate_syntax_from(start_line);
             }
         } else {
+            let old_line_count = self.lines.len();
             let before = if let Some(line) = self.lines.get(start_line) {
                 line[..start_col].to_string()
             } else {
@@ -96,7 +135,8 @@ impl Buffer {
             left.push_back(merged);
             left.append(right);
             self.lines = left;
-            self.invalidate_syntax_from(start_line);
+            let line_delta = self.lines.len() as isize - old_line_count as isize;
+            self.invalidate_syntax_from_with_line_delta(start_line, line_delta);
         }
     }
 
@@ -166,13 +206,15 @@ impl Buffer {
                 .map_or("", |s| s.as_ref())
                 .to_string();
             let prev_content_len = prev_content.len();
+            let old_line_count = self.lines.len();
             let merged = Arc::from(format!("{}{}", prev_content, current_content));
             let mut left = self.lines.take(prev_line);
             let right = self.lines.skip(current_line + 1);
             left.push_back(merged);
             left.append(right);
             self.lines = left;
-            self.invalidate_syntax_from(prev_line);
+            let line_delta = self.lines.len() as isize - old_line_count as isize;
+            self.invalidate_syntax_from_with_line_delta(prev_line, line_delta);
             return Some(Cursor::new(prev_line, prev_content_len));
         }
 
@@ -215,13 +257,15 @@ impl Buffer {
                 .map_or("", |s| s.as_ref())
                 .to_string();
             let current_content_len = current_content.len();
+            let old_line_count = self.lines.len();
             let merged = Arc::from(format!("{}{}", current_content, next_content));
             let mut left = self.lines.take(current_line);
             let right = self.lines.skip(next_line + 1);
             left.push_back(merged);
             left.append(right);
             self.lines = left;
-            self.invalidate_syntax_from(current_line);
+            let line_delta = self.lines.len() as isize - old_line_count as isize;
+            self.invalidate_syntax_from_with_line_delta(current_line, line_delta);
             return Some(Cursor::new(current_line, current_content_len));
         }
 
@@ -259,6 +303,7 @@ impl Buffer {
         if actual_line_count < 2 {
             return None;
         }
+        let old_line_count = self.lines.len();
         let mut joined_content = String::new();
         for i in 0..actual_line_count {
             let line_idx = start_line + i;
@@ -276,7 +321,8 @@ impl Buffer {
         left.push_back(Arc::from(joined_content));
         left.append(right);
         self.lines = left;
-        self.invalidate_syntax_from(start_line);
+        let line_delta = self.lines.len() as isize - old_line_count as isize;
+        self.invalidate_syntax_from_with_line_delta(start_line, line_delta);
         Some(Cursor::new(start_line, joined_len))
     }
 
@@ -292,6 +338,7 @@ impl Buffer {
         if actual_count == 0 {
             return Some(Cursor::new(start_line, 0));
         }
+        let old_line_count = self.lines.len();
         let end_line = start_line + actual_count;
         if end_line >= total_lines {
             let mut left = self.lines.take(start_line);
@@ -305,7 +352,8 @@ impl Buffer {
             left.append(right);
             self.lines = left;
         }
-        self.invalidate_syntax_from(start_line);
+        let line_delta = self.lines.len() as isize - old_line_count as isize;
+        self.invalidate_syntax_from_with_line_delta(start_line, line_delta);
         let new_line_count = self.lines.len();
         if new_line_count == 0 {
             Some(Cursor::new(0, 0))
@@ -320,7 +368,10 @@ impl Buffer {
         let total_lines = self.lines.len();
         if total_lines == 0 {
             self.lines.push_back(Arc::from(""));
-            self.invalidate_syntax_from(0);
+            self.invalidate_syntax_from_with_line_delta(
+                0,
+                self.lines.len() as isize - total_lines as isize,
+            );
             return Some(Cursor::new(0, 0));
         }
         if start_line >= total_lines {
@@ -331,6 +382,7 @@ impl Buffer {
             return Some(Cursor::new(start_line, 0));
         }
         let end_line = start_line + actual_count;
+        let old_line_count = self.lines.len();
         if end_line >= total_lines {
             let mut left = self.lines.take(start_line);
             left.push_back(Arc::from(""));
@@ -342,7 +394,8 @@ impl Buffer {
             left.append(right);
             self.lines = left;
         }
-        self.invalidate_syntax_from(start_line);
+        let line_delta = self.lines.len() as isize - old_line_count as isize;
+        self.invalidate_syntax_from_with_line_delta(start_line, line_delta);
         Some(Cursor::new(start_line, 0))
     }
 
@@ -371,18 +424,25 @@ impl Buffer {
             if count > 0 {
                 self.lines.push_back(Arc::from(""));
             }
-            self.invalidate_syntax_from(0);
+            self.invalidate_syntax_from_with_line_delta(
+                0,
+                self.lines.len() as isize - total_lines as isize,
+            );
             return Some(Cursor::new(0, 0));
         }
         let insert_after = line.min(total_lines);
         if count == 0 {
             return Some(Cursor::new(line, 0));
         }
+        let old_line_count = self.lines.len();
         if insert_after >= total_lines {
             for _ in 0..count {
                 self.lines.push_back(Arc::from(""));
             }
-            self.invalidate_syntax_from(total_lines);
+            self.invalidate_syntax_from_with_line_delta(
+                total_lines,
+                self.lines.len() as isize - old_line_count as isize,
+            );
             Some(Cursor::new(total_lines, 0))
         } else {
             let mut left = self.lines.take(insert_after + 1);
@@ -392,7 +452,10 @@ impl Buffer {
             }
             left.append(right);
             self.lines = left;
-            self.invalidate_syntax_from(insert_after + 1);
+            self.invalidate_syntax_from_with_line_delta(
+                insert_after + 1,
+                self.lines.len() as isize - old_line_count as isize,
+            );
             Some(Cursor::new(insert_after + 1, 0))
         }
     }
@@ -403,17 +466,24 @@ impl Buffer {
             if count > 0 {
                 self.lines.push_back(Arc::from(""));
             }
-            self.invalidate_syntax_from(0);
+            self.invalidate_syntax_from_with_line_delta(
+                0,
+                self.lines.len() as isize - total_lines as isize,
+            );
             return Some(Cursor::new(0, 0));
         }
         if count == 0 {
             return Some(Cursor::new(line, 0));
         }
+        let old_line_count = self.lines.len();
         if line == 0 {
             for _ in 0..count {
                 self.lines.push_front(Arc::from(""));
             }
-            self.invalidate_syntax_from(0);
+            self.invalidate_syntax_from_with_line_delta(
+                0,
+                self.lines.len() as isize - old_line_count as isize,
+            );
             Some(Cursor::new(0, 0))
         } else {
             let insert_before = line.saturating_sub(1);
@@ -421,7 +491,10 @@ impl Buffer {
                 for _ in 0..count {
                     self.lines.push_back(Arc::from(""));
                 }
-                self.invalidate_syntax_from(total_lines);
+                self.invalidate_syntax_from_with_line_delta(
+                    total_lines,
+                    self.lines.len() as isize - old_line_count as isize,
+                );
                 Some(Cursor::new(total_lines, 0))
             } else {
                 let mut left = self.lines.take(insert_before + 1);
@@ -431,7 +504,10 @@ impl Buffer {
                 }
                 left.append(right);
                 self.lines = left;
-                self.invalidate_syntax_from(line);
+                self.invalidate_syntax_from_with_line_delta(
+                    line,
+                    self.lines.len() as isize - old_line_count as isize,
+                );
                 Some(Cursor::new(insert_before + 1, 0))
             }
         }

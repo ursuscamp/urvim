@@ -395,10 +395,13 @@ impl PreviewSyntaxRefreshJob {
             return;
         }
 
-        let line_refs: Vec<&str> = self.line_texts.iter().map(|line| line.as_ref()).collect();
         let mut cache = BufferCache::new(self.syntax_name.clone());
-        if !line_refs.is_empty() {
-            cache.ensure_through(&self.syntax_name, &line_refs, line_refs.len() - 1);
+        if !self.line_texts.is_empty() {
+            cache.ensure_through(
+                &self.syntax_name,
+                &self.line_texts,
+                self.line_texts.len() - 1,
+            );
         }
 
         let _ = event_tx.send(crate::background::JobEvent::Completed {

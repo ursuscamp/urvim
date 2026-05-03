@@ -330,7 +330,7 @@ impl Buffer {
 
         if self.syntax_name() != new_syntax_name {
             self.buffer_cache.set_syntax_name(new_syntax_name);
-            self.buffer_cache.invalidate_from(0);
+            self.buffer_cache.invalidate_from(0, 0);
             self.syntax_generation = self.syntax_generation.wrapping_add(1);
             self.syntax_background_generation = None;
         }

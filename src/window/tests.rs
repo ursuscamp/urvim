@@ -934,7 +934,13 @@ fn test_window_render_refreshes_visible_syntax_after_edit() {
     assert_eq!(second_cell.text, "/");
     assert_eq!(first_cell.style, expected_comment_style);
     assert_eq!(second_cell.style, expected_comment_style);
-    assert_eq!(offscreen_cache, None);
+    assert!(offscreen_cache.is_some());
+    assert!(
+        window
+            .buffer_view()
+            .with_buffer(|buffer| buffer.syntax_cache_complete())
+            .unwrap_or(false)
+    );
 }
 
 #[test]

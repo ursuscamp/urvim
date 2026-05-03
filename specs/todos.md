@@ -6,10 +6,11 @@ This is a list, in no particular order, of things that need to be addressed whic
 
 - session support
 - should panes hold dynamic widgets?
-- optimize syntax highlighting by only rehighlighting lines that need to be rehighlighted
-    - probably need to re-highlight until line state matches previous
+- new indents dont get added until you add a line above the indent
 
 - build-time compiled themes and syntax grammar
+- "P" is pasting after still it seems (its not putting the cursor after the pasted text)
+- pasting seems a little slow
 
 # Bugs
 

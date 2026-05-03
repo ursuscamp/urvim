@@ -32,7 +32,7 @@ pub struct InjectedSyntaxRule {
 }
 
 /// Context-sensitive matching and stack updates for a syntax region.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContextControl {
     /// Context markers that must already be active for the region to match.
     pub requires: Vec<SmolStr>,
@@ -45,7 +45,7 @@ pub struct ContextControl {
 }
 
 /// A context marker to activate, optionally populated from a regex capture.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContextPush {
     /// The active context name.
     pub name: SmolStr,
@@ -54,7 +54,7 @@ pub struct ContextPush {
 }
 
 /// A payload-bearing context match constraint.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContextMatch {
     /// The active context name.
     pub name: SmolStr,
@@ -63,7 +63,7 @@ pub struct ContextMatch {
 }
 
 /// An active context entry tracked by the syntax tokenizer.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContextEntry {
     /// The active context name.
     pub name: SmolStr,

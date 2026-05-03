@@ -276,6 +276,16 @@ fn test_insert_text() {
 }
 
 #[test]
+fn test_insert_text_increments_syntax_generation_once() {
+    let mut buf = Buffer::from_str("hello");
+    let before = buf.syntax_generation();
+
+    buf.insert_text(Cursor::new(0, 5), " world");
+
+    assert_eq!(buf.syntax_generation(), before + 1);
+}
+
+#[test]
 fn test_add_surround_wraps_character_range() {
     let mut buf = Buffer::from_str("hello world");
     let cursor = buf
@@ -339,6 +349,16 @@ fn test_insert_with_newline() {
     buf.insert_text(Cursor::new(0, 2), "X\nY");
     assert_eq!(buf.as_str(), "heX\nYllo");
     assert_eq!(buf.line_count(), 2);
+}
+
+#[test]
+fn test_insert_text_with_newline_increments_syntax_generation_once() {
+    let mut buf = Buffer::from_str("hello");
+    let before = buf.syntax_generation();
+
+    buf.insert_text(Cursor::new(0, 2), "X\nY");
+
+    assert_eq!(buf.syntax_generation(), before + 1);
 }
 
 #[test]
@@ -476,6 +496,10 @@ fn test_syntax_spans_update_after_edit() {
 
     buf.insert_text(Cursor::new(0, 0), "// ");
 
+    assert!(buf.syntax_cache_complete());
+    assert!(!buf.syntax_background_pending());
+    assert!(!buf.indent_scope_cache_stale());
+
     let spans = buf.syntax_spans_for_line(0).expect("line should exist");
     assert_spans_include_comment_style(&spans);
 }
@@ -495,6 +519,28 @@ fn test_syntax_spans_preserve_multiline_state() {
 
     assert!(first_line.iter().any(|span| span.style == tag("string")));
     assert!(second_line.iter().any(|span| span.style == tag("string")));
+}
+
+#[test]
+fn test_multiline_string_reuses_downstream_syntax_after_line_insertion() {
+    let path =
+        AbsolutePath::from_path(temp_path_with_ext("syntax-multiline-insert", "toml").as_path())
+            .unwrap();
+    let mut buf =
+        Buffer::from_str_with_path("value = \"\"\"hello\nplanet\nworld\"\"\"\nafter", path);
+
+    buf.ensure_syntax_through(buf.line_count().saturating_sub(1));
+    buf.insert_lines_before(1, 1);
+
+    let closing = buf
+        .syntax_spans_for_line(3)
+        .expect("closing line should exist");
+    let after = buf
+        .syntax_spans_for_line(4)
+        .expect("tail line should exist");
+
+    assert!(closing.iter().any(|span| span.style == tag("string")));
+    assert!(!after.iter().any(|span| span.style == tag("string")));
 }
 
 #[test]

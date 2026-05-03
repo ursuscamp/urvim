@@ -38,13 +38,14 @@ impl SyntaxSpan {
 
 #[derive(Debug, Clone)]
 pub struct SyntaxLine {
+    line: Arc<str>,
     pub spans: Vec<SyntaxSpan>,
     state: SyntaxState,
 }
 
 impl SyntaxLine {
-    fn new(spans: Vec<SyntaxSpan>, state: SyntaxState) -> Self {
-        Self { spans, state }
+    fn new(line: Arc<str>, spans: Vec<SyntaxSpan>, state: SyntaxState) -> Self {
+        Self { line, spans, state }
     }
 }
 
@@ -52,6 +53,9 @@ impl SyntaxLine {
 pub struct SyntaxCache {
     syntax_name: SmolStr,
     lines: Vector<SyntaxLine>,
+    dirty_suffix: Vector<SyntaxLine>,
+    dirty_start: Option<usize>,
+    dirty_line_delta: isize,
 }
 
 impl SyntaxCache {
@@ -60,6 +64,9 @@ impl SyntaxCache {
         Self {
             syntax_name: syntax_name.into(),
             lines: Vector::new(),
+            dirty_suffix: Vector::new(),
+            dirty_start: None,
+            dirty_line_delta: 0,
         }
     }
 
@@ -69,6 +76,7 @@ impl SyntaxCache {
         if self.syntax_name != syntax_name {
             self.syntax_name = syntax_name;
             self.lines = Vector::new();
+            self.clear_dirty_suffix();
         }
     }
 
@@ -77,12 +85,23 @@ impl SyntaxCache {
         &self.syntax_name
     }
 
+    fn clear_dirty_suffix(&mut self) {
+        self.dirty_suffix = Vector::new();
+        self.dirty_start = None;
+        self.dirty_line_delta = 0;
+    }
+
     /// Invalidates cached syntax data from the provided line onward.
-    pub fn invalidate_from(&mut self, line: usize) {
+    pub fn invalidate_from(&mut self, line: usize, line_delta: isize) {
         if line >= self.lines.len() {
+            self.clear_dirty_suffix();
             return;
         }
+
+        self.dirty_suffix = self.lines.skip(line);
         self.lines.truncate(line.min(self.lines.len()));
+        self.dirty_start = Some(line);
+        self.dirty_line_delta = line_delta;
     }
 
     /// Returns cached spans for a line without computing any missing prefix.
@@ -95,16 +114,20 @@ impl SyntaxCache {
         self.lines.len()
     }
 
+    fn has_dirty_suffix(&self) -> bool {
+        !self.dirty_suffix.is_empty()
+    }
+
     /// Returns true when every line in the buffer has a cached syntax result.
     pub fn is_complete_for_line_count(&self, line_count: usize) -> bool {
-        self.lines.len() >= line_count
+        self.dirty_suffix.is_empty() && self.lines.len() >= line_count
     }
 
     /// Returns the cached spans for a line, computing any missing prefix first.
     pub fn spans_for_line(
         &mut self,
         syntax_name: &str,
-        line_texts: &[&str],
+        line_texts: &Vector<Arc<str>>,
         line: usize,
     ) -> Option<Vec<SyntaxSpan>> {
         self.set_syntax_name(syntax_name);
@@ -117,28 +140,86 @@ impl SyntaxCache {
     }
 
     /// Ensures syntax data exists through the requested line.
-    pub fn ensure_through(&mut self, syntax_name: &str, line_texts: &[&str], line: usize) {
+    fn ensure_through(&mut self, syntax_name: &str, line_texts: &Vector<Arc<str>>, line: usize) {
+        self.ensure_through_with(syntax_name, line_texts, line, || true);
+    }
+
+    fn ensure_through_with<F>(
+        &mut self,
+        syntax_name: &str,
+        line_texts: &Vector<Arc<str>>,
+        line: usize,
+        mut should_continue: F,
+    ) where
+        F: FnMut() -> bool,
+    {
         self.set_syntax_name(syntax_name);
+
+        if line_texts.is_empty() {
+            self.lines = Vector::new();
+            self.clear_dirty_suffix();
+            return;
+        }
 
         let target_line = line.min(line_texts.len().saturating_sub(1));
         if self.lines.len() > line_texts.len() {
             self.lines.truncate(line_texts.len());
         }
 
-        if target_line >= self.lines.len() {
-            let mut state = self
-                .lines
-                .last()
-                .map(|line| line.state.clone())
-                .unwrap_or_default();
-            let start_line = self.lines.len();
+        if target_line < self.lines.len() {
+            return;
+        }
 
-            for line_text in line_texts.iter().take(target_line + 1).skip(start_line) {
-                let (spans, next_state) = tokenize_line(syntax_name, line_text, state);
-                self.lines
-                    .push_back(SyntaxLine::new(spans, next_state.clone()));
-                state = next_state;
+        let dirty_start = self.dirty_start.unwrap_or(self.lines.len());
+        let dirty_line_delta = self.dirty_line_delta;
+        let dirty_suffix = std::mem::take(&mut self.dirty_suffix);
+        let mut state = self
+            .lines
+            .last()
+            .map(|line| line.state.clone())
+            .unwrap_or_default();
+        let mut current_line = self.lines.len();
+
+        while current_line <= target_line {
+            if !should_continue() {
+                self.dirty_suffix = dirty_suffix;
+                self.dirty_start = Some(dirty_start);
+                self.dirty_line_delta = dirty_line_delta;
+                return;
             }
+
+            let line_text = line_texts[current_line].as_ref();
+            let (spans, next_state) = tokenize_line(syntax_name, line_text, state);
+            self.lines.push_back(SyntaxLine::new(
+                line_texts[current_line].clone(),
+                spans,
+                next_state.clone(),
+            ));
+
+            let dirty_idx = current_line as isize - dirty_start as isize - dirty_line_delta;
+            if dirty_idx >= 0 {
+                let dirty_idx = dirty_idx as usize;
+                if let Some(old_entry) = dirty_suffix.get(dirty_idx)
+                    && old_entry.line.as_ref() == line_text
+                    && old_entry.state == next_state
+                {
+                    let reusable_suffix = dirty_suffix.skip(dirty_idx + 1);
+                    self.lines.append(reusable_suffix);
+                    self.clear_dirty_suffix();
+                    return;
+                }
+            }
+
+            state = next_state;
+            current_line += 1;
+        }
+
+        if target_line == line_texts.len() - 1 {
+            self.clear_dirty_suffix();
+        } else {
+            self.dirty_suffix = dirty_suffix;
+            self.dirty_start = Some(dirty_start);
+            self.dirty_line_delta = dirty_line_delta;
         }
     }
 }
@@ -264,7 +345,7 @@ impl IndentScopeCache {
 
     pub(crate) fn ensure_through(
         &mut self,
-        line_texts: &[&str],
+        line_texts: &Vector<Arc<str>>,
         target_line: usize,
         tab_width: usize,
     ) -> bool {
@@ -432,7 +513,7 @@ impl IndentScopeCache {
         }
     }
 
-    fn finalize_to_eof(&mut self, line_texts: &[&str]) {
+    fn finalize_to_eof(&mut self, line_texts: &Vector<Arc<str>>) {
         if line_texts.is_empty() {
             return;
         }
@@ -518,11 +599,12 @@ impl BufferCache {
     }
 
     /// Invalidates cached data from the provided line onward.
-    pub fn invalidate_from(&mut self, line: usize) {
-        if line >= self.syntax_cache.cached_line_count() {
+    pub fn invalidate_from(&mut self, line: usize, line_delta: isize) {
+        if line >= self.syntax_cache.cached_line_count() && !self.syntax_cache.has_dirty_suffix() {
             return;
         }
-        self.syntax_cache.invalidate_from(line);
+
+        self.syntax_cache.invalidate_from(line, line_delta);
         self.indent_scope_cache.invalidate_from(line);
         self.indent_scope_cache_stale = true;
     }
@@ -546,7 +628,7 @@ impl BufferCache {
     pub fn spans_for_line(
         &mut self,
         syntax_name: &str,
-        line_texts: &[&str],
+        line_texts: &Vector<Arc<str>>,
         line: usize,
     ) -> Option<Vec<SyntaxSpan>> {
         self.syntax_cache
@@ -554,10 +636,35 @@ impl BufferCache {
     }
 
     /// Ensures syntax and indent cache data exists through the requested line.
-    pub fn ensure_through(&mut self, syntax_name: &str, line_texts: &[&str], line: usize) {
-        self.syntax_cache
-            .ensure_through(syntax_name, line_texts, line);
+    pub fn ensure_through(
+        &mut self,
+        syntax_name: &str,
+        line_texts: &Vector<Arc<str>>,
+        line: usize,
+    ) {
+        self.ensure_through_with_budget(
+            syntax_name,
+            line_texts,
+            line,
+            std::time::Duration::from_millis(5),
+        );
+    }
 
+    fn ensure_syntax_through_with_budget(
+        &mut self,
+        syntax_name: &str,
+        line_texts: &Vector<Arc<str>>,
+        line: usize,
+        budget: std::time::Duration,
+    ) {
+        let syntax_started_at = std::time::Instant::now();
+        self.syntax_cache
+            .ensure_through_with(syntax_name, line_texts, line, || {
+                syntax_started_at.elapsed() < budget
+            });
+    }
+
+    fn ensure_indent_through(&mut self, line_texts: &Vector<Arc<str>>, line: usize) {
         if line_texts.is_empty() {
             self.indent_scope_cache_stale = false;
             return;
@@ -571,6 +678,17 @@ impl BufferCache {
             !self
                 .indent_scope_cache
                 .ensure_through(line_texts, target_line, tab_width);
+    }
+
+    fn ensure_through_with_budget(
+        &mut self,
+        syntax_name: &str,
+        line_texts: &Vector<Arc<str>>,
+        line: usize,
+        budget: std::time::Duration,
+    ) {
+        self.ensure_syntax_through_with_budget(syntax_name, line_texts, line, budget);
+        self.ensure_indent_through(line_texts, line);
     }
 
     /// Returns true when the indent-scope cache needs rebuilding.
@@ -625,39 +743,25 @@ impl BufferCacheRefreshJob {
 impl BufferCacheRefreshJob {
     /// Runs the cache refresh job on the worker thread.
     pub fn run(mut self, context: &JobContext, event_tx: &std::sync::mpsc::Sender<JobEvent>) {
-        let line_refs: Vec<&str> = self.line_texts.iter().map(|line| line.as_ref()).collect();
-        if !line_refs.is_empty() {
-            if self.cache.syntax_cache.lines.len() > line_refs.len() {
-                self.cache.syntax_cache.lines.truncate(line_refs.len());
-            }
-
-            let target_line = line_refs.len() - 1;
-            let mut state = self
-                .cache
-                .syntax_cache
-                .lines
-                .last()
-                .map(|line| line.state.clone())
-                .unwrap_or_default();
-            let start_line = self.cache.syntax_cache.lines.len();
-
-            for line_text in line_refs.iter().take(target_line + 1).skip(start_line) {
-                if !context.is_current() {
-                    tracing::debug!(
-                        kind = %context.kind(),
-                        generation = context.token().generation(),
-                        "stopping stale buffer cache refresh job"
-                    );
-                    break;
-                }
-
-                let (spans, next_state) = tokenize_line(&self.syntax_name, line_text, state);
-                self.cache
-                    .syntax_cache
-                    .lines
-                    .push_back(SyntaxLine::new(spans, next_state.clone()));
-                state = next_state;
-            }
+        if !self.line_texts.is_empty() {
+            let target_line = self.line_texts.len() - 1;
+            self.cache.syntax_cache.ensure_through_with(
+                &self.syntax_name,
+                &self.line_texts,
+                target_line,
+                || {
+                    if context.is_current() {
+                        true
+                    } else {
+                        tracing::debug!(
+                            kind = %context.kind(),
+                            generation = context.token().generation(),
+                            "stopping stale buffer cache refresh job"
+                        );
+                        false
+                    }
+                },
+            );
 
             if context.is_current() {
                 let tab_width = globals::with_config(|config| config.tab_width)
@@ -666,7 +770,7 @@ impl BufferCacheRefreshJob {
                 self.cache.indent_scope_cache_stale = !self
                     .cache
                     .indent_scope_cache
-                    .ensure_through(&line_refs, target_line, tab_width);
+                    .ensure_through(&self.line_texts, target_line, tab_width);
             }
         } else {
             self.cache.set_syntax_name(self.syntax_name.as_str());
@@ -684,14 +788,14 @@ impl BufferCacheRefreshJob {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 enum SyntaxState {
     #[default]
     Plain,
     Code(CodeState),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum CodeState {
     Normal {
         contexts: ContextStack,
@@ -703,14 +807,14 @@ enum CodeState {
     },
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct RuleListInjectionState {
     nested: Option<NestedState>,
     fallback: InjectedSyntaxFallback,
     parent_style: Option<Tag>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum NestedState {
     Syntax {
         syntax_name: SmolStr,
@@ -718,7 +822,7 @@ enum NestedState {
     },
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct ContextStack {
     entries: Vec<crate::syntax::ContextEntry>,
 }
@@ -1273,11 +1377,29 @@ impl Buffer {
 
     /// Invalidates buffer-owned cache data from the given line onward.
     pub fn invalidate_syntax_from(&mut self, line: usize) {
-        self.buffer_cache.invalidate_from(line);
+        self.invalidate_syntax_from_with_line_delta(line, 0);
+    }
+
+    /// Invalidates buffer-owned cache data from the given line onward and records the line-count delta.
+    pub fn invalidate_syntax_from_with_line_delta(&mut self, line: usize, line_delta: isize) {
+        self.buffer_cache.invalidate_from(line, line_delta);
         self.syntax_generation = self.syntax_generation.wrapping_add(1);
         self.syntax_background_generation = None;
         if line == 0 {
             self.refresh_syntax();
+        }
+
+        if !self.lines.is_empty() {
+            let syntax_name = self.syntax_name().to_owned();
+            self.buffer_cache.ensure_syntax_through_with_budget(
+                &syntax_name,
+                &self.lines,
+                self.line_count().saturating_sub(1),
+                std::time::Duration::from_millis(5),
+            );
+            self.buffer_cache
+                .ensure_indent_through(&self.lines, self.line_count().saturating_sub(1));
+            self.sync_undo_snapshot_cache_if_current();
         }
     }
 
@@ -1324,11 +1446,10 @@ impl Buffer {
 
     /// Returns the highlighted spans for a line, computing them on demand.
     pub fn syntax_spans_for_line(&mut self, line: usize) -> Option<Vec<SyntaxSpan>> {
-        let line_texts: Vec<&str> = self.lines.iter().map(|line| line.as_ref()).collect();
         let syntax_name = self.syntax_name().to_owned();
         let spans = self
             .buffer_cache
-            .spans_for_line(&syntax_name, &line_texts, line);
+            .spans_for_line(&syntax_name, &self.lines, line);
         if spans.is_some() {
             self.sync_undo_snapshot_cache_if_current();
         }
@@ -1392,10 +1513,9 @@ impl Buffer {
 
     /// Ensures syntax data exists through a line without returning it.
     pub fn ensure_syntax_through(&mut self, line: usize) {
-        let line_texts: Vec<&str> = self.lines.iter().map(|line| line.as_ref()).collect();
         let syntax_name = self.syntax_name().to_owned();
         self.buffer_cache
-            .ensure_through(&syntax_name, &line_texts, line);
+            .ensure_through(&syntax_name, &self.lines, line);
         self.sync_undo_snapshot_cache_if_current();
     }
 
@@ -1529,6 +1649,7 @@ mod tests {
         assert_eq!(cache.cached_spans_for_line(0), None);
 
         cache.lines.push_back(SyntaxLine::new(
+            Arc::from("abc"),
             vec![SyntaxSpan::new(0, 3, tag("text.plain"))],
             SyntaxState::default(),
         ));
@@ -1541,10 +1662,12 @@ mod tests {
 
         let mut replacement = SyntaxCache::new("plain");
         replacement.lines.push_back(SyntaxLine::new(
+            Arc::from("abcd"),
             vec![SyntaxSpan::new(0, 4, tag("text.replaced"))],
             SyntaxState::default(),
         ));
         replacement.lines.push_back(SyntaxLine::new(
+            Arc::from("abcde"),
             vec![SyntaxSpan::new(0, 5, tag("text.replaced"))],
             SyntaxState::default(),
         ));
@@ -1556,6 +1679,49 @@ mod tests {
             .expect("replacement cache should have line 1");
         assert_eq!(cached.len(), 1);
         assert_eq!(cached[0].style, tag("text.replaced"));
+    }
+
+    #[test]
+    fn budgeted_syntax_refresh_can_stop_before_eof() {
+        let lines: Vector<Arc<str>> =
+            std::iter::repeat_n("fn main() { let value = Some(\"hi\"); }", 64)
+                .map(Arc::from)
+                .collect();
+        let mut cache = SyntaxCache::new("rust");
+
+        cache.ensure_through("rust", &lines, lines.len() - 1);
+        assert!(cache.is_complete_for_line_count(lines.len()));
+
+        cache.invalidate_from(1, 0);
+        cache.ensure_through_with("rust", &lines, lines.len() - 1, || false);
+
+        assert_eq!(cache.cached_line_count(), 1);
+        assert!(!cache.is_complete_for_line_count(lines.len()));
+    }
+
+    #[test]
+    fn syntax_cache_stops_when_dirty_suffix_reconverges() {
+        let original: Vector<Arc<str>> = ["value = \"\"\"hello", "planet", "world\"\"\"", "after"]
+            .into_iter()
+            .map(Arc::from)
+            .collect();
+        let edited: Vector<Arc<str>> = ["value = \"\"\"hello", "galaxy", "world\"\"\"", "after"]
+            .into_iter()
+            .map(Arc::from)
+            .collect();
+        let mut cache = SyntaxCache::new("toml");
+
+        cache.ensure_through("toml", &original, original.len() - 1);
+        assert!(cache.is_complete_for_line_count(original.len()));
+
+        cache.invalidate_from(1, 0);
+        assert!(!cache.is_complete_for_line_count(original.len()));
+
+        cache.ensure_through("toml", &edited, 2);
+
+        assert!(cache.is_complete_for_line_count(edited.len()));
+        assert_eq!(cache.cached_line_count(), edited.len());
+        assert!(cache.cached_spans_for_line(3).is_some());
     }
 
     #[test]
@@ -1635,10 +1801,10 @@ mod tests {
 
         buffer.invalidate_syntax_from(1);
 
-        assert!(buffer.indent_scope_cache_stale());
-        assert!(scope_tuples(&buffer).is_empty());
-        assert!(buffer.cached_line_indent_scope_ids(0).is_none());
-        assert!(buffer.cached_line_indent_scope_ids(1).is_none());
+        assert!(!buffer.indent_scope_cache_stale());
+        assert_eq!(scope_tuples(&buffer), vec![(0, Some(2), 0)]);
+        assert!(buffer.cached_line_indent_scope_ids(0).is_some());
+        assert!(buffer.cached_line_indent_scope_ids(1).is_some());
     }
 
     #[test]
@@ -1718,10 +1884,13 @@ mod tests {
         buffer.ensure_syntax_through(2);
         buffer.invalidate_syntax_from(1);
 
-        assert!(buffer.indent_scope_cache_stale());
-        assert!(scope_tuples(&buffer).is_empty());
-        assert!(buffer.cached_line_indent_scope_ids(0).is_none());
-        assert!(buffer.cached_line_indent_scope_ids(1).is_none());
+        assert!(!buffer.indent_scope_cache_stale());
+        assert_eq!(
+            scope_tuples(&buffer),
+            vec![(0, Some(4), 0), (1, Some(3), 2)]
+        );
+        assert!(buffer.cached_line_indent_scope_ids(0).is_some());
+        assert!(buffer.cached_line_indent_scope_ids(1).is_some());
 
         buffer.ensure_syntax_through(4);
 
@@ -1851,7 +2020,8 @@ mod tests {
         assert_eq!(buffer.syntax_generation(), 8);
         assert_eq!(buffer.syntax_background_generation, None);
         assert!(buffer.cached_syntax_spans_for_line(0).is_some());
-        assert_eq!(buffer.cached_syntax_spans_for_line(1), None);
+        assert!(buffer.cached_syntax_spans_for_line(1).is_some());
+        assert!(buffer.syntax_cache_complete());
     }
 
     #[test]
