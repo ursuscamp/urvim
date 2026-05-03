@@ -522,4 +522,47 @@ impl Buffer {
         self.remove(start, end);
         Some(start)
     }
+
+    pub fn paste_linewise_content(
+        &mut self,
+        line: usize,
+        content_lines: &[Arc<str>],
+        after: bool,
+    ) -> Option<Cursor> {
+        let total_lines = self.lines.len();
+        let content_len = content_lines.len();
+        if content_len == 0 {
+            return Some(Cursor::new(line, 0));
+        }
+
+        let insert_at = if after {
+            (line + 1).min(total_lines)
+        } else {
+            line.min(total_lines)
+        };
+
+        let old_line_count = self.lines.len();
+
+        if total_lines == 0 {
+            for content in content_lines {
+                self.lines.push_back(content.clone());
+            }
+        } else if insert_at >= total_lines {
+            for content in content_lines {
+                self.lines.push_back(content.clone());
+            }
+        } else {
+            let mut left = self.lines.take(insert_at);
+            let right = self.lines.skip(insert_at);
+            for content in content_lines {
+                left.push_back(content.clone());
+            }
+            left.append(right);
+            self.lines = left;
+        }
+
+        let line_delta = self.lines.len() as isize - old_line_count as isize;
+        self.invalidate_syntax_from_with_line_delta(insert_at, line_delta);
+        Some(Cursor::new(insert_at, 0))
+    }
 }

@@ -4940,3 +4940,57 @@ fn paste_after_characterwise_inserts_at_cursor_not_after_character() {
     assert_eq!(buffer_text(window.buffer_view()), "hellohello world");
     assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 5));
 }
+
+#[test]
+fn paste_after_linewise_multiple_lines_inserts_all_content() {
+    let _register_guard = globals::set_test_register_store(RegisterStore::new());
+    globals::with_register_store_mut(|store| {
+        store.set(
+            RegisterName('y'),
+            RegisterContent::new(
+                "one\ntwo\nthree\nfour".to_string(),
+                RegisterContentKind::Linewise,
+            ),
+        );
+    });
+
+    let buffer = Buffer::from_str("alpha\nbeta");
+    let mut window = Window::new(buffer);
+
+    assert_eq!(
+        window.dispatch_action(&Action::paste_after()),
+        ActionResult::Handled
+    );
+    assert_eq!(
+        buffer_text(window.buffer_view()),
+        "alpha\none\ntwo\nthree\nfour\nbeta"
+    );
+    assert_eq!(window.buffer_view().cursor(), Cursor::new(4, 4));
+}
+
+#[test]
+fn paste_before_linewise_multiple_lines_inserts_all_content() {
+    let _register_guard = globals::set_test_register_store(RegisterStore::new());
+    globals::with_register_store_mut(|store| {
+        store.set(
+            RegisterName('y'),
+            RegisterContent::new(
+                "one\ntwo\nthree\nfour".to_string(),
+                RegisterContentKind::Linewise,
+            ),
+        );
+    });
+
+    let buffer = Buffer::from_str("alpha\nbeta");
+    let mut window = Window::new(buffer);
+
+    assert_eq!(
+        window.dispatch_action(&Action::paste_before()),
+        ActionResult::Handled
+    );
+    assert_eq!(
+        buffer_text(window.buffer_view()),
+        "one\ntwo\nthree\nfour\nalpha\nbeta"
+    );
+    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 0));
+}

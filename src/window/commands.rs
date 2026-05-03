@@ -7,6 +7,7 @@ use crate::editor::{ActionKind, DelimiterFamily, OperatorTarget, TextObject};
 use crate::register::{
     self, DefaultRegisterRole, RegisterContent, RegisterContentKind, RegisterName,
 };
+use std::sync::Arc;
 
 impl Window {
     fn resolved_register_name(
@@ -177,23 +178,22 @@ impl Window {
 
     fn paste_linewise_text(&mut self, text: &str, after: bool) -> Option<Cursor> {
         let cursor = self.buffer_view.cursor();
-        let lines: Vec<&str> = text.split('\n').collect();
-        let line_count = lines.len();
-        let start_cursor = if after {
-            self.insert_auto_indented_lines_after(cursor.line, line_count, None)?
-        } else {
-            self.insert_auto_indented_lines_before(cursor.line, line_count, None)?
-        };
+        let content_lines: Vec<Arc<str>> = text.split('\n').map(Arc::from).collect();
+        let line_count = content_lines.len();
 
-        self.buffer_view.with_buffer_mut(|buffer| {
-            for (offset, line) in lines.iter().enumerate() {
-                buffer.insert_text(Cursor::new(start_cursor.line + offset, 0), line);
-            }
-        })?;
+        let start_cursor = self
+            .buffer_view
+            .with_buffer_mut(|buffer| {
+                buffer.paste_linewise_content(cursor.line, &content_lines, after)
+            })
+            .flatten()?;
 
         if after {
             let last_line_idx = line_count.saturating_sub(1);
-            let last_line_len = lines.get(last_line_idx).map(|l| l.len()).unwrap_or(0);
+            let last_line_len = content_lines
+                .get(last_line_idx)
+                .map(|l| l.len())
+                .unwrap_or(0);
             Some(Cursor::new(
                 start_cursor.line + last_line_idx,
                 last_line_len,
