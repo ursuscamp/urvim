@@ -646,7 +646,7 @@ impl BufferCache {
             syntax_name,
             line_texts,
             line,
-            std::time::Duration::from_millis(5),
+            std::time::Duration::from_millis(50),
         );
     }
 
@@ -1395,7 +1395,7 @@ impl Buffer {
                 &syntax_name,
                 &self.lines,
                 self.line_count().saturating_sub(1),
-                std::time::Duration::from_millis(5),
+                std::time::Duration::from_millis(50),
             );
             self.buffer_cache
                 .ensure_indent_through(&self.lines, self.line_count().saturating_sub(1));
