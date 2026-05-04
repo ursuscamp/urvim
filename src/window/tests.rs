@@ -4743,3 +4743,111 @@ fn paste_before_linewise_multiple_lines_inserts_all_content() {
     );
     assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 0));
 }
+
+#[test]
+fn test_indent_guide_appears_with_step_by_step_editing_at_column_zero() {
+    // Start with flat, non-nested content (all at indent 0).
+    // This creates no valid scopes in the cache (all are invalidated single-line).
+    let buffer = Buffer::from_str("a\nb");
+    let mut window = Window::new(buffer);
+
+    let _config_guard = globals::set_test_config(Config {
+        indent_guides: true,
+        ..Default::default()
+    });
+
+    // NO warmup render - simulate the app state when user opens a file
+    // and immediately starts editing. The caches are empty.
+
+    // Simulate typing character by character as the user would:
+    // Press `o` on line 1 (cursor at end of "b") to open a new line
+    window
+        .buffer_view_mut()
+        .with_buffer_mut(|b| b.insert_char(Cursor::new(1, 1), '\n'))
+        .unwrap();
+    // Now buffer: ["a", "b", ""], cursor goes to line 2
+
+    // Type `{` on the new empty line
+    window
+        .buffer_view_mut()
+        .with_buffer_mut(|b| b.insert_char(Cursor::new(2, 0), '{'))
+        .unwrap();
+    // Buffer: ["a", "b", "{"]
+
+    // Press Enter to split the line
+    window
+        .buffer_view_mut()
+        .with_buffer_mut(|b| b.insert_char(Cursor::new(2, 1), '\n'))
+        .unwrap();
+    // Buffer: ["a", "b", "{", ""]
+
+    // Type spaces (user presses space 3 times for indentation)
+    window
+        .buffer_view_mut()
+        .with_buffer_mut(|b| b.insert_char(Cursor::new(3, 0), ' '))
+        .unwrap();
+    window
+        .buffer_view_mut()
+        .with_buffer_mut(|b| b.insert_char(Cursor::new(3, 1), ' '))
+        .unwrap();
+    window
+        .buffer_view_mut()
+        .with_buffer_mut(|b| b.insert_char(Cursor::new(3, 2), ' '))
+        .unwrap();
+
+    // Type `"hello"`
+    for ch in "\"hello\"".chars() {
+        window
+            .buffer_view_mut()
+            .with_buffer_mut(|b| {
+                b.insert_char(
+                    Cursor::new(3, b.line_at(3).map(|l| l.len()).unwrap_or(0)),
+                    ch,
+                )
+            })
+            .unwrap();
+    }
+
+    // Press Enter to split
+    window
+        .buffer_view_mut()
+        .with_buffer_mut(|b| {
+            b.insert_char(
+                Cursor::new(3, b.line_at(3).map(|l| l.len()).unwrap_or(0)),
+                '\n',
+            )
+        })
+        .unwrap();
+
+    // Type `}`
+    window
+        .buffer_view_mut()
+        .with_buffer_mut(|b| b.insert_char(Cursor::new(4, 0), '}'))
+        .unwrap();
+    // Buffer: ["a", "b", "{", "   \"hello\"", "}"]
+
+    // Cursor is on the indented line (line 3 = `   "hello"`)
+    window.set_cursor(Cursor::new(3, 3));
+
+    let mut screen = crate::screen::Screen::new(5, 24);
+    window.render(&mut screen, Position::new(0, 0), Size::new(5, 24));
+
+    let _ = window.buffer_view().with_buffer(|b| {
+        let scopes = b.cached_indent_scopes();
+        let scope_ids = b.cached_line_indent_scope_ids(3);
+
+    });
+
+    // Check for the guide character on screen row for the `"hello"` line.
+    // Screen layout: 5 rows (0-4), gutter width = digits(5)+2 = 1+2 = 3.
+    // Row 3 = buffer line 3 = `   "hello"`, guide expected at column 3 (gutter) + indent_width(0) = col 3
+    let guide_cell = screen
+        .get_cell_mut(3, 3)
+        .map(|c| c.text.clone())
+        .unwrap_or_default();
+    eprintln!("guide at (3,3): {:?}", guide_cell);
+    assert_eq!(
+        guide_cell, "|",
+        "indent guide should appear on the indented line after step-by-step edit"
+    );
+}

@@ -305,7 +305,15 @@ impl IndentScopeCache {
 
     pub(crate) fn invalidate_from(&mut self, line: usize) {
         let boundary = line.min(self.line_to_scopes.len());
-        let sync_point = self.previous_sync_point(boundary);
+        let mut sync_point = self.previous_sync_point(boundary);
+
+        // When all lines before the boundary have no open scopes (which happens
+        // after all scopes are invalidated for flat content at indent 0),
+        // previous_sync_point returns boundary, skipping the context line before
+        // the edit. Back up by one to ensure that preceding line is reprocessed.
+        if sync_point > 0 && sync_point >= boundary {
+            sync_point = boundary - 1;
+        }
 
         self.line_to_scopes.truncate(sync_point);
         self.scanned_through_line = sync_point;
@@ -601,6 +609,8 @@ impl BufferCache {
     /// Invalidates cached data from the provided line onward.
     pub fn invalidate_from(&mut self, line: usize, line_delta: isize) {
         if line >= self.syntax_cache.cached_line_count() && !self.syntax_cache.has_dirty_suffix() {
+            self.indent_scope_cache.invalidate_from(line);
+            self.indent_scope_cache_stale = true;
             return;
         }
 
