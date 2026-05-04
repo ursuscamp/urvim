@@ -108,12 +108,7 @@ fn test_surround_replace_is_single_undoable_edit() {
     );
     assert_eq!(buffer_text(window.buffer_view()), "foo[bar]baz");
 
-    let cursor = window
-        .buffer_view
-        .with_buffer_mut(|buffer| buffer.undo())
-        .flatten()
-        .expect("undo should restore previous state");
-    window.set_cursor_synced(cursor);
+    apply_undo_synced(&mut window);
     assert_eq!(buffer_text(window.buffer_view()), "foo(bar)baz");
 }
 
@@ -251,12 +246,7 @@ fn test_surround_add_is_single_undoable_edit() {
     );
     assert_eq!(buffer_text(window.buffer_view()), "\"hello\" world");
 
-    let cursor = window
-        .buffer_view
-        .with_buffer_mut(|buffer| buffer.undo())
-        .flatten()
-        .expect("undo should restore previous state");
-    window.set_cursor_synced(cursor);
+    apply_undo_synced(&mut window);
     assert_eq!(buffer_text(window.buffer_view()), "hello world");
 }
 
@@ -491,6 +481,57 @@ fn auto_indent_test_config(auto_indent: AutoIndentMode) -> Config {
         advanced_glyphs: BTreeSet::new(),
         ..Default::default()
     }
+}
+
+fn visual_test_setup() -> (impl Drop, impl Drop) {
+    let theme = themed_window();
+    let theme_guard = globals::set_test_active_theme(theme);
+    let config_guard = globals::set_test_config(Config {
+        theme: "demo".to_string(),
+        insert_escape: None,
+        syntax: true,
+        auto_close_pairs: true,
+        auto_indent: AutoIndentMode::Off,
+        advanced_glyphs: BTreeSet::new(),
+        ..Default::default()
+    });
+    (theme_guard, config_guard)
+}
+
+fn apply_undo(window: &mut Window) {
+    if let Some(cursor) = window
+        .buffer_view
+        .with_buffer_mut(|buffer| buffer.undo())
+        .flatten()
+    {
+        window.buffer_view.set_cursor(cursor);
+    }
+}
+
+fn apply_undo_synced(window: &mut Window) {
+    let cursor = window
+        .buffer_view
+        .with_buffer_mut(|buffer| buffer.undo())
+        .flatten()
+        .expect("undo should restore previous state");
+    window.set_cursor_synced(cursor);
+}
+
+fn apply_redo(window: &mut Window) {
+    if let Some(cursor) = window
+        .buffer_view
+        .with_buffer_mut(|buffer| buffer.redo())
+        .flatten()
+    {
+        window.buffer_view.set_cursor(cursor);
+    }
+}
+
+fn rendered_line<'a>(window: &'a Window, idx: usize) -> &'a [RenderChunk] {
+    window
+        .render_data()
+        .get_line(idx)
+        .expect("rendered line should exist")
 }
 
 #[test]
@@ -978,10 +1019,7 @@ fn test_window_render_refreshes_scrolled_visible_syntax_after_edit() {
     let mut screen = crate::screen::Screen::new(2, 24);
     window.render(&mut screen, Position::new(0, 0), Size::new(2, 24));
 
-    let rendered_line = window
-        .render_data()
-        .get_line(0)
-        .expect("visible line should be rendered");
+    let rendered_line = rendered_line(&window, 0);
     assert!(
         rendered_line
             .iter()
@@ -1265,10 +1303,7 @@ fn test_window_render_uses_syntax_styles_for_supported_filetypes() {
     let mut screen = crate::screen::Screen::new(1, 80);
     window.render(&mut screen, Position::new(0, 0), Size::new(1, 80));
 
-    let line = window
-        .render_data()
-        .get_line(0)
-        .expect("rendered line should exist");
+    let line = rendered_line(&window, 0);
     assert!(
         line.iter()
             .any(|chunk| chunk.text == "fn" && chunk.style == expected_keyword_style)
@@ -1318,10 +1353,7 @@ fn test_window_render_omits_syntax_styles_when_disabled() {
     let mut screen = crate::screen::Screen::new(1, 80);
     window.render(&mut screen, Position::new(0, 0), Size::new(1, 80));
 
-    let line = window
-        .render_data()
-        .get_line(0)
-        .expect("rendered line should exist");
+    let line = rendered_line(&window, 0);
 
     assert!(!line.is_empty());
     assert!(
@@ -1360,10 +1392,7 @@ fn test_window_render_does_not_force_full_syntax_warmup_on_bottom_jump() {
     let mut screen = crate::screen::Screen::new(4, 80);
     window.render(&mut screen, Position::new(0, 0), Size::new(4, 80));
 
-    let rendered_line = window
-        .render_data()
-        .get_line(0)
-        .expect("rendered line should exist");
+    let rendered_line = rendered_line(&window, 0);
     let syntax_pending = window
         .buffer_view()
         .with_buffer(|buffer| buffer.syntax_background_pending())
@@ -1502,10 +1531,7 @@ fn test_window_render_uses_background_syntax_after_tick() {
     let mut screen = crate::screen::Screen::new(1, 80);
     window.render(&mut screen, Position::new(0, 0), Size::new(1, 80));
 
-    let line = window
-        .render_data()
-        .get_line(0)
-        .expect("rendered line should exist");
+    let line = rendered_line(&window, 0);
     assert!(!line.is_empty());
     assert!(
         window
@@ -1537,10 +1563,7 @@ fn test_window_render_uses_background_syntax_after_tick() {
 
     window.render(&mut screen, Position::new(0, 0), Size::new(1, 80));
 
-    let line = window
-        .render_data()
-        .get_line(0)
-        .expect("rendered line should exist");
+    let line = rendered_line(&window, 0);
     assert!(
         line.iter()
             .any(|chunk| chunk.text == "fn" && chunk.style == expected_keyword_style)
@@ -1580,10 +1603,7 @@ fn test_window_render_distinguishes_rust_format_string_escapes() {
     let mut screen = crate::screen::Screen::new(1, 80);
     window.render(&mut screen, Position::new(0, 0), Size::new(1, 80));
 
-    let line = window
-        .render_data()
-        .get_line(0)
-        .expect("rendered line should exist");
+    let line = rendered_line(&window, 0);
 
     assert!(
         line.iter()
@@ -1623,10 +1643,7 @@ fn test_window_render_highlights_todo_markers_inside_comments() {
     let mut screen = crate::screen::Screen::new(1, 80);
     window.render(&mut screen, Position::new(0, 0), Size::new(1, 80));
 
-    let line = window
-        .render_data()
-        .get_line(0)
-        .expect("rendered line should exist");
+    let line = rendered_line(&window, 0);
     assert!(
         line.iter()
             .any(|chunk| chunk.text == "fn" && chunk.style == expected_keyword_style)
@@ -1670,10 +1687,7 @@ fn test_window_render_skips_todo_markers_when_syntax_is_disabled() {
     let mut screen = crate::screen::Screen::new(1, 80);
     window.render(&mut screen, Position::new(0, 0), Size::new(1, 80));
 
-    let line = window
-        .render_data()
-        .get_line(0)
-        .expect("rendered line should exist");
+    let line = rendered_line(&window, 0);
     assert!(!line.is_empty());
     assert!(
         line.iter()
@@ -1745,13 +1759,7 @@ fn test_open_line_below_undo_restores_original_text() {
 
     commit_insert_exit_snapshot(&mut window);
 
-    if let Some(cursor) = window
-        .buffer_view
-        .with_buffer_mut(|buffer| buffer.undo())
-        .flatten()
-    {
-        window.buffer_view.set_cursor(cursor);
-    }
+    apply_undo(&mut window);
 
     assert_eq!(buffer_text(window.buffer_view()), "hello");
     assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 0));
@@ -1827,13 +1835,7 @@ fn test_change_line_undo_restores_original_text() {
 
     commit_insert_exit_snapshot(&mut window);
 
-    if let Some(cursor) = window
-        .buffer_view
-        .with_buffer_mut(|buffer| buffer.undo())
-        .flatten()
-    {
-        window.buffer_view.set_cursor(cursor);
-    }
+    apply_undo(&mut window);
 
     assert_eq!(
         buffer_text(window.buffer_view()),
@@ -1867,13 +1869,7 @@ fn test_change_to_line_end_undo_restores_original_text() {
 
     commit_insert_exit_snapshot(&mut window);
 
-    if let Some(cursor) = window
-        .buffer_view
-        .with_buffer_mut(|buffer| buffer.undo())
-        .flatten()
-    {
-        window.buffer_view.set_cursor(cursor);
-    }
+    apply_undo(&mut window);
 
     assert_eq!(buffer_text(window.buffer_view()), "hello world");
     assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 0));
@@ -1944,13 +1940,7 @@ fn test_raw_paste_in_insert_mode_bypasses_auto_pair_and_auto_indent() {
     assert_eq!(window.buffer_view().cursor(), Cursor::new(1, 0));
     assert_eq!(window.take_pending_repeat_suffix(), None);
 
-    if let Some(cursor) = window
-        .buffer_view
-        .with_buffer_mut(|buffer| buffer.undo())
-        .flatten()
-    {
-        window.buffer_view.set_cursor(cursor);
-    }
+    apply_undo(&mut window);
 
     assert_eq!(buffer_text(window.buffer_view()), "fn main() {");
     assert_eq!(window.buffer_view().cursor(), cursor);
@@ -1975,13 +1965,7 @@ fn test_raw_paste_in_normal_mode_inserts_text_without_mode_change() {
     assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 11));
     assert_eq!(window.mode_kind(), ModeKind::Normal);
 
-    if let Some(cursor) = window
-        .buffer_view
-        .with_buffer_mut(|buffer| buffer.undo())
-        .flatten()
-    {
-        window.buffer_view.set_cursor(cursor);
-    }
+    apply_undo(&mut window);
 
     assert_eq!(buffer_text(window.buffer_view()), "hello");
     assert_eq!(window.buffer_view().cursor(), cursor);
@@ -2010,13 +1994,7 @@ fn test_raw_paste_replaces_visual_selection_and_exits_to_normal_mode() {
     assert_eq!(window.mode_kind(), ModeKind::Normal);
     assert_eq!(window.buffer_view().visual_selection(), None);
 
-    if let Some(cursor) = window
-        .buffer_view
-        .with_buffer_mut(|buffer| buffer.undo())
-        .flatten()
-    {
-        window.buffer_view.set_cursor(cursor);
-    }
+    apply_undo(&mut window);
 
     assert_eq!(buffer_text(window.buffer_view()), "abcdef");
     assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 1));
@@ -2578,10 +2556,7 @@ fn test_visual_selection_is_rendered() {
     let mut screen = crate::screen::Screen::new(1, 20);
     window.render(&mut screen, Position::new(0, 0), Size::new(1, 20));
 
-    let line = window
-        .render_data()
-        .get_line(0)
-        .expect("rendered line should exist");
+    let line = rendered_line(&window, 0);
     assert!(
         line.iter()
             .any(|chunk| chunk.text == "ab" && chunk.style == expected_style)
@@ -2617,19 +2592,13 @@ fn test_visual_line_selection_is_rendered() {
     let mut screen = crate::screen::Screen::new(2, 20);
     window.render(&mut screen, Position::new(0, 0), Size::new(2, 20));
 
-    let first = window
-        .render_data()
-        .get_line(0)
-        .expect("first rendered line should exist");
+    let first = rendered_line(&window, 0);
     assert!(
         first
             .iter()
             .any(|chunk| chunk.text == "abc" && chunk.style == expected_style)
     );
-    let second = window
-        .render_data()
-        .get_line(1)
-        .expect("second rendered line should exist");
+    let second = rendered_line(&window, 1);
     assert!(
         second
             .iter()
@@ -2639,18 +2608,8 @@ fn test_visual_line_selection_is_rendered() {
 
 #[test]
 fn test_normal_yank_characterwise_flashes_selection() {
-    let theme = themed_window();
-    let expected_style = theme.highlight_style_for_name("ui.selection");
-    let _theme_guard = globals::set_test_active_theme(theme);
-    let _config_guard = globals::set_test_config(Config {
-        theme: "demo".to_string(),
-        insert_escape: None,
-        syntax: true,
-        auto_close_pairs: true,
-        auto_indent: AutoIndentMode::Off,
-        advanced_glyphs: BTreeSet::new(),
-        ..Default::default()
-    });
+    let (_t, _c) = visual_test_setup();
+    let expected_style = themed_window().highlight_style_for_name("ui.selection");
 
     let buffer = Buffer::from_str("hello world");
     let mut window = Window::new(buffer);
@@ -2665,10 +2624,7 @@ fn test_normal_yank_characterwise_flashes_selection() {
     let mut screen = crate::screen::Screen::new(1, 20);
     window.render(&mut screen, Position::new(0, 0), Size::new(1, 20));
 
-    let line = window
-        .render_data()
-        .get_line(0)
-        .expect("rendered line should exist");
+    let line = rendered_line(&window, 0);
     assert!(
         line.iter()
             .any(|chunk| chunk.text == "hello" && chunk.style == expected_style)
@@ -2677,18 +2633,8 @@ fn test_normal_yank_characterwise_flashes_selection() {
 
 #[test]
 fn test_normal_yank_line_flashes_selection() {
-    let theme = themed_window();
-    let expected_style = theme.highlight_style_for_name("ui.selection");
-    let _theme_guard = globals::set_test_active_theme(theme);
-    let _config_guard = globals::set_test_config(Config {
-        theme: "demo".to_string(),
-        insert_escape: None,
-        syntax: true,
-        auto_close_pairs: true,
-        auto_indent: AutoIndentMode::Off,
-        advanced_glyphs: BTreeSet::new(),
-        ..Default::default()
-    });
+    let (_t, _c) = visual_test_setup();
+    let expected_style = themed_window().highlight_style_for_name("ui.selection");
 
     let buffer = Buffer::from_str("alpha\nbeta");
     let mut window = Window::new(buffer);
@@ -2702,36 +2648,20 @@ fn test_normal_yank_line_flashes_selection() {
     let mut screen = crate::screen::Screen::new(2, 20);
     window.render(&mut screen, Position::new(0, 0), Size::new(2, 20));
 
-    let first = window
-        .render_data()
-        .get_line(0)
-        .expect("first rendered line should exist");
+    let first = rendered_line(&window, 0);
     assert!(
         first
             .iter()
             .any(|chunk| chunk.text == "alpha" && chunk.style == expected_style)
     );
-    let second = window
-        .render_data()
-        .get_line(1)
-        .expect("second rendered line should exist");
+    let second = rendered_line(&window, 1);
     assert!(!second.iter().any(|chunk| chunk.style == expected_style));
 }
 
 #[test]
 fn test_normal_counted_linewise_yank_motion_flashes_selection() {
-    let theme = themed_window();
-    let expected_style = theme.highlight_style_for_name("ui.selection");
-    let _theme_guard = globals::set_test_active_theme(theme);
-    let _config_guard = globals::set_test_config(Config {
-        theme: "demo".to_string(),
-        insert_escape: None,
-        syntax: true,
-        auto_close_pairs: true,
-        auto_indent: AutoIndentMode::Off,
-        advanced_glyphs: BTreeSet::new(),
-        ..Default::default()
-    });
+    let (_t, _c) = visual_test_setup();
+    let expected_style = themed_window().highlight_style_for_name("ui.selection");
 
     let buffer = Buffer::from_str("one\ntwo\nthree\nfour");
     let mut window = Window::new(buffer);
@@ -2752,10 +2682,7 @@ fn test_normal_counted_linewise_yank_motion_flashes_selection() {
 
     // Yank should include lines 2-4 (0-based lines 1..=3).
     for line_idx in 1..=3 {
-        let line = window
-            .render_data()
-            .get_line(line_idx)
-            .expect("rendered line should exist");
+        let line = rendered_line(&window, line_idx);
         assert!(
             line.iter().any(|chunk| chunk.style == expected_style),
             "expected yank flash on line {}",
@@ -2763,27 +2690,14 @@ fn test_normal_counted_linewise_yank_motion_flashes_selection() {
         );
     }
 
-    let first = window
-        .render_data()
-        .get_line(0)
-        .expect("first rendered line should exist");
+    let first = rendered_line(&window, 0);
     assert!(!first.iter().any(|chunk| chunk.style == expected_style));
 }
 
 #[test]
 fn test_normal_yank_restarts_flash_on_subsequent_yank() {
-    let theme = themed_window();
-    let expected_style = theme.highlight_style_for_name("ui.selection");
-    let _theme_guard = globals::set_test_active_theme(theme);
-    let _config_guard = globals::set_test_config(Config {
-        theme: "demo".to_string(),
-        insert_escape: None,
-        syntax: true,
-        auto_close_pairs: true,
-        auto_indent: AutoIndentMode::Off,
-        advanced_glyphs: BTreeSet::new(),
-        ..Default::default()
-    });
+    let (_t, _c) = visual_test_setup();
+    let expected_style = themed_window().highlight_style_for_name("ui.selection");
 
     let buffer = Buffer::from_str("alpha\nbeta");
     let mut window = Window::new(buffer);
@@ -2801,15 +2715,9 @@ fn test_normal_yank_restarts_flash_on_subsequent_yank() {
     let mut screen = crate::screen::Screen::new(2, 20);
     window.render(&mut screen, Position::new(0, 0), Size::new(2, 20));
 
-    let first = window
-        .render_data()
-        .get_line(0)
-        .expect("first rendered line should exist");
+    let first = rendered_line(&window, 0);
     assert!(!first.iter().any(|chunk| chunk.style == expected_style));
-    let second = window
-        .render_data()
-        .get_line(1)
-        .expect("second rendered line should exist");
+    let second = rendered_line(&window, 1);
     assert!(
         second
             .iter()
@@ -2819,18 +2727,8 @@ fn test_normal_yank_restarts_flash_on_subsequent_yank() {
 
 #[test]
 fn test_normal_yank_flash_expires_and_is_cleared_on_render() {
-    let theme = themed_window();
-    let expected_style = theme.highlight_style_for_name("ui.selection");
-    let _theme_guard = globals::set_test_active_theme(theme);
-    let _config_guard = globals::set_test_config(Config {
-        theme: "demo".to_string(),
-        insert_escape: None,
-        syntax: true,
-        auto_close_pairs: true,
-        auto_indent: AutoIndentMode::Off,
-        advanced_glyphs: BTreeSet::new(),
-        ..Default::default()
-    });
+    let (_t, _c) = visual_test_setup();
+    let expected_style = themed_window().highlight_style_for_name("ui.selection");
 
     let buffer = Buffer::from_str("alpha");
     let mut window = Window::new(buffer);
@@ -2844,26 +2742,13 @@ fn test_normal_yank_flash_expires_and_is_cleared_on_render() {
     let mut screen = crate::screen::Screen::new(1, 20);
     window.render(&mut screen, Position::new(0, 0), Size::new(1, 20));
 
-    let line = window
-        .render_data()
-        .get_line(0)
-        .expect("rendered line should exist");
+    let line = rendered_line(&window, 0);
     assert!(!line.iter().any(|chunk| chunk.style == expected_style));
 }
 
 #[test]
 fn test_visual_repeated_motion_matches_counted_motion() {
-    let theme = themed_window();
-    let _theme_guard = globals::set_test_active_theme(theme);
-    let _config_guard = globals::set_test_config(Config {
-        theme: "demo".to_string(),
-        insert_escape: None,
-        syntax: true,
-        auto_close_pairs: true,
-        auto_indent: AutoIndentMode::Off,
-        advanced_glyphs: BTreeSet::new(),
-        ..Default::default()
-    });
+    let (_t, _c) = visual_test_setup();
 
     let buffer = Buffer::from_str("abcdef");
     let mut counted = Window::new(buffer.clone());
@@ -2900,17 +2785,7 @@ fn test_visual_repeated_motion_matches_counted_motion() {
 
 #[test]
 fn test_visual_delete_leaves_cursor_at_selection_start() {
-    let theme = themed_window();
-    let _theme_guard = globals::set_test_active_theme(theme);
-    let _config_guard = globals::set_test_config(Config {
-        theme: "demo".to_string(),
-        insert_escape: None,
-        syntax: true,
-        auto_close_pairs: true,
-        auto_indent: AutoIndentMode::Off,
-        advanced_glyphs: BTreeSet::new(),
-        ..Default::default()
-    });
+    let (_t, _c) = visual_test_setup();
 
     let buffer = Buffer::from_str("abc");
     let mut window = Window::new(buffer);
@@ -2929,17 +2804,7 @@ fn test_visual_delete_leaves_cursor_at_selection_start() {
 
 #[test]
 fn test_visual_change_leaves_cursor_at_selection_start() {
-    let theme = themed_window();
-    let _theme_guard = globals::set_test_active_theme(theme);
-    let _config_guard = globals::set_test_config(Config {
-        theme: "demo".to_string(),
-        insert_escape: None,
-        syntax: true,
-        auto_close_pairs: true,
-        auto_indent: AutoIndentMode::Off,
-        advanced_glyphs: BTreeSet::new(),
-        ..Default::default()
-    });
+    let (_t, _c) = visual_test_setup();
 
     let buffer = Buffer::from_str("abc");
     let mut window = Window::new(buffer);
@@ -2958,17 +2823,7 @@ fn test_visual_change_leaves_cursor_at_selection_start() {
 
 #[test]
 fn test_visual_change_undo_restores_original_text() {
-    let theme = themed_window();
-    let _theme_guard = globals::set_test_active_theme(theme);
-    let _config_guard = globals::set_test_config(Config {
-        theme: "demo".to_string(),
-        insert_escape: None,
-        syntax: true,
-        auto_close_pairs: true,
-        auto_indent: AutoIndentMode::Off,
-        advanced_glyphs: BTreeSet::new(),
-        ..Default::default()
-    });
+    let (_t, _c) = visual_test_setup();
 
     let buffer = Buffer::from_str("abc");
     let mut window = Window::new(buffer);
@@ -2995,13 +2850,7 @@ fn test_visual_change_undo_restores_original_text() {
 
     commit_insert_exit_snapshot(&mut window);
 
-    if let Some(cursor) = window
-        .buffer_view
-        .with_buffer_mut(|buffer| buffer.undo())
-        .flatten()
-    {
-        window.buffer_view.set_cursor(cursor);
-    }
+    apply_undo(&mut window);
 
     assert_eq!(buffer_text(window.buffer_view()), "abc");
     assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 0));
@@ -3078,17 +2927,7 @@ fn test_visual_text_object_invalid_location_leaves_selection_unchanged() {
 
 #[test]
 fn test_visual_case_lowercases_selection_and_exits_to_normal() {
-    let theme = themed_window();
-    let _theme_guard = globals::set_test_active_theme(theme);
-    let _config_guard = globals::set_test_config(Config {
-        theme: "demo".to_string(),
-        insert_escape: None,
-        syntax: true,
-        auto_close_pairs: true,
-        auto_indent: AutoIndentMode::Off,
-        advanced_glyphs: BTreeSet::new(),
-        ..Default::default()
-    });
+    let (_t, _c) = visual_test_setup();
 
     let buffer = Buffer::from_str("AbC");
     let mut window = Window::new(buffer);
@@ -3124,17 +2963,7 @@ fn test_case_uppercase_operator_handles_unicode_expansion() {
 
 #[test]
 fn test_visual_line_toggle_case_handles_unicode_and_exits_to_normal() {
-    let theme = themed_window();
-    let _theme_guard = globals::set_test_active_theme(theme);
-    let _config_guard = globals::set_test_config(Config {
-        theme: "demo".to_string(),
-        insert_escape: None,
-        syntax: true,
-        auto_close_pairs: true,
-        auto_indent: AutoIndentMode::Off,
-        advanced_glyphs: BTreeSet::new(),
-        ..Default::default()
-    });
+    let (_t, _c) = visual_test_setup();
 
     let buffer = Buffer::from_str("foo\nßa");
     let mut window = Window::new(buffer);
@@ -3177,17 +3006,7 @@ fn test_visual_yank_copies_selection_without_mutating_buffer() {
 
 #[test]
 fn test_visual_line_delete_removes_entire_lines() {
-    let theme = themed_window();
-    let _theme_guard = globals::set_test_active_theme(theme);
-    let _config_guard = globals::set_test_config(Config {
-        theme: "demo".to_string(),
-        insert_escape: None,
-        syntax: true,
-        auto_close_pairs: true,
-        auto_indent: AutoIndentMode::Off,
-        advanced_glyphs: BTreeSet::new(),
-        ..Default::default()
-    });
+    let (_t, _c) = visual_test_setup();
 
     let buffer = Buffer::from_str("one\ntwo\nthree\nfour");
     let mut window = Window::new(buffer);
@@ -3207,17 +3026,7 @@ fn test_visual_line_delete_removes_entire_lines() {
 
 #[test]
 fn test_visual_line_change_leaves_blank_line() {
-    let theme = themed_window();
-    let _theme_guard = globals::set_test_active_theme(theme);
-    let _config_guard = globals::set_test_config(Config {
-        theme: "demo".to_string(),
-        insert_escape: None,
-        syntax: true,
-        auto_close_pairs: true,
-        auto_indent: AutoIndentMode::Off,
-        advanced_glyphs: BTreeSet::new(),
-        ..Default::default()
-    });
+    let (_t, _c) = visual_test_setup();
 
     let buffer = Buffer::from_str("one\ntwo\nthree\nfour");
     let mut window = Window::new(buffer);
@@ -3866,13 +3675,7 @@ fn test_cw_undo_restores_original_text() {
 
     commit_insert_exit_snapshot(&mut window);
 
-    if let Some(cursor) = window
-        .buffer_view
-        .with_buffer_mut(|buffer| buffer.undo())
-        .flatten()
-    {
-        window.buffer_view.set_cursor(cursor);
-    }
+    apply_undo(&mut window);
     assert_eq!(buffer_text(window.buffer_view()), "hello world");
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
 }
@@ -4102,23 +3905,11 @@ fn test_insert_pair_undo_and_redo_restore_exact_states() {
     assert_eq!(buffer_text(window.buffer_view()), "()");
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 1));
 
-    if let Some(cursor) = window
-        .buffer_view
-        .with_buffer_mut(|buffer| buffer.undo())
-        .flatten()
-    {
-        window.buffer_view.set_cursor(cursor);
-    }
+    apply_undo(&mut window);
     assert_eq!(buffer_text(window.buffer_view()), "");
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
 
-    if let Some(cursor) = window
-        .buffer_view
-        .with_buffer_mut(|buffer| buffer.redo())
-        .flatten()
-    {
-        window.buffer_view.set_cursor(cursor);
-    }
+    apply_redo(&mut window);
     assert_eq!(buffer_text(window.buffer_view()), "()");
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 1));
 }
@@ -4142,23 +3933,11 @@ fn test_pair_delete_undo_and_redo_restore_exact_states() {
     assert_eq!(buffer_text(window.buffer_view()), "");
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
 
-    if let Some(cursor) = window
-        .buffer_view
-        .with_buffer_mut(|buffer| buffer.undo())
-        .flatten()
-    {
-        window.buffer_view.set_cursor(cursor);
-    }
+    apply_undo(&mut window);
     assert_eq!(buffer_text(window.buffer_view()), "()");
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
 
-    if let Some(cursor) = window
-        .buffer_view
-        .with_buffer_mut(|buffer| buffer.redo())
-        .flatten()
-    {
-        window.buffer_view.set_cursor(cursor);
-    }
+    apply_redo(&mut window);
     assert_eq!(buffer_text(window.buffer_view()), "");
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
 }
@@ -4190,23 +3969,11 @@ fn test_delete_forward_undo_and_redo() {
     assert_eq!(buffer_text(window.buffer_view()), "ello");
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
 
-    if let Some(cursor) = window
-        .buffer_view
-        .with_buffer_mut(|buffer| buffer.undo())
-        .flatten()
-    {
-        window.buffer_view.set_cursor(cursor);
-    }
+    apply_undo(&mut window);
     assert_eq!(buffer_text(window.buffer_view()), "hello");
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
 
-    if let Some(cursor) = window
-        .buffer_view
-        .with_buffer_mut(|buffer| buffer.redo())
-        .flatten()
-    {
-        window.buffer_view.set_cursor(cursor);
-    }
+    apply_redo(&mut window);
     assert_eq!(buffer_text(window.buffer_view()), "ello");
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
 }
@@ -4228,23 +3995,11 @@ fn test_dw_undo_and_redo() {
     assert_eq!(buffer_text(window.buffer_view()), "world");
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
 
-    if let Some(cursor) = window
-        .buffer_view
-        .with_buffer_mut(|buffer| buffer.undo())
-        .flatten()
-    {
-        window.buffer_view.set_cursor(cursor);
-    }
+    apply_undo(&mut window);
     assert_eq!(buffer_text(window.buffer_view()), "hello world");
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
 
-    if let Some(cursor) = window
-        .buffer_view
-        .with_buffer_mut(|buffer| buffer.redo())
-        .flatten()
-    {
-        window.buffer_view.set_cursor(cursor);
-    }
+    apply_redo(&mut window);
     assert_eq!(buffer_text(window.buffer_view()), "world");
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
 }
@@ -4284,13 +4039,7 @@ fn test_counted_dw_undo_restores_original_text() {
 
     assert_eq!(buffer_text(window.buffer_view()), "three four");
 
-    if let Some(cursor) = window
-        .buffer_view
-        .with_buffer_mut(|buffer| buffer.undo())
-        .flatten()
-    {
-        window.buffer_view.set_cursor(cursor);
-    }
+    apply_undo(&mut window);
     assert_eq!(buffer_text(window.buffer_view()), "one two three four");
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
 }

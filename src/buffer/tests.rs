@@ -5,7 +5,6 @@ use crate::editor::{
     BoundaryMotion, BracketKind, DelimiterFamily, LinewiseMotion, OperatorTarget, QuoteKind,
     TextObject,
 };
-use crate::globals;
 use crate::globals::{Direction, FindKind, FindState};
 use crate::path::AbsolutePath;
 use crate::theme::Tag;
@@ -78,6 +77,133 @@ fn fixture_buffer(name: &str, ext: &str, contents: &str) -> Buffer {
 fn named_fixture_buffer(name: &str, contents: &str) -> Buffer {
     let path = AbsolutePath::from_path(std::env::temp_dir().join(name).as_path()).unwrap();
     Buffer::from_str_with_path(contents, path)
+}
+
+fn syntax_buffer(name: &str, ext: &str, contents: &str) -> Buffer {
+    let path = AbsolutePath::from_path(temp_path_with_ext(name, ext).as_path()).unwrap();
+    Buffer::from_str_with_path(contents, path)
+}
+
+fn line_spans(buf: &mut Buffer, line: usize) -> Vec<crate::buffer::syntax::SyntaxSpan> {
+    buf.syntax_spans_for_line(line)
+        .expect("line should exist")
+        .to_vec()
+}
+
+fn assert_buffer_eq(buf: &Buffer, expected: &str, lines: usize) {
+    assert_eq!(buf.as_str(), expected);
+    assert_eq!(buf.line_count(), lines);
+}
+
+fn tab_config_4() -> crate::globals::TestConfigGuard {
+    crate::globals::set_test_config(Config {
+        tab_width: 4,
+        ..Default::default()
+    })
+}
+
+fn three_para_buffer() -> Buffer {
+    Buffer::from_str("Para 1 line 1\n\nPara 2 line 1\nPara 2 line 2\n\nPara 3 line 1")
+}
+
+macro_rules! assert_next_boundary {
+    ($name:ident, $text:expr, $cursor:expr, $boundary:expr, $expected:expr) => {
+        #[test]
+        fn $name() {
+            let buf = Buffer::from_str($text);
+            let result = buf.next_boundary($cursor, $boundary);
+            assert_eq!(result, $expected);
+        }
+    };
+    ($name:ident, $text:expr, $cursor:expr, $boundary:expr, $expected:expr, $msg:expr) => {
+        #[test]
+        fn $name() {
+            let buf = Buffer::from_str($text);
+            let result = buf.next_boundary($cursor, $boundary);
+            assert_eq!(result, $expected, $msg);
+        }
+    };
+}
+
+macro_rules! assert_prev_boundary {
+    ($name:ident, $text:expr, $cursor:expr, $boundary:expr, $expected:expr) => {
+        #[test]
+        fn $name() {
+            let buf = Buffer::from_str($text);
+            let result = buf.prev_boundary($cursor, $boundary);
+            assert_eq!(result, $expected);
+        }
+    };
+    ($name:ident, $text:expr, $cursor:expr, $boundary:expr, $expected:expr, $msg:expr) => {
+        #[test]
+        fn $name() {
+            let buf = Buffer::from_str($text);
+            let result = buf.prev_boundary($cursor, $boundary);
+            assert_eq!(result, $expected, $msg);
+        }
+    };
+}
+
+macro_rules! assert_operator_range {
+    ($name:ident, $text:expr, $cursor:expr, $target:expr, $start:expr, $end:expr) => {
+        #[test]
+        fn $name() {
+            let buf = Buffer::from_str($text);
+            let range = buf.get_operator_target_range($cursor, $target).unwrap();
+            assert_eq!(
+                range,
+                TextObjectRange {
+                    start: $start,
+                    end: $end,
+                }
+            );
+        }
+    };
+}
+
+macro_rules! assert_operator_range_with_count {
+    ($name:ident, $text:expr, $cursor:expr, $target:expr, $count:expr, $start:expr, $end:expr) => {
+        #[test]
+        fn $name() {
+            let buf = Buffer::from_str($text);
+            let range = buf
+                .get_operator_target_range_with_count($cursor, $target, $count)
+                .unwrap();
+            assert_eq!(
+                range,
+                TextObjectRange {
+                    start: $start,
+                    end: $end,
+                }
+            );
+        }
+    };
+}
+
+macro_rules! assert_linewise_range {
+    ($name:ident, $text:expr, $cursor:expr, $motion:expr, $expected:expr) => {
+        #[test]
+        fn $name() {
+            let buf = Buffer::from_str($text);
+            let range = buf
+                .get_linewise_operator_target_range($cursor, $motion)
+                .unwrap();
+            assert_eq!(range, $expected);
+        }
+    };
+}
+
+macro_rules! assert_linewise_range_with_count {
+    ($name:ident, $text:expr, $cursor:expr, $motion:expr, $count:expr, $expected:expr) => {
+        #[test]
+        fn $name() {
+            let buf = Buffer::from_str($text);
+            let range = buf
+                .get_linewise_operator_target_range_with_count($cursor, $motion, $count)
+                .unwrap();
+            assert_eq!(range, $expected);
+        }
+    };
 }
 
 mod syntax;
@@ -478,18 +604,15 @@ fn test_syntax_spans_for_supported_filetype() {
 
 #[test]
 fn test_syntax_spans_update_after_edit() {
-    let path = AbsolutePath::from_path(temp_path_with_ext("syntax-edit", "rs").as_path()).unwrap();
-    let mut buf = Buffer::from_str_with_path("let value = 1;", path);
+    let mut buf = syntax_buffer("syntax-edit", "rs", "let value = 1;");
 
     assert!(
-        buf.syntax_spans_for_line(0)
-            .expect("line should exist")
+        line_spans(&mut buf, 0)
             .iter()
             .any(|span| span.style == tag("keyword"))
     );
     assert!(
-        buf.syntax_spans_for_line(0)
-            .expect("line should exist")
+        line_spans(&mut buf, 0)
             .iter()
             .any(|span| span.style == tag("variable"))
     );
@@ -500,7 +623,7 @@ fn test_syntax_spans_update_after_edit() {
     assert!(!buf.syntax_background_pending());
     assert!(!buf.indent_scope_cache_stale());
 
-    let spans = buf.syntax_spans_for_line(0).expect("line should exist");
+    let spans = line_spans(&mut buf, 0);
     assert_spans_include_comment_style(&spans);
 }
 
@@ -545,21 +668,15 @@ fn test_multiline_string_reuses_downstream_syntax_after_line_insertion() {
 
 #[test]
 fn test_markdown_code_fence_injects_nested_syntax() {
-    let path = AbsolutePath::from_path(temp_path_with_ext("syntax-fence", "md").as_path()).unwrap();
-    let mut buf = Buffer::from_str_with_path(
+    let mut buf = syntax_buffer(
+        "syntax-fence",
+        "md",
         "```rust\nfn main() { let value = Some(\"hi\"); }\n```",
-        path,
     );
 
-    let first_line = buf
-        .syntax_spans_for_line(0)
-        .expect("first line should exist");
-    let second_line = buf
-        .syntax_spans_for_line(1)
-        .expect("second line should exist");
-    let third_line = buf
-        .syntax_spans_for_line(2)
-        .expect("third line should exist");
+    let first_line = line_spans(&mut buf, 0);
+    let second_line = line_spans(&mut buf, 1);
+    let third_line = line_spans(&mut buf, 2);
 
     assert!(
         first_line
@@ -1076,41 +1193,27 @@ fn test_shell_fixture_highlights_substitutions_and_heredoc_marker() {
 
 #[test]
 fn test_markdown_prose_does_not_use_generic_identifier_heuristics() {
-    let path = AbsolutePath::from_path(temp_path_with_ext("syntax-prose", "md").as_path()).unwrap();
-    let mut buf = Buffer::from_str_with_path("Capitalized SCREAMY_CASE words stay plain", path);
+    let mut buf = syntax_buffer(
+        "syntax-prose",
+        "md",
+        "Capitalized SCREAMY_CASE words stay plain",
+    );
 
-    let spans = buf
-        .syntax_spans_for_line(0)
-        .expect("prose line should exist");
+    let spans = line_spans(&mut buf, 0);
     assert!(spans.is_empty());
 }
 
 #[test]
 fn test_markdown_fixture_highlights_common_constructs() {
-    let path =
-        AbsolutePath::from_path(temp_path_with_ext("syntax-markdown-common", "md").as_path())
-            .unwrap();
     let fixture = include_str!("tests/syntax/fixtures/markdown.md");
-    let mut buf = Buffer::from_str_with_path(fixture, path);
+    let mut buf = syntax_buffer("syntax-markdown-common", "md", fixture);
 
-    let heading = buf
-        .syntax_spans_for_line(0)
-        .expect("heading line should exist");
-    let prose = buf
-        .syntax_spans_for_line(2)
-        .expect("prose line should exist");
-    let quote = buf
-        .syntax_spans_for_line(6)
-        .expect("quote line should exist");
-    let list = buf
-        .syntax_spans_for_line(8)
-        .expect("list line should exist");
-    let thematic_break = buf
-        .syntax_spans_for_line(11)
-        .expect("thematic break line should exist");
-    let plain = buf
-        .syntax_spans_for_line(28)
-        .expect("plain line should exist");
+    let heading = line_spans(&mut buf, 0);
+    let prose = line_spans(&mut buf, 2);
+    let quote = line_spans(&mut buf, 6);
+    let list = line_spans(&mut buf, 8);
+    let thematic_break = line_spans(&mut buf, 11);
+    let plain = line_spans(&mut buf, 28);
 
     assert_spans_include_style(&heading, tag("markup.heading"));
     assert_spans_include_style(&prose, tag("markup.emphasis"));
@@ -1497,10 +1600,7 @@ fn test_char_width_narrow() {
 
 #[test]
 fn test_tab_display_width_and_expansion() {
-    let _config_guard = globals::set_test_config(Config {
-        tab_width: 4,
-        ..Default::default()
-    });
+    let _config_guard = tab_config_4();
 
     assert_eq!(display_char_width('\t', 0, 4), 4);
     assert_eq!(display_char_width('\t', 1, 4), 4);
@@ -2292,22 +2392,21 @@ fn test_word_forward_at_last_word() {
     assert_eq!(result, Some(Cursor::new(1, 0))); // wraps to 'm' on line 1
 }
 
-#[test]
-fn test_word_forward_wrap_no_leading_whitespace() {
-    // "hello\nworld" - at 'd' in "hello", w should go to 'w' on line 1 (first word)
-    let buf = Buffer::from_str("hello\nworld");
-    let result = buf.next_boundary(Cursor::new(0, 4), Boundary::Word);
-    assert_eq!(result, Some(Cursor::new(1, 0))); // wraps to 'w' on line 1
-}
+assert_next_boundary!(
+    test_word_forward_wrap_no_leading_whitespace,
+    "hello\nworld",
+    Cursor::new(0, 4),
+    Boundary::Word,
+    Some(Cursor::new(1, 0))
+);
 
-#[test]
-fn test_word_forward_at_word_end() {
-    // "hello world" - at 'h' (start of "hello"), w should go to 'w' (start of "world")
-    // This is NOT a wrapping case - it's moving to the next word on the same line
-    let buf = Buffer::from_str("hello world");
-    let result = buf.next_boundary(Cursor::new(0, 0), Boundary::Word);
-    assert_eq!(result, Some(Cursor::new(0, 6))); // 'w'
-}
+assert_next_boundary!(
+    test_word_forward_at_word_end,
+    "hello world",
+    Cursor::new(0, 0),
+    Boundary::Word,
+    Some(Cursor::new(0, 6))
+);
 
 #[test]
 fn test_word_forward_at_word_end_with_nonword() {
@@ -2327,623 +2426,410 @@ fn test_word_forward_at_word_end_with_nonword() {
     assert_eq!(result_e, Some(Cursor::new(0, 7)), "e should go to last '-'");
 }
 
-#[test]
-fn test_word_end_at_nonword_sequence_end() {
-    // "hello---world" - at last '-' (position 7), e should go to end of "world" (position 12)
-    let buf = Buffer::from_str("hello---world");
+assert_next_boundary!(
+    test_word_end_at_nonword_sequence_end,
+    "hello---world",
+    Cursor::new(0, 7),
+    Boundary::WordEnd,
+    Some(Cursor::new(0, 12)),
+    "e should go to end of 'world'"
+);
 
-    let result = buf.next_boundary(Cursor::new(0, 7), Boundary::WordEnd);
-    assert_eq!(
-        result,
-        Some(Cursor::new(0, 12)),
-        "e should go to end of 'world'"
-    );
-}
+assert_next_boundary!(
+    test_word_end_at_word_start,
+    "hello world",
+    Cursor::new(0, 0),
+    Boundary::WordEnd,
+    Some(Cursor::new(0, 4))
+);
 
-#[test]
-fn test_word_end_at_word_start() {
-    // "hello world" - at 'h', e should go to 'o' (end of "hello")
-    let buf = Buffer::from_str("hello world");
-    let result = buf.next_boundary(Cursor::new(0, 0), Boundary::WordEnd);
-    assert_eq!(result, Some(Cursor::new(0, 4))); // 'o'
-}
+assert_next_boundary!(
+    test_word_end_at_word_end,
+    "hello world",
+    Cursor::new(0, 4),
+    Boundary::WordEnd,
+    Some(Cursor::new(0, 10))
+);
 
-#[test]
-fn test_word_end_at_word_end() {
-    // "hello world" - at 'o' (end of "hello"), e should go to 'd' (end of "world")
-    let buf = Buffer::from_str("hello world");
-    let result = buf.next_boundary(Cursor::new(0, 4), Boundary::WordEnd);
-    assert_eq!(result, Some(Cursor::new(0, 10))); // 'd'
-}
+assert_next_boundary!(
+    test_word_end_at_last_char_wraps,
+    "hello world\nfoo",
+    Cursor::new(0, 10),
+    Boundary::WordEnd,
+    Some(Cursor::new(1, 2))
+);
 
-#[test]
-fn test_word_end_at_last_char_wraps() {
-    // "hello world\nfoo" - at 'd' in "world", e should wrap to 'o' in "foo"
-    let buf = Buffer::from_str("hello world\nfoo");
-    let result = buf.next_boundary(Cursor::new(0, 10), Boundary::WordEnd);
-    assert_eq!(result, Some(Cursor::new(1, 2))); // 'o' in "foo"
-}
+assert_next_boundary!(
+    test_bigword_forward_wrap_no_leading_whitespace,
+    "hello\nworld",
+    Cursor::new(0, 4),
+    Boundary::BigWord,
+    Some(Cursor::new(1, 0))
+);
 
-#[test]
-fn test_bigword_forward_wrap_no_leading_whitespace() {
-    // "hello\nworld" - at end of line 0, W should go to 'w' on line 1 (first word)
-    let buf = Buffer::from_str("hello\nworld");
-    let result = buf.next_boundary(Cursor::new(0, 4), Boundary::BigWord);
-    assert_eq!(result, Some(Cursor::new(1, 0))); // wraps to 'w' on line 1
-}
-
-#[test]
-fn test_bigword_forward_wrap_with_leading_whitespace() {
-    // "hello\n  world" - at end of line 0, W should skip the leading spaces and go to 'w' on line 1
-    let buf = Buffer::from_str("hello\n  world");
-    let result = buf.next_boundary(Cursor::new(0, 4), Boundary::BigWord);
-    assert_eq!(result, Some(Cursor::new(1, 2))); // wraps to 'w' on line 1 (skipping 2 spaces)
-}
+assert_next_boundary!(
+    test_bigword_forward_wrap_with_leading_whitespace,
+    "hello\n  world",
+    Cursor::new(0, 4),
+    Boundary::BigWord,
+    Some(Cursor::new(1, 2))
+);
 
 // Non-word boundary tests (bug fix for "hello---world" case)
 
-#[test]
-fn test_word_forward_with_nonword_chars() {
-    // "hello---world" - at 'h', w should go to first '-' (position 5)
-    let buf = Buffer::from_str("hello---world");
-    let result = buf.next_boundary(Cursor::new(0, 0), Boundary::Word);
-    assert_eq!(result, Some(Cursor::new(0, 5))); // first '-'
-}
+assert_next_boundary!(
+    test_word_forward_with_nonword_chars,
+    "hello---world",
+    Cursor::new(0, 0),
+    Boundary::Word,
+    Some(Cursor::new(0, 5))
+);
 
-#[test]
-fn test_word_forward_at_nonword_boundary() {
-    // "hello---world" - at first '-' (position 5), w should go to 'w' of "world" (position 8)
-    let buf = Buffer::from_str("hello---world");
-    let result = buf.next_boundary(Cursor::new(0, 5), Boundary::Word);
-    assert_eq!(result, Some(Cursor::new(0, 8))); // first 'w' of "world"
-}
+assert_next_boundary!(
+    test_word_forward_at_nonword_boundary,
+    "hello---world",
+    Cursor::new(0, 5),
+    Boundary::Word,
+    Some(Cursor::new(0, 8))
+);
 
-#[test]
-fn test_word_forward_multiple_nonword_chars() {
-    // "a...b" - at 'a', w should go to first '.' (position 1)
-    let buf = Buffer::from_str("a...b");
-    let result = buf.next_boundary(Cursor::new(0, 0), Boundary::Word);
-    assert_eq!(result, Some(Cursor::new(0, 1))); // first '.'
-}
+assert_next_boundary!(
+    test_word_forward_multiple_nonword_chars,
+    "a...b",
+    Cursor::new(0, 0),
+    Boundary::Word,
+    Some(Cursor::new(0, 1))
+);
 
-#[test]
-fn test_word_forward_nonword_at_start() {
-    // "...hello" - at first '.' (position 0), w should go to 'h' (position 3)
-    let buf = Buffer::from_str("...hello");
-    let result = buf.next_boundary(Cursor::new(0, 0), Boundary::Word);
-    assert_eq!(result, Some(Cursor::new(0, 3))); // 'h'
-}
+assert_next_boundary!(
+    test_word_forward_nonword_at_start,
+    "...hello",
+    Cursor::new(0, 0),
+    Boundary::Word,
+    Some(Cursor::new(0, 3))
+);
 
-#[test]
-fn test_word_end_with_nonword_chars() {
-    // "hello---world" - at 'h', e should go to 'o' (end of "hello")
-    let buf = Buffer::from_str("hello---world");
-    let result = buf.next_boundary(Cursor::new(0, 0), Boundary::WordEnd);
-    assert_eq!(result, Some(Cursor::new(0, 4))); // 'o' (end of "hello")
-}
+assert_next_boundary!(
+    test_word_end_with_nonword_chars,
+    "hello---world",
+    Cursor::new(0, 0),
+    Boundary::WordEnd,
+    Some(Cursor::new(0, 4))
+);
 
-#[test]
-fn test_word_end_at_nonword_boundary() {
-    // "hello---world" - at first '-' (position 5), e should go to last '-' (position 7)
-    let buf = Buffer::from_str("hello---world");
-    let result = buf.next_boundary(Cursor::new(0, 5), Boundary::WordEnd);
-    assert_eq!(result, Some(Cursor::new(0, 7))); // last '-' (end of "---")
-}
+assert_next_boundary!(
+    test_word_end_at_nonword_boundary,
+    "hello---world",
+    Cursor::new(0, 5),
+    Boundary::WordEnd,
+    Some(Cursor::new(0, 7))
+);
 
-#[test]
-fn test_word_backward_with_nonword_chars() {
-    // "hello---world" - at 'd' (position 11), b should go to start of "world" (position 8)
-    // This matches Vim behavior - b goes to start of current/previous word
-    let buf = Buffer::from_str("hello---world");
-    let result = buf.prev_boundary(Cursor::new(0, 11), Boundary::Word);
-    assert_eq!(result, Some(Cursor::new(0, 8))); // start of "world"
-}
+assert_prev_boundary!(
+    test_word_backward_with_nonword_chars,
+    "hello---world",
+    Cursor::new(0, 11),
+    Boundary::Word,
+    Some(Cursor::new(0, 8))
+);
 
-#[test]
-fn test_word_backward_at_nonword_boundary() {
-    // "hello---world" - at first '-' (position 5), b should go to 'h' (position 0)
-    let buf = Buffer::from_str("hello---world");
-    let result = buf.prev_boundary(Cursor::new(0, 5), Boundary::Word);
-    assert_eq!(result, Some(Cursor::new(0, 0))); // 'h'
-}
+assert_prev_boundary!(
+    test_word_backward_at_nonword_boundary,
+    "hello---world",
+    Cursor::new(0, 5),
+    Boundary::Word,
+    Some(Cursor::new(0, 0))
+);
 
-#[test]
-fn test_word_backward_at_word_boundary_after_nonword() {
-    // "hello---world" - at first 'w' of "world" (position 8), b should go to first '-' (position 5)
-    let buf = Buffer::from_str("hello---world");
-    let result = buf.prev_boundary(Cursor::new(0, 8), Boundary::Word);
-    assert_eq!(result, Some(Cursor::new(0, 5))); // first '-'
-}
+assert_prev_boundary!(
+    test_word_backward_at_word_boundary_after_nonword,
+    "hello---world",
+    Cursor::new(0, 8),
+    Boundary::Word,
+    Some(Cursor::new(0, 5))
+);
 
 // BigWordEnd wrap test (bug fix for E key at end of line)
 
-#[test]
-fn test_bigword_end_at_end_of_word_wraps_to_next_line() {
-    // "hello\nworld" - at end of line 0 (position 4), E should wrap to end of "world" on line 1
-    let buf = Buffer::from_str("hello\nworld");
-    let result = buf.next_boundary(Cursor::new(0, 4), Boundary::BigWordEnd);
-    assert_eq!(result, Some(Cursor::new(1, 4))); // end of "world" on line 1
-}
+assert_next_boundary!(
+    test_bigword_end_at_end_of_word_wraps_to_next_line,
+    "hello\nworld",
+    Cursor::new(0, 4),
+    Boundary::BigWordEnd,
+    Some(Cursor::new(1, 4))
+);
 
-#[test]
-fn test_bigword_end_in_middle_of_word() {
-    // "hello world" - at position 2 ('l'), E should go to end of "hello" (position 4)
-    let buf = Buffer::from_str("hello world");
-    let result = buf.next_boundary(Cursor::new(0, 2), Boundary::BigWordEnd);
-    assert_eq!(result, Some(Cursor::new(0, 4))); // end of "hello"
-}
+assert_next_boundary!(
+    test_bigword_end_in_middle_of_word,
+    "hello world",
+    Cursor::new(0, 2),
+    Boundary::BigWordEnd,
+    Some(Cursor::new(0, 4))
+);
 
-#[test]
-fn test_bigword_end_at_last_char_with_next_word() {
-    // "hello world" - at last char of "hello" (position 4), E should go to end of "world" (position 10)
-    let buf = Buffer::from_str("hello world");
-    let result = buf.next_boundary(Cursor::new(0, 4), Boundary::BigWordEnd);
-    assert_eq!(result, Some(Cursor::new(0, 10))); // end of "world"
-}
+assert_next_boundary!(
+    test_bigword_end_at_last_char_with_next_word,
+    "hello world",
+    Cursor::new(0, 4),
+    Boundary::BigWordEnd,
+    Some(Cursor::new(0, 10))
+);
 
-#[test]
-fn test_operator_target_word_forward_range() {
-    let buf = Buffer::from_str("hello world");
-    let range = buf
-        .get_operator_target_range(
-            Cursor::new(0, 0),
-            OperatorTarget::BoundaryMotion(BoundaryMotion::WordForward),
-        )
-        .unwrap();
-    assert_eq!(
-        range,
-        TextObjectRange {
-            start: Cursor::new(0, 0),
-            end: Cursor::new(0, 6),
-        }
-    );
-}
+assert_operator_range!(
+    test_operator_target_word_forward_range,
+    "hello world",
+    Cursor::new(0, 0),
+    OperatorTarget::BoundaryMotion(BoundaryMotion::WordForward),
+    Cursor::new(0, 0),
+    Cursor::new(0, 6)
+);
 
-#[test]
-fn test_operator_target_word_end_range() {
-    let buf = Buffer::from_str("hello world");
-    let range = buf
-        .get_operator_target_range(
-            Cursor::new(0, 0),
-            OperatorTarget::BoundaryMotion(BoundaryMotion::WordEnd),
-        )
-        .unwrap();
-    assert_eq!(
-        range,
-        TextObjectRange {
-            start: Cursor::new(0, 0),
-            end: Cursor::new(0, 5),
-        }
-    );
-}
+assert_operator_range!(
+    test_operator_target_word_end_range,
+    "hello world",
+    Cursor::new(0, 0),
+    OperatorTarget::BoundaryMotion(BoundaryMotion::WordEnd),
+    Cursor::new(0, 0),
+    Cursor::new(0, 5)
+);
 
-#[test]
-fn test_operator_target_word_backward_range() {
-    let buf = Buffer::from_str("hello world");
-    let range = buf
-        .get_operator_target_range(
-            Cursor::new(0, 6),
-            OperatorTarget::BoundaryMotion(BoundaryMotion::WordBackward),
-        )
-        .unwrap();
-    assert_eq!(
-        range,
-        TextObjectRange {
-            start: Cursor::new(0, 0),
-            end: Cursor::new(0, 6),
-        }
-    );
-}
+assert_operator_range!(
+    test_operator_target_word_backward_range,
+    "hello world",
+    Cursor::new(0, 6),
+    OperatorTarget::BoundaryMotion(BoundaryMotion::WordBackward),
+    Cursor::new(0, 0),
+    Cursor::new(0, 6)
+);
 
-#[test]
-fn test_operator_target_character_scan_find_forward_range() {
-    let buf = Buffer::from_str("foo:bar");
-    let range = buf
-        .get_operator_target_range(
-            Cursor::new(0, 0),
-            OperatorTarget::CharacterScan(FindState {
-                target_char: ':',
-                kind: FindKind::Find,
-                direction: Direction::Forward,
-            }),
-        )
-        .unwrap();
-    assert_eq!(
-        range,
-        TextObjectRange {
-            start: Cursor::new(0, 0),
-            end: Cursor::new(0, 4),
-        }
-    );
-}
+assert_operator_range!(
+    test_operator_target_character_scan_find_forward_range,
+    "foo:bar",
+    Cursor::new(0, 0),
+    OperatorTarget::CharacterScan(FindState {
+        target_char: ':',
+        kind: FindKind::Find,
+        direction: Direction::Forward,
+    }),
+    Cursor::new(0, 0),
+    Cursor::new(0, 4)
+);
 
-#[test]
-fn test_operator_target_character_scan_till_forward_range() {
-    let buf = Buffer::from_str("foo:bar");
-    let range = buf
-        .get_operator_target_range(
-            Cursor::new(0, 0),
-            OperatorTarget::CharacterScan(FindState {
-                target_char: ':',
-                kind: FindKind::Till,
-                direction: Direction::Forward,
-            }),
-        )
-        .unwrap();
-    assert_eq!(
-        range,
-        TextObjectRange {
-            start: Cursor::new(0, 0),
-            end: Cursor::new(0, 3),
-        }
-    );
-}
+assert_operator_range!(
+    test_operator_target_character_scan_till_forward_range,
+    "foo:bar",
+    Cursor::new(0, 0),
+    OperatorTarget::CharacterScan(FindState {
+        target_char: ':',
+        kind: FindKind::Till,
+        direction: Direction::Forward,
+    }),
+    Cursor::new(0, 0),
+    Cursor::new(0, 3)
+);
 
-#[test]
-fn test_operator_target_character_scan_find_backward_range() {
-    let buf = Buffer::from_str("abcxdef");
-    let range = buf
-        .get_operator_target_range(
-            Cursor::new(0, 6),
-            OperatorTarget::CharacterScan(FindState {
-                target_char: 'x',
-                kind: FindKind::Find,
-                direction: Direction::Backward,
-            }),
-        )
-        .unwrap();
-    assert_eq!(
-        range,
-        TextObjectRange {
-            start: Cursor::new(0, 3),
-            end: Cursor::new(0, 6),
-        }
-    );
-}
+assert_operator_range!(
+    test_operator_target_character_scan_find_backward_range,
+    "abcxdef",
+    Cursor::new(0, 6),
+    OperatorTarget::CharacterScan(FindState {
+        target_char: 'x',
+        kind: FindKind::Find,
+        direction: Direction::Backward,
+    }),
+    Cursor::new(0, 3),
+    Cursor::new(0, 6)
+);
 
-#[test]
-fn test_operator_target_character_scan_till_backward_range() {
-    let buf = Buffer::from_str("abcxdef");
-    let range = buf
-        .get_operator_target_range(
-            Cursor::new(0, 6),
-            OperatorTarget::CharacterScan(FindState {
-                target_char: 'x',
-                kind: FindKind::Till,
-                direction: Direction::Backward,
-            }),
-        )
-        .unwrap();
-    assert_eq!(
-        range,
-        TextObjectRange {
-            start: Cursor::new(0, 4),
-            end: Cursor::new(0, 6),
-        }
-    );
-}
+assert_operator_range!(
+    test_operator_target_character_scan_till_backward_range,
+    "abcxdef",
+    Cursor::new(0, 6),
+    OperatorTarget::CharacterScan(FindState {
+        target_char: 'x',
+        kind: FindKind::Till,
+        direction: Direction::Backward,
+    }),
+    Cursor::new(0, 4),
+    Cursor::new(0, 6)
+);
 
-#[test]
-fn test_operator_target_character_scan_counted_range() {
-    let buf = Buffer::from_str("foo:bar:baz");
-    let range = buf
-        .get_operator_target_range_with_count(
-            Cursor::new(0, 0),
-            OperatorTarget::CharacterScan(FindState {
-                target_char: ':',
-                kind: FindKind::Find,
-                direction: Direction::Forward,
-            }),
-            2,
-        )
-        .unwrap();
-    assert_eq!(
-        range,
-        TextObjectRange {
-            start: Cursor::new(0, 0),
-            end: Cursor::new(0, 8),
-        }
-    );
-}
+assert_operator_range_with_count!(
+    test_operator_target_character_scan_counted_range,
+    "foo:bar:baz",
+    Cursor::new(0, 0),
+    OperatorTarget::CharacterScan(FindState {
+        target_char: ':',
+        kind: FindKind::Find,
+        direction: Direction::Forward,
+    }),
+    2,
+    Cursor::new(0, 0),
+    Cursor::new(0, 8)
+);
 
-#[test]
-fn test_operator_target_bigword_forward_range() {
-    let buf = Buffer::from_str("alpha --- beta");
-    let range = buf
-        .get_operator_target_range(
-            Cursor::new(0, 0),
-            OperatorTarget::BoundaryMotion(BoundaryMotion::BigWordForward),
-        )
-        .unwrap();
-    assert_eq!(
-        range,
-        TextObjectRange {
-            start: Cursor::new(0, 0),
-            end: Cursor::new(0, 6),
-        }
-    );
-}
+assert_operator_range!(
+    test_operator_target_bigword_forward_range,
+    "alpha --- beta",
+    Cursor::new(0, 0),
+    OperatorTarget::BoundaryMotion(BoundaryMotion::BigWordForward),
+    Cursor::new(0, 0),
+    Cursor::new(0, 6)
+);
 
-#[test]
-fn test_operator_target_bigword_backward_range() {
-    let buf = Buffer::from_str("alpha --- beta");
-    let range = buf
-        .get_operator_target_range(
-            Cursor::new(0, 10),
-            OperatorTarget::BoundaryMotion(BoundaryMotion::BigWordBackward),
-        )
-        .unwrap();
-    assert_eq!(
-        range,
-        TextObjectRange {
-            start: Cursor::new(0, 6),
-            end: Cursor::new(0, 10),
-        }
-    );
-}
+assert_operator_range!(
+    test_operator_target_bigword_backward_range,
+    "alpha --- beta",
+    Cursor::new(0, 10),
+    OperatorTarget::BoundaryMotion(BoundaryMotion::BigWordBackward),
+    Cursor::new(0, 6),
+    Cursor::new(0, 10)
+);
 
-#[test]
-fn test_operator_target_inner_bigword_range() {
-    let buf = Buffer::from_str("foo-bar baz");
-    let range = buf
-        .get_operator_target_range(
-            Cursor::new(0, 2),
-            OperatorTarget::TextObject(TextObject::InnerBigWord),
-        )
-        .unwrap();
-    assert_eq!(
-        range,
-        TextObjectRange {
-            start: Cursor::new(0, 0),
-            end: Cursor::new(0, 7),
-        }
-    );
-}
+assert_operator_range!(
+    test_operator_target_inner_bigword_range,
+    "foo-bar baz",
+    Cursor::new(0, 2),
+    OperatorTarget::TextObject(TextObject::InnerBigWord),
+    Cursor::new(0, 0),
+    Cursor::new(0, 7)
+);
 
-#[test]
-fn test_operator_target_around_bigword_range() {
-    let buf = Buffer::from_str("foo-bar   baz");
-    let range = buf
-        .get_operator_target_range(
-            Cursor::new(0, 2),
-            OperatorTarget::TextObject(TextObject::AroundBigWord),
-        )
-        .unwrap();
-    assert_eq!(
-        range,
-        TextObjectRange {
-            start: Cursor::new(0, 0),
-            end: Cursor::new(0, 10),
-        }
-    );
-}
+assert_operator_range!(
+    test_operator_target_around_bigword_range,
+    "foo-bar   baz",
+    Cursor::new(0, 2),
+    OperatorTarget::TextObject(TextObject::AroundBigWord),
+    Cursor::new(0, 0),
+    Cursor::new(0, 10)
+);
 
-#[test]
-fn test_operator_target_inner_bigword_whitespace_range() {
-    let buf = Buffer::from_str("x foo-bar baz");
-    let range = buf
-        .get_operator_target_range(
-            Cursor::new(0, 1),
-            OperatorTarget::TextObject(TextObject::InnerBigWord),
-        )
-        .unwrap();
-    assert_eq!(
-        range,
-        TextObjectRange {
-            start: Cursor::new(0, 1),
-            end: Cursor::new(0, 2),
-        }
-    );
-}
+assert_operator_range!(
+    test_operator_target_inner_bigword_whitespace_range,
+    "x foo-bar baz",
+    Cursor::new(0, 1),
+    OperatorTarget::TextObject(TextObject::InnerBigWord),
+    Cursor::new(0, 1),
+    Cursor::new(0, 2)
+);
 
-#[test]
-fn test_operator_target_around_bigword_whitespace_range() {
-    let buf = Buffer::from_str("x foo-bar baz");
-    let range = buf
-        .get_operator_target_range(
-            Cursor::new(0, 1),
-            OperatorTarget::TextObject(TextObject::AroundBigWord),
-        )
-        .unwrap();
-    assert_eq!(
-        range,
-        TextObjectRange {
-            start: Cursor::new(0, 1),
-            end: Cursor::new(0, 9),
-        }
-    );
-}
+assert_operator_range!(
+    test_operator_target_around_bigword_whitespace_range,
+    "x foo-bar baz",
+    Cursor::new(0, 1),
+    OperatorTarget::TextObject(TextObject::AroundBigWord),
+    Cursor::new(0, 1),
+    Cursor::new(0, 9)
+);
 
-#[test]
-fn test_operator_target_bigword_whitespace_only_range() {
-    let buf = Buffer::from_str("   ");
-    let range = buf
-        .get_operator_target_range(
-            Cursor::new(0, 0),
-            OperatorTarget::TextObject(TextObject::InnerBigWord),
-        )
-        .unwrap();
-    assert_eq!(
-        range,
-        TextObjectRange {
-            start: Cursor::new(0, 0),
-            end: Cursor::new(0, 3),
-        }
-    );
-}
+assert_operator_range!(
+    test_operator_target_bigword_whitespace_only_range,
+    "   ",
+    Cursor::new(0, 0),
+    OperatorTarget::TextObject(TextObject::InnerBigWord),
+    Cursor::new(0, 0),
+    Cursor::new(0, 3)
+);
 
-#[test]
-fn test_operator_target_bigword_empty_line_is_zero_length() {
-    let buf = Buffer::new();
-    let range = buf
-        .get_operator_target_range(
-            Cursor::new(0, 0),
-            OperatorTarget::TextObject(TextObject::InnerBigWord),
-        )
-        .unwrap();
-    assert_eq!(
-        range,
-        TextObjectRange {
-            start: Cursor::new(0, 0),
-            end: Cursor::new(0, 0),
-        }
-    );
-}
+assert_operator_range!(
+    test_operator_target_bigword_empty_line_is_zero_length,
+    "",
+    Cursor::new(0, 0),
+    OperatorTarget::TextObject(TextObject::InnerBigWord),
+    Cursor::new(0, 0),
+    Cursor::new(0, 0)
+);
 
-#[test]
-fn test_operator_target_line_end_range() {
-    let buf = Buffer::from_str("hello world");
-    let range = buf
-        .get_operator_target_range(
-            Cursor::new(0, 6),
-            OperatorTarget::BoundaryMotion(BoundaryMotion::LineEnd),
-        )
-        .unwrap();
-    assert_eq!(
-        range,
-        TextObjectRange {
-            start: Cursor::new(0, 6),
-            end: Cursor::new(0, 11),
-        }
-    );
-}
+assert_operator_range!(
+    test_operator_target_line_end_range,
+    "hello world",
+    Cursor::new(0, 6),
+    OperatorTarget::BoundaryMotion(BoundaryMotion::LineEnd),
+    Cursor::new(0, 6),
+    Cursor::new(0, 11)
+);
 
-#[test]
-fn test_operator_target_line_start_range() {
-    let buf = Buffer::from_str("hello world");
-    let range = buf
-        .get_operator_target_range(
-            Cursor::new(0, 6),
-            OperatorTarget::BoundaryMotion(BoundaryMotion::LineStart),
-        )
-        .unwrap();
-    assert_eq!(
-        range,
-        TextObjectRange {
-            start: Cursor::new(0, 0),
-            end: Cursor::new(0, 6),
-        }
-    );
-}
+assert_operator_range!(
+    test_operator_target_line_start_range,
+    "hello world",
+    Cursor::new(0, 6),
+    OperatorTarget::BoundaryMotion(BoundaryMotion::LineStart),
+    Cursor::new(0, 0),
+    Cursor::new(0, 6)
+);
 
-#[test]
-fn test_operator_target_line_content_start_range() {
-    let buf = Buffer::from_str("    hello world");
-    let range = buf
-        .get_operator_target_range(
-            Cursor::new(0, 10),
-            OperatorTarget::BoundaryMotion(BoundaryMotion::LineContentStart),
-        )
-        .unwrap();
-    assert_eq!(
-        range,
-        TextObjectRange {
-            start: Cursor::new(0, 4),
-            end: Cursor::new(0, 10),
-        }
-    );
-}
+assert_operator_range!(
+    test_operator_target_line_content_start_range,
+    "    hello world",
+    Cursor::new(0, 10),
+    OperatorTarget::BoundaryMotion(BoundaryMotion::LineContentStart),
+    Cursor::new(0, 4),
+    Cursor::new(0, 10)
+);
 
-#[test]
-fn test_operator_target_counted_word_forward_range() {
-    let buf = Buffer::from_str("one two three four");
-    let range = buf
-        .get_operator_target_range_with_count(
-            Cursor::new(0, 0),
-            OperatorTarget::BoundaryMotion(BoundaryMotion::WordForward),
-            2,
-        )
-        .unwrap();
-    assert_eq!(
-        range,
-        TextObjectRange {
-            start: Cursor::new(0, 0),
-            end: Cursor::new(0, 8),
-        }
-    );
-}
+assert_operator_range_with_count!(
+    test_operator_target_counted_word_forward_range,
+    "one two three four",
+    Cursor::new(0, 0),
+    OperatorTarget::BoundaryMotion(BoundaryMotion::WordForward),
+    2,
+    Cursor::new(0, 0),
+    Cursor::new(0, 8)
+);
 
-#[test]
-fn test_operator_target_counted_word_end_range() {
-    let buf = Buffer::from_str("one two three four");
-    let range = buf
-        .get_operator_target_range_with_count(
-            Cursor::new(0, 0),
-            OperatorTarget::BoundaryMotion(BoundaryMotion::WordEnd),
-            2,
-        )
-        .unwrap();
-    assert_eq!(
-        range,
-        TextObjectRange {
-            start: Cursor::new(0, 0),
-            end: Cursor::new(0, 7),
-        }
-    );
-}
+assert_operator_range_with_count!(
+    test_operator_target_counted_word_end_range,
+    "one two three four",
+    Cursor::new(0, 0),
+    OperatorTarget::BoundaryMotion(BoundaryMotion::WordEnd),
+    2,
+    Cursor::new(0, 0),
+    Cursor::new(0, 7)
+);
 
-#[test]
-fn test_operator_target_counted_word_backward_range() {
-    let buf = Buffer::from_str("one two three four");
-    let range = buf
-        .get_operator_target_range_with_count(
-            Cursor::new(0, 8),
-            OperatorTarget::BoundaryMotion(BoundaryMotion::WordBackward),
-            2,
-        )
-        .unwrap();
-    assert_eq!(
-        range,
-        TextObjectRange {
-            start: Cursor::new(0, 0),
-            end: Cursor::new(0, 8),
-        }
-    );
-}
+assert_operator_range_with_count!(
+    test_operator_target_counted_word_backward_range,
+    "one two three four",
+    Cursor::new(0, 8),
+    OperatorTarget::BoundaryMotion(BoundaryMotion::WordBackward),
+    2,
+    Cursor::new(0, 0),
+    Cursor::new(0, 8)
+);
 
-#[test]
-fn test_linewise_operator_target_first_line_range() {
-    let buf = Buffer::from_str("a\nb\nc\nd\ne");
-    let range = buf
-        .get_linewise_operator_target_range(Cursor::new(3, 0), LinewiseMotion::FirstLine)
-        .unwrap();
-    assert_eq!(range, LinewiseDeleteRange::new(0, 4));
-}
+assert_linewise_range!(
+    test_linewise_operator_target_first_line_range,
+    "a\nb\nc\nd\ne",
+    Cursor::new(3, 0),
+    LinewiseMotion::FirstLine,
+    LinewiseDeleteRange::new(0, 4)
+);
 
-#[test]
-fn test_linewise_operator_target_last_line_range() {
-    let buf = Buffer::from_str("a\nb\nc\nd\ne");
-    let range = buf
-        .get_linewise_operator_target_range(Cursor::new(1, 0), LinewiseMotion::LastLine)
-        .unwrap();
-    assert_eq!(range, LinewiseDeleteRange::new(1, 4));
-}
+assert_linewise_range!(
+    test_linewise_operator_target_last_line_range,
+    "a\nb\nc\nd\ne",
+    Cursor::new(1, 0),
+    LinewiseMotion::LastLine,
+    LinewiseDeleteRange::new(1, 4)
+);
 
-#[test]
-fn test_linewise_operator_target_counted_first_line_range() {
-    let buf = Buffer::from_str("a\nb\nc\nd\ne\nf\ng\nh\ni\nj");
-    let range = buf
-        .get_linewise_operator_target_range_with_count(
-            Cursor::new(7, 0),
-            LinewiseMotion::FirstLine,
-            5,
-        )
-        .unwrap();
-    assert_eq!(range, LinewiseDeleteRange::new(4, 4));
-}
+assert_linewise_range_with_count!(
+    test_linewise_operator_target_counted_first_line_range,
+    "a\nb\nc\nd\ne\nf\ng\nh\ni\nj",
+    Cursor::new(7, 0),
+    LinewiseMotion::FirstLine,
+    5,
+    LinewiseDeleteRange::new(4, 4)
+);
 
-#[test]
-fn test_linewise_operator_target_counted_last_line_range() {
-    let buf = Buffer::from_str("a\nb\nc\nd\ne\nf\ng\nh\ni\nj");
-    let range = buf
-        .get_linewise_operator_target_range_with_count(
-            Cursor::new(2, 0),
-            LinewiseMotion::LastLine,
-            5,
-        )
-        .unwrap();
-    assert_eq!(range, LinewiseDeleteRange::new(2, 3));
-}
+assert_linewise_range_with_count!(
+    test_linewise_operator_target_counted_last_line_range,
+    "a\nb\nc\nd\ne\nf\ng\nh\ni\nj",
+    Cursor::new(2, 0),
+    LinewiseMotion::LastLine,
+    5,
+    LinewiseDeleteRange::new(2, 3)
+);
 
 #[test]
 fn test_operator_target_invalid_count_is_none() {
@@ -2966,115 +2852,61 @@ fn test_operator_target_invalid_count_is_none() {
     );
 }
 
-#[test]
-fn test_operator_target_counted_bigword_range() {
-    let buf = Buffer::from_str("foo-bar baz qux");
-    let range = buf
-        .get_operator_target_range_with_count(
-            Cursor::new(0, 0),
-            OperatorTarget::TextObject(TextObject::InnerBigWord),
-            2,
-        )
-        .unwrap();
-    assert_eq!(
-        range,
-        TextObjectRange {
-            start: Cursor::new(0, 0),
-            end: Cursor::new(0, 11),
-        }
-    );
-}
+assert_operator_range_with_count!(
+    test_operator_target_counted_bigword_range,
+    "foo-bar baz qux",
+    Cursor::new(0, 0),
+    OperatorTarget::TextObject(TextObject::InnerBigWord),
+    2,
+    Cursor::new(0, 0),
+    Cursor::new(0, 11)
+);
 
-#[test]
-fn test_operator_target_inner_bracket_range() {
-    let buf = Buffer::from_str("foo(bar)baz");
-    let range = buf
-        .get_operator_target_range(
-            Cursor::new(0, 4),
-            OperatorTarget::TextObject(TextObject::InnerBracket(BracketKind::Paren)),
-        )
-        .unwrap();
-    assert_eq!(
-        range,
-        TextObjectRange {
-            start: Cursor::new(0, 4),
-            end: Cursor::new(0, 7),
-        }
-    );
-}
+assert_operator_range!(
+    test_operator_target_inner_bracket_range,
+    "foo(bar)baz",
+    Cursor::new(0, 4),
+    OperatorTarget::TextObject(TextObject::InnerBracket(BracketKind::Paren)),
+    Cursor::new(0, 4),
+    Cursor::new(0, 7)
+);
 
-#[test]
-fn test_operator_target_around_bracket_range() {
-    let buf = Buffer::from_str("foo(bar)baz");
-    let range = buf
-        .get_operator_target_range(
-            Cursor::new(0, 4),
-            OperatorTarget::TextObject(TextObject::AroundBracket(BracketKind::Paren)),
-        )
-        .unwrap();
-    assert_eq!(
-        range,
-        TextObjectRange {
-            start: Cursor::new(0, 3),
-            end: Cursor::new(0, 8),
-        }
-    );
-}
+assert_operator_range!(
+    test_operator_target_around_bracket_range,
+    "foo(bar)baz",
+    Cursor::new(0, 4),
+    OperatorTarget::TextObject(TextObject::AroundBracket(BracketKind::Paren)),
+    Cursor::new(0, 3),
+    Cursor::new(0, 8)
+);
 
-#[test]
-fn test_operator_target_bracket_range_uses_next_pair_on_current_line() {
-    let buf = Buffer::from_str("x foo(bar) baz");
-    let range = buf
-        .get_operator_target_range(
-            Cursor::new(0, 0),
-            OperatorTarget::TextObject(TextObject::InnerBracket(BracketKind::Paren)),
-        )
-        .unwrap();
-    assert_eq!(
-        range,
-        TextObjectRange {
-            start: Cursor::new(0, 6),
-            end: Cursor::new(0, 9),
-        }
-    );
-}
+assert_operator_range!(
+    test_operator_target_bracket_range_uses_next_pair_on_current_line,
+    "x foo(bar) baz",
+    Cursor::new(0, 0),
+    OperatorTarget::TextObject(TextObject::InnerBracket(BracketKind::Paren)),
+    Cursor::new(0, 6),
+    Cursor::new(0, 9)
+);
 
-#[test]
-fn test_operator_target_bracket_range_nested_count_expands_outward() {
-    let buf = Buffer::from_str("((foo))");
-    let range = buf
-        .get_operator_target_range_with_count(
-            Cursor::new(0, 2),
-            OperatorTarget::TextObject(TextObject::InnerBracket(BracketKind::Paren)),
-            2,
-        )
-        .unwrap();
-    assert_eq!(
-        range,
-        TextObjectRange {
-            start: Cursor::new(0, 1),
-            end: Cursor::new(0, 6),
-        }
-    );
-}
+assert_operator_range_with_count!(
+    test_operator_target_bracket_range_nested_count_expands_outward,
+    "((foo))",
+    Cursor::new(0, 2),
+    OperatorTarget::TextObject(TextObject::InnerBracket(BracketKind::Paren)),
+    2,
+    Cursor::new(0, 1),
+    Cursor::new(0, 6)
+);
 
-#[test]
-fn test_operator_target_bracket_range_multiline() {
-    let buf = Buffer::from_str("foo(\nbar\n)baz");
-    let range = buf
-        .get_operator_target_range(
-            Cursor::new(1, 1),
-            OperatorTarget::TextObject(TextObject::AroundBracket(BracketKind::Paren)),
-        )
-        .unwrap();
-    assert_eq!(
-        range,
-        TextObjectRange {
-            start: Cursor::new(0, 3),
-            end: Cursor::new(2, 1),
-        }
-    );
-}
+assert_operator_range!(
+    test_operator_target_bracket_range_multiline,
+    "foo(\nbar\n)baz",
+    Cursor::new(1, 1),
+    OperatorTarget::TextObject(TextObject::AroundBracket(BracketKind::Paren)),
+    Cursor::new(0, 3),
+    Cursor::new(2, 1)
+);
 
 #[test]
 fn test_operator_target_bracket_range_missing_pair_is_none() {
@@ -3088,113 +2920,59 @@ fn test_operator_target_bracket_range_missing_pair_is_none() {
     );
 }
 
-#[test]
-fn test_operator_target_inner_bracket_empty_pair_is_zero_length() {
-    let buf = Buffer::from_str("()");
-    let range = buf
-        .get_operator_target_range(
-            Cursor::new(0, 0),
-            OperatorTarget::TextObject(TextObject::InnerBracket(BracketKind::Paren)),
-        )
-        .unwrap();
-    assert_eq!(
-        range,
-        TextObjectRange {
-            start: Cursor::new(0, 1),
-            end: Cursor::new(0, 1),
-        }
-    );
-}
+assert_operator_range!(
+    test_operator_target_inner_bracket_empty_pair_is_zero_length,
+    "()",
+    Cursor::new(0, 0),
+    OperatorTarget::TextObject(TextObject::InnerBracket(BracketKind::Paren)),
+    Cursor::new(0, 1),
+    Cursor::new(0, 1)
+);
 
-#[test]
-fn test_operator_target_inner_quote_range() {
-    let buf = Buffer::from_str("foo \"bar\" baz");
-    let range = buf
-        .get_operator_target_range(
-            Cursor::new(0, 5),
-            OperatorTarget::TextObject(TextObject::InnerQuote(QuoteKind::Double)),
-        )
-        .unwrap();
-    assert_eq!(
-        range,
-        TextObjectRange {
-            start: Cursor::new(0, 5),
-            end: Cursor::new(0, 8),
-        }
-    );
-}
+assert_operator_range!(
+    test_operator_target_inner_quote_range,
+    "foo \"bar\" baz",
+    Cursor::new(0, 5),
+    OperatorTarget::TextObject(TextObject::InnerQuote(QuoteKind::Double)),
+    Cursor::new(0, 5),
+    Cursor::new(0, 8)
+);
 
-#[test]
-fn test_operator_target_around_quote_range() {
-    let buf = Buffer::from_str("foo 'bar' baz");
-    let range = buf
-        .get_operator_target_range(
-            Cursor::new(0, 5),
-            OperatorTarget::TextObject(TextObject::AroundQuote(QuoteKind::Single)),
-        )
-        .unwrap();
-    assert_eq!(
-        range,
-        TextObjectRange {
-            start: Cursor::new(0, 4),
-            end: Cursor::new(0, 9),
-        }
-    );
-}
+assert_operator_range!(
+    test_operator_target_around_quote_range,
+    "foo 'bar' baz",
+    Cursor::new(0, 5),
+    OperatorTarget::TextObject(TextObject::AroundQuote(QuoteKind::Single)),
+    Cursor::new(0, 4),
+    Cursor::new(0, 9)
+);
 
-#[test]
-fn test_operator_target_quote_range_uses_next_pair_on_current_line() {
-    let buf = Buffer::from_str("x \"foo\" bar");
-    let range = buf
-        .get_operator_target_range(
-            Cursor::new(0, 0),
-            OperatorTarget::TextObject(TextObject::InnerQuote(QuoteKind::Double)),
-        )
-        .unwrap();
-    assert_eq!(
-        range,
-        TextObjectRange {
-            start: Cursor::new(0, 3),
-            end: Cursor::new(0, 6),
-        }
-    );
-}
+assert_operator_range!(
+    test_operator_target_quote_range_uses_next_pair_on_current_line,
+    "x \"foo\" bar",
+    Cursor::new(0, 0),
+    OperatorTarget::TextObject(TextObject::InnerQuote(QuoteKind::Double)),
+    Cursor::new(0, 3),
+    Cursor::new(0, 6)
+);
 
-#[test]
-fn test_operator_target_quote_range_ignores_escaped_delimiters() {
-    let buf = Buffer::from_str("foo \"say \\\"hi\\\"\" baz");
-    let range = buf
-        .get_operator_target_range(
-            Cursor::new(0, 6),
-            OperatorTarget::TextObject(TextObject::InnerQuote(QuoteKind::Double)),
-        )
-        .unwrap();
-    assert_eq!(
-        range,
-        TextObjectRange {
-            start: Cursor::new(0, 5),
-            end: Cursor::new(0, 15),
-        }
-    );
-}
+assert_operator_range!(
+    test_operator_target_quote_range_ignores_escaped_delimiters,
+    "foo \"say \\\"hi\\\"\" baz",
+    Cursor::new(0, 6),
+    OperatorTarget::TextObject(TextObject::InnerQuote(QuoteKind::Double)),
+    Cursor::new(0, 5),
+    Cursor::new(0, 15)
+);
 
-#[test]
-fn test_operator_target_quote_range_multiline() {
-    let buf = Buffer::from_str("\"foo\nbar\nbaz\"");
-    let range = buf
-        .get_operator_target_range(
-            Cursor::new(1, 1),
-            OperatorTarget::TextObject(TextObject::AroundQuote(QuoteKind::Double)),
-        )
-        .unwrap();
-    assert_eq!(
-        range,
-        TextObjectRange {
-            start: Cursor::new(0, 0),
-            end: Cursor::new(2, 4),
-        }
-    );
-}
+assert_operator_range!(
+    test_operator_target_quote_range_multiline,
+    "\"foo\nbar\nbaz\"",
+    Cursor::new(1, 1),
+    OperatorTarget::TextObject(TextObject::AroundQuote(QuoteKind::Double)),
+    Cursor::new(0, 0),
+    Cursor::new(2, 4)
+);
 
 #[test]
 fn test_operator_target_quote_range_missing_pair_is_none() {
@@ -3208,23 +2986,14 @@ fn test_operator_target_quote_range_missing_pair_is_none() {
     );
 }
 
-#[test]
-fn test_operator_target_inner_quote_empty_pair_is_zero_length() {
-    let buf = Buffer::from_str("\"\"");
-    let range = buf
-        .get_operator_target_range(
-            Cursor::new(0, 0),
-            OperatorTarget::TextObject(TextObject::InnerQuote(QuoteKind::Double)),
-        )
-        .unwrap();
-    assert_eq!(
-        range,
-        TextObjectRange {
-            start: Cursor::new(0, 1),
-            end: Cursor::new(0, 1),
-        }
-    );
-}
+assert_operator_range!(
+    test_operator_target_inner_quote_empty_pair_is_zero_length,
+    "\"\"",
+    Cursor::new(0, 0),
+    OperatorTarget::TextObject(TextObject::InnerQuote(QuoteKind::Double)),
+    Cursor::new(0, 1),
+    Cursor::new(0, 1)
+);
 
 // Delete character tests
 
@@ -3423,8 +3192,7 @@ fn test_join_lines_multiple_without_space() {
     let mut buf = Buffer::from_str("a\nb\nc\nd");
     let cursor = buf.join_lines(0, 4, false);
     assert_eq!(cursor, Some(Cursor::new(0, 4))); // "abcd" has 4 chars
-    assert_eq!(buf.as_str(), "abcd");
-    assert_eq!(buf.line_count(), 1);
+    assert_buffer_eq(&buf, "abcd", 1);
 }
 
 #[test]
@@ -3471,8 +3239,7 @@ fn test_delete_lines_single_line() {
     let mut buf = Buffer::from_str("line1\nline2\nline3");
     let cursor = buf.delete_lines(0, 1);
     assert_eq!(cursor, Some(Cursor::new(0, 0)));
-    assert_eq!(buf.line_count(), 2);
-    assert_eq!(buf.as_str(), "line2\nline3");
+    assert_buffer_eq(&buf, "line2\nline3", 2);
 }
 
 #[test]
@@ -3480,8 +3247,7 @@ fn test_delete_lines_multiple_lines() {
     let mut buf = Buffer::from_str("line1\nline2\nline3\nline4");
     let cursor = buf.delete_lines(0, 2);
     assert_eq!(cursor, Some(Cursor::new(0, 0)));
-    assert_eq!(buf.line_count(), 2);
-    assert_eq!(buf.as_str(), "line3\nline4");
+    assert_buffer_eq(&buf, "line3\nline4", 2);
 }
 
 #[test]
@@ -3489,8 +3255,7 @@ fn test_delete_lines_from_middle() {
     let mut buf = Buffer::from_str("line1\nline2\nline3\nline4\nline5");
     let cursor = buf.delete_lines(1, 2);
     assert_eq!(cursor, Some(Cursor::new(1, 0)));
-    assert_eq!(buf.line_count(), 3);
-    assert_eq!(buf.as_str(), "line1\nline4\nline5");
+    assert_buffer_eq(&buf, "line1\nline4\nline5", 3);
 }
 
 #[test]
@@ -3498,8 +3263,7 @@ fn test_delete_lines_from_last_line() {
     let mut buf = Buffer::from_str("line1\nline2\nline3");
     let cursor = buf.delete_lines(2, 1);
     assert_eq!(cursor, Some(Cursor::new(1, 0)));
-    assert_eq!(buf.line_count(), 2);
-    assert_eq!(buf.as_str(), "line1\nline2");
+    assert_buffer_eq(&buf, "line1\nline2", 2);
 }
 
 #[test]
@@ -3507,8 +3271,7 @@ fn test_delete_lines_only_line() {
     let mut buf = Buffer::from_str("only line");
     let cursor = buf.delete_lines(0, 1);
     assert_eq!(cursor, Some(Cursor::new(0, 0)));
-    assert_eq!(buf.line_count(), 1);
-    assert_eq!(buf.as_str(), "");
+    assert_buffer_eq(&buf, "", 1);
 }
 
 #[test]
@@ -3516,8 +3279,7 @@ fn test_delete_lines_count_exceeds_available() {
     let mut buf = Buffer::from_str("line1\nline2\nline3");
     let cursor = buf.delete_lines(1, 10); // Only 2 lines from index 1
     assert_eq!(cursor, Some(Cursor::new(0, 0))); // Only line1 remains, at index 0
-    assert_eq!(buf.line_count(), 1);
-    assert_eq!(buf.as_str(), "line1");
+    assert_buffer_eq(&buf, "line1", 1);
 }
 
 #[test]
@@ -3532,8 +3294,7 @@ fn test_delete_lines_empty_buffer() {
     let mut buf = Buffer::new();
     let cursor = buf.delete_lines(0, 1);
     assert_eq!(cursor, Some(Cursor::new(0, 0)));
-    assert_eq!(buf.line_count(), 1);
-    assert_eq!(buf.as_str(), "");
+    assert_buffer_eq(&buf, "", 1);
 }
 
 #[test]
@@ -3541,8 +3302,7 @@ fn test_change_lines_single_line() {
     let mut buf = Buffer::from_str("hello\nworld\ntest");
     let cursor = buf.change_lines(0, 1);
     assert_eq!(cursor, Some(Cursor::new(0, 0)));
-    assert_eq!(buf.line_count(), 3);
-    assert_eq!(buf.as_str(), "\nworld\ntest"); // First line replaced with blank
+    assert_buffer_eq(&buf, "\nworld\ntest", 3);
 }
 
 #[test]
@@ -3550,8 +3310,7 @@ fn test_change_lines_multiple_lines() {
     let mut buf = Buffer::from_str("line1\nline2\nline3\nline4");
     let cursor = buf.change_lines(0, 2); // Change 2 lines, leave 1 blank
     assert_eq!(cursor, Some(Cursor::new(0, 0)));
-    assert_eq!(buf.line_count(), 3);
-    assert_eq!(buf.as_str(), "\nline3\nline4"); // 2 lines replaced with 1 blank
+    assert_buffer_eq(&buf, "\nline3\nline4", 3);
 }
 
 #[test]
@@ -3559,8 +3318,7 @@ fn test_change_lines_from_middle() {
     let mut buf = Buffer::from_str("line1\nline2\nline3\nline4");
     let cursor = buf.change_lines(1, 1); // Change line 2
     assert_eq!(cursor, Some(Cursor::new(1, 0)));
-    assert_eq!(buf.line_count(), 4);
-    assert_eq!(buf.as_str(), "line1\n\nline3\nline4"); // line2 replaced with blank
+    assert_buffer_eq(&buf, "line1\n\nline3\nline4", 4);
 }
 
 #[test]
@@ -3568,8 +3326,7 @@ fn test_change_lines_from_last_line() {
     let mut buf = Buffer::from_str("line1\nline2");
     let cursor = buf.change_lines(1, 1); // Change last line
     assert_eq!(cursor, Some(Cursor::new(1, 0)));
-    assert_eq!(buf.line_count(), 2);
-    assert_eq!(buf.as_str(), "line1\n"); // last line replaced with blank
+    assert_buffer_eq(&buf, "line1\n", 2);
 }
 
 #[test]
@@ -3577,8 +3334,7 @@ fn test_change_lines_only_line() {
     let mut buf = Buffer::from_str("only line");
     let cursor = buf.change_lines(0, 1);
     assert_eq!(cursor, Some(Cursor::new(0, 0)));
-    assert_eq!(buf.line_count(), 1);
-    assert_eq!(buf.as_str(), ""); // Line replaced with blank
+    assert_buffer_eq(&buf, "", 1);
 }
 
 #[test]
@@ -3586,8 +3342,7 @@ fn test_change_lines_count_exceeds_available() {
     let mut buf = Buffer::from_str("line1\nline2\nline3");
     let cursor = buf.change_lines(0, 5); // Try to change 5 lines, only 3 exist
     assert_eq!(cursor, Some(Cursor::new(0, 0)));
-    assert_eq!(buf.line_count(), 1); // Should leave 1 blank line
-    assert_eq!(buf.as_str(), ""); // All 3 lines replaced with 1 blank
+    assert_buffer_eq(&buf, "", 1);
 }
 
 #[test]
@@ -3603,8 +3358,7 @@ fn test_change_lines_empty_buffer() {
     let mut buf = Buffer::new();
     let cursor = buf.change_lines(0, 1);
     assert_eq!(cursor, Some(Cursor::new(0, 0)));
-    assert_eq!(buf.line_count(), 1);
-    assert_eq!(buf.as_str(), "");
+    assert_buffer_eq(&buf, "", 1);
 }
 
 // Tests for change_to_line_end
@@ -3837,10 +3591,7 @@ fn test_inferred_auto_indent_prefix_ignores_blank_lines() {
 
 #[test]
 fn test_shift_line_indentation_increases_and_decreases_with_spaces() {
-    let _guard = globals::set_test_config(Config {
-        tab_width: 4,
-        ..Default::default()
-    });
+    let _guard = tab_config_4();
     let mut buf = Buffer::from_str("hello");
 
     assert_eq!(buf.increase_line_indentation(0), Some(4));
@@ -3851,10 +3602,7 @@ fn test_shift_line_indentation_increases_and_decreases_with_spaces() {
 
 #[test]
 fn test_shift_line_indentation_uses_tabs_when_buffer_style_is_tabs() {
-    let _guard = globals::set_test_config(Config {
-        tab_width: 4,
-        ..Default::default()
-    });
+    let _guard = tab_config_4();
     let mut buf = Buffer::from_str("fn main() {\n\t\tprintln!(\"hi\");");
 
     assert_eq!(buf.decrease_line_indentation(1), Some(1));
@@ -3863,10 +3611,7 @@ fn test_shift_line_indentation_uses_tabs_when_buffer_style_is_tabs() {
 
 #[test]
 fn test_shift_line_indentation_preserves_mixed_remaining_prefix() {
-    let _guard = globals::set_test_config(Config {
-        tab_width: 4,
-        ..Default::default()
-    });
+    let _guard = tab_config_4();
     let mut buf = Buffer::from_str("\t  hello");
 
     assert_eq!(buf.decrease_line_indentation(0), Some(1));
@@ -3875,10 +3620,7 @@ fn test_shift_line_indentation_preserves_mixed_remaining_prefix() {
 
 #[test]
 fn test_shift_line_indentation_stops_at_column_zero() {
-    let _guard = globals::set_test_config(Config {
-        tab_width: 4,
-        ..Default::default()
-    });
+    let _guard = tab_config_4();
     let mut buf = Buffer::from_str("  hello");
 
     assert_eq!(buf.decrease_line_indentation(0), Some(2));
@@ -3920,7 +3662,7 @@ fn test_cursor_paragraph_backward_from_paragraph() {
     // 3: "Para 2 line 2"
     // 4: "" (blank)
     // 5: "Para 3 line 1"
-    let buf = Buffer::from_str("Para 1 line 1\n\nPara 2 line 1\nPara 2 line 2\n\nPara 3 line 1");
+    let buf = three_para_buffer();
 
     // From middle of Para 2 (line 2), should find blank line before it (line 1)
     let cursor = Cursor::new(2, 5);
@@ -3947,7 +3689,7 @@ fn test_cursor_paragraph_backward_from_blank_line() {
     // 3: "Para 2 line 2"
     // 4: "" (blank)
     // 5: "Para 3 line 1"
-    let buf = Buffer::from_str("Para 1 line 1\n\nPara 2 line 1\nPara 2 line 2\n\nPara 3 line 1");
+    let buf = three_para_buffer();
 
     // From blank line 1, should clamp to BOF instead of stopping early.
     let cursor = Cursor::new(1, 0);
@@ -3995,7 +3737,7 @@ fn test_cursor_paragraph_forward_from_paragraph() {
     // 3: "Para 2 line 2"
     // 4: "" (blank)
     // 5: "Para 3 line 1"
-    let buf = Buffer::from_str("Para 1 line 1\n\nPara 2 line 1\nPara 2 line 2\n\nPara 3 line 1");
+    let buf = three_para_buffer();
 
     // From Para 1 (line 0), should find blank line after Para 1 (line 1)
     let cursor = Cursor::new(0, 5);
@@ -4017,7 +3759,7 @@ fn test_cursor_paragraph_forward_from_blank_line() {
     // 3: "Para 2 line 2"
     // 4: "" (blank)
     // 5: "Para 3 line 1"
-    let buf = Buffer::from_str("Para 1 line 1\n\nPara 2 line 1\nPara 2 line 2\n\nPara 3 line 1");
+    let buf = three_para_buffer();
 
     // From blank line 1, should find blank line after Para 2 (line 4).
     let cursor = Cursor::new(1, 0);
