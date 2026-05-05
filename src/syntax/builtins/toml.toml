@@ -67,12 +67,6 @@ context = { requires = ["toml_single_string"] }
 
 [[rules]]
 kind = "regex"
-pattern = "'"
-tag = "string"
-context = { push = ["toml_single_string"] }
-
-[[rules]]
-kind = "regex"
 pattern = "\""
 tag = "string"
 context = { requires = ["toml_double_string"], pop = ["toml_double_string"] }
@@ -88,6 +82,12 @@ kind = "regex"
 pattern = "[^\"\\\\]+"
 tag = "string"
 context = { requires = ["toml_double_string"] }
+
+[[rules]]
+kind = "regex"
+pattern = "'"
+tag = "string"
+context = { push = ["toml_single_string"] }
 
 [[rules]]
 kind = "regex"
