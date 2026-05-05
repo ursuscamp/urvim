@@ -1,0 +1,84 @@
+name = "Gruvbox"
+
+[palette]
+bg0 = "#282828"
+bg1 = "#3c3836"
+bg2 = "#504945"
+bg3 = "#665c54"
+bg4 = "#7c6f64"
+fg0 = "#fbf1c7"
+fg1 = "#ebdbb2"
+fg2 = "#d5c4a1"
+fg3 = "#bdae93"
+fg4 = "#a89984"
+red = "#fb4934"
+green = "#b8bb26"
+yellow = "#fabd2f"
+blue = "#83a598"
+purple = "#d3869b"
+aqua = "#8ec07c"
+orange = "#fe8019"
+neutral_red = "#cc241d"
+neutral_green = "#98971a"
+neutral_yellow = "#d79921"
+neutral_blue = "#458588"
+neutral_purple = "#b16286"
+neutral_aqua = "#689d6a"
+gray = "#928374"
+
+[default]
+fg = "fg1"
+bg = "bg0"
+
+[highlights]
+# UI
+"ui.status_bar" = { fg = "fg1", bg = "bg2", bold = true }
+"ui.status_bar.modified_marker" = { fg = "orange", bold = true }
+"ui.selection" = { bg = "bg3" }
+"ui.window.active_line" = { bg = "bg1", overlay = true }
+"ui.tab.active" = { fg = "bg0", bg = "green", bold = true }
+"ui.tab.inactive" = { fg = "fg4", bg = "bg1" }
+"ui.tab.scroll_indicator" = { fg = "bg4", bg = "bg0" }
+"ui.window.gutter" = { fg = "bg4", bg = "bg0" }
+"ui.window.gutter.active_line" = { fg = "yellow" }
+"ui.window" = { fg = "fg1", bg = "bg0" }
+"ui.window.lines" = { fg = "bg3" }
+"ui.window.lines.resize" = { fg = "orange", bold = true }
+"ui.input.prompt" = { fg = "orange", bold = true }
+"ui.input.prompt.exact" = { fg = "orange", bold = true }
+"ui.input.prompt.fuzzy" = { fg = "orange", italic = true }
+"ui.input.prompt.separator" = { fg = "bg4" }
+"ui.picker.location" = { fg = "gray" }
+"ui.notification.info" = { fg = "aqua" }
+"ui.notification.warn" = { fg = "yellow", bold = true }
+"ui.notification.error" = { fg = "red", bold = true }
+
+# Syntax
+"syntax.comment" = { fg = "gray", italic = true }
+"syntax.comment.todo" = { fg = "bg0", bg = "yellow", bold = true }
+"syntax.comment.fixme" = { fg = "bg0", bg = "red", bold = true }
+"syntax.comment.bug" = { fg = "bg0", bg = "orange", bold = true }
+"syntax.comment.note" = { fg = "bg0", bg = "aqua", bold = true }
+"syntax.constant" = { fg = "purple" }
+"syntax.function" = { fg = "green", bold = true }
+"syntax.namespace" = { fg = "aqua" }
+"syntax.keyword" = { fg = "red" }
+"syntax.markup" = { fg = "fg1" }
+"syntax.markup.code" = { fg = "aqua" }
+"syntax.markup.code.inline" = { fg = "aqua" }
+"syntax.markup.emphasis" = { fg = "fg3", italic = true }
+"syntax.markup.heading" = { fg = "green", bold = true }
+"syntax.markup.link" = { fg = "purple", underline = true }
+"syntax.markup.list" = { fg = "gray" }
+"syntax.markup.quote" = { fg = "gray", italic = true }
+"syntax.markup.strong" = { fg = "fg3", bold = true }
+"syntax.markup.thematic_break" = { fg = "gray" }
+"syntax.number" = { fg = "purple" }
+"syntax.operator" = { fg = "orange" }
+"syntax.punctuation" = { fg = "fg3" }
+"syntax.string" = { fg = "green", italic = true }
+"syntax.string.escape" = { fg = "aqua" }
+"syntax.string.interpolation" = { fg = "blue" }
+"syntax.type" = { fg = "yellow" }
+"syntax.variable" = { fg = "fg1" }
+"syntax.variable.global" = { fg = "blue" }

@@ -297,7 +297,7 @@ impl ThemeRegistry {
     }
 }
 
-fn builtin_theme_sources() -> [(&'static str, &'static str, &'static str); 8] {
+fn builtin_theme_sources() -> [(&'static str, &'static str, &'static str); 10] {
     [
         (
             "Friday Night",
@@ -334,6 +334,16 @@ fn builtin_theme_sources() -> [(&'static str, &'static str, &'static str); 8] {
             "OneDark",
             "onedark.toml",
             include_str!("builtin/onedark.toml"),
+        ),
+        (
+            "Gruvbox",
+            "gruvbox-dark.toml",
+            include_str!("builtin/gruvbox-dark.toml"),
+        ),
+        (
+            "Gruvbox Light",
+            "gruvbox-light.toml",
+            include_str!("builtin/gruvbox-light.toml"),
         ),
     ]
 }

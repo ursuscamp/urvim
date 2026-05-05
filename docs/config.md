@@ -50,7 +50,7 @@ Sets the active editor theme by name.
 - Type: string
 - Default: existing built-in default theme
 - Override: `--theme <name>`
-- Built-in themes: Friday Night, Saturday Morning, Rose Pine, Dracula, Tokyo Night, Catppuccin, Nord, and OneDark
+- Built-in themes: Friday Night, Saturday Morning, Rose Pine, Dracula, Tokyo Night, Catppuccin, Nord, OneDark, Gruvbox, and Gruvbox Light
 
 ### `insert_escape`
 

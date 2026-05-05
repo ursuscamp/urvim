@@ -186,6 +186,8 @@ mod tests {
             "Catppuccin" => Color::Rgb(Rgb::new(30, 30, 46)),
             "Nord" => Color::Rgb(Rgb::new(46, 52, 64)),
             "OneDark" => Color::Rgb(Rgb::new(24, 26, 31)),
+            "Gruvbox" => Color::Rgb(Rgb::new(40, 40, 40)),
+            "Gruvbox Light" => Color::Rgb(Rgb::new(251, 241, 199)),
             other => panic!("unexpected theme {other}"),
         };
         let bg = match marker {
@@ -198,6 +200,8 @@ mod tests {
                 "Catppuccin" => Color::Rgb(Rgb::new(203, 166, 247)),
                 "Nord" => Color::Rgb(Rgb::new(235, 203, 139)),
                 "OneDark" => Color::Rgb(Rgb::new(198, 120, 221)),
+                "Gruvbox" => Color::Rgb(Rgb::new(250, 189, 47)),
+                "Gruvbox Light" => Color::Rgb(Rgb::new(181, 118, 20)),
                 other => panic!("unexpected theme {other}"),
             },
             "fixme" => match theme {
@@ -209,6 +213,8 @@ mod tests {
                 "Catppuccin" => Color::Rgb(Rgb::new(243, 139, 168)),
                 "Nord" => Color::Rgb(Rgb::new(191, 97, 106)),
                 "OneDark" => Color::Rgb(Rgb::new(232, 102, 113)),
+                "Gruvbox" => Color::Rgb(Rgb::new(251, 73, 52)),
+                "Gruvbox Light" => Color::Rgb(Rgb::new(157, 0, 6)),
                 other => panic!("unexpected theme {other}"),
             },
             "bug" => match theme {
@@ -220,6 +226,8 @@ mod tests {
                 "Catppuccin" => Color::Rgb(Rgb::new(250, 179, 135)),
                 "Nord" => Color::Rgb(Rgb::new(208, 135, 112)),
                 "OneDark" => Color::Rgb(Rgb::new(209, 154, 102)),
+                "Gruvbox" => Color::Rgb(Rgb::new(254, 128, 25)),
+                "Gruvbox Light" => Color::Rgb(Rgb::new(175, 58, 3)),
                 other => panic!("unexpected theme {other}"),
             },
             "note" => match theme {
@@ -231,6 +239,8 @@ mod tests {
                 "Catppuccin" => Color::Rgb(Rgb::new(148, 226, 213)),
                 "Nord" => Color::Rgb(Rgb::new(143, 188, 187)),
                 "OneDark" => Color::Rgb(Rgb::new(86, 182, 194)),
+                "Gruvbox" => Color::Rgb(Rgb::new(142, 192, 124)),
+                "Gruvbox Light" => Color::Rgb(Rgb::new(66, 123, 88)),
                 other => panic!("unexpected theme {other}"),
             },
             other => panic!("unexpected marker {other}"),
@@ -249,6 +259,8 @@ mod tests {
             "Catppuccin" => Style::new().bg(Color::Rgb(Rgb::new(69, 71, 90))),
             "Nord" => Style::new().bg(Color::Rgb(Rgb::new(67, 76, 94))),
             "OneDark" => Style::new().bg(Color::Rgb(Rgb::new(59, 63, 76))),
+            "Gruvbox" => Style::new().bg(Color::Rgb(Rgb::new(102, 92, 84))),
+            "Gruvbox Light" => Style::new().bg(Color::Rgb(Rgb::new(189, 174, 147))),
             other => panic!("unexpected theme {other}"),
         }
     }
@@ -263,6 +275,8 @@ mod tests {
             "Catppuccin" => Style::new().bg(Color::Rgb(Rgb::new(49, 50, 68))),
             "Nord" => Style::new().bg(Color::Rgb(Rgb::new(59, 66, 82))),
             "OneDark" => Style::new().bg(Color::Rgb(Rgb::new(49, 53, 63))),
+            "Gruvbox" => Style::new().bg(Color::Rgb(Rgb::new(60, 56, 54))),
+            "Gruvbox Light" => Style::new().bg(Color::Rgb(Rgb::new(235, 219, 178))),
             other => panic!("unexpected theme {other}"),
         }
     }
@@ -277,6 +291,8 @@ mod tests {
             "Catppuccin" => Style::new().fg(Color::Rgb(Rgb::new(205, 214, 244))),
             "Nord" => Style::new().fg(Color::Rgb(Rgb::new(216, 222, 233))),
             "OneDark" => Style::new().fg(Color::Rgb(Rgb::new(171, 178, 191))),
+            "Gruvbox" => Style::new().fg(Color::Rgb(Rgb::new(250, 189, 47))),
+            "Gruvbox Light" => Style::new().fg(Color::Rgb(Rgb::new(181, 118, 20))),
             other => panic!("unexpected theme {other}"),
         }
     }
@@ -291,6 +307,8 @@ mod tests {
             "Catppuccin" => Style::new().fg(Color::Rgb(Rgb::new(108, 112, 134))),
             "Nord" => Style::new().fg(Color::Rgb(Rgb::new(76, 86, 106))),
             "OneDark" => Style::new().fg(Color::Rgb(Rgb::new(92, 99, 112))),
+            "Gruvbox" => Style::new().fg(Color::Rgb(Rgb::new(102, 92, 84))),
+            "Gruvbox Light" => Style::new().fg(Color::Rgb(Rgb::new(189, 174, 147))),
             other => panic!("unexpected theme {other}"),
         }
     }
@@ -305,6 +323,8 @@ mod tests {
             "Catppuccin" => Style::new().fg(Color::Rgb(Rgb::new(203, 166, 247))).bold(),
             "Nord" => Style::new().fg(Color::Rgb(Rgb::new(129, 161, 193))).bold(),
             "OneDark" => Style::new().fg(Color::Rgb(Rgb::new(97, 175, 239))).bold(),
+            "Gruvbox" => Style::new().fg(Color::Rgb(Rgb::new(254, 128, 25))).bold(),
+            "Gruvbox Light" => Style::new().fg(Color::Rgb(Rgb::new(175, 58, 3))).bold(),
             other => panic!("unexpected theme {other}"),
         }
     }
@@ -382,6 +402,24 @@ mod tests {
             }
             ("OneDark", crate::notification::NotificationLevel::Error) => {
                 Style::new().fg(Color::Rgb(Rgb::new(232, 102, 113))).bold()
+            }
+            ("Gruvbox", crate::notification::NotificationLevel::Info) => {
+                Style::new().fg(Color::Rgb(Rgb::new(142, 192, 124)))
+            }
+            ("Gruvbox", crate::notification::NotificationLevel::Warn) => {
+                Style::new().fg(Color::Rgb(Rgb::new(250, 189, 47))).bold()
+            }
+            ("Gruvbox", crate::notification::NotificationLevel::Error) => {
+                Style::new().fg(Color::Rgb(Rgb::new(251, 73, 52))).bold()
+            }
+            ("Gruvbox Light", crate::notification::NotificationLevel::Info) => {
+                Style::new().fg(Color::Rgb(Rgb::new(66, 123, 88)))
+            }
+            ("Gruvbox Light", crate::notification::NotificationLevel::Warn) => {
+                Style::new().fg(Color::Rgb(Rgb::new(181, 118, 20))).bold()
+            }
+            ("Gruvbox Light", crate::notification::NotificationLevel::Error) => {
+                Style::new().fg(Color::Rgb(Rgb::new(157, 0, 6))).bold()
             }
             (other, _) => panic!("unexpected theme {other}"),
         }
@@ -761,6 +799,14 @@ bg = "base"
             registry.get("OneDark").unwrap().kind(),
             ThemeKind::TrueColor
         );
+        assert_eq!(
+            registry.get("Gruvbox").unwrap().kind(),
+            ThemeKind::TrueColor
+        );
+        assert_eq!(
+            registry.get("Gruvbox Light").unwrap().kind(),
+            ThemeKind::TrueColor
+        );
         for name in registry.names() {
             let theme = registry.get(name).unwrap();
             let semantic_styles = [
@@ -851,6 +897,8 @@ bg = "base"
             "Catppuccin",
             "Nord",
             "OneDark",
+            "Gruvbox",
+            "Gruvbox Light",
         ] {
             let theme = registry.get(name).expect("theme should exist");
             let comment_style = theme.highlight_style_for_tag(&tag("syntax.comment"));
