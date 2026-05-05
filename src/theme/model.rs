@@ -297,7 +297,7 @@ impl ThemeRegistry {
     }
 }
 
-fn builtin_theme_sources() -> [(&'static str, &'static str, &'static str); 7] {
+fn builtin_theme_sources() -> [(&'static str, &'static str, &'static str); 8] {
     [
         (
             "Friday Night",
@@ -330,6 +330,11 @@ fn builtin_theme_sources() -> [(&'static str, &'static str, &'static str); 7] {
             include_str!("builtin/catppuccin.toml"),
         ),
         ("Nord", "nord.toml", include_str!("builtin/nord.toml")),
+        (
+            "OneDark",
+            "onedark.toml",
+            include_str!("builtin/onedark.toml"),
+        ),
     ]
 }
 

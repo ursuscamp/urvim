@@ -1,0 +1,75 @@
+name = "OneDark"
+
+[palette]
+black = "#181a1f"
+bg = "#282c34"
+surface = "#31353f"
+surface_alt = "#393f4a"
+selection = "#3b3f4c"
+fg = "#abb2bf"
+purple = "#c678dd"
+green = "#98c379"
+orange = "#d19a66"
+blue = "#61afef"
+yellow = "#e5c07b"
+cyan = "#56b6c2"
+red = "#e86671"
+grey = "#5c6370"
+light_grey = "#848b98"
+
+[default]
+fg = "fg"
+bg = "bg"
+
+[highlights]
+# UI
+"ui.status_bar" = { fg = "fg", bg = "surface", bold = true }
+"ui.status_bar.modified_marker" = { fg = "orange", bold = true }
+"ui.selection" = { bg = "selection" }
+"ui.window.active_line" = { bg = "surface", overlay = true }
+"ui.tab.active" = { fg = "black", bg = "blue", bold = true }
+"ui.tab.inactive" = { fg = "fg", bg = "surface" }
+"ui.tab.scroll_indicator" = { fg = "light_grey", bg = "bg" }
+"ui.window.gutter" = { fg = "grey", bg = "bg" }
+"ui.window.gutter.active_line" = { fg = "fg" }
+"ui.window" = { fg = "fg", bg = "bg" }
+"ui.window.lines" = { fg = "grey" }
+"ui.window.lines.resize" = { fg = "blue", bold = true }
+"ui.input.prompt" = { fg = "blue", bold = true }
+"ui.input.prompt.exact" = { fg = "blue", bold = true }
+"ui.input.prompt.fuzzy" = { fg = "blue", italic = true }
+"ui.input.prompt.separator" = { fg = "grey" }
+"ui.picker.location" = { fg = "light_grey" }
+"ui.notification.info" = { fg = "green" }
+"ui.notification.warn" = { fg = "yellow", bold = true }
+"ui.notification.error" = { fg = "red", bold = true }
+
+# Syntax
+"syntax.comment" = { fg = "grey", italic = true }
+"syntax.comment.todo" = { fg = "black", bg = "purple", bold = true }
+"syntax.comment.fixme" = { fg = "black", bg = "red", bold = true }
+"syntax.comment.bug" = { fg = "black", bg = "orange", bold = true }
+"syntax.comment.note" = { fg = "black", bg = "cyan", bold = true }
+"syntax.constant" = { fg = "orange" }
+"syntax.function" = { fg = "blue" }
+"syntax.namespace" = { fg = "purple" }
+"syntax.keyword" = { fg = "purple" }
+"syntax.markup" = { fg = "fg" }
+"syntax.markup.code" = { fg = "orange" }
+"syntax.markup.code.inline" = { fg = "orange" }
+"syntax.markup.emphasis" = { fg = "purple", italic = true }
+"syntax.markup.heading" = { fg = "blue", bold = true }
+"syntax.markup.link" = { fg = "cyan", underline = true }
+"syntax.markup.list" = { fg = "red" }
+"syntax.markup.quote" = { fg = "grey", italic = true }
+"syntax.markup.strong" = { fg = "purple", bold = true }
+"syntax.markup.thematic_break" = { fg = "grey" }
+"syntax.number" = { fg = "orange" }
+"syntax.operator" = { fg = "cyan" }
+"syntax.punctuation" = { fg = "light_grey" }
+"syntax.string" = { fg = "green" }
+"syntax.string.escape" = { fg = "cyan" }
+"syntax.string.interpolation" = { fg = "blue" }
+"syntax.type" = { fg = "yellow" }
+"syntax.variable" = { fg = "fg" }
+"syntax.variable.global" = { fg = "red" }

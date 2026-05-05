@@ -107,10 +107,8 @@ fn test_toml_literal_strings_remain_plain() {
 #[test]
 fn test_toml_quote_inside_double_quoted_string() {
     let path =
-        AbsolutePath::from_path(temp_path_with_ext("syntax-toml-quote", "toml").as_path())
-            .unwrap();
-    let mut buf =
-        Buffer::from_str_with_path("name = \"it's value\"\nnext = 42", path);
+        AbsolutePath::from_path(temp_path_with_ext("syntax-toml-quote", "toml").as_path()).unwrap();
+    let mut buf = Buffer::from_str_with_path("name = \"it's value\"\nnext = 42", path);
 
     let line0 = buf.syntax_spans_for_line(0).expect("line 0 should exist");
     assert_spans_include_style(&line0, tag("string"));

@@ -83,9 +83,7 @@ impl Layout {
         if result.handled() && !is_open {
             let intents = result.into_intents();
             if intents.is_empty() {
-                if let Some(original) =
-                    crate::globals::with_config(|config| config.theme.clone())
-                {
+                if let Some(original) = crate::globals::with_config(|config| config.theme.clone()) {
                     self.apply_theme(&original);
                 }
             }

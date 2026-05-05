@@ -185,6 +185,7 @@ mod tests {
             "Tokyo Night" => Color::Rgb(Rgb::new(26, 27, 38)),
             "Catppuccin" => Color::Rgb(Rgb::new(30, 30, 46)),
             "Nord" => Color::Rgb(Rgb::new(46, 52, 64)),
+            "OneDark" => Color::Rgb(Rgb::new(24, 26, 31)),
             other => panic!("unexpected theme {other}"),
         };
         let bg = match marker {
@@ -196,6 +197,7 @@ mod tests {
                 "Tokyo Night" => Color::Rgb(Rgb::new(187, 154, 247)),
                 "Catppuccin" => Color::Rgb(Rgb::new(203, 166, 247)),
                 "Nord" => Color::Rgb(Rgb::new(235, 203, 139)),
+                "OneDark" => Color::Rgb(Rgb::new(198, 120, 221)),
                 other => panic!("unexpected theme {other}"),
             },
             "fixme" => match theme {
@@ -206,6 +208,7 @@ mod tests {
                 "Tokyo Night" => Color::Rgb(Rgb::new(247, 118, 142)),
                 "Catppuccin" => Color::Rgb(Rgb::new(243, 139, 168)),
                 "Nord" => Color::Rgb(Rgb::new(191, 97, 106)),
+                "OneDark" => Color::Rgb(Rgb::new(232, 102, 113)),
                 other => panic!("unexpected theme {other}"),
             },
             "bug" => match theme {
@@ -216,6 +219,7 @@ mod tests {
                 "Tokyo Night" => Color::Rgb(Rgb::new(255, 158, 100)),
                 "Catppuccin" => Color::Rgb(Rgb::new(250, 179, 135)),
                 "Nord" => Color::Rgb(Rgb::new(208, 135, 112)),
+                "OneDark" => Color::Rgb(Rgb::new(209, 154, 102)),
                 other => panic!("unexpected theme {other}"),
             },
             "note" => match theme {
@@ -226,6 +230,7 @@ mod tests {
                 "Tokyo Night" => Color::Rgb(Rgb::new(125, 207, 255)),
                 "Catppuccin" => Color::Rgb(Rgb::new(148, 226, 213)),
                 "Nord" => Color::Rgb(Rgb::new(143, 188, 187)),
+                "OneDark" => Color::Rgb(Rgb::new(86, 182, 194)),
                 other => panic!("unexpected theme {other}"),
             },
             other => panic!("unexpected marker {other}"),
@@ -243,6 +248,7 @@ mod tests {
             "Tokyo Night" => Style::new().bg(Color::Rgb(Rgb::new(41, 46, 66))),
             "Catppuccin" => Style::new().bg(Color::Rgb(Rgb::new(69, 71, 90))),
             "Nord" => Style::new().bg(Color::Rgb(Rgb::new(67, 76, 94))),
+            "OneDark" => Style::new().bg(Color::Rgb(Rgb::new(59, 63, 76))),
             other => panic!("unexpected theme {other}"),
         }
     }
@@ -256,6 +262,7 @@ mod tests {
             "Tokyo Night" => Style::new().bg(Color::Rgb(Rgb::new(36, 40, 59))),
             "Catppuccin" => Style::new().bg(Color::Rgb(Rgb::new(49, 50, 68))),
             "Nord" => Style::new().bg(Color::Rgb(Rgb::new(59, 66, 82))),
+            "OneDark" => Style::new().bg(Color::Rgb(Rgb::new(49, 53, 63))),
             other => panic!("unexpected theme {other}"),
         }
     }
@@ -269,6 +276,7 @@ mod tests {
             "Tokyo Night" => Style::new().fg(Color::Rgb(Rgb::new(192, 202, 245))),
             "Catppuccin" => Style::new().fg(Color::Rgb(Rgb::new(205, 214, 244))),
             "Nord" => Style::new().fg(Color::Rgb(Rgb::new(216, 222, 233))),
+            "OneDark" => Style::new().fg(Color::Rgb(Rgb::new(171, 178, 191))),
             other => panic!("unexpected theme {other}"),
         }
     }
@@ -282,6 +290,7 @@ mod tests {
             "Tokyo Night" => Style::new().fg(Color::Rgb(Rgb::new(59, 66, 97))),
             "Catppuccin" => Style::new().fg(Color::Rgb(Rgb::new(108, 112, 134))),
             "Nord" => Style::new().fg(Color::Rgb(Rgb::new(76, 86, 106))),
+            "OneDark" => Style::new().fg(Color::Rgb(Rgb::new(92, 99, 112))),
             other => panic!("unexpected theme {other}"),
         }
     }
@@ -295,6 +304,7 @@ mod tests {
             "Tokyo Night" => Style::new().fg(Color::Rgb(Rgb::new(122, 162, 247))).bold(),
             "Catppuccin" => Style::new().fg(Color::Rgb(Rgb::new(203, 166, 247))).bold(),
             "Nord" => Style::new().fg(Color::Rgb(Rgb::new(129, 161, 193))).bold(),
+            "OneDark" => Style::new().fg(Color::Rgb(Rgb::new(97, 175, 239))).bold(),
             other => panic!("unexpected theme {other}"),
         }
     }
@@ -363,6 +373,15 @@ mod tests {
             }
             ("Nord", crate::notification::NotificationLevel::Error) => {
                 Style::new().fg(Color::Rgb(Rgb::new(191, 97, 106))).bold()
+            }
+            ("OneDark", crate::notification::NotificationLevel::Info) => {
+                Style::new().fg(Color::Rgb(Rgb::new(152, 195, 121)))
+            }
+            ("OneDark", crate::notification::NotificationLevel::Warn) => {
+                Style::new().fg(Color::Rgb(Rgb::new(229, 192, 123))).bold()
+            }
+            ("OneDark", crate::notification::NotificationLevel::Error) => {
+                Style::new().fg(Color::Rgb(Rgb::new(232, 102, 113))).bold()
             }
             (other, _) => panic!("unexpected theme {other}"),
         }
@@ -738,6 +757,10 @@ bg = "base"
             ThemeKind::TrueColor
         );
         assert_eq!(registry.get("Nord").unwrap().kind(), ThemeKind::TrueColor);
+        assert_eq!(
+            registry.get("OneDark").unwrap().kind(),
+            ThemeKind::TrueColor
+        );
         for name in registry.names() {
             let theme = registry.get(name).unwrap();
             let semantic_styles = [
@@ -827,6 +850,7 @@ bg = "base"
             "Tokyo Night",
             "Catppuccin",
             "Nord",
+            "OneDark",
         ] {
             let theme = registry.get(name).expect("theme should exist");
             let comment_style = theme.highlight_style_for_tag(&tag("syntax.comment"));

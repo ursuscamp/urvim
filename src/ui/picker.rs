@@ -399,7 +399,9 @@ impl<S: PickerSource> PickerWidget<S> {
             picker_content_cols.saturating_add(2).min(rect.size.cols),
         );
 
-        if self.highlighted.is_some() && self.preview_key.is_some() && rect.size.cols >= picker_outer.cols + PREVIEW_MIN_COLS + 2
+        if self.highlighted.is_some()
+            && self.preview_key.is_some()
+            && rect.size.cols >= picker_outer.cols + PREVIEW_MIN_COLS + 2
         {
             let preview_outer_cols = PREVIEW_PREFERRED_COLS
                 .min(rect.size.cols.saturating_sub(picker_outer.cols))
@@ -447,7 +449,10 @@ impl<S: PickerSource> PickerWidget<S> {
             .row
             .saturating_add(rect.size.rows)
             .saturating_sub(picker.origin.row.saturating_add(picker.size.rows));
-        let preview = if self.highlighted.is_some() && self.preview_key.is_some() && below_rows >= PREVIEW_MIN_ROWS {
+        let preview = if self.highlighted.is_some()
+            && self.preview_key.is_some()
+            && below_rows >= PREVIEW_MIN_ROWS
+        {
             Some(frame_from_outer(
                 Position::new(
                     picker.origin.row.saturating_add(picker.size.rows),
