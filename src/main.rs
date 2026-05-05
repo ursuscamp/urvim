@@ -59,6 +59,7 @@ fn main() -> io::Result<()> {
             io::Error::new(io::ErrorKind::InvalidInput, error)
         })?;
     globals::set_active_theme(active_theme);
+    globals::set_theme_registry(registry);
 
     let mut terminal = Terminal::new(stdin, stdout)?;
 

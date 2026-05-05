@@ -158,6 +158,7 @@ impl PickerSource for GrepPickerSource {
         }
 
         if query.is_empty() {
+            let _ = _sender.send(PickerSearchEvent::PickerSearchComplete { generation });
             return;
         }
 

@@ -138,10 +138,26 @@ impl Layout {
             .render(screen, footer_origin, Size::new(1, size.cols), &context);
 
         notification::render_active_banner(screen, origin, size, std::time::Instant::now());
+        self.render_colorscheme_picker_overlay(screen, origin, size);
         self.render_grep_picker_overlay(screen, origin, size);
         self.render_file_picker_overlay(screen, origin, size);
         self.render_command_line_overlay(screen, origin, size);
         self.render_confirmation_box_overlay(screen, origin, size);
+    }
+
+    fn render_colorscheme_picker_overlay(
+        &mut self,
+        screen: &mut Screen,
+        origin: Position,
+        size: Size,
+    ) {
+        let Some(picker) = self.colorscheme_picker_mut() else {
+            return;
+        };
+
+        let ctx = UiContext;
+        let rect = UiRect::new(origin, size);
+        picker.render_widget(screen, rect, &ctx);
     }
 
     fn render_grep_picker_overlay(&mut self, screen: &mut Screen, origin: Position, size: Size) {

@@ -3,6 +3,7 @@
 //! These types provide a unified dispatch envelope that carries either editing
 //! actions or UI orchestration commands.
 
+pub mod colorscheme_picker;
 pub mod confirmation_box;
 pub mod file_picker;
 pub mod floating_window;
@@ -113,6 +114,8 @@ pub enum Command {
     OpenCommandLine,
     /// Open the file picker overlay.
     OpenFilePicker,
+    /// Open the colorscheme picker overlay.
+    OpenColorschemePicker,
     /// Open the live grep picker overlay.
     OpenGrepPicker,
     /// Open a file selected from a picker.

@@ -4,6 +4,7 @@
 //! tree of pane-hosted window groups, routes split-management actions, and renders
 //! a footer status bar below the active editor region.
 
+mod colorscheme_picker;
 mod command_line;
 mod confirmation;
 mod geometry;
@@ -20,6 +21,7 @@ use crate::editor::{Action, ModeKind};
 use crate::screen::Screen;
 use crate::status_bar::StatusBar;
 use crate::terminal::CursorStyle;
+use crate::ui::colorscheme_picker::ColorschemePickerWidget;
 use crate::ui::confirmation_box::ConfirmationBox;
 use crate::ui::file_picker::FilePickerWidget;
 use crate::ui::grep_picker::GrepPickerWidget;
@@ -46,6 +48,7 @@ pub struct Layout {
     size: Size,
     command_line: CommandLineState,
     command_line_open: bool,
+    colorscheme_picker: Option<ColorschemePickerWidget>,
     file_picker: Option<FilePickerWidget>,
     grep_picker: Option<GrepPickerWidget>,
     confirmation_box: Option<ConfirmationBox>,
@@ -65,6 +68,7 @@ impl Layout {
             size: Size::default(),
             command_line: CommandLineState::new(),
             command_line_open: false,
+            colorscheme_picker: None,
             file_picker: None,
             grep_picker: None,
             confirmation_box: None,
@@ -171,6 +175,14 @@ impl Layout {
 
     /// Returns the visual cursor for the focused pane, if any.
     pub fn visual_cursor(&self) -> Option<Position> {
+        if let Some(position) = self
+            .colorscheme_picker
+            .as_ref()
+            .and_then(|picker| picker.cursor())
+        {
+            return Some(position);
+        }
+
         if let Some(position) = self.grep_picker.as_ref().and_then(|picker| picker.cursor()) {
             return Some(position);
         }
@@ -216,6 +228,13 @@ impl Layout {
 }
 
 impl Layout {
+    /// Closes all open pickers.
+    pub(super) fn close_all_pickers(&mut self) {
+        self.close_colorscheme_picker();
+        self.close_file_picker();
+        self.close_grep_picker();
+    }
+
     /// Dispatches a unified intent through the root layout.
     pub fn dispatch_intent(&mut self, intent: &Intent) -> bool {
         match intent {
@@ -231,6 +250,10 @@ impl Layout {
             }
             Command::OpenCommandLine => {
                 self.open_command_line();
+                true
+            }
+            Command::OpenColorschemePicker => {
+                self.open_colorscheme_picker();
                 true
             }
             Command::OpenFilePicker => {
@@ -404,6 +427,10 @@ impl Layout {
     }
 
     fn route_picker_ui_event(&mut self, event: &UiEvent) -> UiEventResult {
+        if self.colorscheme_picker_is_open() {
+            return self.handle_colorscheme_picker_event(event);
+        }
+
         if self.grep_picker_is_open() {
             return self.handle_grep_picker_event(event);
         }

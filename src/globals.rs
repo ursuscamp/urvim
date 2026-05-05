@@ -8,7 +8,7 @@ use crate::config::Config;
 use crate::editor::Action;
 use crate::notification::{NotificationLevel, NotificationMessage, NotificationState};
 use crate::register::RegisterStore;
-use crate::theme::Theme;
+use crate::theme::{Theme, ThemeRegistry};
 use std::sync::{Mutex, OnceLock, RwLock};
 
 #[cfg(test)]
@@ -54,6 +54,7 @@ static BUFFER_POOL: OnceLock<RwLock<BufferPool>> = OnceLock::new();
 static ACTIVE_BUFFER_ID: OnceLock<RwLock<Option<BufferId>>> = OnceLock::new();
 static CONFIG: OnceLock<RwLock<Option<Config>>> = OnceLock::new();
 static ACTIVE_THEME: OnceLock<RwLock<Option<Theme>>> = OnceLock::new();
+static THEME_REGISTRY: OnceLock<RwLock<Option<ThemeRegistry>>> = OnceLock::new();
 static NOTIFICATION_STATE: OnceLock<Mutex<NotificationState>> = OnceLock::new();
 #[cfg(not(test))]
 static REGISTER_STORE: OnceLock<RwLock<RegisterStore>> = OnceLock::new();
@@ -62,6 +63,7 @@ static REGISTER_STORE: OnceLock<RwLock<RegisterStore>> = OnceLock::new();
 thread_local! {
     static TEST_CONFIG: RefCell<Option<Config>> = const { RefCell::new(None) };
     static TEST_ACTIVE_THEME: RefCell<Option<Theme>> = const { RefCell::new(None) };
+    static TEST_THEME_REGISTRY: RefCell<Option<ThemeRegistry>> = const { RefCell::new(None) };
     static TEST_LAST_REPEAT: RefCell<Option<RepeatState>> = const { RefCell::new(None) };
     static TEST_REGISTER_STORE: RefCell<RegisterStore> = RefCell::new(RegisterStore::new());
 }
@@ -200,6 +202,10 @@ fn active_theme_slot() -> &'static RwLock<Option<Theme>> {
     ACTIVE_THEME.get_or_init(|| RwLock::new(None))
 }
 
+fn theme_registry_slot() -> &'static RwLock<Option<ThemeRegistry>> {
+    THEME_REGISTRY.get_or_init(|| RwLock::new(None))
+}
+
 fn notification_state_slot() -> &'static Mutex<NotificationState> {
     NOTIFICATION_STATE.get_or_init(|| Mutex::new(NotificationState::new()))
 }
@@ -216,6 +222,55 @@ fn register_store_slot() -> &'static RwLock<RegisterStore> {
 pub fn set_active_theme(theme: Theme) {
     let mut active_theme = active_theme_slot().write().unwrap();
     *active_theme = Some(theme);
+}
+
+/// Sets the theme registry used by the colorscheme picker.
+pub fn set_theme_registry(registry: ThemeRegistry) {
+    let slot = theme_registry_slot();
+    let mut stored = slot.write().unwrap();
+    *stored = Some(registry);
+}
+
+/// Runs a closure with access to the theme registry, if one has been set.
+pub fn with_theme_registry<R>(f: impl FnOnce(Option<&ThemeRegistry>) -> R) -> R {
+    #[cfg(test)]
+    {
+        let test_registry = TEST_THEME_REGISTRY.with(|slot| slot.borrow().clone());
+        if let Some(registry) = test_registry.as_ref() {
+            return f(Some(registry));
+        }
+        f(None)
+    }
+
+    #[cfg(not(test))]
+    {
+        let slot = theme_registry_slot();
+        let stored = slot.read().unwrap();
+        f(stored.as_ref())
+    }
+}
+
+/// Updates the theme field in the global session config.
+///
+/// This is called when a user selects a colorscheme from the picker so that
+/// the chosen theme name persists for the remainder of the session.
+pub fn update_theme_in_config(theme_name: &str) {
+    #[cfg(test)]
+    {
+        TEST_CONFIG.with(|slot| {
+            if let Some(config) = slot.borrow_mut().as_mut() {
+                config.theme = theme_name.to_string();
+            }
+        });
+    }
+
+    #[cfg(not(test))]
+    {
+        let mut stored = config_slot().write().unwrap();
+        if let Some(ref mut config) = *stored {
+            config.theme = theme_name.to_string();
+        }
+    }
 }
 
 /// Runs a closure with access to the active theme if one has been configured.
@@ -346,6 +401,10 @@ pub fn set_test_config(config: Config) -> TestConfigGuard {
 pub struct TestActiveThemeGuard;
 
 #[cfg(test)]
+/// A guard that installs a test-only theme registry for the current thread.
+pub struct TestThemeRegistryGuard;
+
+#[cfg(test)]
 /// A guard that installs a test-only register store for the current thread.
 pub struct TestRegisterStoreGuard;
 
@@ -353,6 +412,15 @@ pub struct TestRegisterStoreGuard;
 impl Drop for TestActiveThemeGuard {
     fn drop(&mut self) {
         TEST_ACTIVE_THEME.with(|slot| {
+            *slot.borrow_mut() = None;
+        });
+    }
+}
+
+#[cfg(test)]
+impl Drop for TestThemeRegistryGuard {
+    fn drop(&mut self) {
+        TEST_THEME_REGISTRY.with(|slot| {
             *slot.borrow_mut() = None;
         });
     }
@@ -374,6 +442,15 @@ pub fn set_test_active_theme(theme: Theme) -> TestActiveThemeGuard {
         *slot.borrow_mut() = Some(theme);
     });
     TestActiveThemeGuard
+}
+
+#[cfg(test)]
+/// Installs a theme registry for the current test thread and clears it when the guard drops.
+pub fn set_test_theme_registry(registry: ThemeRegistry) -> TestThemeRegistryGuard {
+    TEST_THEME_REGISTRY.with(|slot| {
+        *slot.borrow_mut() = Some(registry);
+    });
+    TestThemeRegistryGuard
 }
 
 #[cfg(test)]

@@ -399,7 +399,7 @@ impl<S: PickerSource> PickerWidget<S> {
             picker_content_cols.saturating_add(2).min(rect.size.cols),
         );
 
-        if self.highlighted.is_some() && rect.size.cols >= picker_outer.cols + PREVIEW_MIN_COLS + 2
+        if self.highlighted.is_some() && self.preview_key.is_some() && rect.size.cols >= picker_outer.cols + PREVIEW_MIN_COLS + 2
         {
             let preview_outer_cols = PREVIEW_PREFERRED_COLS
                 .min(rect.size.cols.saturating_sub(picker_outer.cols))
@@ -447,7 +447,7 @@ impl<S: PickerSource> PickerWidget<S> {
             .row
             .saturating_add(rect.size.rows)
             .saturating_sub(picker.origin.row.saturating_add(picker.size.rows));
-        let preview = if self.highlighted.is_some() && below_rows >= PREVIEW_MIN_ROWS {
+        let preview = if self.highlighted.is_some() && self.preview_key.is_some() && below_rows >= PREVIEW_MIN_ROWS {
             Some(frame_from_outer(
                 Position::new(
                     picker.origin.row.saturating_add(picker.size.rows),
@@ -473,7 +473,7 @@ impl<S: PickerSource> PickerWidget<S> {
     }
 
     fn status_line(&self) -> Option<String> {
-        if self.query_input.text().is_empty() {
+        if self.query_input.text().is_empty() && self.results.is_empty() {
             return Some("Type to search".to_string());
         }
 
@@ -512,7 +512,11 @@ impl<S: PickerSource> PickerWidget<S> {
         }
 
         let len = self.results.len() as isize;
-        let current = self.highlighted.unwrap_or(0) as isize;
+        let current = match self.highlighted {
+            Some(idx) => idx as isize,
+            None if delta > 0 => -1,
+            None => 0,
+        };
         let next = (current + delta).rem_euclid(len) as usize;
         self.highlighted = Some(next);
         self.ensure_highlight_visible();
@@ -527,19 +531,7 @@ impl<S: PickerSource> PickerWidget<S> {
         self.search_complete = false;
         self.source.set_generation(self.generation);
 
-        let has_previous_results = !self.results.is_empty();
-
-        if self.query_input.text().is_empty() {
-            self.results.clear();
-            self.highlighted = None;
-            self.visible_start = 0;
-            self.pending_result_replacement = false;
-            self.refresh_preview_for_highlight();
-            self.sync_query_right_prompt();
-            return;
-        }
-
-        self.pending_result_replacement = has_previous_results;
+        self.pending_result_replacement = !self.results.is_empty();
         self.search_active = true;
         self.source.start_search(
             self.query_input.text(),
@@ -691,9 +683,6 @@ impl<S: PickerSource> PickerWidget<S> {
                         self.pending_result_replacement = false;
                     }
                     self.results.extend(chunk);
-                    if self.highlighted.is_none() {
-                        self.highlighted = Some(0);
-                    }
                     self.ensure_highlight_visible();
                     self.refresh_preview_for_highlight();
                 }
@@ -1195,7 +1184,7 @@ mod tests {
             picker.results(),
             &["a-one".to_string(), "a-two".to_string()]
         );
-        assert_eq!(picker.highlighted_index(), Some(0));
+        assert_eq!(picker.highlighted_index(), None);
     }
 
     #[test]
@@ -1235,7 +1224,7 @@ mod tests {
         });
 
         assert_eq!(picker.results(), &["ab-one".to_string()]);
-        assert_eq!(picker.highlighted_index(), Some(0));
+        assert_eq!(picker.highlighted_index(), None);
     }
 
     #[test]
@@ -1283,6 +1272,9 @@ mod tests {
             &mut ctx,
         );
         let _ = picker.handle_ui_event(&UiEvent::Tick, &mut ctx);
+
+        // Move highlight to first result before selecting
+        picker.move_highlight(1);
 
         let result = picker.handle_ui_event(
             &UiEvent::Key(crate::terminal::Key::new(KeyCode::Enter)),
@@ -1608,6 +1600,7 @@ mod tests {
         let mut picker = PickerWidget::new(source);
         picker.results = vec!["src/main.rs".to_string()];
         picker.highlighted = Some(0);
+        picker.preview_key = Some("src/main.rs".to_string());
         let rect = UiRect::new(Position::new(0, 0), crate::window::Size::new(30, 180));
 
         let layout = picker.resolve_layout(rect).expect("picker layout");
@@ -1627,6 +1620,7 @@ mod tests {
         let mut picker = PickerWidget::new(source);
         picker.results = vec!["src/main.rs".to_string()];
         picker.highlighted = Some(0);
+        picker.preview_key = Some("src/main.rs".to_string());
         let rect = UiRect::new(Position::new(0, 0), crate::window::Size::new(18, 180));
 
         let layout = picker.resolve_layout(rect).expect("picker layout");
@@ -1641,6 +1635,7 @@ mod tests {
         let mut picker = PickerWidget::new(source);
         picker.results = vec!["src/main.rs".to_string()];
         picker.highlighted = Some(0);
+        picker.preview_key = Some("src/main.rs".to_string());
         let rect = UiRect::new(Position::new(0, 0), crate::window::Size::new(30, 90));
 
         let layout = picker.resolve_layout(rect).expect("picker layout");

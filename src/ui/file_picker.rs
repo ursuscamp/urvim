@@ -164,6 +164,7 @@ impl PickerSource for FilePickerSource {
         }
 
         if query.is_empty() {
+            let _ = _sender.send(PickerSearchEvent::PickerSearchComplete { generation });
             return;
         }
 
@@ -716,7 +717,7 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
 
-        assert_eq!(picker.highlighted_index(), Some(0));
+        assert_eq!(picker.highlighted_index(), None);
 
         manager.shutdown();
         let _ = fs::remove_file(file_path);

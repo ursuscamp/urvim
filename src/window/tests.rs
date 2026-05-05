@@ -4835,7 +4835,6 @@ fn test_indent_guide_appears_with_step_by_step_editing_at_column_zero() {
     let _ = window.buffer_view().with_buffer(|b| {
         let scopes = b.cached_indent_scopes();
         let scope_ids = b.cached_line_indent_scope_ids(3);
-
     });
 
     // Check for the guide character on screen row for the `"hello"` line.

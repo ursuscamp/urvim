@@ -12,8 +12,7 @@ impl Layout {
     pub(super) fn open_grep_picker(&mut self) {
         self.command_line_open = false;
         self.confirmation_box = None;
-        self.close_file_picker();
-        self.close_grep_picker();
+        self.close_all_pickers();
 
         match std::env::current_dir() {
             Ok(cwd) => {
