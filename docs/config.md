@@ -199,6 +199,18 @@ Sets how long logical lines break when visual wrapping is enabled for a window.
 - Behavior: `hard` wraps at the exact content width; `soft` wraps at the nearest word boundary at or before the content width, and falls back to a hard split when no boundary exists
 - Scope: wrapped window rendering only (wrapping is toggled per window)
 
+## Sessions
+
+urvim also saves and restores workspace sessions automatically when it is started with no file paths.
+
+- Storage: `$XDG_DATA_HOME/urvim/sessions/`, with a fallback to `$HOME/.local/share/urvim/sessions/`
+- Keying: sessions are matched to the raw current working directory
+- Filename format: `<sanitized-folder-name>--<short-hash>.toml`
+- Restore behavior: if a matching session exists, urvim restores the workspace automatically
+- Fallback: if no session exists or a session cannot be read, urvim starts with a blank buffer
+- Autosave: the current session is written every 10 seconds while the workspace state is dirty
+- Scope: workspace state only; unsaved buffer contents are not persisted
+
 ## Notes
 
 - The config file is TOML.

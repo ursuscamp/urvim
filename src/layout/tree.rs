@@ -180,6 +180,7 @@ impl Layout {
         };
 
         Self::equalize_node(root);
+        crate::session::mark_dirty();
         true
     }
 
@@ -476,6 +477,7 @@ impl Layout {
 
         if Self::record_focus_in_node(root, pane_id) {
             self.focused_pane = pane_id;
+            crate::session::mark_dirty();
             true
         } else {
             false

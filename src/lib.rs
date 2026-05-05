@@ -12,6 +12,7 @@ pub mod notification;
 pub mod path;
 pub mod register;
 pub mod screen;
+pub mod session;
 pub mod status_bar;
 pub mod syntax;
 pub mod terminal;

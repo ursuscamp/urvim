@@ -20,6 +20,8 @@ use std::time::Instant;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
+mod session;
+
 #[derive(Debug)]
 struct TabBarLayout {
     start: usize,
@@ -190,6 +192,7 @@ impl WindowGroup {
         let index = self.active_tab_index();
         self.tabs.remove(index);
         self.normalize_state();
+        crate::session::mark_dirty();
         self.tabs.is_empty()
     }
 
@@ -247,12 +250,14 @@ impl WindowGroup {
             .tab_index_for_buffer_id(buffer_id)
             .unwrap_or_else(|| self.open_buffer_tab(buffer_id));
         self.active_tab = index;
+        crate::session::mark_dirty();
     }
 
     /// Opens a new unnamed buffer in a new tab and activates it.
     pub fn open_unnamed_buffer_tab(&mut self) -> BufferId {
         let buffer_id = crate::globals::with_buffer_pool(|pool| pool.create_buffer());
         self.active_tab = self.open_buffer_tab(buffer_id);
+        crate::session::mark_dirty();
         buffer_id
     }
 
@@ -270,6 +275,7 @@ impl WindowGroup {
         self.jumplist
             .borrow_mut()
             .sync_current_cursor(restored_cursor);
+        crate::session::mark_dirty();
         true
     }
 

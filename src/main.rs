@@ -66,7 +66,8 @@ fn main() -> io::Result<()> {
     let (mut rows, mut cols) = get_terminal_size().unwrap_or((24, 80));
     let mut screen = Screen::new(rows, cols);
 
-    let mut layout = Layout::from_cli_files(&cli.files);
+    let mut layout = startup_layout(&cli.files);
+    urvim::session::set_enabled(cli.files.is_empty());
     globals::set_active_buffer_id(layout.active_buffer_view().buffer_id());
     globals::with_buffer_pool(|pool| {
         pool.warmup_syntax_at_startup(
@@ -113,6 +114,7 @@ fn main() -> io::Result<()> {
                         break;
                     }
                 }
+                urvim::session::maybe_autosave(&layout);
                 continue;
             }
             UiEvent::Paste(text) => {
@@ -360,6 +362,10 @@ fn main() -> io::Result<()> {
                                 terminal.set_cursor_style(layout.active_window_cursor_style())?;
                             }
                             Intent::Command(command) => {
+                                if matches!(command, Command::Quit | Command::TryQuit) {
+                                    urvim::session::save_now(&layout);
+                                }
+
                                 if matches!(command, Command::Quit) {
                                     break;
                                 }
@@ -391,6 +397,7 @@ fn main() -> io::Result<()> {
         }
     }
 
+    urvim::session::save_now(&layout);
     terminal.reset_style()?;
 
     Ok(())
@@ -621,6 +628,30 @@ fn raw_paste_action_for_mode(mode: ModeKind, text: String) -> Option<Action> {
     }
 }
 
+fn startup_layout(files: &[urvim::cli::CliFileSpec]) -> Layout {
+    let Ok(cwd) = std::env::current_dir() else {
+        tracing::warn!("failed to resolve current directory for startup");
+        return Layout::from_cli_files(files);
+    };
+
+    startup_layout_for_cwd(&cwd, files)
+}
+
+fn startup_layout_for_cwd(cwd: &std::path::Path, files: &[urvim::cli::CliFileSpec]) -> Layout {
+    if files.is_empty() {
+        match urvim::session::load_session_for_cwd(cwd) {
+            Ok(Some(session)) => Layout::from_session(session),
+            Ok(None) => Layout::from_cli_files(&[]),
+            Err(error) => {
+                tracing::warn!(?error, "failed to load session");
+                Layout::from_cli_files(&[])
+            }
+        }
+    } else {
+        Layout::from_cli_files(files)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -628,6 +659,7 @@ mod tests {
     use std::io::{Read, Write};
     use std::sync::{Arc, Mutex, OnceLock};
     use urvim::buffer::{Buffer, BufferId};
+    use urvim::cli::CliFileSpec;
     use urvim::editor::ModeKind;
     use urvim::terminal::{Event, Key, KeyCode};
     use urvim::window::VisualSelectionKind;
@@ -950,6 +982,226 @@ mod tests {
             &mut layout,
             Some(&ActionKind::SaveBuffer(Some(BufferId::new(usize::MAX))))
         ));
+    }
+
+    #[test]
+    fn try_quit_saves_session_before_layout_is_cleared() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "urvim-try-quit-session-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time should be after epoch")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let original_dir = std::env::current_dir().unwrap();
+        std::env::set_current_dir(&temp_dir).unwrap();
+
+        (|| {
+            urvim::session::set_enabled(true);
+
+            let mut layout = Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("one")]));
+            assert!(process_intent_queue(
+                &mut layout,
+                vec![Intent::Command(Command::SplitVertical)],
+            ));
+
+            urvim::session::save_now(&layout);
+            let session_file = urvim::session::load_current_cwd()
+                .expect("session should load")
+                .expect("session should exist");
+
+            match session_file.root {
+                urvim::session::SessionNode::Split(_) => {}
+                other => panic!("expected split session root, got {other:?}"),
+            }
+
+            assert!(process_intent_queue(
+                &mut layout,
+                vec![Intent::Command(Command::TryQuit)],
+            ));
+
+            let saved = urvim::session::load_current_cwd()
+                .expect("session should still load")
+                .expect("session should still exist");
+            match saved.root {
+                urvim::session::SessionNode::Split(_) => {}
+                other => panic!("expected split session root after try-quit, got {other:?}"),
+            }
+        })();
+
+        std::env::set_current_dir(original_dir).unwrap();
+    }
+
+    #[test]
+    fn quit_saves_session_before_layout_is_cleared() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "urvim-quit-session-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time should be after epoch")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let original_dir = std::env::current_dir().unwrap();
+        std::env::set_current_dir(&temp_dir).unwrap();
+
+        (|| {
+            urvim::session::set_enabled(true);
+
+            let mut layout = Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("one")]));
+            assert!(process_intent_queue(
+                &mut layout,
+                vec![Intent::Command(Command::SplitVertical)],
+            ));
+
+            urvim::session::save_now(&layout);
+            let session_file = urvim::session::load_current_cwd()
+                .expect("session should load")
+                .expect("session should exist");
+            assert!(matches!(
+                session_file.root,
+                urvim::session::SessionNode::Split(_)
+            ));
+
+            assert!(process_intent_queue(
+                &mut layout,
+                vec![Intent::Command(Command::Quit)],
+            ));
+
+            let saved = urvim::session::load_current_cwd()
+                .expect("session should still load")
+                .expect("session should still exist");
+            assert!(matches!(saved.root, urvim::session::SessionNode::Split(_)));
+        })();
+
+        std::env::set_current_dir(original_dir).unwrap();
+    }
+
+    #[test]
+    fn startup_layout_restores_existing_session_when_no_files_are_passed() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "urvim-startup-restore-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time should be after epoch")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let path = temp_dir.join("restore.txt");
+        std::fs::write(&path, "saved session file\nsecond line").unwrap();
+        let session = urvim::session::SessionFile {
+            version: 1,
+            cwd: temp_dir.display().to_string(),
+            label: temp_dir
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("cwd")
+                .to_string(),
+            focused_pane: 0,
+            root: urvim::session::SessionNode::Pane(urvim::session::SessionPane {
+                pane_id: 0,
+                window_group: urvim::session::SessionWindowGroup {
+                    active_tab: 0,
+                    tabs: vec![urvim::session::SessionWindow {
+                        path: path.display().to_string(),
+                        cursor: urvim::session::SessionCursor { row: 1, col: 0 },
+                        scroll_offset: urvim::session::SessionPosition { row: 0, col: 0 },
+                        wrapped_row_offset: 0,
+                        wrap_enabled: false,
+                    }],
+                },
+            }),
+        };
+        urvim::session::save_session_for_cwd(&temp_dir, &session).unwrap();
+
+        let loaded = urvim::session::load_session_for_cwd(&temp_dir).unwrap();
+        assert!(loaded.is_some());
+
+        let restored = startup_layout_for_cwd(&temp_dir, &[]);
+        assert_eq!(
+            restored
+                .active_buffer_view()
+                .with_buffer(|buffer| buffer
+                    .file_name()
+                    .map(|name| name.to_string_lossy().into_owned()))
+                .unwrap(),
+            Some("restore.txt".to_string())
+        );
+        assert_eq!(restored.active_buffer_view().cursor(), Cursor::new(1, 0));
+    }
+
+    #[test]
+    fn startup_layout_uses_blank_buffer_when_no_session_exists() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "urvim-startup-blank-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time should be after epoch")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let restored = startup_layout_for_cwd(&temp_dir, &[]);
+        assert_eq!(
+            restored
+                .active_buffer_view()
+                .with_buffer(|buffer| buffer.as_str())
+                .unwrap(),
+            ""
+        );
+    }
+
+    #[test]
+    fn startup_layout_with_files_does_not_restore_session() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "urvim-startup-files-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time should be after epoch")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let session_path = temp_dir.join("session.txt");
+        std::fs::write(&session_path, "session state").unwrap();
+        let saved_layout = Layout::new(WindowGroup::from_paths(&[session_path.clone()]));
+        urvim::session::save_session_for_cwd(&temp_dir, &saved_layout.to_session()).unwrap();
+
+        let cli_path = temp_dir.join("cli.txt");
+        std::fs::write(&cli_path, "cli file").unwrap();
+        let restored = startup_layout_for_cwd(
+            &temp_dir,
+            &[CliFileSpec {
+                path: cli_path.clone(),
+                cursor: None,
+            }],
+        );
+
+        assert_eq!(
+            restored
+                .active_buffer_view()
+                .with_buffer(|buffer| buffer.as_str())
+                .unwrap(),
+            "cli file"
+        );
+        assert_eq!(
+            restored
+                .active_buffer_view()
+                .with_buffer(|buffer| buffer
+                    .file_name()
+                    .map(|name| name.to_string_lossy().into_owned()))
+                .unwrap(),
+            Some("cli.txt".to_string())
+        );
     }
 
     #[test]

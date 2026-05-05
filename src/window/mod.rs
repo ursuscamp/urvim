@@ -11,6 +11,7 @@ mod gutter;
 mod motions;
 mod render;
 pub mod renderer;
+mod session;
 mod view;
 mod widget;
 mod wrap;
@@ -234,6 +235,7 @@ impl Window {
     /// Toggles visual wrapping for this window.
     pub fn toggle_wrap(&mut self) {
         self.wrap_enabled = !self.wrap_enabled;
+        crate::session::mark_dirty();
     }
 
     pub fn render_data(&self) -> &RenderData {

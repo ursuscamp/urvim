@@ -1,6 +1,7 @@
 use super::*;
 use crate::action::ActionResult;
 use crate::buffer::Buffer;
+use crate::buffer::Cursor;
 use crate::config::Config;
 use crate::editor::{Action, ActionKind, ModeKind};
 use crate::globals;
@@ -11,11 +12,16 @@ use crate::ui::{Command, Intent, UiEvent, UiEventResult};
 use crate::window::{Position, Size};
 use crate::window_group::WindowGroup;
 use std::collections::BTreeSet;
+use std::fs;
 use std::thread;
 use std::time::Duration;
 
 fn layout_with_buffers(buffers: Vec<Buffer>) -> Layout {
     Layout::new(WindowGroup::from_buffers(buffers))
+}
+
+fn abs_path(path: &std::path::Path) -> crate::AbsolutePath {
+    crate::AbsolutePath::from_path(path).unwrap()
 }
 
 fn dispatch_layout_action<T>(layout: &mut Layout, intent: T) -> ActionResult
@@ -129,6 +135,40 @@ fn pane_count(node: &LayoutNode) -> usize {
         LayoutNode::Pane(_) => 1,
         LayoutNode::Split(split) => pane_count(&split.first) + pane_count(&split.second),
     }
+}
+
+#[test]
+fn test_layout_session_round_trips_cursor_and_file_paths() {
+    let temp_dir = std::env::temp_dir().join(format!(
+        "urvim-layout-session-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir_all(&temp_dir).unwrap();
+
+    let path = temp_dir.join("session.txt");
+    fs::write(&path, "alpha\nbeta").unwrap();
+
+    let mut layout = layout_with_buffers(vec![Buffer::from_str_with_path(
+        "alpha\nbeta",
+        abs_path(&path),
+    )]);
+    layout
+        .active_buffer_view_mut()
+        .set_cursor_synced(Cursor::new(1, 2));
+
+    let restored = Layout::from_session(layout.to_session());
+
+    assert_eq!(restored.active_buffer_view().cursor(), Cursor::new(1, 2));
+    assert_eq!(
+        restored.active_buffer_view().with_buffer(|buffer| buffer
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())),
+        Some(Some("session.txt".to_string()))
+    );
 }
 
 fn collect_pane_ids(node: &LayoutNode, ids: &mut Vec<PaneId>) {

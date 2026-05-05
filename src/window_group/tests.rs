@@ -8,6 +8,7 @@ use crate::globals;
 use crate::terminal::{Color, Style};
 use crate::theme::{HighlightStyles, Tag, Theme, ThemeKind};
 use std::collections::BTreeSet;
+use std::fs;
 use std::path::{Path, PathBuf};
 
 fn abs_path(path: &Path) -> crate::AbsolutePath {
@@ -112,6 +113,35 @@ fn buffer_file_name(view: &BufferView) -> Option<std::ffi::OsString> {
 
 fn buffer_cursor(view: &BufferView) -> Cursor {
     view.cursor()
+}
+
+#[test]
+fn test_window_group_session_skips_missing_files_during_restore() {
+    let temp_dir = std::env::temp_dir().join(format!(
+        "urvim-window-group-session-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir_all(&temp_dir).unwrap();
+
+    let first = temp_dir.join("first.txt");
+    let second = temp_dir.join("second.txt");
+    fs::write(&first, "alpha").unwrap();
+    fs::write(&second, "beta").unwrap();
+
+    let group = WindowGroup::from_paths(&[first.clone(), second.clone()]);
+    let session = group.to_session();
+    fs::remove_file(&second).unwrap();
+
+    let restored = WindowGroup::from_session(session);
+    assert_eq!(restored.tabs.len(), 1);
+    assert_eq!(
+        buffer_file_name(restored.active_window().buffer_view()).unwrap(),
+        first.file_name().unwrap()
+    );
 }
 
 #[test]

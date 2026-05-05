@@ -12,6 +12,7 @@ mod grep_picker;
 mod node;
 mod picker;
 mod render;
+mod session;
 mod tree;
 
 use self::command_line::CommandLineState;
@@ -89,6 +90,11 @@ impl Layout {
     /// Returns true when the layout has no panes left to render.
     pub fn should_exit(&self) -> bool {
         self.root.is_none()
+    }
+
+    /// Returns true when the layout still has session state to persist.
+    pub fn can_save_session(&self) -> bool {
+        self.root.is_some()
     }
 
     /// Returns the active window group for the focused pane.

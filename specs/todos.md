@@ -4,7 +4,6 @@ This is a list, in no particular order, of things that need to be addressed whic
 
 ## Features
 
-- session support
 - should panes hold dynamic widgets?
 
 - build-time compiled themes and syntax grammar

@@ -7,7 +7,7 @@ use crate::window_group::WindowGroup;
 pub struct PaneId(pub usize);
 
 /// Orientation of a binary split node.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum SplitAxis {
     /// Child panes are stacked vertically and divide rows.
     Horizontal,

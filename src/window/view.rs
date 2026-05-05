@@ -187,6 +187,7 @@ impl BufferView {
     pub fn set_scroll_offset(&mut self, offset: Position) {
         self.scroll_offset = offset;
         self.wrapped_row_offset = offset.row;
+        crate::session::mark_dirty();
     }
 
     pub fn wrapped_row_offset(&self) -> u16 {
@@ -195,6 +196,7 @@ impl BufferView {
 
     pub fn set_wrapped_row_offset(&mut self, offset: u16) {
         self.wrapped_row_offset = offset;
+        crate::session::mark_dirty();
     }
 
     pub fn cursor(&self) -> Cursor {
@@ -203,6 +205,7 @@ impl BufferView {
 
     pub fn set_cursor(&mut self, cursor: Cursor) {
         self.cursor = cursor;
+        crate::session::mark_dirty();
     }
 
     /// Starts a new visual selection anchored at the current cursor.
@@ -289,6 +292,7 @@ impl BufferView {
             .unwrap_or(cursor);
         self.cursor = synced_cursor;
         self.remembered_visual_col = Some(self.current_visual_col());
+        crate::session::mark_dirty();
     }
 
     pub fn get_or_compute_target_col(&self) -> usize {
