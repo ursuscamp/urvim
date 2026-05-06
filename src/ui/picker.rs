@@ -656,6 +656,17 @@ impl<S: PickerSource> PickerWidget<S> {
             .apply_syntax_refresh_result_for_key(result.key.as_str(), result.result);
     }
 
+    /// Applies an in-progress background syntax snapshot to the currently highlighted preview.
+    pub fn handle_preview_syntax_refresh_chunk(
+        &mut self,
+        _generation: u64,
+        result: crate::ui::picker_preview::PreviewSyntaxRefreshResult,
+    ) {
+        let _ = self
+            .preview_adapter
+            .apply_syntax_refresh_chunk_for_key(result.key.as_str(), result.result);
+    }
+
     /// Marks a background preview syntax refresh as failed.
     pub fn handle_preview_syntax_refresh_failed(&mut self, _generation: u64) {
         let Some(key) = self.preview_key.as_deref() else {

@@ -78,6 +78,17 @@ impl Layout {
             JobEvent::Chunk {
                 kind,
                 token,
+                payload: JobPayload::PreviewSyntax(result),
+            } if kind == crate::background::JobKind::PickerPreviewSyntax => {
+                if let Some(picker) = self.file_picker.as_mut() {
+                    picker.handle_preview_syntax_refresh_chunk(token.generation(), result);
+                } else if let Some(picker) = self.grep_picker.as_mut() {
+                    picker.handle_preview_syntax_refresh_chunk(token.generation(), result);
+                }
+            }
+            JobEvent::Chunk {
+                kind,
+                token,
                 payload: JobPayload::FileSearchChunk(chunk),
             } if kind == crate::background::JobKind::FilePickerSearch => {
                 if let Some(picker) = self.file_picker.as_mut() {

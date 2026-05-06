@@ -143,11 +143,24 @@ impl PreviewPane {
 
     /// Applies a completed background syntax refresh to the preview buffer.
     pub fn apply_syntax_refresh_result(&mut self, result: BufferCacheRefreshResult) -> bool {
+        self.apply_syntax_refresh_result_inner(result, true)
+    }
+
+    /// Applies an in-progress background syntax snapshot to the preview buffer.
+    pub fn apply_syntax_refresh_chunk(&mut self, result: BufferCacheRefreshResult) -> bool {
+        self.apply_syntax_refresh_result_inner(result, false)
+    }
+
+    fn apply_syntax_refresh_result_inner(
+        &mut self,
+        result: BufferCacheRefreshResult,
+        clear_pending: bool,
+    ) -> bool {
         let applied = self
             .buffer_view
             .with_buffer_mut(|buffer| buffer.apply_buffer_cache_refresh_result(result))
             .unwrap_or(false);
-        if applied {
+        if applied && clear_pending {
             self.syntax_refresh_pending = false;
         }
         applied
@@ -203,7 +216,7 @@ impl PreviewPane {
             scroll_to_cursor: active_line && self.follow_highlight,
             active_line_enabled: active_line,
             is_normal_mode: active_line,
-            syntax_warmup: false,
+            syntax_warmup: true,
         };
 
         renderer::render_buffer_view(
@@ -306,6 +319,17 @@ impl PickerPreviewAdapter {
             .is_some_and(|pane| pane.apply_syntax_refresh_result(result))
     }
 
+    /// Applies an in-progress syntax snapshot to the cached preview for a key.
+    pub fn apply_syntax_refresh_chunk_for_key(
+        &mut self,
+        key: &str,
+        result: BufferCacheRefreshResult,
+    ) -> bool {
+        self.panes
+            .get_mut(key)
+            .is_some_and(|pane| pane.apply_syntax_refresh_chunk(result))
+    }
+
     /// Clears the pending syntax-refresh flag for a cached preview.
     pub fn clear_syntax_refresh_pending_for_key(&mut self, key: &str) -> bool {
         self.panes
@@ -397,11 +421,43 @@ impl PreviewSyntaxRefreshJob {
 
         let mut cache = BufferCache::new(self.syntax_name.clone());
         if !self.line_texts.is_empty() {
-            cache.ensure_through(
-                &self.syntax_name,
-                &self.line_texts,
-                self.line_texts.len() - 1,
-            );
+            let last_line = self.line_texts.len() - 1;
+            let mut chunk_end = 0usize;
+            let chunk_size = 100usize;
+
+            loop {
+                if context.is_stopping() || context.is_aborted() {
+                    return;
+                }
+
+                chunk_end = chunk_end.saturating_add(chunk_size).min(last_line);
+                cache.ensure_through(&self.syntax_name, &self.line_texts, chunk_end);
+
+                let payload =
+                    crate::background::JobPayload::PreviewSyntax(PreviewSyntaxRefreshResult {
+                        key: self.key.clone(),
+                        result: BufferCacheRefreshResult {
+                            buffer_id: BufferId::new(0),
+                            generation: self.generation,
+                            cache: cache.clone(),
+                        },
+                    });
+
+                if chunk_end < last_line {
+                    let _ = event_tx.send(crate::background::JobEvent::Chunk {
+                        kind: context.kind().clone(),
+                        token: context.token(),
+                        payload,
+                    });
+                } else {
+                    let _ = event_tx.send(crate::background::JobEvent::Completed {
+                        kind: context.kind().clone(),
+                        token: context.token(),
+                        payload: Some(payload),
+                    });
+                    return;
+                }
+            }
         }
 
         let _ = event_tx.send(crate::background::JobEvent::Completed {
@@ -729,6 +785,8 @@ mod tests {
 
     #[test]
     fn preview_syntax_refresh_job_populates_cached_spans_off_thread() {
+        let line_texts: Vector<Arc<str>> =
+            std::iter::repeat_n(Arc::<str>::from("fn main() { let value = 1; }"), 250).collect();
         let handle = JobHandle::new();
         handle
             .submit_latest_only(
@@ -738,28 +796,40 @@ mod tests {
                     String::from("/tmp/preview.rs"),
                     SmolStr::new("rust"),
                     7,
-                    vec![Arc::<str>::from("fn main() { let value = 1; }")]
-                        .into_iter()
-                        .collect(),
+                    line_texts,
                 ),
             )
             .unwrap();
 
-        let event = wait_for_event(&handle);
-        let result = match event {
-            JobEvent::Completed {
-                payload: Some(crate::background::JobPayload::PreviewSyntax(preview_result)),
-                ..
-            } => {
-                assert_eq!(preview_result.key, "/tmp/preview.rs");
-                preview_result.result
+        let mut chunk_count = 0;
+        let result = loop {
+            let event = wait_for_event(&handle);
+            match event {
+                JobEvent::Chunk {
+                    payload: crate::background::JobPayload::PreviewSyntax(preview_result),
+                    ..
+                } => {
+                    chunk_count += 1;
+                    assert_eq!(preview_result.key, "/tmp/preview.rs");
+                }
+                JobEvent::Completed {
+                    payload: Some(crate::background::JobPayload::PreviewSyntax(preview_result)),
+                    ..
+                } => {
+                    assert_eq!(preview_result.key, "/tmp/preview.rs");
+                    break preview_result.result;
+                }
+                other => panic!(
+                    "expected preview syntax chunk or completion, got {:?}",
+                    other
+                ),
             }
-            other => panic!("expected preview syntax completion, got {:?}", other),
         };
 
+        assert!(chunk_count > 0);
         assert_eq!(result.generation, 7);
         assert!(result.cache.cached_spans_for_line(0).is_some());
-        assert!(result.cache.is_complete_for_line_count(1));
+        assert!(result.cache.is_complete_for_line_count(250));
 
         handle.shutdown();
     }
@@ -986,20 +1056,141 @@ mod tests {
             Tag::parse("ui.window.lines").expect("valid tag"),
             Style::new().fg(Color::ansi(15)).bg(Color::ansi(16)),
         );
+        highlights.insert(
+            Tag::parse("syntax.comment").expect("valid tag"),
+            Style::new().fg(Color::ansi(20)),
+        );
+        highlights.insert(
+            Tag::parse("syntax.constant").expect("valid tag"),
+            Style::new().fg(Color::ansi(21)),
+        );
+        highlights.insert(
+            Tag::parse("syntax.function").expect("valid tag"),
+            Style::new().fg(Color::ansi(22)),
+        );
+        highlights.insert(
+            Tag::parse("syntax.keyword").expect("valid tag"),
+            Style::new().fg(Color::ansi(23)),
+        );
+        highlights.insert(
+            Tag::parse("syntax.operator").expect("valid tag"),
+            Style::new().fg(Color::ansi(24)),
+        );
+        highlights.insert(
+            Tag::parse("syntax.punctuation").expect("valid tag"),
+            Style::new().fg(Color::ansi(25)),
+        );
+        highlights.insert(
+            Tag::parse("syntax.string").expect("valid tag"),
+            Style::new().fg(Color::ansi(26)),
+        );
+        highlights.insert(
+            Tag::parse("syntax.type").expect("valid tag"),
+            Style::new().fg(Color::ansi(27)),
+        );
+        highlights.insert(
+            Tag::parse("syntax.variable").expect("valid tag"),
+            Style::new().fg(Color::ansi(28)),
+        );
         for tag_name in [
-            "syntax.comment",
-            "syntax.constant",
-            "syntax.function",
-            "syntax.keyword",
-            "syntax.operator",
-            "syntax.punctuation",
-            "syntax.string",
-            "syntax.type",
-            "syntax.variable",
+            "syntax.comment.todo",
+            "syntax.comment.fixme",
+            "syntax.comment.bug",
+            "syntax.comment.note",
         ] {
             highlights.insert(Tag::parse(tag_name).expect("valid tag"), Style::new());
         }
         Theme::new("demo", ThemeKind::Ansi256, default_style, highlights)
+    }
+
+    #[test]
+    fn preview_pane_matches_window_with_syntax_and_active_line() {
+        let _config_guard = globals::set_test_config(Config {
+            wrap_mode: WrapMode::Hard,
+            syntax: true,
+            active_line: true,
+            ..Config::default()
+        });
+        let theme = themed_window();
+        let _theme_guard = globals::set_test_active_theme(theme);
+        let file_path = unique_temp_dir().join("preview.rs");
+        fs::create_dir_all(file_path.parent().unwrap()).unwrap();
+        fs::write(
+            &file_path,
+            "fn main() { let value: Option<String> = Some(\"hi\"); } // note\n",
+        )
+        .unwrap();
+
+        let mut pane = PreviewPane::new(Buffer::from_str_with_path(
+            "fn main() { let value: Option<String> = Some(\"hi\"); } // note\n",
+            AbsolutePath::from_path(file_path.as_path()).unwrap(),
+        ));
+        let mut preview_screen = crate::screen::Screen::new(1, 80);
+        pane.render(
+            &mut preview_screen,
+            Position::new(0, 0),
+            Size::new(1, 80),
+            0,
+            true,
+        );
+
+        let mut window = Window::new(Buffer::from_str_with_path(
+            "fn main() { let value: Option<String> = Some(\"hi\"); } // note\n",
+            AbsolutePath::from_path(file_path.as_path()).unwrap(),
+        ));
+        window.set_cursor(crate::buffer::Cursor::new(0, 0));
+        let mut window_screen = crate::screen::Screen::new(1, 80);
+        window.render(&mut window_screen, Position::new(0, 0), Size::new(1, 80));
+
+        assert_screen_eq(&mut preview_screen, &mut window_screen);
+
+        let _ = fs::remove_file(file_path);
+    }
+
+    #[test]
+    fn preview_pane_warms_initial_viewport_syntax_cache_on_render() {
+        let _config_guard = globals::set_test_config(Config {
+            syntax: true,
+            ..Config::default()
+        });
+        let theme = themed_window();
+        let _theme_guard = globals::set_test_active_theme(theme);
+
+        let mut pane = PreviewPane::new(Buffer::from_str(
+            "one\ntwo\nthree\nfour\nfive\nsix\nseven\neight\n",
+        ));
+        pane.render(
+            &mut crate::screen::Screen::new(2, 20),
+            Position::new(0, 0),
+            Size::new(2, 20),
+            0,
+            false,
+        );
+
+        assert!(
+            !pane
+                .buffer_view()
+                .with_buffer(|buffer| buffer.syntax_cache_complete())
+                .unwrap_or(true)
+        );
+        assert!(
+            pane.buffer_view()
+                .with_buffer(|buffer| buffer.cached_syntax_spans_for_line(0))
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            pane.buffer_view()
+                .with_buffer(|buffer| buffer.cached_syntax_spans_for_line(3))
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            pane.buffer_view()
+                .with_buffer(|buffer| buffer.cached_syntax_spans_for_line(6))
+                .unwrap()
+                .is_none()
+        );
     }
 
     fn unique_temp_dir() -> std::path::PathBuf {
