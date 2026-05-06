@@ -628,6 +628,57 @@ fn test_syntax_spans_update_after_edit() {
 }
 
 #[test]
+fn test_syntax_spans_update_after_full_replace() {
+    let mut buf = syntax_buffer("syntax-replace", "rs", "let value = 1;");
+
+    assert!(
+        line_spans(&mut buf, 0)
+            .iter()
+            .any(|span| span.style == tag("keyword"))
+    );
+
+    buf.replace_text("// let value = 1;\nlet next = 2;");
+
+    assert_eq!(buf.cached_syntax_line_count(), 0);
+    assert!(!buf.syntax_cache_complete());
+    let first_line = line_spans(&mut buf, 0);
+    let second_line = line_spans(&mut buf, 1);
+
+    assert_spans_include_comment_style(&first_line);
+    assert!(second_line.iter().any(|span| span.style == tag("keyword")));
+}
+
+#[test]
+fn test_syntax_spans_update_after_full_replace_same_line_length_change() {
+    let mut buf = syntax_buffer(
+        "syntax-replace-same-line",
+        "rs",
+        "let config = Config::load(cli.theme.as_deref(), cli.no_syntax.then_some(false));",
+    );
+
+    let original = line_spans(&mut buf, 0);
+    assert_spans_include_exact_style(
+        &original,
+        "let config = Config::load(cli.theme.as_deref(), cli.no_syntax.then_some(false));",
+        "Config",
+        tag("type"),
+    );
+
+    buf.replace_text(
+        "let configg = Config::load(cli.theme.as_deref(), cli.no_syntax.then_some(false));",
+    );
+
+    assert_eq!(buf.cached_syntax_line_count(), 0);
+    let updated = line_spans(&mut buf, 0);
+    assert_spans_include_exact_style(
+        &updated,
+        "let configg = Config::load(cli.theme.as_deref(), cli.no_syntax.then_some(false));",
+        "Config",
+        tag("type"),
+    );
+}
+
+#[test]
 fn test_syntax_spans_preserve_multiline_state() {
     let path =
         AbsolutePath::from_path(temp_path_with_ext("syntax-multiline", "toml").as_path()).unwrap();

@@ -116,11 +116,78 @@ impl BufferPool {
         self.buffers.get_mut(&id)
     }
 
+    /// Returns the buffer identifier currently associated with a file path.
+    pub fn buffer_id_for_path(&self, path: &AbsolutePath) -> Option<BufferId> {
+        self.paths.get(path).copied()
+    }
+
+    /// Updates the stored path for a loaded buffer.
+    pub fn rename_buffer_path(&mut self, id: BufferId, path: impl AsRef<Path>) -> io::Result<()> {
+        let abs_path = AbsolutePath::from_path(path.as_ref()).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "failed to resolve absolute path",
+            )
+        })?;
+
+        let Some(buffer) = self.buffers.get_mut(&id) else {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                "buffer id not found",
+            ));
+        };
+
+        if let Some(existing_id) = self.paths.get(&abs_path).copied()
+            && existing_id != id
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                "buffer path already exists in pool",
+            ));
+        }
+
+        if let Some(old_path) = buffer.path().cloned() {
+            self.paths.remove(&old_path);
+        }
+
+        buffer.set_path(abs_path.clone());
+        self.paths.insert(abs_path, id);
+        Ok(())
+    }
+
+    /// Removes a buffer from the pool and returns it when present.
+    pub fn remove_buffer(&mut self, id: BufferId) -> Option<Buffer> {
+        let buffer = self.buffers.remove(&id)?;
+        if let Some(path) = buffer.path().cloned() {
+            self.paths.remove(&path);
+        }
+        Some(buffer)
+    }
+
     /// Returns all buffer identifiers currently loaded into the pool.
     pub fn buffer_ids(&self) -> Vec<BufferId> {
         let mut ids = self.buffers.keys().copied().collect::<Vec<_>>();
         ids.sort_unstable();
         ids
+    }
+
+    /// Returns the identifiers for modified buffers currently loaded into the pool.
+    pub fn modified_buffer_ids(&self) -> Vec<BufferId> {
+        let mut ids = self
+            .buffers
+            .iter()
+            .filter_map(|(id, buffer)| buffer.is_modified().then_some(*id))
+            .collect::<Vec<_>>();
+        ids.sort_unstable();
+        ids
+    }
+
+    /// Returns how many modified buffers are currently loaded into the pool.
+    pub fn modified_buffer_count(&self) -> usize {
+        self.buffers
+            .values()
+            .filter(|buffer| buffer.is_modified())
+            .count()
     }
 
     /// Requests a background job to be scheduled on the buffer-pool engine.
@@ -236,11 +303,35 @@ impl BufferPool {
             .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "buffer id not found"))?;
         let result = buffer.save_to_file(abs_path.as_path());
         if result.is_ok() {
+            if let Some(old_path) = buffer.path().cloned() {
+                self.paths.remove(&old_path);
+            }
             buffer.set_path(abs_path.clone());
             buffer.mark_saved();
             self.paths.insert(abs_path, id);
         }
         result
+    }
+
+    /// Saves every modified buffer that has a resolved path.
+    pub fn save_modified_buffers(&mut self) -> io::Result<Vec<BufferId>> {
+        let buffer_ids = self.modified_buffer_ids();
+        let mut saved = Vec::new();
+
+        for buffer_id in buffer_ids {
+            let Some(buffer) = self.buffers.get(&buffer_id) else {
+                continue;
+            };
+
+            if buffer.path().is_none() {
+                continue;
+            }
+
+            self.save_buffer(buffer_id)?;
+            saved.push(buffer_id);
+        }
+
+        Ok(saved)
     }
 
     /// Requests buffer cache refresh for a buffer using the pool-owned job engine.
@@ -390,6 +481,57 @@ mod tests {
         assert!(!pool.get(id).unwrap().is_modified());
 
         fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn test_modified_buffer_ids_include_hidden_buffers() {
+        let path = temp_file("modified-hidden.txt");
+        fs::write(&path, "alpha").unwrap();
+
+        let mut pool = BufferPool::new();
+        let visible = pool.open_buffer(&path).unwrap();
+        let hidden = pool
+            .create_buffer_with_path(&path.with_file_name("modified-hidden-2.txt"))
+            .unwrap();
+        pool.with_buffer_mut(hidden, |buffer| {
+            buffer.insert_text(crate::buffer::Cursor::new(0, 0), "beta");
+        })
+        .unwrap();
+
+        assert_eq!(pool.modified_buffer_count(), 1);
+        assert_eq!(pool.modified_buffer_ids(), vec![hidden]);
+        assert!(!pool.get(visible).unwrap().is_modified());
+
+        fs::remove_file(&path).ok();
+        fs::remove_file(path.with_file_name("modified-hidden-2.txt")).ok();
+    }
+
+    #[test]
+    fn test_save_modified_buffers_writes_hidden_buffers() {
+        let visible_path = temp_file("write-all-visible.txt");
+        let hidden_path = temp_file("write-all-hidden.txt");
+        fs::write(&visible_path, "alpha").unwrap();
+        fs::write(&hidden_path, "gamma").unwrap();
+
+        let mut pool = BufferPool::new();
+        let visible = pool.open_buffer(&visible_path).unwrap();
+        let hidden = pool.open_buffer(&hidden_path).unwrap();
+        pool.with_buffer_mut(visible, |buffer| {
+            buffer.insert_text(crate::buffer::Cursor::new(0, 5), "-1");
+        })
+        .unwrap();
+        pool.with_buffer_mut(hidden, |buffer| {
+            buffer.insert_text(crate::buffer::Cursor::new(0, 5), "-2");
+        })
+        .unwrap();
+
+        let saved = pool.save_modified_buffers().unwrap();
+        assert_eq!(saved, vec![visible, hidden]);
+        assert_eq!(fs::read_to_string(&visible_path).unwrap(), "alpha-1");
+        assert_eq!(fs::read_to_string(&hidden_path).unwrap(), "gamma-2");
+
+        fs::remove_file(&visible_path).ok();
+        fs::remove_file(&hidden_path).ok();
     }
 
     #[cfg(unix)]

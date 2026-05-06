@@ -30,6 +30,8 @@ Register behavior is documented separately in [docs/registers.md](docs/registers
 | `PageDown` | Move down one page |
 | `Ctrl-U` | Move up half a page |
 | `Ctrl-D` | Move down half a page |
+| `[d` / `]d` | Move to previous / next diagnostic |
+| `[e` / `]e` | Move to previous / next error diagnostic |
 | `Ctrl-O` | Jump backward through the current window group's jumplist |
 | `Ctrl-I` | Jump forward through the current window group's jumplist |
 | `Ctrl-W v` | Split the current pane vertically |
@@ -50,6 +52,7 @@ Register behavior is documented separately in [docs/registers.md](docs/registers
 | `I` | Insert at line start (enter insert mode) |
 | `J` | Join lines with space |
 | `gJ` | Join lines without space |
+| `gO` | Open the active buffer's document symbol picker |
 | `gsa{text object}{pair}` | Add surrounding pair around a text object |
 | `gsr{from}{to}` | Replace nearest surrounding pair of `{from}` family with `{to}` family |
 | `gsd{pair}` | Delete nearest surrounding pair of `{pair}` family |

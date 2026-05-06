@@ -33,6 +33,10 @@ bg = "bg"
 "ui.window" = { fg = "fg", bg = "bg" }
 "ui.window.lines" = { fg = "muted" }
 "ui.window.lines.resize" = { fg = "accent", bold = true }
+"ui.diagnostic.error" = { fg = "red", bold = true }
+"ui.diagnostic.warning" = { fg = "yellow", bold = true }
+"ui.diagnostic.info" = { fg = "blue" }
+"ui.diagnostic.hint" = { fg = "cyan" }
 "ui.input.prompt" = { fg = "accent", bold = true }
 "ui.input.prompt.exact" = { fg = "accent", bold = true }
 "ui.input.prompt.fuzzy" = { fg = "accent", italic = true }

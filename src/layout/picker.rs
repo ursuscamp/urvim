@@ -10,9 +10,7 @@ use crate::widget::Widget;
 impl Layout {
     /// Opens the file picker overlay.
     pub(super) fn open_file_picker(&mut self) {
-        self.command_line_open = false;
-        self.confirmation_box = None;
-        self.close_all_pickers();
+        self.close_all_dialogs();
 
         match std::env::current_dir() {
             Ok(cwd) => {
@@ -84,6 +82,8 @@ impl Layout {
                     picker.handle_preview_syntax_refresh_chunk(token.generation(), result);
                 } else if let Some(picker) = self.grep_picker.as_mut() {
                     picker.handle_preview_syntax_refresh_chunk(token.generation(), result);
+                } else if let Some(picker) = self.doc_symbols_picker.as_mut() {
+                    picker.handle_preview_syntax_refresh_chunk(token.generation(), result);
                 }
             }
             JobEvent::Chunk {
@@ -92,6 +92,18 @@ impl Layout {
                 payload: JobPayload::FileSearchChunk(chunk),
             } if kind == crate::background::JobKind::FilePickerSearch => {
                 if let Some(picker) = self.file_picker.as_mut() {
+                    picker.handle_search_event(PickerSearchEvent::PickerChunk {
+                        generation: token.generation(),
+                        chunk,
+                    });
+                }
+            }
+            JobEvent::Chunk {
+                kind,
+                token,
+                payload: JobPayload::DocSymbolsSearchChunk(chunk),
+            } if kind == crate::background::JobKind::DocSymbolsPickerSearch => {
+                if let Some(picker) = self.doc_symbols_picker.as_mut() {
                     picker.handle_search_event(PickerSearchEvent::PickerChunk {
                         generation: token.generation(),
                         chunk,
@@ -107,6 +119,26 @@ impl Layout {
                     picker.handle_preview_syntax_refresh(token.generation(), result);
                 } else if let Some(picker) = self.grep_picker.as_mut() {
                     picker.handle_preview_syntax_refresh(token.generation(), result);
+                } else if let Some(picker) = self.doc_symbols_picker.as_mut() {
+                    picker.handle_preview_syntax_refresh(token.generation(), result);
+                }
+            }
+            JobEvent::Completed { kind, token, .. }
+                if kind == crate::background::JobKind::DocSymbolsPickerSearch =>
+            {
+                if let Some(picker) = self.doc_symbols_picker.as_mut() {
+                    picker.handle_search_event(PickerSearchEvent::PickerSearchComplete {
+                        generation: token.generation(),
+                    });
+                }
+            }
+            JobEvent::Failed { kind, token, .. }
+                if kind == crate::background::JobKind::DocSymbolsPickerSearch =>
+            {
+                if let Some(picker) = self.doc_symbols_picker.as_mut() {
+                    picker.handle_search_event(PickerSearchEvent::PickerSearchComplete {
+                        generation: token.generation(),
+                    });
                 }
             }
             JobEvent::Failed { kind, token, .. }
@@ -115,6 +147,8 @@ impl Layout {
                 if let Some(picker) = self.file_picker.as_mut() {
                     picker.handle_preview_syntax_refresh_failed(token.generation());
                 } else if let Some(picker) = self.grep_picker.as_mut() {
+                    picker.handle_preview_syntax_refresh_failed(token.generation());
+                } else if let Some(picker) = self.doc_symbols_picker.as_mut() {
                     picker.handle_preview_syntax_refresh_failed(token.generation());
                 }
             }

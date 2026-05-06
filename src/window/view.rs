@@ -703,6 +703,8 @@ impl BufferView {
             self.apply_yank_flash(&mut render_data, selection_style);
         }
 
+        self.apply_diagnostic_overlays(&mut render_data);
+
         render_data
     }
 
@@ -742,38 +744,52 @@ impl BufferView {
         }
     }
 
+    fn apply_diagnostic_overlays(&self, render_data: &mut RenderData) {
+        let Some(buffer_id) = self.buffer_id_opt() else {
+            return;
+        };
+
+        let Some(mut diagnostics) =
+            globals::with_diagnostics_store(|store| store.diagnostics_for_buffer(buffer_id))
+        else {
+            return;
+        };
+
+        diagnostics.sort_by(|left, right| {
+            diagnostic_severity_rank(diagnostic_severity(right))
+                .cmp(&diagnostic_severity_rank(diagnostic_severity(left)))
+                .then_with(|| {
+                    left.range
+                        .start
+                        .line
+                        .cmp(&right.range.start.line)
+                        .then_with(|| left.range.start.character.cmp(&right.range.start.character))
+                })
+        });
+
+        for diagnostic in diagnostics {
+            let severity = diagnostic_severity(&diagnostic);
+            let diagnostic_style =
+                crate::lsp::diagnostics::diagnostic_undercurl_style_for(severity, Style::default());
+            let start = crate::buffer::Cursor::new(
+                diagnostic.range.start.line as usize,
+                diagnostic.range.start.character as usize,
+            );
+            let end = crate::buffer::Cursor::new(
+                diagnostic.range.end.line as usize,
+                diagnostic.range.end.character as usize,
+            );
+            render_data.accent_range(start, end, diagnostic_style);
+        }
+    }
+
     fn apply_characterwise_selection(
         &self,
         render_data: &mut RenderData,
         selection_style: Style,
         selection: crate::buffer::TextObjectRange,
     ) {
-        for line_data in &mut render_data.line_data {
-            let Some((line_start, line_end)) =
-                Self::intersect_line_range(selection.start, selection.end, line_data.buffer_line)
-            else {
-                continue;
-            };
-
-            let mut selected_chunks = Vec::with_capacity(line_data.chunks.len());
-            let mut chunk_start = line_data.byte_offset;
-            for chunk in line_data.chunks.drain(..) {
-                let selected_style = chunk.style.overlay(selection_style);
-                Self::push_split_render_chunk(
-                    &mut selected_chunks,
-                    &chunk.text,
-                    chunk_start,
-                    line_start,
-                    line_end,
-                    chunk.style,
-                    selected_style,
-                );
-
-                chunk_start += chunk.text.len();
-            }
-
-            line_data.chunks = selected_chunks;
-        }
+        render_data.overlay_range(selection.start, selection.end, selection_style);
     }
 
     fn apply_linewise_selection(
@@ -784,15 +800,22 @@ impl BufferView {
         count: usize,
     ) {
         let end_line = start_line.saturating_add(count.saturating_sub(1));
+        let ranges = render_data
+            .line_data
+            .iter()
+            .filter(|line_data| {
+                line_data.buffer_line >= start_line && line_data.buffer_line <= end_line
+            })
+            .map(|line_data| {
+                (
+                    crate::buffer::Cursor::new(line_data.buffer_line, line_data.byte_offset),
+                    crate::buffer::Cursor::new(line_data.buffer_line, line_data.end_byte),
+                )
+            })
+            .collect::<Vec<_>>();
 
-        for line_data in &mut render_data.line_data {
-            if line_data.buffer_line < start_line || line_data.buffer_line > end_line {
-                continue;
-            }
-
-            for chunk in &mut line_data.chunks {
-                chunk.style = chunk.style.overlay(selection_style);
-            }
+        for (start, end) in ranges {
+            render_data.overlay_range(start, end, selection_style);
         }
     }
 
@@ -1086,28 +1109,6 @@ impl BufferView {
         let end_line = anchor.line.max(cursor.line);
         let count = end_line.saturating_sub(start_line).saturating_add(1);
         (count > 0).then_some((start_line, count))
-    }
-
-    fn intersect_line_range(start: Cursor, end: Cursor, line_idx: usize) -> Option<(usize, usize)> {
-        // Reject lines outside the selection span outright so callers can
-        // skip them without any extra range math.
-        if line_idx < start.line || line_idx > end.line {
-            return None;
-        }
-
-        // For the first and last selected lines, clamp to the visible
-        // endpoints. Middle lines are fully selected.
-        let line_range = if start.line == end.line {
-            (start.col, end.col)
-        } else if line_idx == start.line {
-            (start.col, usize::MAX)
-        } else if line_idx == end.line {
-            (0, end.col)
-        } else {
-            (0, usize::MAX)
-        };
-
-        Some(line_range)
     }
 
     /// Returns the overlap between two byte ranges, if any.

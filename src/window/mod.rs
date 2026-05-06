@@ -23,11 +23,13 @@ use crate::editor::{
     VisualLineMode, VisualMode,
 };
 use crate::globals;
+use crate::lsp::diagnostics::{diagnostic_severity, diagnostic_severity_rank};
 use crate::screen::Screen;
 use crate::terminal::Color;
 use crate::terminal::CursorStyle;
 use crate::terminal::Key;
 use crate::terminal::Style;
+use lsp_types::DiagnosticSeverity;
 use std::fmt;
 use std::time::Instant;
 use unicode_segmentation::UnicodeSegmentation;
@@ -60,12 +62,14 @@ pub struct Gutter {
     visible_rows: u16,
     /// Total number of lines in the buffer (for width calculation)
     total_buffer_lines: usize,
+    /// Width reserved for diagnostic signs.
+    diagnostic_sign_width: u16,
     /// Resolved style for the gutter.
     style: Style,
 }
 
 /// Per-render gutter state used to resolve relative numbering and active-row styling.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct GutterRenderState {
     /// The current cursor line in the buffer.
     pub cursor_line: usize,
@@ -75,6 +79,10 @@ pub struct GutterRenderState {
     pub active_screen_row: Option<usize>,
     /// The overlay style to apply to the active gutter row, if any.
     pub active_line_style: Option<Style>,
+    /// Diagnostic severity for each visible screen row.
+    pub diagnostic_severities: Vec<Option<DiagnosticSeverity>>,
+    /// Width reserved for the diagnostic sign column.
+    pub diagnostic_sign_width: u16,
 }
 
 #[derive(Debug, Clone)]
@@ -242,6 +250,18 @@ impl Window {
         &self.render_data
     }
 
+    /// Rebuilds the cached render snapshot for the current viewport.
+    pub fn refresh_render_data(&mut self) {
+        let wrap_mode = globals::with_config(|config| config.wrap_mode).unwrap_or_default();
+        self.render_data = self.buffer_view.build_render_data_with_options(
+            self.size,
+            Style::default(),
+            self.wrap_enabled,
+            wrap_mode,
+            false,
+        );
+    }
+
     /// Returns the current mode kind owned by this window.
     pub fn mode_kind(&self) -> ModeKind {
         self.mode.kind()
@@ -333,8 +353,11 @@ impl Window {
         let is_normal_mode = self.mode.kind() == ModeKind::Normal;
 
         let total_lines = self.buffer_view.line_count();
-        let gutter_width =
-            Gutter::new_with_style(0, size.rows, total_lines, gutter_style).calculate_width();
+        let diagnostic_sign_width =
+            diagnostic_sign_width_for_buffer(self.buffer_view.buffer_id_opt());
+        let gutter_width = Gutter::new_with_style(0, size.rows, total_lines, gutter_style)
+            .with_diagnostic_sign_width(diagnostic_sign_width)
+            .calculate_width();
         let mut render_state = renderer::BufferRenderState {
             cursor: self.buffer_view.cursor(),
             scroll_offset: self.buffer_view.scroll_offset(),
@@ -384,6 +407,23 @@ impl Window {
     /// Sets the cursor from stored state after syncing it to the current buffer.
     pub fn set_cursor_synced(&mut self, cursor: Cursor) {
         self.buffer_view.set_cursor_synced(cursor);
+    }
+
+    /// Sets the cursor, scrolls it into view, and refreshes render state.
+    pub fn reveal_cursor(&mut self, cursor: Cursor) {
+        self.set_cursor_synced(cursor);
+        let wrap_mode = globals::with_config(|config| config.wrap_mode).unwrap_or_default();
+        let size = self.size;
+        let wrap_enabled = self.wrap_enabled;
+        let gutter_width = Gutter::new(0, size.rows, self.buffer_view.line_count())
+            .with_diagnostic_sign_width(diagnostic_sign_width_for_buffer(
+                self.buffer_view.buffer_id_opt(),
+            ))
+            .calculate_width();
+
+        self.buffer_view
+            .scroll_to_cursor_with_wrap(size, gutter_width, wrap_enabled, wrap_mode);
+        self.refresh_render_data();
     }
 
     fn render_indent_guides(
@@ -470,6 +510,59 @@ impl Window {
     fn indent_guide_glyph(unicode_indent: bool) -> &'static str {
         if unicode_indent { "│" } else { "|" }
     }
+}
+
+/// Returns the reserved gutter width used for LSP diagnostics in a buffer.
+pub fn diagnostic_sign_width_for_buffer(buffer_id: Option<BufferId>) -> u16 {
+    let Some(buffer_id) = buffer_id else {
+        return 0;
+    };
+
+    let has_lsp =
+        globals::with_lsp_runtime_mut(|runtime| runtime.buffer_has_lsp(buffer_id)).unwrap_or(false);
+    if !has_lsp {
+        return 0;
+    }
+
+    if globals::with_config(|config| config.nerdfont_enabled()).unwrap_or(false) {
+        2
+    } else {
+        1
+    }
+}
+
+fn visible_diagnostic_severities(
+    buffer_id: Option<BufferId>,
+    start_line: usize,
+    visible_rows: usize,
+) -> Vec<Option<DiagnosticSeverity>> {
+    let mut severities = vec![None; visible_rows];
+    let Some(buffer_id) = buffer_id else {
+        return severities;
+    };
+
+    let diagnostics =
+        globals::with_diagnostics_store(|store| store.diagnostics_for_buffer(buffer_id))
+            .unwrap_or_default();
+
+    for diagnostic in diagnostics {
+        let line = diagnostic.range.start.line as usize;
+        if line < start_line || line >= start_line.saturating_add(visible_rows) {
+            continue;
+        }
+
+        let row = line - start_line;
+        let severity = diagnostic_severity(&diagnostic);
+        let replace = match severities[row] {
+            Some(current) => diagnostic_severity_rank(severity) < diagnostic_severity_rank(current),
+            None => true,
+        };
+        if replace {
+            severities[row] = Some(severity);
+        }
+    }
+
+    severities
 }
 
 #[cfg(test)]

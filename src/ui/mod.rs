@@ -5,10 +5,14 @@
 
 pub mod colorscheme_picker;
 pub mod confirmation_box;
+pub mod diagnostic_hover;
+pub mod doc_symbols_picker;
 pub mod file_picker;
 pub mod floating_window;
 pub mod grep_picker;
+pub mod hover;
 pub mod inputs;
+pub mod lsp_rename;
 pub mod picker;
 pub mod picker_preview;
 
@@ -116,8 +120,28 @@ pub enum Command {
     OpenFilePicker,
     /// Open the colorscheme picker overlay.
     OpenColorschemePicker,
+    /// Open the active-buffer document symbol picker overlay.
+    OpenDocumentSymbolsPicker,
     /// Open the live grep picker overlay.
     OpenGrepPicker,
+    /// Write all modified buffers in the pool.
+    WriteAll,
+    /// Run an LSP hover query on the active buffer.
+    LspHover,
+    /// Run an LSP go-to-definition query on the active buffer.
+    LspDefinition,
+    /// Jump to the previous diagnostic in the active buffer.
+    LspPreviousDiagnostic,
+    /// Jump to the next diagnostic in the active buffer.
+    LspNextDiagnostic,
+    /// Jump to the previous error diagnostic in the active buffer.
+    LspPreviousErrorDiagnostic,
+    /// Jump to the next error diagnostic in the active buffer.
+    LspNextErrorDiagnostic,
+    /// Open the rename prompt for an LSP rename.
+    LspRenamePrompt,
+    /// Run an LSP rename with the provided replacement name.
+    LspRename(String),
     /// Open a file selected from a picker.
     OpenFile(PathBuf),
     /// Open a file and place the cursor at the provided position.

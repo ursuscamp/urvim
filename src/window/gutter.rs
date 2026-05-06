@@ -6,6 +6,7 @@ impl Gutter {
             start_line,
             visible_rows,
             total_buffer_lines,
+            diagnostic_sign_width: 0,
             style: Style::new().bg(Color::ansi(236)).fg(Color::ansi(245)),
         }
     }
@@ -21,8 +22,15 @@ impl Gutter {
             start_line,
             visible_rows,
             total_buffer_lines,
+            diagnostic_sign_width: 0,
             style,
         }
+    }
+
+    /// Sets the reserved width for the diagnostic sign column.
+    pub fn with_diagnostic_sign_width(mut self, width: u16) -> Self {
+        self.diagnostic_sign_width = width;
+        self
     }
 
     pub fn calculate_width(&self) -> u16 {
@@ -32,7 +40,7 @@ impl Gutter {
         } else {
             digits + 2
         };
-        min_width as u16
+        min_width as u16 + self.diagnostic_sign_width
     }
 
     pub(super) fn digit_count(n: usize) -> usize {
@@ -70,12 +78,33 @@ impl Gutter {
     ) {
         let total_buffer_lines = self.total_buffer_lines;
         let gutter_style = self.style;
+        let sign_width = state.diagnostic_sign_width;
         let gutter_width = self.calculate_width();
-        self.render_rows(screen, origin, |screen_row_idx| {
-            let line_data = render_data.line_data.get(screen_row_idx)?;
+        let nerdfont_enabled =
+            crate::globals::with_config(|config| config.nerdfont_enabled()).unwrap_or(false);
+
+        for screen_row in 0..self.visible_rows {
+            let screen_row_idx = screen_row as usize;
+            let Some(line_data) = render_data.line_data.get(screen_row_idx) else {
+                self.write_gutter_row(
+                    screen,
+                    origin,
+                    screen_row,
+                    gutter_style,
+                    " ".repeat(gutter_width as usize),
+                );
+                continue;
+            };
 
             if line_data.buffer_line >= total_buffer_lines {
-                return None;
+                self.write_gutter_row(
+                    screen,
+                    origin,
+                    screen_row,
+                    gutter_style,
+                    " ".repeat(gutter_width as usize),
+                );
+                continue;
             }
 
             let row_style = if state.active_screen_row == Some(screen_row_idx) {
@@ -84,19 +113,55 @@ impl Gutter {
                 gutter_style
             };
 
-            let gutter_line = if !line_data.show_gutter_line_number {
-                " ".repeat(gutter_width as usize)
-            } else if state.relative_number && line_data.buffer_line != state.cursor_line {
-                Self::format_line_number(
-                    line_data.buffer_line.abs_diff(state.cursor_line),
-                    gutter_width,
-                )
+            let mut gutter_line = String::new();
+            let sign = if sign_width == 0 {
+                String::new()
             } else {
-                Self::format_line_number(line_data.buffer_line + 1, gutter_width)
+                state
+                    .diagnostic_severities
+                    .get(screen_row_idx)
+                    .copied()
+                    .flatten()
+                    .map(|severity| {
+                        Self::diagnostic_sign_text(severity, sign_width, nerdfont_enabled)
+                    })
+                    .unwrap_or_else(|| " ".repeat(sign_width as usize))
             };
+            gutter_line.push_str(sign.as_str());
+            if line_data.show_gutter_line_number {
+                let number_width = gutter_width.saturating_sub(sign_width);
+                let number = if state.relative_number && line_data.buffer_line != state.cursor_line
+                {
+                    Self::format_line_number(
+                        line_data.buffer_line.abs_diff(state.cursor_line),
+                        number_width,
+                    )
+                } else {
+                    Self::format_line_number(line_data.buffer_line + 1, number_width)
+                };
+                gutter_line.push_str(number.as_str());
+            } else {
+                gutter_line.push_str(&" ".repeat(gutter_width.saturating_sub(sign_width) as usize));
+            }
 
-            Some((gutter_line, row_style))
-        });
+            self.write_gutter_row(screen, origin, screen_row, row_style, gutter_line);
+
+            if let Some(severity) = state
+                .diagnostic_severities
+                .get(screen_row_idx)
+                .copied()
+                .flatten()
+            {
+                let sign_style = crate::lsp::diagnostics::diagnostic_style_for(severity, row_style);
+                for offset in 0..sign_width {
+                    if let Some(cell) =
+                        screen.get_cell_mut(origin.row + screen_row, origin.col + offset)
+                    {
+                        cell.style = sign_style;
+                    }
+                }
+            }
+        }
     }
 
     fn render_rows<F>(&mut self, screen: &mut Screen, origin: Position, line_for_row: F)
@@ -121,5 +186,31 @@ impl Gutter {
         let left_pad_len = width as usize - 1 - line_width;
         let left_pad = " ".repeat(left_pad_len);
         format!("{}{} ", left_pad, line_str)
+    }
+
+    fn diagnostic_sign_text(
+        severity: lsp_types::DiagnosticSeverity,
+        width: u16,
+        nerdfont_enabled: bool,
+    ) -> String {
+        let marker = crate::lsp::diagnostics::diagnostic_marker(severity, nerdfont_enabled);
+        if width <= 1 {
+            return marker.to_string();
+        }
+
+        let marker_width = unicode_width::UnicodeWidthStr::width(marker);
+        let padding = width as usize - marker_width;
+        format!("{}{}", marker, " ".repeat(padding))
+    }
+
+    fn write_gutter_row(
+        &self,
+        screen: &mut Screen,
+        origin: Position,
+        row: u16,
+        style: Style,
+        gutter_line: String,
+    ) {
+        screen.write_string(origin.row + row, origin.col, style, gutter_line.as_str());
     }
 }

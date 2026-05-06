@@ -28,10 +28,14 @@ impl Layout {
             size: Default::default(),
             command_line: super::CommandLineState::new(),
             command_line_open: false,
+            lsp_rename_prompt: None,
             colorscheme_picker: None,
+            doc_symbols_picker: None,
             file_picker: None,
             grep_picker: None,
             confirmation_box: None,
+            hover: None,
+            diagnostic_hover: None,
             jobs: std::sync::Arc::new(crate::background::JobManager::new()),
         };
         layout.next_pane_id = layout.max_pane_id().map(|id| id.0 + 1).unwrap_or(0);

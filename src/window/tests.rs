@@ -11,10 +11,12 @@ use crate::editor::{
 use crate::editor::{Operator, OperatorTarget, QuoteKind, TextObject};
 use crate::globals;
 use crate::globals::{Direction, FindKind, FindState};
+use crate::lsp::diagnostics::{diagnostic_style_for, diagnostic_undercurl_style_for};
 use crate::path::AbsolutePath;
 use crate::register::{RegisterContent, RegisterContentKind, RegisterName, RegisterStore};
 use crate::terminal::{Color, Style};
 use crate::theme::{HighlightStyles, Tag, Theme, ThemeKind};
+use lsp_types::{Diagnostic, DiagnosticSeverity, Range};
 use std::collections::BTreeSet;
 use std::sync::{Mutex, OnceLock};
 use std::thread;
@@ -2159,6 +2161,50 @@ fn test_gutter_width_calculation() {
 }
 
 #[test]
+fn test_gutter_width_calculation_includes_diagnostic_sign_column() {
+    let gutter = Gutter::new(0, 10, 9).with_diagnostic_sign_width(2);
+    assert_eq!(gutter.calculate_width(), 5);
+}
+
+#[test]
+fn test_gutter_render_for_render_data_uses_diagnostic_signs() {
+    let buffer = Buffer::from_str("one\ntwo");
+    let view = BufferView::new(buffer);
+    let render_data = view.build_render_data(Size::new(2, 20));
+    let mut gutter = Gutter::new(0, 2, 2).with_diagnostic_sign_width(1);
+    let mut screen = crate::screen::Screen::new(2, 20);
+
+    gutter.render_for_render_data(
+        &mut screen,
+        Position::new(0, 0),
+        &render_data,
+        GutterRenderState {
+            cursor_line: 0,
+            relative_number: false,
+            active_screen_row: None,
+            active_line_style: None,
+            diagnostic_severities: vec![
+                Some(DiagnosticSeverity::ERROR),
+                Some(DiagnosticSeverity::HINT),
+            ],
+            diagnostic_sign_width: 1,
+        },
+    );
+
+    assert_eq!(screen.get_cell_mut(0, 0).unwrap().text, "E");
+    assert_eq!(screen.get_cell_mut(1, 0).unwrap().text, "H");
+    let gutter_style = Style::new().bg(Color::ansi(236)).fg(Color::ansi(245));
+    assert_eq!(
+        screen.get_cell_mut(0, 0).unwrap().style,
+        diagnostic_style_for(DiagnosticSeverity::ERROR, gutter_style)
+    );
+    assert_eq!(
+        screen.get_cell_mut(1, 0).unwrap().style,
+        diagnostic_style_for(DiagnosticSeverity::HINT, gutter_style)
+    );
+}
+
+#[test]
 fn test_gutter_digit_count() {
     assert_eq!(Gutter::digit_count(0), 1);
     assert_eq!(Gutter::digit_count(9), 1);
@@ -2246,6 +2292,68 @@ fn test_window_render_applies_active_gutter_style_to_full_row() {
     );
     assert_eq!(
         screen.get_cell_mut(2, 0).unwrap().style,
+        expected_base_style
+    );
+}
+
+#[test]
+fn test_window_render_applies_diagnostic_undercurl_to_buffer_ranges() {
+    let path = temp_path_with_ext("diagnostic-undercurl", "txt");
+    let buffer = Buffer::from_str_with_path("abcd", path);
+    let mut window = Window::new(buffer);
+    let theme = syntax_themed_window();
+    let _theme_guard = globals::set_test_active_theme(theme.clone());
+    let _config_guard = globals::set_test_config(Config {
+        syntax: false,
+        ..Default::default()
+    });
+
+    let buffer_id = window.buffer_view().buffer_id();
+    globals::with_diagnostics_store(|store| {
+        store.set(
+            buffer_id,
+            "lsp-test",
+            vec![Diagnostic {
+                range: Range::new(
+                    lsp_types::Position::new(0, 1),
+                    lsp_types::Position::new(0, 3),
+                ),
+                severity: Some(DiagnosticSeverity::WARNING),
+                code: None,
+                code_description: None,
+                source: Some("lsp".to_string()),
+                message: "warning".to_string(),
+                related_information: None,
+                tags: None,
+                data: None,
+            }],
+        );
+    });
+
+    let mut screen = crate::screen::Screen::new(1, 20);
+    window.render(&mut screen, Position::new(0, 0), Size::new(1, 20));
+
+    let expected_base_style = theme.default_style();
+    let expected_diagnostic_style = expected_base_style.overlay(diagnostic_undercurl_style_for(
+        DiagnosticSeverity::WARNING,
+        Style::default(),
+    ));
+    let content_col = Gutter::new(0, 1, 1).calculate_width();
+
+    assert_eq!(
+        screen.get_cell_mut(0, content_col).unwrap().style,
+        expected_base_style
+    );
+    assert_eq!(
+        screen.get_cell_mut(0, content_col + 1).unwrap().style,
+        expected_diagnostic_style
+    );
+    assert_eq!(
+        screen.get_cell_mut(0, content_col + 2).unwrap().style,
+        expected_diagnostic_style
+    );
+    assert_eq!(
+        screen.get_cell_mut(0, content_col + 3).unwrap().style,
         expected_base_style
     );
 }

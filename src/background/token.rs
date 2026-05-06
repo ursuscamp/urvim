@@ -28,8 +28,12 @@ pub enum JobKind {
     FilePickerSearch,
     /// Live grep picker search.
     GrepPickerSearch,
+    /// Document symbol picker search.
+    DocSymbolsPickerSearch,
     /// Picker preview syntax refresh.
     PickerPreviewSyntax,
+    /// LSP rename.
+    LspRename(BufferId),
     /// Test-only gate job.
     #[cfg(test)]
     TestGate,
@@ -43,7 +47,9 @@ impl fmt::Display for JobKind {
             }
             Self::FilePickerSearch => f.write_str("file-picker-search"),
             Self::GrepPickerSearch => f.write_str("grep-picker-search"),
+            Self::DocSymbolsPickerSearch => f.write_str("doc-symbols-picker-search"),
             Self::PickerPreviewSyntax => f.write_str("picker-preview-syntax"),
+            Self::LspRename(buffer_id) => write!(f, "lsp-rename:{}", buffer_id.get()),
             #[cfg(test)]
             Self::TestGate => f.write_str("gate"),
         }

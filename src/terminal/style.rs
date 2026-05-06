@@ -211,6 +211,11 @@ impl Style {
         self
     }
 
+    /// Returns the foreground color, if set.
+    pub const fn foreground(self) -> Option<Color> {
+        self.foreground
+    }
+
     /// Sets the background color.
     pub const fn bg(mut self, color: Color) -> Self {
         self.background = Some(color);

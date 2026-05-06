@@ -1,10 +1,13 @@
 //! Command-line overlay state, parsing, and execution.
 
 use super::Layout;
+use crate::background::{JobKind, JobToken};
+use crate::lsp::rename_job::LspRenameJob;
 use crate::notification::NotificationLevel;
 use crate::terminal::{Key, KeyCode};
 use crate::ui::inputs::InputWidget;
 use crate::ui::{Command, Intent, UiEventResult};
+use lsp_types::DiagnosticSeverity;
 use std::io;
 use std::path::Path;
 
@@ -107,7 +110,15 @@ impl Default for CommandLineState {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ParsedCommand {
     Save { path: Option<String> },
+    WriteAll,
     Edit { path: Option<String> },
+    PickFile,
+    PickGrep,
+    PickColorscheme,
+    PickDocumentSymbols,
+    LspHover,
+    LspDefinition,
+    LspRename { name: Option<String> },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -136,9 +147,10 @@ impl ParseCommandError {
 
 impl Layout {
     pub(super) fn open_command_line(&mut self) {
+        self.close_all_dialogs();
         self.command_line_open = true;
+        self.command_line.input_widget_mut().set_prompt(":");
         self.command_line.reset_input();
-        self.close_file_picker();
     }
 
     pub(super) fn close_command_line(&mut self) {
@@ -228,11 +240,38 @@ impl Layout {
         match command {
             ParsedCommand::Save { path: None } => self.execute_save_current(),
             ParsedCommand::Save { path: Some(path) } => self.execute_save_as(path.as_str()),
+            ParsedCommand::WriteAll => self.execute_write_all(),
             ParsedCommand::Edit { path: None } => {
                 self.active_window_group_mut().open_unnamed_buffer_tab();
                 Ok(())
             }
             ParsedCommand::Edit { path: Some(path) } => self.execute_edit_path(path.as_str()),
+            ParsedCommand::PickFile => {
+                self.open_file_picker();
+                Ok(())
+            }
+            ParsedCommand::PickGrep => {
+                self.open_grep_picker();
+                Ok(())
+            }
+            ParsedCommand::PickColorscheme => {
+                self.open_colorscheme_picker();
+                Ok(())
+            }
+            ParsedCommand::PickDocumentSymbols => {
+                self.open_doc_symbols_picker();
+                Ok(())
+            }
+            ParsedCommand::LspHover => self.execute_lsp_hover(),
+            ParsedCommand::LspDefinition => self.execute_lsp_definition(),
+            ParsedCommand::LspRename { name: None } => {
+                if !self.lsp_rename_supported() {
+                    return Err("attached server does not support rename".to_string());
+                }
+                self.open_lsp_rename_prompt();
+                Ok(())
+            }
+            ParsedCommand::LspRename { name: Some(name) } => self.execute_lsp_rename(name),
         }
     }
 
@@ -257,11 +296,166 @@ impl Layout {
             .map_err(|error| format!("Failed to write buffer to {path}: {error}"))
     }
 
+    pub(super) fn execute_write_all(&mut self) -> Result<(), String> {
+        let buffer_ids = crate::globals::with_buffer_pool(|pool| pool.modified_buffer_ids());
+        let mut saved_buffer_ids = Vec::new();
+        let mut unnamed_buffer_ids = Vec::new();
+
+        for buffer_id in buffer_ids {
+            let has_path = crate::globals::with_buffer(buffer_id, |buffer| buffer.path().is_some())
+                .unwrap_or(false);
+            if !has_path {
+                unnamed_buffer_ids.push(buffer_id);
+                continue;
+            }
+
+            crate::globals::with_buffer_pool(|pool| pool.save_buffer(buffer_id))
+                .map_err(|error| format!("Failed to write buffer {:?}: {error}", buffer_id))?;
+            saved_buffer_ids.push(buffer_id);
+        }
+
+        crate::globals::with_lsp_runtime_mut(|runtime| {
+            for buffer_id in &saved_buffer_ids {
+                runtime.did_save_buffer(*buffer_id);
+            }
+        });
+
+        if !unnamed_buffer_ids.is_empty() {
+            return Err(format!(
+                "Cannot write {} unnamed buffer{}",
+                unnamed_buffer_ids.len(),
+                if unnamed_buffer_ids.len() == 1 {
+                    ""
+                } else {
+                    "s"
+                }
+            ));
+        }
+
+        Ok(())
+    }
+
     fn execute_edit_path(&mut self, path: &str) -> Result<(), String> {
         let buffer_id = crate::globals::with_buffer_pool(|pool| pool.open_buffer(path))
             .map_err(|error| format!("Failed to open {path}: {error}"))?;
         self.active_window_group_mut()
             .activate_or_open_buffer(buffer_id);
+        Ok(())
+    }
+
+    pub(super) fn execute_lsp_hover(&mut self) -> Result<(), String> {
+        let buffer_id = self.active_buffer_view().buffer_id();
+        let cursor = self.active_buffer_view().cursor();
+        let result =
+            crate::globals::with_lsp_runtime_mut(|runtime| runtime.hover_buffer(buffer_id, cursor))
+                .ok_or_else(|| "LSP runtime is not available".to_string())??;
+
+        if let Some(text) = result {
+            if let Some(anchor) = self.editor_cursor_position() {
+                self.open_lsp_hover(text, anchor);
+            }
+        }
+
+        Ok(())
+    }
+
+    pub(super) fn execute_lsp_definition(&mut self) -> Result<(), String> {
+        let buffer_id = self.active_buffer_view().buffer_id();
+        let cursor = self.active_buffer_view().cursor();
+        let result = crate::globals::with_lsp_runtime_mut(|runtime| {
+            runtime.definition_buffer(buffer_id, cursor)
+        })
+        .ok_or_else(|| "LSP runtime is not available".to_string())??;
+
+        let Some((target_buffer_id, target_cursor)) = result else {
+            return Ok(());
+        };
+
+        self.active_window_group_mut().record_cursor_position();
+        self.active_window_group_mut()
+            .activate_or_open_buffer(target_buffer_id);
+        self.active_buffer_view_mut()
+            .set_cursor_synced(target_cursor);
+        Ok(())
+    }
+
+    pub(super) fn execute_lsp_previous_diagnostic(&mut self) -> Result<(), String> {
+        self.execute_lsp_diagnostic_navigation(false, None)
+    }
+
+    pub(super) fn execute_lsp_next_diagnostic(&mut self) -> Result<(), String> {
+        self.execute_lsp_diagnostic_navigation(true, None)
+    }
+
+    pub(super) fn execute_lsp_previous_error_diagnostic(&mut self) -> Result<(), String> {
+        self.execute_lsp_diagnostic_navigation(false, Some(DiagnosticSeverity::ERROR))
+    }
+
+    pub(super) fn execute_lsp_next_error_diagnostic(&mut self) -> Result<(), String> {
+        self.execute_lsp_diagnostic_navigation(true, Some(DiagnosticSeverity::ERROR))
+    }
+
+    pub(super) fn execute_lsp_rename(&mut self, new_name: String) -> Result<(), String> {
+        let new_name = new_name.trim().to_string();
+        if new_name.is_empty() {
+            return Err("Rename requires a new symbol name".to_string());
+        }
+
+        let buffer_id = self.active_buffer_view().buffer_id();
+        let cursor = self.active_buffer_view().cursor();
+        let Some(supports_rename) = crate::globals::try_with_lsp_runtime_mut(|runtime| {
+            runtime.buffer_supports_rename(buffer_id)
+        }) else {
+            return Err("LSP runtime is busy".to_string());
+        };
+
+        if !supports_rename {
+            return Err("attached server does not support rename".to_string());
+        }
+
+        let job = LspRenameJob::new(buffer_id, cursor, new_name);
+        let token = JobToken::new(LspRenameJob::next_generation());
+        self.jobs
+            .submit_latest_only(JobKind::LspRename(buffer_id), token, job)
+            .map_err(|error| error.to_string())?;
+
+        Ok(())
+    }
+
+    fn execute_lsp_diagnostic_navigation(
+        &mut self,
+        forward: bool,
+        severity: Option<DiagnosticSeverity>,
+    ) -> Result<(), String> {
+        let buffer_id = self.active_buffer_view().buffer_id();
+        let cursor = self.active_buffer_view().cursor();
+        let target = crate::globals::with_diagnostics_store(|store| {
+            if forward {
+                store.next_diagnostic_cursor(buffer_id, cursor, severity)
+            } else {
+                store.previous_diagnostic_cursor(buffer_id, cursor, severity)
+            }
+        })
+        .flatten();
+
+        let Some(target_cursor) = target else {
+            return Ok(());
+        };
+
+        {
+            let active_window = self.active_window_group_mut().active_window_mut();
+            active_window.reveal_cursor(target_cursor);
+        }
+
+        let diagnostics = crate::globals::with_diagnostics_store(|store| {
+            store.diagnostics_at_buffer_cursor(buffer_id, target_cursor)
+        })
+        .unwrap_or_default();
+
+        if let Some(anchor) = self.editor_cursor_position() {
+            self.open_diagnostic_hover(diagnostics, anchor);
+        }
+
         Ok(())
     }
 
@@ -299,6 +493,32 @@ pub fn parse_command_line(input: &str) -> Result<ParsedCommand, ParseCommandErro
     let command = tokens[0].as_str();
     let args = &tokens[1..];
     match command {
+        "pick" => match args {
+            [target] if target == "file" => Ok(ParsedCommand::PickFile),
+            [target] if target == "grep" => Ok(ParsedCommand::PickGrep),
+            [target] if target == "colorscheme" => Ok(ParsedCommand::PickColorscheme),
+            [target] if target == "doc-symbols" => Ok(ParsedCommand::PickDocumentSymbols),
+            [target, ..] => Err(ParseCommandError::UnknownCommand(format!("pick {target}"))),
+            [] => Err(ParseCommandError::InvalidArity {
+                command: "pick".to_string(),
+                expected: "pick <file|grep|colorscheme|doc-symbols>",
+            }),
+        },
+        "lsp" => match args {
+            [subcommand] if subcommand == "hover" => Ok(ParsedCommand::LspHover),
+            [subcommand] if subcommand == "definition" => Ok(ParsedCommand::LspDefinition),
+            [subcommand] if subcommand == "rename" => Ok(ParsedCommand::LspRename { name: None }),
+            [subcommand, name] if subcommand == "rename" => Ok(ParsedCommand::LspRename {
+                name: Some(name.clone()),
+            }),
+            [subcommand, ..] => Err(ParseCommandError::UnknownCommand(format!(
+                "lsp {subcommand}"
+            ))),
+            [] => Err(ParseCommandError::InvalidArity {
+                command: "lsp".to_string(),
+                expected: "lsp <hover|definition|rename> [name]",
+            }),
+        },
         "write" => match args {
             [] => Ok(ParsedCommand::Save { path: None }),
             [path] => Ok(ParsedCommand::Save {
@@ -317,6 +537,13 @@ pub fn parse_command_line(input: &str) -> Result<ParsedCommand, ParseCommandErro
             _ => Err(ParseCommandError::InvalidArity {
                 command: "edit".to_string(),
                 expected: "edit [path]",
+            }),
+        },
+        "write-all" => match args {
+            [] => Ok(ParsedCommand::WriteAll),
+            _ => Err(ParseCommandError::InvalidArity {
+                command: "write-all".to_string(),
+                expected: "write-all",
             }),
         },
         other => Err(ParseCommandError::UnknownCommand(other.to_string())),
@@ -396,6 +623,48 @@ mod tests {
             parse_command_line("edit src/main.rs").expect("edit path command should parse"),
             ParsedCommand::Edit {
                 path: Some("src/main.rs".to_string())
+            }
+        );
+        assert_eq!(
+            parse_command_line("pick file").expect("file picker should parse"),
+            ParsedCommand::PickFile
+        );
+        assert_eq!(
+            parse_command_line("pick grep").expect("grep picker should parse"),
+            ParsedCommand::PickGrep
+        );
+        assert_eq!(
+            parse_command_line("pick colorscheme").expect("colorscheme picker should parse"),
+            ParsedCommand::PickColorscheme
+        );
+        assert_eq!(
+            parse_command_line("pick doc-symbols").expect("doc symbols picker should parse"),
+            ParsedCommand::PickDocumentSymbols
+        );
+        assert_eq!(
+            parse_command_line("write-all").expect("write-all should parse"),
+            ParsedCommand::WriteAll
+        );
+    }
+
+    #[test]
+    fn parse_lsp_commands() {
+        assert_eq!(
+            parse_command_line("lsp hover").expect("hover should parse"),
+            ParsedCommand::LspHover
+        );
+        assert_eq!(
+            parse_command_line("lsp definition").expect("definition should parse"),
+            ParsedCommand::LspDefinition
+        );
+        assert_eq!(
+            parse_command_line("lsp rename").expect("rename prompt should parse"),
+            ParsedCommand::LspRename { name: None }
+        );
+        assert_eq!(
+            parse_command_line("lsp rename next_name").expect("rename should parse"),
+            ParsedCommand::LspRename {
+                name: Some("next_name".to_string())
             }
         );
     }

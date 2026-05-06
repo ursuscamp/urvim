@@ -3,6 +3,7 @@
 use super::geometry::PaneRegion;
 use super::node::{LayoutNode, PaneNode, SplitAxis, SplitNode};
 use super::{Layout, PaneId};
+use crate::buffer::BufferId;
 use crate::window::Window;
 use crate::window::{Position, Size};
 use crate::window_group::WindowGroup;
@@ -152,6 +153,14 @@ impl Layout {
         removed
     }
 
+    pub(super) fn close_buffer_tabs(&mut self, buffer_id: BufferId) -> bool {
+        let Some(root) = self.root.as_mut() else {
+            return false;
+        };
+
+        Self::close_buffer_tabs_in_node(root, buffer_id)
+    }
+
     pub(super) fn resize_focused_pane(
         &mut self,
         axis: SplitAxis,
@@ -248,6 +257,17 @@ impl Layout {
                     )),
                     false,
                 )
+            }
+        }
+    }
+
+    fn close_buffer_tabs_in_node(node: &mut LayoutNode, buffer_id: BufferId) -> bool {
+        match node {
+            LayoutNode::Pane(pane) => pane.window_group.close_buffer_tab(buffer_id),
+            LayoutNode::Split(split) => {
+                let removed_first = Self::close_buffer_tabs_in_node(&mut split.first, buffer_id);
+                let removed_second = Self::close_buffer_tabs_in_node(&mut split.second, buffer_id);
+                removed_first || removed_second
             }
         }
     }
@@ -621,24 +641,6 @@ impl Layout {
 
     pub(super) fn prune_expired_yank_flashes_at(&mut self, now: Instant) -> bool {
         Self::prune_expired_yank_flashes_in_node(self.root.as_mut(), now)
-    }
-
-    pub(super) fn has_modified_buffers(&self) -> bool {
-        Self::has_modified_buffers_in_node(self.root.as_ref())
-    }
-
-    fn has_modified_buffers_in_node(node: Option<&LayoutNode>) -> bool {
-        let Some(node) = node else {
-            return false;
-        };
-
-        match node {
-            LayoutNode::Pane(pane) => pane.window_group.active_buffer_view().is_modified(),
-            LayoutNode::Split(split) => {
-                Self::has_modified_buffers_in_node(Some(split.first.as_ref()))
-                    || Self::has_modified_buffers_in_node(Some(split.second.as_ref()))
-            }
-        }
     }
 
     fn prune_expired_yank_flashes_in_node(node: Option<&mut LayoutNode>, now: Instant) -> bool {

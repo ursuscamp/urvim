@@ -34,6 +34,34 @@ urvim supports a normal-mode command line opened with `:`.
   - Switches to an already open buffer for that path when present.
   - Otherwise opens the path in a new tab.
 
+### `pick`
+
+- `pick file`
+  - Opens the file picker.
+
+- `pick grep`
+  - Opens the live grep picker.
+
+- `pick colorscheme`
+  - Opens the colorscheme picker.
+
+- `pick doc-symbols`
+  - Opens the active buffer's LSP document symbol picker.
+
+### `lsp`
+
+- `lsp hover`
+  - Requests hover text from the attached language server.
+
+- `lsp definition`
+  - Jumps to the first definition returned by the attached language server.
+
+- `lsp rename`
+  - Opens a rename prompt.
+
+- `lsp rename <name>`
+  - Renames the symbol under the cursor to `<name>`.
+
 ## Quoted Paths
 
 Commands accept quoted path arguments:

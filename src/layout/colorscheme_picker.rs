@@ -6,9 +6,7 @@ use crate::widget::Widget;
 impl Layout {
     /// Opens the colorscheme picker overlay.
     pub(super) fn open_colorscheme_picker(&mut self) {
-        self.command_line_open = false;
-        self.confirmation_box = None;
-        self.close_all_pickers();
+        self.close_all_dialogs();
 
         let names: Vec<String> = crate::globals::with_theme_registry(|registry| {
             registry

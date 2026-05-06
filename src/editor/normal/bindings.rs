@@ -87,6 +87,7 @@ fn register_motion_bindings(trie_keymap: &mut TrieKeymap) {
     trie_keymap.insert_str("}", Action::new(ActionKind::MoveToNextParagraph));
     trie_keymap.insert_str("J", Action::new(ActionKind::JoinWithSpace));
     trie_keymap.insert_str("gJ", Action::new(ActionKind::JoinWithoutSpace));
+    trie_keymap.insert_str("gO", Command::OpenDocumentSymbolsPicker);
 }
 
 fn register_character_scan_bindings(trie_keymap: &mut TrieKeymap) {
@@ -148,6 +149,10 @@ fn register_window_bindings(trie_keymap: &mut TrieKeymap) {
 
 fn register_edit_bindings(trie_keymap: &mut TrieKeymap) {
     trie_keymap.insert_str("gcc", Action::toggle_line_comment());
+    trie_keymap.insert_str("[d", Command::LspPreviousDiagnostic);
+    trie_keymap.insert_str("]d", Command::LspNextDiagnostic);
+    trie_keymap.insert_str("[e", Command::LspPreviousErrorDiagnostic);
+    trie_keymap.insert_str("]e", Command::LspNextErrorDiagnostic);
     trie_keymap.insert_str("[b", Action::new(ActionKind::PreviousTab));
     trie_keymap.insert_str("]b", Action::new(ActionKind::NextTab));
     trie_keymap.insert_str("x", Action::new(ActionKind::DeleteForward));
@@ -388,6 +393,9 @@ fn register_misc_bindings(trie_keymap: &mut TrieKeymap) {
     trie_keymap.insert_str("<F1>", Command::OpenFilePicker);
     trie_keymap.insert_str("<F2>", Command::OpenGrepPicker);
     trie_keymap.insert_str("<F3>", Command::OpenColorschemePicker);
+    trie_keymap.insert_str("K", Command::LspHover);
+    trie_keymap.insert_str("gd", Command::LspDefinition);
+    trie_keymap.insert_str("grn", Command::LspRenamePrompt);
     trie_keymap.insert_str("%", Action::new(ActionKind::MoveToMatchingBracket));
     trie_keymap.insert_str(";", Action::new(ActionKind::RepeatLastFind));
     trie_keymap.insert_str(",", Action::new(ActionKind::RepeatLastFindReverse));

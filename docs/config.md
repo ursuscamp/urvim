@@ -23,7 +23,7 @@ Command-line flags override config file values.
 
 ## Current Schema
 
-The canonical config values are `theme`, `insert_escape`, `default_registers`, `syntax`, `todo_markers`, `auto_close_pairs`, `active_line`, `relative_number`, `indent_guides`, `auto_indent`, `advanced_glyphs`, `tab_insertion`, `tab_behavior`, `tab_width`, `scroll_margin`, and `wrap_mode`.
+The canonical config values are `theme`, `insert_escape`, `default_registers`, `syntax`, `todo_markers`, `auto_close_pairs`, `active_line`, `relative_number`, `indent_guides`, `auto_indent`, `advanced_glyphs`, `tab_insertion`, `tab_behavior`, `tab_width`, `scroll_margin`, `wrap_mode`, and `lsp`.
 
 ```toml
 theme = "Friday Night"
@@ -41,6 +41,12 @@ tab_behavior = "simple"
 tab_width = 4
 scroll_margin = { vertical = 5, horizontal = 5 }
 wrap_mode = "hard"
+
+[lsp.rust_analyzer]
+enabled = true
+command = "rust-analyzer"
+filetypes = ["rust"]
+root_markers = ["Cargo.toml", "rust-project.json", ".git"]
 ```
 
 ### `theme`
@@ -198,6 +204,17 @@ Sets how long logical lines break when visual wrapping is enabled for a window.
 - Supported values: `hard`, `soft`
 - Behavior: `hard` wraps at the exact content width; `soft` wraps at the nearest word boundary at or before the content width, and falls back to a hard split when no boundary exists
 - Scope: wrapped window rendering only (wrapping is toggled per window)
+
+### `lsp`
+
+Controls built-in language server configurations.
+
+- Type: nested TOML table
+- Default: all servers disabled
+- Built-in servers: `rust_analyzer`
+- Behavior: builtin server definitions are loaded from statically included TOML files at startup; user overrides deep-merge into those built-in defaults, so you can enable a server by setting `enabled = true` and override individual server fields as needed
+- `rust_analyzer` defaults: `command = "rust-analyzer"`, `filetypes = ["rust"]`, `root_markers = ["Cargo.toml", "rust-project.json", ".git"]`
+- Scope: language-server startup and attachment only
 
 ## Sessions
 

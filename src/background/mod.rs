@@ -26,6 +26,8 @@ use std::sync::mpsc::Sender;
 
 use crate::buffer::BufferCacheRefreshJob;
 use crate::buffer::BufferCacheRefreshResult;
+use crate::lsp::rename_job::LspRenameJob;
+use crate::ui::doc_symbols_picker::DocSymbolsPickerSearchJob;
 use crate::ui::file_picker::{FilePickerItem, PickerSearchJob};
 use crate::ui::grep_picker::{GrepPickerItem, GrepPickerSearchJob};
 use crate::ui::picker_preview::PreviewSyntaxRefreshJob;
@@ -39,8 +41,12 @@ pub enum BackgroundJob {
     FilePickerSearch(PickerSearchJob),
     /// Streams live grep matches.
     GrepPickerSearch(GrepPickerSearchJob),
+    /// Streams document symbol picker matches.
+    DocSymbolsPickerSearch(DocSymbolsPickerSearchJob),
     /// Refreshes preview syntax for picker panes.
     PickerPreviewSyntax(PreviewSyntaxRefreshJob),
+    /// Runs an LSP rename on a background thread.
+    LspRename(LspRenameJob),
     /// Test-only gate job used to block the worker thread.
     #[cfg(test)]
     Gate {
@@ -55,7 +61,9 @@ impl BackgroundJob {
             Self::BufferCacheRefresh(job) => job.run(context, event_tx),
             Self::FilePickerSearch(job) => job.run(context, event_tx),
             Self::GrepPickerSearch(job) => job.run(context, event_tx),
+            Self::DocSymbolsPickerSearch(job) => job.run(context, event_tx),
             Self::PickerPreviewSyntax(job) => job.run(context, event_tx),
+            Self::LspRename(job) => job.run(context, event_tx),
             #[cfg(test)]
             Self::Gate { gate } => {
                 let (lock, cvar) = &*gate;
@@ -95,10 +103,24 @@ impl From<GrepPickerSearchJob> for BackgroundJob {
     }
 }
 
+impl From<DocSymbolsPickerSearchJob> for BackgroundJob {
+    /// Wraps a document symbol picker search job in the background job enum.
+    fn from(value: DocSymbolsPickerSearchJob) -> Self {
+        Self::DocSymbolsPickerSearch(value)
+    }
+}
+
 impl From<PreviewSyntaxRefreshJob> for BackgroundJob {
     /// Wraps a picker preview syntax refresh job in the background job enum.
     fn from(value: PreviewSyntaxRefreshJob) -> Self {
         Self::PickerPreviewSyntax(value)
+    }
+}
+
+impl From<LspRenameJob> for BackgroundJob {
+    /// Wraps an LSP rename job in the background job enum.
+    fn from(value: LspRenameJob) -> Self {
+        Self::LspRename(value)
     }
 }
 

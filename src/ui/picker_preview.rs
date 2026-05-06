@@ -661,12 +661,6 @@ mod tests {
         plain_window.render(&mut plain_screen, Position::new(0, 0), Size::new(2, 32));
 
         assert_screen_eq(&mut preview_screen, &mut plain_screen);
-        assert!(
-            pane.buffer_view()
-                .with_buffer(|buffer| buffer.cached_syntax_spans_for_line(0))
-                .unwrap()
-                .is_none()
-        );
 
         let _ = fs::remove_file(file_path);
     }

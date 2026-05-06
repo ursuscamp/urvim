@@ -1,12 +1,16 @@
 //! Notification primitives for user-facing runtime messages.
 //!
 //! This module provides queue-backed notification state, top-right floating
-//! popup rendering, and helper APIs used by notification macros.
+//! popup rendering, bottom-right LSP progress rendering, and helper APIs used
+//! by notification macros.
 
 use crate::globals;
+use crate::lsp::runtime::LspServerStatus;
 use crate::screen::Screen;
 use crate::terminal::{Color, Style};
 use crate::ui::floating_window::{FloatingAnchor, FloatingWindowFrame};
+use crate::ui::{FocusPolicy, UiContext, UiEvent, UiEventResult, UiRect};
+use crate::widget::Widget;
 use crate::window::{Position, Size};
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
@@ -16,6 +20,7 @@ use unicode_width::UnicodeWidthStr;
 const NORMAL_TTL: Duration = Duration::from_secs(3);
 const BACKLOG_TTL: Duration = Duration::from_secs(1);
 const MAX_POPUP_CONTENT_WIDTH: usize = 48;
+const MAX_PROGRESS_CONTENT_WIDTH: usize = 48;
 
 /// Notification severity level.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -184,6 +189,49 @@ pub fn render_active_banner(screen: &mut Screen, origin: Position, size: Size, n
     render_notification_popup(screen, origin, size, &message);
 }
 
+/// Renders the current LSP progress as a bottom-right floating popup.
+pub fn render_active_progress_banner(screen: &mut Screen, origin: Position, size: Size) {
+    if size.rows < 3 || size.cols < 3 {
+        return;
+    }
+
+    let statuses = globals::with_lsp_runtime(|runtime| {
+        runtime
+            .map(|runtime| runtime.server_statuses())
+            .unwrap_or_default()
+    });
+    if statuses.is_empty() {
+        return;
+    }
+
+    render_progress_popup(screen, origin, size, statuses.as_slice());
+}
+
+/// Floating widget that renders LSP server progress.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct ProgressWidget;
+
+impl ProgressWidget {
+    /// Creates a progress widget.
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Widget for ProgressWidget {
+    fn handle_ui_event(&mut self, _event: &UiEvent, _ctx: &mut UiContext) -> UiEventResult {
+        UiEventResult::NotHandled
+    }
+
+    fn render_widget(&mut self, screen: &mut Screen, rect: UiRect, _ctx: &UiContext) {
+        render_active_progress_banner(screen, rect.origin, rect.size);
+    }
+
+    fn focus_policy(&self) -> FocusPolicy {
+        FocusPolicy::Passive
+    }
+}
+
 fn render_notification_popup(
     screen: &mut Screen,
     origin: Position,
@@ -256,6 +304,76 @@ fn render_notification_popup(
     }
 }
 
+fn render_progress_popup(
+    screen: &mut Screen,
+    origin: Position,
+    size: Size,
+    statuses: &[LspServerStatus],
+) {
+    let available_content_cols = usize::from(size.cols.saturating_sub(2));
+    let available_content_rows = usize::from(size.rows.saturating_sub(2));
+    if available_content_cols == 0 || available_content_rows == 0 {
+        return;
+    }
+
+    let wrap_width = available_content_cols.min(MAX_PROGRESS_CONTENT_WIDTH);
+    let mut rendered_lines = Vec::new();
+    for status in statuses {
+        let status_text = format!("{}: {}", status.server_name, status.message);
+        rendered_lines.extend(wrap_notification_text(status_text.as_str(), wrap_width));
+    }
+
+    rendered_lines.truncate(available_content_rows);
+    if rendered_lines.is_empty() {
+        return;
+    }
+
+    let content_width = rendered_lines
+        .iter()
+        .map(|line| UnicodeWidthStr::width(line.as_str()))
+        .max()
+        .unwrap_or(0)
+        .min(available_content_cols);
+    if content_width == 0 {
+        return;
+    }
+
+    let popup_width = content_width + 2;
+    let popup_height = rendered_lines.len() + 2;
+    if popup_width < 3 || popup_height < 3 {
+        return;
+    }
+
+    let popup_width = popup_width.min(usize::from(size.cols)) as u16;
+    let popup_height = popup_height.min(usize::from(size.rows)) as u16;
+    if popup_width < 3 || popup_height < 3 {
+        return;
+    }
+
+    let frame = FloatingWindowFrame::resolve(
+        origin,
+        size,
+        popup_height.saturating_sub(2),
+        popup_width.saturating_sub(2),
+        FloatingAnchor::BottomRight,
+    );
+    let Some(frame) = frame else {
+        return;
+    };
+
+    let border_style = progress_border_style();
+    let body_style = progress_body_style();
+    frame.render_bordered(screen, border_style, body_style);
+
+    for (line_idx, line) in rendered_lines.iter().enumerate() {
+        let row = frame.content_origin.row + line_idx as u16;
+        if row >= frame.content_origin.row + frame.content_size.rows {
+            break;
+        }
+        screen.write_string(row, frame.content_origin.col, border_style, line.as_str());
+    }
+}
+
 fn level_style(level: NotificationLevel) -> Style {
     globals::with_active_theme(|theme| {
         theme
@@ -280,6 +398,18 @@ fn notification_body_style() -> Style {
             .map(|theme| theme.resolve_name_with_default("ui.window"))
             .unwrap_or_default()
     })
+}
+
+fn progress_border_style() -> Style {
+    globals::with_active_theme(|theme| {
+        theme
+            .map(|theme| theme.resolve_name_with_default("ui.window.lines.border"))
+            .unwrap_or_default()
+    })
+}
+
+fn progress_body_style() -> Style {
+    notification_body_style()
 }
 
 fn wrap_notification_text(text: &str, max_width: usize) -> Vec<String> {
@@ -525,6 +655,39 @@ mod tests {
         );
         assert_eq!(
             screen.get_cell_mut(1, 6).map(|cell| cell.text.clone()),
+            Some("k".to_string())
+        );
+    }
+
+    #[test]
+    fn render_active_progress_banner_places_popup_bottom_right() {
+        let _config_guard = globals::set_test_config(Config::default());
+        let statuses = vec![LspServerStatus {
+            server_name: "lsp".to_string(),
+            message: "ok".to_string(),
+        }];
+        let mut screen = Screen::new(4, 12);
+        render_progress_popup(
+            &mut screen,
+            Position::new(0, 0),
+            Size::new(4, 12),
+            &statuses,
+        );
+
+        assert_eq!(
+            screen.get_cell_mut(1, 3).map(|cell| cell.text.clone()),
+            Some("+".to_string())
+        );
+        assert_eq!(
+            screen.get_cell_mut(1, 11).map(|cell| cell.text.clone()),
+            Some("+".to_string())
+        );
+        assert_eq!(
+            screen.get_cell_mut(2, 4).map(|cell| cell.text.clone()),
+            Some("l".to_string())
+        );
+        assert_eq!(
+            screen.get_cell_mut(2, 10).map(|cell| cell.text.clone()),
             Some("k".to_string())
         );
     }

@@ -1,0 +1,8 @@
+[rust_analyzer]
+enabled = false
+command = "rust-analyzer"
+args = []
+filetypes = ["rust"]
+root_markers = ["Cargo.toml", "rust-project.json", ".git"]
+env = {}
+settings = {}

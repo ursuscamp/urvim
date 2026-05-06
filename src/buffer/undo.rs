@@ -110,6 +110,15 @@ impl Buffer {
         self.undo_state.update_cursor(cursor);
     }
 
+    /// Returns the cursor stored in the active undo snapshot.
+    pub fn current_cursor(&self) -> Cursor {
+        self.undo_state
+            .history
+            .get(self.undo_state.position)
+            .map(|snapshot| snapshot.cursor)
+            .unwrap_or_default()
+    }
+
     pub fn undo(&mut self) -> Option<Cursor> {
         match self.undo_state.undo() {
             Some((lines, buffer_cache, cursor)) => {

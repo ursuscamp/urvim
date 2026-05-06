@@ -8,8 +8,7 @@ impl Layout {
         query: impl Into<String>,
         positive_intent: impl Into<Intent>,
     ) {
-        self.command_line_open = false;
-        self.close_file_picker();
+        self.close_all_dialogs();
         self.confirmation_box = Some(ConfirmationBox::new(query, positive_intent));
     }
 

@@ -7,8 +7,12 @@
 mod colorscheme_picker;
 mod command_line;
 mod confirmation;
+mod doc_symbols_picker;
 mod geometry;
 mod grep_picker;
+mod hover;
+mod lsp;
+mod lsp_rename;
 mod node;
 mod picker;
 mod render;
@@ -17,15 +21,19 @@ mod tree;
 
 use self::command_line::CommandLineState;
 use crate::action::ActionResult;
-use crate::background::{JobEvent, JobManager};
+use crate::background::{JobEvent, JobKind, JobManager};
 use crate::editor::{Action, ModeKind};
 use crate::screen::Screen;
 use crate::status_bar::StatusBar;
 use crate::terminal::CursorStyle;
 use crate::ui::colorscheme_picker::ColorschemePickerWidget;
 use crate::ui::confirmation_box::ConfirmationBox;
+use crate::ui::diagnostic_hover::DiagnosticHoverWidget;
+use crate::ui::doc_symbols_picker::DocSymbolsPickerWidget;
 use crate::ui::file_picker::FilePickerWidget;
 use crate::ui::grep_picker::GrepPickerWidget;
+use crate::ui::hover::HoverWidget;
+use crate::ui::lsp_rename::LspRenamePrompt;
 use crate::ui::{Command, Intent, UiEvent, UiEventResult};
 use crate::window::{BufferView, Position, Size};
 use std::path::PathBuf;
@@ -49,10 +57,14 @@ pub struct Layout {
     size: Size,
     command_line: CommandLineState,
     command_line_open: bool,
+    lsp_rename_prompt: Option<LspRenamePrompt>,
     colorscheme_picker: Option<ColorschemePickerWidget>,
+    doc_symbols_picker: Option<DocSymbolsPickerWidget>,
     file_picker: Option<FilePickerWidget>,
     grep_picker: Option<GrepPickerWidget>,
     confirmation_box: Option<ConfirmationBox>,
+    hover: Option<HoverWidget>,
+    diagnostic_hover: Option<DiagnosticHoverWidget>,
     jobs: Arc<JobManager>,
 }
 
@@ -69,10 +81,14 @@ impl Layout {
             size: Size::default(),
             command_line: CommandLineState::new(),
             command_line_open: false,
+            lsp_rename_prompt: None,
             colorscheme_picker: None,
+            doc_symbols_picker: None,
             file_picker: None,
             grep_picker: None,
             confirmation_box: None,
+            hover: None,
+            diagnostic_hover: None,
             jobs: Arc::new(JobManager::new()),
         }
     }
@@ -193,7 +209,23 @@ impl Layout {
             return Some(position);
         }
 
+        if let Some(position) = self
+            .doc_symbols_picker
+            .as_ref()
+            .and_then(|picker| picker.cursor())
+        {
+            return Some(position);
+        }
+
         if let Some(position) = self.file_picker.as_ref().and_then(|picker| picker.cursor()) {
+            return Some(position);
+        }
+
+        if let Some(position) = self
+            .lsp_rename_prompt
+            .as_ref()
+            .and_then(|prompt| prompt.cursor())
+        {
             return Some(position);
         }
 
@@ -223,8 +255,40 @@ impl Layout {
                 event @ JobEvent::Chunk { .. }
                 | event @ JobEvent::Completed { .. }
                 | event @ JobEvent::Failed { .. } => {
-                    self.dispatch_job_event(event);
+                    if matches!(event.kind(), JobKind::LspRename(_)) {
+                        self.dispatch_lsp_job_event(event);
+                    } else {
+                        self.dispatch_job_event(event);
+                    }
                     accepted_redraw = true;
+                }
+            }
+        }
+
+        accepted_redraw
+    }
+
+    /// Processes workspace file-operation notifications.
+    pub fn process_workspace_file_operations(&mut self) -> bool {
+        let mut accepted_redraw = false;
+
+        while let Some(event) = crate::globals::take_workspace_file_operation_notification() {
+            match event {
+                crate::globals::WorkspaceFileOperationNotification::Create { .. } => {
+                    accepted_redraw = true;
+                }
+                crate::globals::WorkspaceFileOperationNotification::Rename { .. } => {
+                    accepted_redraw = true;
+                }
+                crate::globals::WorkspaceFileOperationNotification::Delete {
+                    buffer_id, ..
+                } => {
+                    if let Some(buffer_id) = buffer_id
+                        && self.close_buffer_tabs(buffer_id)
+                    {
+                        self.prune_empty_panes();
+                        accepted_redraw = true;
+                    }
                 }
             }
         }
@@ -234,11 +298,17 @@ impl Layout {
 }
 
 impl Layout {
-    /// Closes all open pickers.
-    pub(super) fn close_all_pickers(&mut self) {
+    /// Closes all open dialogs and overlays.
+    pub(super) fn close_all_dialogs(&mut self) {
+        self.close_command_line();
         self.close_colorscheme_picker();
+        self.close_doc_symbols_picker();
         self.close_file_picker();
         self.close_grep_picker();
+        self.close_confirmation_box();
+        self.close_hover();
+        self.close_diagnostic_hover();
+        self.close_lsp_rename_prompt();
     }
 
     /// Dispatches a unified intent through the root layout.
@@ -250,6 +320,11 @@ impl Layout {
     }
 
     fn dispatch_command(&mut self, command: &Command) -> bool {
+        if !matches!(command, Command::EnqueueNotification { .. }) {
+            self.close_hover();
+            self.close_diagnostic_hover();
+        }
+
         match command {
             Command::EnqueueNotification { level, message } => {
                 crate::globals::enqueue_notification(*level, message.clone())
@@ -262,6 +337,10 @@ impl Layout {
                 self.open_colorscheme_picker();
                 true
             }
+            Command::OpenDocumentSymbolsPicker => {
+                self.open_doc_symbols_picker();
+                true
+            }
             Command::OpenFilePicker => {
                 self.open_file_picker();
                 true
@@ -269,6 +348,87 @@ impl Layout {
             Command::OpenGrepPicker => {
                 self.open_grep_picker();
                 true
+            }
+            Command::WriteAll => self.execute_write_all().map_or_else(
+                |error| {
+                    crate::notify_error!("Write all failed: {}", error);
+                    true
+                },
+                |_| true,
+            ),
+            Command::LspHover => {
+                if !self.lsp_hover_supported() {
+                    return true;
+                }
+                self.execute_lsp_hover().map_or_else(
+                    |error| {
+                        crate::notify_error!("LSP hover failed: {}", error);
+                        true
+                    },
+                    |_| true,
+                )
+            }
+            Command::LspDefinition => {
+                if !self.lsp_definition_supported() {
+                    return true;
+                }
+                self.execute_lsp_definition().map_or_else(
+                    |error| {
+                        crate::notify_error!("LSP definition failed: {}", error);
+                        true
+                    },
+                    |_| true,
+                )
+            }
+            Command::LspPreviousDiagnostic => self.execute_lsp_previous_diagnostic().map_or_else(
+                |error| {
+                    crate::notify_error!("LSP diagnostic navigation failed: {}", error);
+                    true
+                },
+                |_| true,
+            ),
+            Command::LspNextDiagnostic => self.execute_lsp_next_diagnostic().map_or_else(
+                |error| {
+                    crate::notify_error!("LSP diagnostic navigation failed: {}", error);
+                    true
+                },
+                |_| true,
+            ),
+            Command::LspPreviousErrorDiagnostic => {
+                self.execute_lsp_previous_error_diagnostic().map_or_else(
+                    |error| {
+                        crate::notify_error!("LSP diagnostic navigation failed: {}", error);
+                        true
+                    },
+                    |_| true,
+                )
+            }
+            Command::LspNextErrorDiagnostic => {
+                self.execute_lsp_next_error_diagnostic().map_or_else(
+                    |error| {
+                        crate::notify_error!("LSP diagnostic navigation failed: {}", error);
+                        true
+                    },
+                    |_| true,
+                )
+            }
+            Command::LspRenamePrompt => {
+                if self.lsp_rename_supported() {
+                    self.open_lsp_rename_prompt();
+                }
+                true
+            }
+            Command::LspRename(name) => {
+                if !self.lsp_rename_supported() {
+                    return true;
+                }
+                self.execute_lsp_rename(name.clone()).map_or_else(
+                    |error| {
+                        crate::notify_error!("LSP rename failed: {}", error);
+                        true
+                    },
+                    |_| true,
+                )
             }
             Command::OpenFile(path) => {
                 match crate::globals::with_buffer_pool(|pool| pool.open_buffer(path)) {
@@ -328,8 +488,14 @@ impl Layout {
             Command::FocusPaneRight => self.move_focus(geometry::FocusDirection::Right),
             Command::ClosePane => self.close_focused_pane(),
             Command::TryQuit => {
-                if self.has_modified_buffers() {
-                    self.open_confirmation_box("Quit without saving?", Command::Quit);
+                let modified_count =
+                    crate::globals::with_buffer_pool(|pool| pool.modified_buffer_count());
+                if modified_count > 0 {
+                    let suffix = if modified_count == 1 { "" } else { "s" };
+                    self.open_confirmation_box(
+                        format!("Quit without saving {} buffer{}?", modified_count, suffix),
+                        Command::Quit,
+                    );
                     true
                 } else {
                     self.close_confirmation_box();
@@ -347,6 +513,8 @@ impl Layout {
 
     /// Dispatches an action intent through the layout tree.
     pub fn dispatch_action(&mut self, action: &Action) -> bool {
+        self.close_hover();
+        self.close_diagnostic_hover();
         self.prune_empty_panes();
         match action.kind.as_ref() {
             _ => {
@@ -398,6 +566,11 @@ impl Layout {
             return overlay;
         }
 
+        let hover = self.route_hover_ui_event(event);
+        if hover.handled() {
+            return hover;
+        }
+
         self.route_base_ui_event(event)
     }
 
@@ -413,6 +586,8 @@ impl Layout {
             UiEvent::Key(key) => {
                 if self.confirmation_box_is_open() {
                     self.handle_confirmation_box_event(event)
+                } else if self.lsp_rename_prompt_is_open() {
+                    self.handle_lsp_rename_event(event)
                 } else if self.command_line_should_capture_events() {
                     self.handle_command_line_key(key)
                 } else {
@@ -422,6 +597,8 @@ impl Layout {
             UiEvent::Paste(text) => {
                 if self.confirmation_box_is_open() {
                     self.handle_confirmation_box_event(event)
+                } else if self.lsp_rename_prompt_is_open() {
+                    self.handle_lsp_rename_event(event)
                 } else if self.command_line_should_capture_events() {
                     self.handle_command_line_paste(text.as_str())
                 } else {
@@ -432,9 +609,43 @@ impl Layout {
         }
     }
 
+    fn route_hover_ui_event(&mut self, event: &UiEvent) -> UiEventResult {
+        let (result, should_close) = {
+            if let Some(hover) = self.diagnostic_hover_mut() {
+                let mut ctx = crate::ui::UiContext;
+                let result = hover.handle_ui_event(event, &mut ctx);
+                let should_close = result.handled() && !hover.is_open();
+                (result, should_close)
+            } else {
+                let Some(hover) = self.hover_mut() else {
+                    return UiEventResult::NotHandled;
+                };
+
+                let mut ctx = crate::ui::UiContext;
+                let result = hover.handle_ui_event(event, &mut ctx);
+                let should_close = result.handled() && !hover.is_open();
+                (result, should_close)
+            }
+        };
+
+        if should_close {
+            if self.diagnostic_hover_is_open() {
+                self.close_diagnostic_hover();
+            } else {
+                self.close_hover();
+            }
+        }
+
+        result
+    }
+
     fn route_picker_ui_event(&mut self, event: &UiEvent) -> UiEventResult {
         if self.colorscheme_picker_is_open() {
             return self.handle_colorscheme_picker_event(event);
+        }
+
+        if self.doc_symbols_picker_is_open() {
+            return self.handle_doc_symbols_picker_event(event);
         }
 
         if self.grep_picker_is_open() {
@@ -475,6 +686,36 @@ impl Layout {
         }
 
         handled
+    }
+
+    fn lsp_hover_supported(&mut self) -> bool {
+        let buffer_id = self.active_buffer_view().buffer_id();
+        crate::globals::try_with_lsp_runtime_mut(|runtime| runtime.buffer_supports_hover(buffer_id))
+            .unwrap_or(false)
+    }
+
+    fn editor_cursor_position(&self) -> Option<Position> {
+        let pane_region = self.pane_region(self.focused_pane)?;
+        let mut pos = self.active_window_group().visual_cursor()?;
+        pos.row = pos.row.saturating_add(pane_region.origin.row);
+        pos.col = pos.col.saturating_add(pane_region.origin.col);
+        Some(pos)
+    }
+
+    fn lsp_definition_supported(&mut self) -> bool {
+        let buffer_id = self.active_buffer_view().buffer_id();
+        crate::globals::try_with_lsp_runtime_mut(|runtime| {
+            runtime.buffer_supports_definition(buffer_id)
+        })
+        .unwrap_or(false)
+    }
+
+    fn lsp_rename_supported(&mut self) -> bool {
+        let buffer_id = self.active_buffer_view().buffer_id();
+        crate::globals::try_with_lsp_runtime_mut(|runtime| {
+            runtime.buffer_supports_rename(buffer_id)
+        })
+        .unwrap_or(false)
     }
 }
 

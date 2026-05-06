@@ -44,6 +44,10 @@ bg = "bg0"
 "ui.window" = { fg = "fg1", bg = "bg0" }
 "ui.window.lines" = { fg = "bg3" }
 "ui.window.lines.resize" = { fg = "orange", bold = true }
+"ui.diagnostic.error" = { fg = "red", bold = true }
+"ui.diagnostic.warning" = { fg = "yellow", bold = true }
+"ui.diagnostic.info" = { fg = "blue" }
+"ui.diagnostic.hint" = { fg = "aqua" }
 "ui.input.prompt" = { fg = "orange", bold = true }
 "ui.input.prompt.exact" = { fg = "orange", bold = true }
 "ui.input.prompt.fuzzy" = { fg = "orange", italic = true }

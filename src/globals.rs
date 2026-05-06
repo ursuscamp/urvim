@@ -3,12 +3,17 @@
 //! This module stores persistent state that needs to survive across mode switches
 //! and future multi-window support.
 
+use crate::AbsolutePath;
 use crate::buffer::{Buffer, BufferId, BufferPool};
 use crate::config::Config;
+use crate::diagnostics::DiagnosticsStore;
 use crate::editor::Action;
+use crate::lsp::runtime::LspRuntime;
 use crate::notification::{NotificationLevel, NotificationMessage, NotificationState};
 use crate::register::RegisterStore;
 use crate::theme::{Theme, ThemeRegistry};
+use std::collections::VecDeque;
+use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock, RwLock};
 
 #[cfg(test)]
@@ -46,6 +51,23 @@ pub struct RepeatState {
     pub insert_text: Option<String>,
 }
 
+/// Notification for a workspace file operation applied by LSP.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WorkspaceFileOperationNotification {
+    /// A file was created on disk.
+    Create { path: PathBuf },
+    /// A file was renamed on disk.
+    Rename {
+        old_path: PathBuf,
+        new_path: PathBuf,
+    },
+    /// A file was deleted from disk.
+    Delete {
+        path: PathBuf,
+        buffer_id: Option<BufferId>,
+    },
+}
+
 /// Global storage for the last character search state
 static LAST_FIND: Mutex<Option<FindState>> = Mutex::new(None);
 #[cfg(not(test))]
@@ -55,7 +77,11 @@ static ACTIVE_BUFFER_ID: OnceLock<RwLock<Option<BufferId>>> = OnceLock::new();
 static CONFIG: OnceLock<RwLock<Option<Config>>> = OnceLock::new();
 static ACTIVE_THEME: OnceLock<RwLock<Option<Theme>>> = OnceLock::new();
 static THEME_REGISTRY: OnceLock<RwLock<Option<ThemeRegistry>>> = OnceLock::new();
+static LSP_RUNTIME: OnceLock<Mutex<Option<LspRuntime>>> = OnceLock::new();
+static DIAGNOSTICS_STORE: OnceLock<DiagnosticsStore> = OnceLock::new();
 static NOTIFICATION_STATE: OnceLock<Mutex<NotificationState>> = OnceLock::new();
+static FILE_OPERATION_QUEUE: OnceLock<Mutex<VecDeque<WorkspaceFileOperationNotification>>> =
+    OnceLock::new();
 #[cfg(not(test))]
 static REGISTER_STORE: OnceLock<RwLock<RegisterStore>> = OnceLock::new();
 
@@ -66,7 +92,19 @@ thread_local! {
     static TEST_THEME_REGISTRY: RefCell<Option<ThemeRegistry>> = const { RefCell::new(None) };
     static TEST_LAST_REPEAT: RefCell<Option<RepeatState>> = const { RefCell::new(None) };
     static TEST_REGISTER_STORE: RefCell<RegisterStore> = RefCell::new(RegisterStore::new());
+    static TEST_BUFFER_POOL: RefCell<BufferPool> = RefCell::new(BufferPool::new());
 }
+
+#[cfg(test)]
+static LSP_RUNTIME_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+#[cfg(test)]
+thread_local! {
+    static TEST_DIAGNOSTICS_STORE: RefCell<DiagnosticsStore> = RefCell::new(DiagnosticsStore::new());
+}
+
+#[cfg(test)]
+static BUFFER_POOL_TEST_LOCK: Mutex<()> = Mutex::new(());
 
 /// Set the last character search state
 pub fn set_last_find(state: FindState) {
@@ -117,20 +155,87 @@ pub fn buffer_pool() -> &'static RwLock<BufferPool> {
 
 /// Runs a closure with mutable access to the global buffer pool.
 pub fn with_buffer_pool<R>(f: impl FnOnce(&mut BufferPool) -> R) -> R {
-    let mut pool = buffer_pool().write().unwrap();
-    f(&mut pool)
+    #[cfg(test)]
+    {
+        return TEST_BUFFER_POOL.with(|pool| f(&mut pool.borrow_mut()));
+    }
+
+    #[cfg(not(test))]
+    {
+        let mut pool = buffer_pool().write().unwrap();
+        f(&mut pool)
+    }
 }
 
 /// Runs a closure with shared access to a live buffer entry.
 pub fn with_buffer<R>(id: BufferId, f: impl FnOnce(&Buffer) -> R) -> Option<R> {
-    let pool = buffer_pool().read().unwrap();
-    pool.get(id).map(f)
+    #[cfg(test)]
+    {
+        return TEST_BUFFER_POOL.with(|pool| pool.borrow().get(id).map(f));
+    }
+
+    #[cfg(not(test))]
+    {
+        let pool = buffer_pool().read().unwrap();
+        pool.get(id).map(f)
+    }
 }
 
 /// Runs a closure with mutable access to a live buffer entry.
 pub fn with_buffer_mut<R>(id: BufferId, f: impl FnOnce(&mut Buffer) -> R) -> Option<R> {
-    let mut pool = buffer_pool().write().unwrap();
-    pool.with_buffer_mut(id, f)
+    #[cfg(test)]
+    {
+        return TEST_BUFFER_POOL.with(|pool| pool.borrow_mut().with_buffer_mut(id, f));
+    }
+
+    #[cfg(not(test))]
+    {
+        let mut pool = buffer_pool().write().unwrap();
+        pool.with_buffer_mut(id, f)
+    }
+}
+
+/// Opens a file-backed buffer while minimizing time spent holding the pool lock.
+pub fn open_buffer(path: impl AsRef<std::path::Path>) -> std::io::Result<BufferId> {
+    let abs_path = AbsolutePath::from_path(path.as_ref()).ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "failed to resolve absolute path",
+        )
+    })?;
+
+    let buffer = match Buffer::load_from_file(abs_path.as_path()) {
+        Ok(buffer) => buffer,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            Buffer::with_path(abs_path.clone())
+        }
+        Err(error) => return Err(error),
+    };
+
+    #[cfg(test)]
+    {
+        return TEST_BUFFER_POOL.with(|pool| {
+            let mut pool = pool.borrow_mut();
+            if let Some(id) = pool.buffer_id_for_path(&abs_path) {
+                return Ok(id);
+            }
+            Ok(pool.register_buffer(buffer))
+        });
+    }
+
+    #[cfg(not(test))]
+    {
+        if let Some(id) = buffer_pool().read().unwrap().buffer_id_for_path(&abs_path) {
+            return Ok(id);
+        }
+
+        let mut pool = buffer_pool().write().unwrap();
+        if let Some(id) = pool.buffer_id_for_path(&abs_path) {
+            return Ok(id);
+        }
+
+        Ok(pool.register_buffer(buffer))
+    }
 }
 
 fn config_slot() -> &'static RwLock<Option<Config>> {
@@ -208,6 +313,14 @@ fn theme_registry_slot() -> &'static RwLock<Option<ThemeRegistry>> {
 
 fn notification_state_slot() -> &'static Mutex<NotificationState> {
     NOTIFICATION_STATE.get_or_init(|| Mutex::new(NotificationState::new()))
+}
+
+fn lsp_runtime_slot() -> &'static Mutex<Option<LspRuntime>> {
+    LSP_RUNTIME.get_or_init(|| Mutex::new(None))
+}
+
+fn diagnostics_store_slot() -> &'static DiagnosticsStore {
+    DIAGNOSTICS_STORE.get_or_init(DiagnosticsStore::new)
 }
 
 #[cfg(not(test))]
@@ -364,6 +477,28 @@ pub fn request_notification_redraw() {
     }
 }
 
+fn file_operation_queue_slot() -> &'static Mutex<VecDeque<WorkspaceFileOperationNotification>> {
+    FILE_OPERATION_QUEUE.get_or_init(|| Mutex::new(VecDeque::new()))
+}
+
+/// Enqueues a workspace file-operation notification for the UI.
+pub fn enqueue_workspace_file_operation_notification(
+    notification: WorkspaceFileOperationNotification,
+) {
+    if let Ok(mut queue) = file_operation_queue_slot().lock() {
+        queue.push_back(notification);
+    }
+}
+
+/// Returns and removes the next pending workspace file-operation notification.
+pub fn take_workspace_file_operation_notification() -> Option<WorkspaceFileOperationNotification> {
+    let Ok(mut queue) = file_operation_queue_slot().lock() else {
+        return None;
+    };
+
+    queue.pop_front()
+}
+
 /// Returns and clears the notification redraw-requested flag.
 pub fn take_notification_redraw_requested() -> bool {
     let Ok(mut state) = notification_state_slot().lock() else {
@@ -372,6 +507,78 @@ pub fn take_notification_redraw_requested() -> bool {
     };
 
     state.take_redraw_requested()
+}
+
+/// Installs the resolved LSP runtime for the current editor session.
+pub fn set_lsp_runtime(runtime: LspRuntime) {
+    if let Ok(mut slot) = lsp_runtime_slot().lock() {
+        *slot = Some(runtime);
+    }
+}
+
+/// Runs a closure with shared access to the diagnostics store.
+pub fn with_diagnostics_store<R>(f: impl FnOnce(&DiagnosticsStore) -> R) -> Option<R> {
+    #[cfg(test)]
+    {
+        return TEST_DIAGNOSTICS_STORE.with(|store| {
+            let store = store.borrow();
+            Some(f(&store))
+        });
+    }
+
+    #[cfg(not(test))]
+    {
+        Some(f(diagnostics_store_slot()))
+    }
+}
+
+#[cfg(test)]
+/// Clears the diagnostics store in tests.
+pub fn clear_diagnostics_store() {
+    TEST_DIAGNOSTICS_STORE.with(|store| {
+        *store.borrow_mut() = DiagnosticsStore::new();
+    });
+}
+
+/// Runs a closure with mutable access to the LSP runtime, if one has been set.
+pub fn with_lsp_runtime_mut<R>(f: impl FnOnce(&mut LspRuntime) -> R) -> Option<R> {
+    let Ok(mut slot) = lsp_runtime_slot().lock() else {
+        return None;
+    };
+    slot.as_mut().map(f)
+}
+
+/// Runs a closure with mutable access to the LSP runtime without blocking.
+pub fn try_with_lsp_runtime_mut<R>(f: impl FnOnce(&mut LspRuntime) -> R) -> Option<R> {
+    let Ok(mut slot) = lsp_runtime_slot().try_lock() else {
+        return None;
+    };
+    slot.as_mut().map(f)
+}
+
+#[cfg(test)]
+/// Clears the installed LSP runtime in tests.
+pub fn clear_lsp_runtime() {
+    if let Ok(mut slot) = lsp_runtime_slot().lock() {
+        *slot = None;
+    }
+}
+
+/// Runs a closure with shared access to the LSP runtime, if one has been set.
+pub fn with_lsp_runtime<R>(f: impl FnOnce(Option<&LspRuntime>) -> R) -> R {
+    let Ok(slot) = lsp_runtime_slot().lock() else {
+        return f(None);
+    };
+    f(slot.as_ref())
+}
+
+/// Shuts down the LSP runtime if it exists.
+pub fn shutdown_lsp_runtime() {
+    if let Ok(mut slot) = lsp_runtime_slot().lock()
+        && let Some(runtime) = slot.as_mut()
+    {
+        runtime.shutdown();
+    }
 }
 
 #[cfg(test)]
@@ -399,6 +606,12 @@ pub fn set_test_config(config: Config) -> TestConfigGuard {
 #[cfg(test)]
 /// A guard that installs a test-only active theme for the current thread.
 pub struct TestActiveThemeGuard;
+
+#[cfg(test)]
+/// Serializes tests that mutate the global LSP runtime.
+pub fn lsp_runtime_test_lock() -> std::sync::MutexGuard<'static, ()> {
+    LSP_RUNTIME_TEST_LOCK.lock().unwrap()
+}
 
 #[cfg(test)]
 /// A guard that installs a test-only theme registry for the current thread.
@@ -469,11 +682,26 @@ pub fn clear_notifications() {
     }
 }
 
+/// Clears queued workspace file-operation notifications.
+pub fn clear_workspace_file_operation_notifications() {
+    if let Ok(mut queue) = file_operation_queue_slot().lock() {
+        queue.clear();
+    }
+}
+
 #[cfg(test)]
 /// Returns a process-wide guard for synchronizing notification-related tests.
 pub fn notification_test_lock() -> std::sync::MutexGuard<'static, ()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
     LOCK.get_or_init(|| Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+}
+
+#[cfg(test)]
+/// Returns a process-wide guard for synchronizing buffer-pool tests.
+pub fn buffer_pool_test_lock() -> std::sync::MutexGuard<'static, ()> {
+    BUFFER_POOL_TEST_LOCK
         .lock()
         .unwrap_or_else(|error| error.into_inner())
 }
@@ -805,5 +1033,31 @@ mod tests {
         state.request_redraw();
         assert!(state.take_redraw_requested());
         assert!(!state.take_redraw_requested());
+    }
+
+    #[test]
+    fn test_try_with_lsp_runtime_mut_returns_none_when_locked() {
+        let _guard = lsp_runtime_test_lock();
+        use std::sync::mpsc;
+        use std::thread;
+
+        let config = themed_config("demo");
+        set_lsp_runtime(crate::lsp::runtime::LspRuntime::new(&config));
+
+        let (ready_tx, ready_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+
+        let handle = thread::spawn(move || {
+            let _ = with_lsp_runtime_mut(|_| {
+                ready_tx.send(()).expect("ready signal");
+                release_rx.recv().expect("release signal");
+            });
+        });
+
+        ready_rx.recv().expect("worker should lock runtime");
+        assert!(try_with_lsp_runtime_mut(|_| ()).is_none());
+        release_tx.send(()).expect("release worker");
+        handle.join().expect("worker should finish");
+        clear_lsp_runtime();
     }
 }

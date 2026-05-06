@@ -1,5 +1,6 @@
 use super::*;
 use crate::action::ActionResult;
+use crate::background::{JobEvent, JobKind, JobPayload, JobToken};
 use crate::buffer::Buffer;
 use crate::buffer::Cursor;
 use crate::config::Config;
@@ -11,6 +12,7 @@ use crate::theme::{HighlightStyles, Tag, Theme, ThemeKind};
 use crate::ui::{Command, Intent, UiEvent, UiEventResult};
 use crate::window::{Position, Size};
 use crate::window_group::WindowGroup;
+use lsp_types::{Diagnostic, DiagnosticSeverity, Range};
 use std::collections::BTreeSet;
 use std::fs;
 use std::thread;
@@ -139,6 +141,9 @@ fn pane_count(node: &LayoutNode) -> usize {
 
 #[test]
 fn test_layout_session_round_trips_cursor_and_file_paths() {
+    let _pool_guard = globals::buffer_pool_test_lock();
+    globals::with_buffer_pool(|pool| *pool = crate::buffer::BufferPool::new());
+    let _config_guard = globals::set_test_config(Config::default());
     let temp_dir = std::env::temp_dir().join(format!(
         "urvim-layout-session-{}-{}",
         std::process::id(),
@@ -267,6 +272,161 @@ fn test_layout_grep_picker_opens_and_closes() {
 }
 
 #[test]
+fn test_layout_lsp_hover_binding_noops_without_runtime() {
+    let _guard = globals::notification_test_lock();
+    globals::clear_notifications();
+
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("one")]);
+
+    assert!(layout.dispatch_intent(&Intent::Command(Command::LspHover)));
+    assert!(layout.dispatch_intent(&Intent::Command(Command::LspDefinition)));
+    assert!(layout.dispatch_intent(&Intent::Command(Command::LspPreviousDiagnostic)));
+    assert!(layout.dispatch_intent(&Intent::Command(Command::LspNextDiagnostic)));
+    assert!(layout.dispatch_intent(&Intent::Command(Command::LspPreviousErrorDiagnostic)));
+    assert!(layout.dispatch_intent(&Intent::Command(Command::LspNextErrorDiagnostic)));
+    assert!(layout.dispatch_intent(&Intent::Command(Command::LspRenamePrompt)));
+    assert!(globals::active_notification(std::time::Instant::now()).is_none());
+    assert!(!layout.command_line_is_open());
+}
+
+#[test]
+fn test_layout_diagnostic_hover_opens_and_closes() {
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("one")]);
+    layout.open_diagnostic_hover(
+        vec![Diagnostic {
+            range: Range::default(),
+            severity: Some(DiagnosticSeverity::ERROR),
+            code: None,
+            code_description: None,
+            source: Some("lsp".to_string()),
+            message: "problem".to_string(),
+            related_information: None,
+            tags: None,
+            data: None,
+        }],
+        Position::new(1, 1),
+    );
+
+    assert!(layout.diagnostic_hover_is_open());
+
+    let result = layout.route_ui_event(&UiEvent::Key(key(KeyCode::Esc)));
+    assert!(result.handled());
+    assert!(!layout.diagnostic_hover_is_open());
+}
+
+#[test]
+fn test_layout_diagnostic_navigation_scrolls_target_into_view() {
+    let _theme_guard = globals::set_test_active_theme(border_theme());
+    let _config_guard = globals::set_test_config(border_config(false));
+    let _notification_guard = globals::notification_test_lock();
+    globals::clear_diagnostics_store();
+
+    let text = (0..20)
+        .map(|line| format!("line {line}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let mut layout = layout_with_buffers(vec![Buffer::from_str(text.as_str())]);
+    let buffer_id = layout.active_buffer_view().buffer_id();
+
+    globals::with_diagnostics_store(|store| {
+        store.set(
+            buffer_id,
+            "lsp",
+            vec![Diagnostic {
+                range: Range::new(
+                    lsp_types::Position::new(12, 0),
+                    lsp_types::Position::new(12, 4),
+                ),
+                severity: Some(DiagnosticSeverity::ERROR),
+                code: None,
+                code_description: None,
+                source: Some("lsp".to_string()),
+                message: "problem".to_string(),
+                related_information: None,
+                tags: None,
+                data: None,
+            }],
+        );
+    });
+
+    let mut screen = crate::screen::Screen::new(6, 40);
+    layout.render(&mut screen, Position::new(0, 0), Size::new(6, 40));
+
+    assert!(layout.dispatch_intent(&Intent::Command(Command::LspNextDiagnostic)));
+    assert!(layout.diagnostic_hover_is_open());
+
+    layout.render(&mut screen, Position::new(0, 0), Size::new(6, 40));
+    let mut rendered = String::new();
+    let (rows, cols) = screen.size();
+    for row in 0..rows {
+        if row > 0 {
+            rendered.push('\n');
+        }
+        for col in 0..cols {
+            rendered.push_str(screen.get_cell_mut(row, col).unwrap().text.as_str());
+        }
+    }
+
+    assert!(rendered.contains("problem"));
+    assert!(layout.visual_cursor().is_some());
+}
+
+#[test]
+fn test_layout_doc_symbols_picker_binding_opens_for_file_backed_buffer() {
+    let temp_dir = std::env::temp_dir().join(format!(
+        "urvim-doc-symbols-layout-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&temp_dir).unwrap();
+    let path = temp_dir.join("example.rs");
+    std::fs::write(&path, "fn example() {}\n").unwrap();
+
+    let mut layout = layout_with_buffers(vec![Buffer::from_str_with_path(
+        "fn example() {}\n",
+        abs_path(&path),
+    )]);
+
+    assert!(layout.dispatch_intent(&Intent::Command(Command::OpenDocumentSymbolsPicker)));
+    assert!(layout.doc_symbols_picker_is_open());
+
+    let _ = std::fs::remove_file(path);
+    let _ = std::fs::remove_dir_all(temp_dir);
+}
+
+#[test]
+fn test_layout_lsp_hover_closes_on_action() {
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("one")]);
+    layout.open_lsp_hover("hover text".to_string(), Position::new(1, 1));
+
+    assert!(layout.hover_is_open());
+
+    assert!(layout.dispatch_intent(&Intent::Action(Action::new(ActionKind::MoveRight))));
+    assert!(!layout.hover_is_open());
+}
+
+#[test]
+fn test_layout_lsp_rename_job_failure_surfaces_notification() {
+    let _guard = globals::notification_test_lock();
+    globals::clear_notifications();
+
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("one")]);
+    let buffer_id = layout.active_buffer_view().buffer_id();
+
+    layout.dispatch_lsp_job_event(JobEvent::Completed {
+        kind: JobKind::LspRename(buffer_id),
+        token: JobToken::new(7),
+        payload: Some(JobPayload::LspRename(Err("boom".to_string()))),
+    });
+
+    let message = globals::active_notification(std::time::Instant::now()).expect("notification");
+    assert!(message.text.contains("LSP rename failed: boom"));
+}
+
+#[test]
 fn test_layout_open_file_at_cursor_sets_cursor_position() {
     let temp_dir = std::env::temp_dir().join(format!(
         "urvim-open-file-at-cursor-{}",
@@ -305,10 +465,14 @@ fn test_layout_dispatch_intent_quit_exits_immediately() {
 
 #[test]
 fn test_layout_try_quit_without_modified_buffers_exits_immediately() {
+    let _pool_guard = globals::buffer_pool_test_lock();
+    globals::with_buffer_pool(|pool| *pool = crate::buffer::BufferPool::new());
     let mut layout = layout_with_buffers(vec![Buffer::from_str("one")]);
 
     assert!(layout.dispatch_intent(&Intent::Command(Command::TryQuit)));
     assert!(layout.should_exit());
+
+    globals::with_buffer_pool(|pool| *pool = crate::buffer::BufferPool::new());
 }
 
 #[test]
@@ -322,6 +486,84 @@ fn test_layout_try_quit_with_modified_buffers_opens_confirmation_prompt() {
     assert!(layout.dispatch_intent(&Intent::Command(Command::TryQuit)));
     assert!(!layout.should_exit());
     assert!(layout.confirmation_box_is_open());
+}
+
+#[test]
+fn test_layout_try_quit_counts_hidden_modified_buffers() {
+    let _pool_guard = globals::buffer_pool_test_lock();
+    globals::with_buffer_pool(|pool| *pool = crate::buffer::BufferPool::new());
+    let visible = Buffer::from_str("one");
+    let hidden_path = std::env::temp_dir().join(format!(
+        "urvim-hidden-quit-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos()
+    ));
+    std::fs::write(&hidden_path, "alpha").unwrap();
+
+    let mut layout = layout_with_buffers(vec![visible]);
+    let hidden_buffer_id =
+        globals::with_buffer_pool(|pool| pool.open_buffer(&hidden_path)).unwrap();
+    globals::with_buffer_mut(hidden_buffer_id, |buffer| {
+        buffer.insert_text(crate::buffer::Cursor::new(0, 5), "-dirty");
+    });
+
+    assert!(layout.dispatch_intent(&Intent::Command(Command::TryQuit)));
+    let prompt = layout
+        .confirmation_box_mut()
+        .expect("confirmation prompt should be open");
+    assert_eq!(prompt.query(), "Quit without saving 1 buffer?");
+
+    globals::with_buffer_pool(|pool| pool.save_buffer(hidden_buffer_id)).unwrap();
+
+    let _ = std::fs::remove_file(hidden_path);
+    globals::with_buffer_pool(|pool| *pool = crate::buffer::BufferPool::new());
+}
+
+#[test]
+fn test_layout_write_all_saves_hidden_modified_buffers() {
+    let _pool_guard = globals::buffer_pool_test_lock();
+    globals::with_buffer_pool(|pool| *pool = crate::buffer::BufferPool::new());
+    let visible_path = std::env::temp_dir().join(format!(
+        "urvim-visible-write-all-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos()
+    ));
+    let hidden_path = std::env::temp_dir().join(format!(
+        "urvim-hidden-write-all-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos()
+    ));
+    fs::write(&visible_path, "alpha").unwrap();
+    fs::write(&hidden_path, "gamma").unwrap();
+
+    let visible = Buffer::from_str_with_path("alpha", abs_path(&visible_path));
+    let mut layout = layout_with_buffers(vec![visible]);
+    let hidden_buffer_id =
+        globals::with_buffer_pool(|pool| pool.open_buffer(&hidden_path)).unwrap();
+    globals::with_buffer_mut(hidden_buffer_id, |buffer| {
+        buffer.insert_text(Cursor::new(0, 5), "-dirty");
+    });
+    layout
+        .active_buffer_view_mut()
+        .with_buffer_mut(|buffer| buffer.insert_text(Cursor::new(0, 5), "-dirty"))
+        .unwrap();
+
+    assert!(layout.dispatch_intent(&Intent::Command(Command::WriteAll)));
+    assert_eq!(fs::read_to_string(&visible_path).unwrap(), "alpha-dirty");
+    assert_eq!(fs::read_to_string(&hidden_path).unwrap(), "gamma-dirty");
+
+    let _ = fs::remove_file(visible_path);
+    let _ = fs::remove_file(hidden_path);
+    globals::with_buffer_pool(|pool| *pool = crate::buffer::BufferPool::new());
 }
 
 #[test]
@@ -553,6 +795,11 @@ fn test_layout_close_pane_exits_when_last_pane_is_removed() {
 
 #[test]
 fn test_layout_render_stores_geometry_and_forwards_size() {
+    let _pool_guard = globals::buffer_pool_test_lock();
+    globals::with_buffer_pool(|pool| *pool = crate::buffer::BufferPool::new());
+    let _notification_guard = globals::notification_test_lock();
+    globals::clear_notifications();
+    let _config_guard = globals::set_test_config(Config::default());
     let mut layout = layout_with_buffers(vec![Buffer::from_str("alpha")]);
     let mut screen = crate::screen::Screen::new(6, 20);
     let origin = Position::new(3, 4);
@@ -872,6 +1119,11 @@ fn test_layout_visual_cursor_tracks_child() {
 
 #[test]
 fn test_layout_mode_kind_updates_footer() {
+    let _pool_guard = globals::buffer_pool_test_lock();
+    globals::with_buffer_pool(|pool| *pool = crate::buffer::BufferPool::new());
+    let _notification_guard = globals::notification_test_lock();
+    globals::clear_notifications();
+    let _config_guard = globals::set_test_config(Config::default());
     let mut layout = layout_with_buffers(vec![Buffer::from_str("alpha")]);
     layout
         .window_group_mut()
@@ -960,12 +1212,16 @@ fn test_layout_render_omits_split_borders_for_single_pane_layouts() {
 
 #[test]
 fn test_layout_render_draws_split_border_junction_in_unicode_mode() {
+    let _pool_guard = globals::buffer_pool_test_lock();
+    globals::with_buffer_pool(|pool| *pool = crate::buffer::BufferPool::new());
+    let _notification_guard = globals::notification_test_lock();
+    globals::clear_notifications();
+    let _theme_guard = globals::set_test_active_theme(border_theme());
+    let _config_guard = globals::set_test_config(border_config(true));
     let mut layout = layout_with_buffers(vec![Buffer::from_str("alpha")]);
     dispatch_layout_action(&mut layout, Intent::Command(Command::SplitVertical));
 
     let mut screen = crate::screen::Screen::new(5, 20);
-    let _theme_guard = globals::set_test_active_theme(border_theme());
-    let _config_guard = globals::set_test_config(border_config(true));
 
     layout.render(&mut screen, Position::new(0, 0), Size::new(5, 20));
     dispatch_layout_action(&mut layout, Intent::Command(Command::FocusPaneLeft));
@@ -980,12 +1236,16 @@ fn test_layout_render_draws_split_border_junction_in_unicode_mode() {
 
 #[test]
 fn test_layout_render_draws_split_border_junction_in_ascii_mode() {
+    let _pool_guard = globals::buffer_pool_test_lock();
+    globals::with_buffer_pool(|pool| *pool = crate::buffer::BufferPool::new());
+    let _notification_guard = globals::notification_test_lock();
+    globals::clear_notifications();
+    let _theme_guard = globals::set_test_active_theme(border_theme());
+    let _config_guard = globals::set_test_config(border_config(false));
     let mut layout = layout_with_buffers(vec![Buffer::from_str("alpha")]);
     dispatch_layout_action(&mut layout, Intent::Command(Command::SplitVertical));
 
     let mut screen = crate::screen::Screen::new(5, 20);
-    let _theme_guard = globals::set_test_active_theme(border_theme());
-    let _config_guard = globals::set_test_config(border_config(false));
 
     layout.render(&mut screen, Position::new(0, 0), Size::new(5, 20));
     dispatch_layout_action(&mut layout, Intent::Command(Command::FocusPaneLeft));
@@ -1000,12 +1260,16 @@ fn test_layout_render_draws_split_border_junction_in_ascii_mode() {
 
 #[test]
 fn test_layout_render_draws_four_way_split_junction_in_unicode_mode() {
+    let _pool_guard = globals::buffer_pool_test_lock();
+    globals::with_buffer_pool(|pool| *pool = crate::buffer::BufferPool::new());
+    let _notification_guard = globals::notification_test_lock();
+    globals::clear_notifications();
+    let _theme_guard = globals::set_test_active_theme(border_theme());
+    let _config_guard = globals::set_test_config(border_config(true));
     let mut layout = layout_with_buffers(vec![Buffer::from_str("alpha")]);
     dispatch_layout_action(&mut layout, Intent::Command(Command::SplitVertical));
 
     let mut screen = crate::screen::Screen::new(5, 20);
-    let _theme_guard = globals::set_test_active_theme(border_theme());
-    let _config_guard = globals::set_test_config(border_config(true));
 
     layout.render(&mut screen, Position::new(0, 0), Size::new(5, 20));
     dispatch_layout_action(&mut layout, Intent::Command(Command::FocusPaneLeft));
@@ -1020,12 +1284,16 @@ fn test_layout_render_draws_four_way_split_junction_in_unicode_mode() {
 
 #[test]
 fn test_layout_render_draws_four_way_split_junction_in_ascii_mode() {
+    let _pool_guard = globals::buffer_pool_test_lock();
+    globals::with_buffer_pool(|pool| *pool = crate::buffer::BufferPool::new());
+    let _notification_guard = globals::notification_test_lock();
+    globals::clear_notifications();
+    let _theme_guard = globals::set_test_active_theme(border_theme());
+    let _config_guard = globals::set_test_config(border_config(false));
     let mut layout = layout_with_buffers(vec![Buffer::from_str("alpha")]);
     dispatch_layout_action(&mut layout, Intent::Command(Command::SplitVertical));
 
     let mut screen = crate::screen::Screen::new(5, 20);
-    let _theme_guard = globals::set_test_active_theme(border_theme());
-    let _config_guard = globals::set_test_config(border_config(false));
 
     layout.render(&mut screen, Position::new(0, 0), Size::new(5, 20));
     dispatch_layout_action(&mut layout, Intent::Command(Command::FocusPaneLeft));
@@ -1040,6 +1308,12 @@ fn test_layout_render_draws_four_way_split_junction_in_ascii_mode() {
 
 #[test]
 fn test_layout_render_uses_resize_border_style_in_resize_mode() {
+    let _pool_guard = globals::buffer_pool_test_lock();
+    globals::with_buffer_pool(|pool| *pool = crate::buffer::BufferPool::new());
+    let _notification_guard = globals::notification_test_lock();
+    globals::clear_notifications();
+    let _theme_guard = globals::set_test_active_theme(border_theme());
+    let _config_guard = globals::set_test_config(border_config(true));
     let mut layout = layout_with_buffers(vec![Buffer::from_str("alpha")]);
     dispatch_layout_action(&mut layout, Intent::Command(Command::SplitVertical));
     layout
@@ -1048,8 +1322,6 @@ fn test_layout_render_uses_resize_border_style_in_resize_mode() {
         .switch_mode(ModeKind::Resizing);
 
     let mut screen = crate::screen::Screen::new(4, 20);
-    let _theme_guard = globals::set_test_active_theme(border_theme());
-    let _config_guard = globals::set_test_config(border_config(true));
 
     layout.render(&mut screen, Position::new(0, 0), Size::new(4, 20));
 
@@ -1257,4 +1529,25 @@ fn test_layout_preserves_unrelated_pane_cursor_and_mode_state() {
         crate::buffer::Cursor::new(0, 2)
     );
     assert_eq!(layout.active_window_mode_kind(), ModeKind::Insert);
+}
+
+#[test]
+fn test_layout_process_workspace_file_operations_closes_deleted_tabs() {
+    let _lock = globals::buffer_pool_test_lock();
+    globals::with_buffer_pool(|pool| *pool = crate::buffer::BufferPool::new());
+    globals::clear_workspace_file_operation_notifications();
+
+    let layout = layout_with_buffers(vec![Buffer::from_str("alpha")]);
+    let buffer_id = layout.active_buffer_view().buffer_id();
+
+    globals::enqueue_workspace_file_operation_notification(
+        globals::WorkspaceFileOperationNotification::Delete {
+            path: std::path::PathBuf::from("alpha.txt"),
+            buffer_id: Some(buffer_id),
+        },
+    );
+
+    let mut layout = layout;
+    assert!(layout.process_workspace_file_operations());
+    assert!(layout.should_exit());
 }

@@ -77,6 +77,8 @@ fn main() -> io::Result<()> {
             config.syntax,
         );
     });
+    globals::set_lsp_runtime(urvim::lsp::runtime::LspRuntime::new(&config));
+    globals::with_lsp_runtime_mut(|runtime| runtime.sync());
 
     terminal.set_cursor_style(layout.active_window_cursor_style())?;
 
@@ -85,7 +87,10 @@ fn main() -> io::Result<()> {
         let background_requested_redraw =
             globals::with_buffer_pool(|pool| pool.process_background_jobs())
                 || layout.process_background_jobs()
+                || layout.process_workspace_file_operations()
                 || globals::take_notification_redraw_requested();
+
+        globals::try_with_lsp_runtime_mut(|runtime| runtime.sync());
 
         if background_requested_redraw {
             needs_redraw = true;
@@ -397,6 +402,7 @@ fn main() -> io::Result<()> {
         }
     }
 
+    globals::shutdown_lsp_runtime();
     urvim::session::save_now(&layout);
     terminal.reset_style()?;
 
@@ -444,6 +450,7 @@ fn handle_save_buffer_action(layout: &mut Layout, kind: Option<&ActionKind>) -> 
                     .unwrap_or_else(|| "Untitled".to_string())
             })
             .unwrap_or_else(|| "Untitled".to_string());
+            globals::with_lsp_runtime_mut(|runtime| runtime.did_save_buffer(buffer_id));
             urvim::notify_info!("Saved {}", label);
         }
         Err(error) if error.kind() == io::ErrorKind::InvalidInput => {

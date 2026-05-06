@@ -196,6 +196,20 @@ impl WindowGroup {
         self.tabs.is_empty()
     }
 
+    /// Closes every tab that shows `buffer_id` and returns true when any tab was removed.
+    pub fn close_buffer_tab(&mut self, buffer_id: BufferId) -> bool {
+        let before = self.tabs.len();
+        self.tabs
+            .retain(|window| window.buffer_view().buffer_id() != buffer_id);
+        if self.tabs.len() == before {
+            return false;
+        }
+
+        self.normalize_state();
+        crate::session::mark_dirty();
+        true
+    }
+
     /// Returns and clears any repeat-text suffix produced by the active window.
     pub fn take_pending_repeat_suffix(&mut self) -> Option<String> {
         self.active_window_mut().take_pending_repeat_suffix()

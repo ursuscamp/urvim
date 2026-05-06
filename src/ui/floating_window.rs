@@ -18,6 +18,8 @@ pub enum FloatingAnchor {
     TopCenter { top_margin: u16 },
     /// Place the floating window at the top-right corner inside the bounds.
     TopRight,
+    /// Place the floating window at the bottom-right corner inside the bounds.
+    BottomRight,
 }
 
 /// Resolved geometry for a bordered floating window.
@@ -75,6 +77,14 @@ impl FloatingWindowFrame {
                     .col
                     .saturating_add(bounds_size.cols.saturating_sub(frame_cols)),
             ),
+            FloatingAnchor::BottomRight => Position::new(
+                bounds_origin
+                    .row
+                    .saturating_add(bounds_size.rows.saturating_sub(frame_rows)),
+                bounds_origin
+                    .col
+                    .saturating_add(bounds_size.cols.saturating_sub(frame_cols)),
+            ),
         };
 
         Some(Self {
@@ -82,6 +92,47 @@ impl FloatingWindowFrame {
             size: Size::new(frame_rows, frame_cols),
             content_origin: Position::new(origin.row + 1, origin.col + 1),
             content_size: Size::new(frame_rows - 2, frame_cols - 2),
+        })
+    }
+
+    /// Resolves a bordered floating frame near a cursor position.
+    pub fn resolve_near_cursor(
+        bounds_origin: Position,
+        bounds_size: Size,
+        cursor: Position,
+        content_rows: u16,
+        content_cols: u16,
+    ) -> Option<Self> {
+        let frame = Self::resolve(
+            bounds_origin,
+            bounds_size,
+            content_rows,
+            content_cols,
+            FloatingAnchor::Center,
+        )?;
+        let max_row = bounds_origin
+            .row
+            .saturating_add(bounds_size.rows.saturating_sub(frame.size.rows));
+        let max_col = bounds_origin
+            .col
+            .saturating_add(bounds_size.cols.saturating_sub(frame.size.cols));
+
+        let below_row = cursor.row.saturating_add(1);
+        let row =
+            if below_row.saturating_add(frame.size.rows) <= bounds_origin.row + bounds_size.rows {
+                below_row
+            } else if cursor.row >= frame.size.rows {
+                cursor.row - frame.size.rows
+            } else {
+                cursor.row.saturating_add(1).min(max_row)
+            }
+            .min(max_row);
+        let col = cursor.col.min(max_col);
+
+        Some(Self {
+            origin: Position::new(row, col),
+            content_origin: Position::new(row.saturating_add(1), col.saturating_add(1)),
+            ..frame
         })
     }
 
@@ -235,6 +286,21 @@ mod tests {
     }
 
     #[test]
+    fn resolve_bottom_right_frame() {
+        let frame = FloatingWindowFrame::resolve(
+            Position::new(2, 3),
+            Size::new(8, 12),
+            1,
+            4,
+            FloatingAnchor::BottomRight,
+        )
+        .expect("frame should resolve");
+
+        assert_eq!(frame.origin, Position::new(7, 9));
+        assert_eq!(frame.size, Size::new(3, 6));
+    }
+
+    #[test]
     fn resolve_top_center_frame() {
         let frame = FloatingWindowFrame::resolve(
             Position::new(2, 3),
@@ -262,6 +328,34 @@ mod tests {
 
         assert_eq!(frame.origin, Position::new(4, 17));
         assert_eq!(frame.size, Size::new(8, 12));
+    }
+
+    #[test]
+    fn resolve_near_cursor_prefers_below_when_space_allows() {
+        let frame = FloatingWindowFrame::resolve_near_cursor(
+            Position::new(0, 0),
+            Size::new(20, 40),
+            Position::new(4, 10),
+            4,
+            10,
+        )
+        .expect("frame should resolve");
+
+        assert_eq!(frame.origin.row, 5);
+    }
+
+    #[test]
+    fn resolve_near_cursor_falls_back_above_when_needed() {
+        let frame = FloatingWindowFrame::resolve_near_cursor(
+            Position::new(0, 0),
+            Size::new(8, 40),
+            Position::new(6, 10),
+            4,
+            10,
+        )
+        .expect("frame should resolve");
+
+        assert!(frame.origin.row < 6);
     }
 
     #[test]

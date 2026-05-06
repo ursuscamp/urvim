@@ -321,6 +321,24 @@ impl Buffer {
         result
     }
 
+    /// Returns a snapshot of the buffer lines.
+    pub fn line_texts(&self) -> Vector<Arc<str>> {
+        self.lines.clone()
+    }
+
+    /// Replaces the full buffer contents and refreshes syntax state once.
+    pub fn replace_text(&mut self, text: &str) {
+        self.lines = if text.is_empty() {
+            Vector::unit(Arc::from(""))
+        } else {
+            text.lines().map(Arc::from).collect::<Vector<_>>()
+        };
+        let syntax_name = self.buffer_cache.syntax_name().to_owned();
+        self.buffer_cache = BufferCache::new(syntax_name);
+        self.syntax_generation = self.syntax_generation.wrapping_add(1);
+        self.syntax_background_generation = None;
+    }
+
     fn refresh_syntax(&mut self) {
         let new_syntax_name = crate::syntax::resolve_builtin_syntax(
             self.path.as_ref().map(|path| path.as_path()),

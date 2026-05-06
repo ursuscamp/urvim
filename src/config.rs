@@ -5,16 +5,18 @@
 //! configuration object that can be stored globally.
 
 use serde::Deserialize;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fmt;
 use std::fs;
 use std::path::PathBuf;
 
 use crate::editor::validate_key_string;
+use crate::lsp::builtin::builtin_lsp_config;
 use crate::theme::Tag;
 use imbl::Vector;
 use smol_str::SmolStr;
+use toml::Value;
 
 const DEFAULT_THEME: &str = "Friday Night";
 const DEFAULT_TODO_MARKERS: [&str; 4] = ["TODO", "FIXME", "BUG", "NOTE"];
@@ -145,8 +147,82 @@ impl Default for ScrollMargin {
     }
 }
 
+/// The resolved LSP configuration used by the editor.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LspConfig {
+    /// The resolved server configuration map keyed by server name.
+    pub servers: BTreeMap<String, LspServerConfig>,
+}
+
+/// The TOML-backed LSP config table stored in the config file.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+pub struct PartialLspConfig {
+    /// The server override table keyed by server name.
+    #[serde(flatten)]
+    pub servers: BTreeMap<String, PartialLspServerConfig>,
+}
+
+/// The resolved configuration for a single LSP server.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LspServerConfig {
+    /// Whether the server is enabled.
+    pub enabled: bool,
+    /// The executable command used to launch the server.
+    pub command: String,
+    /// Additional command-line arguments.
+    pub args: Vec<String>,
+    /// Environment variables passed to the server process.
+    pub env: BTreeMap<String, String>,
+    /// The filetypes that should attach to this server.
+    pub filetypes: Vec<String>,
+    /// The root markers used to discover workspace roots.
+    pub root_markers: Vec<String>,
+    /// Free-form server settings.
+    pub settings: Value,
+}
+
+/// The TOML-backed config table for a single LSP server.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct PartialLspServerConfig {
+    /// Whether the server is enabled.
+    pub enabled: Option<bool>,
+    /// The executable command stored in the config file.
+    pub command: Option<String>,
+    /// The command-line arguments stored in the config file.
+    pub args: Option<Vec<String>>,
+    /// Environment variables stored in the config file.
+    pub env: Option<BTreeMap<String, String>>,
+    /// The filetypes stored in the config file.
+    pub filetypes: Option<Vec<String>>,
+    /// The root markers stored in the config file.
+    pub root_markers: Option<Vec<String>>,
+    /// Free-form server settings stored in the config file.
+    pub settings: Option<Value>,
+}
+
+impl Default for LspConfig {
+    fn default() -> Self {
+        builtin_lsp_config().clone()
+    }
+}
+
+impl Default for LspServerConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            command: String::new(),
+            args: Vec::new(),
+            env: BTreeMap::new(),
+            filetypes: Vec::new(),
+            root_markers: Vec::new(),
+            settings: Value::Table(Default::default()),
+        }
+    }
+}
+
 /// The resolved startup configuration used by the editor.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Config {
     /// The active theme name selected after merging file and CLI inputs.
     pub theme: String,
@@ -180,10 +256,12 @@ pub struct Config {
     pub scroll_margin: ScrollMargin,
     /// How visual line wrapping should break lines when enabled per window.
     pub wrap_mode: WrapMode,
+    /// The resolved LSP server configuration.
+    pub lsp: LspConfig,
 }
 
 /// The TOML-backed config file schema.
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct PartialConfig {
     /// The theme name stored in the config file.
@@ -218,6 +296,8 @@ pub struct PartialConfig {
     pub scroll_margin: Option<PartialScrollMargin>,
     /// The wrap strategy stored in the config file.
     pub wrap_mode: Option<WrapMode>,
+    /// The LSP config table stored in the config file.
+    pub lsp: Option<PartialLspConfig>,
 }
 
 /// Errors that can occur while loading or resolving startup configuration.
@@ -310,6 +390,7 @@ impl Config {
         let scroll_margin =
             resolve_scroll_margin(file.and_then(|config| config.scroll_margin.as_ref()));
         let wrap_mode = file.and_then(|config| config.wrap_mode).unwrap_or_default();
+        let lsp = resolve_lsp(file.and_then(|config| config.lsp.as_ref()));
 
         Self {
             theme,
@@ -328,6 +409,7 @@ impl Config {
             tab_width,
             scroll_margin,
             wrap_mode,
+            lsp,
         }
     }
 
@@ -377,6 +459,7 @@ impl Default for Config {
             tab_width: DEFAULT_TAB_WIDTH,
             scroll_margin: ScrollMargin::default(),
             wrap_mode: WrapMode::default(),
+            lsp: LspConfig::default(),
         }
     }
 }
@@ -475,6 +558,10 @@ fn validate_partial_config(config: &PartialConfig) -> Result<(), ConfigLoadError
         validate_todo_markers(markers)?;
     }
 
+    if let Some(lsp) = config.lsp.as_ref() {
+        validate_partial_lsp_config(lsp)?;
+    }
+
     Ok(())
 }
 
@@ -488,6 +575,173 @@ fn resolve_scroll_margin(scroll_margin: Option<&PartialScrollMargin>) -> ScrollM
             .and_then(|margin| margin.horizontal)
             .unwrap_or(default_margin.horizontal),
     }
+}
+
+fn resolve_lsp(file: Option<&PartialLspConfig>) -> LspConfig {
+    let builtin = builtin_lsp_config().clone();
+    let mut servers = builtin.servers;
+
+    if let Some(file) = file {
+        for (name, override_config) in &file.servers {
+            let builtin_server = servers.remove(name);
+            let resolved = resolve_lsp_server(builtin_server, Some(override_config));
+            servers.insert(name.clone(), resolved);
+        }
+    }
+
+    LspConfig { servers }
+}
+
+fn resolve_lsp_server(
+    builtin: Option<LspServerConfig>,
+    file: Option<&PartialLspServerConfig>,
+) -> LspServerConfig {
+    let builtin = builtin.unwrap_or_default();
+    let settings = merge_toml_values(
+        builtin.settings,
+        file.and_then(|config| config.settings.as_ref()),
+    );
+
+    LspServerConfig {
+        enabled: file
+            .and_then(|config| config.enabled)
+            .unwrap_or(builtin.enabled),
+        command: file
+            .and_then(|config| config.command.clone())
+            .unwrap_or(builtin.command),
+        args: file
+            .and_then(|config| config.args.clone())
+            .unwrap_or(builtin.args),
+        env: resolve_string_map(builtin.env, file.and_then(|config| config.env.as_ref())),
+        filetypes: file
+            .and_then(|config| config.filetypes.clone())
+            .unwrap_or(builtin.filetypes),
+        root_markers: file
+            .and_then(|config| config.root_markers.clone())
+            .unwrap_or(builtin.root_markers),
+        settings,
+    }
+}
+
+fn resolve_string_map(
+    builtin: BTreeMap<String, String>,
+    file: Option<&BTreeMap<String, String>>,
+) -> BTreeMap<String, String> {
+    let mut resolved = builtin;
+    if let Some(file) = file {
+        for (key, value) in file {
+            resolved.insert(key.clone(), value.clone());
+        }
+    }
+    resolved
+}
+
+fn merge_toml_values(base: Value, overlay: Option<&Value>) -> Value {
+    let Some(overlay) = overlay else {
+        return base;
+    };
+
+    match (base, overlay) {
+        (Value::Table(mut base), Value::Table(overlay)) => {
+            for (key, value) in overlay {
+                let merged = match base.remove(key) {
+                    Some(existing) => merge_toml_values(existing, Some(value)),
+                    None => value.clone(),
+                };
+                base.insert(key.clone(), merged);
+            }
+
+            Value::Table(base)
+        }
+        (_, overlay) => overlay.clone(),
+    }
+}
+
+fn validate_partial_lsp_config(config: &PartialLspConfig) -> Result<(), ConfigLoadError> {
+    let builtin_servers = &builtin_lsp_config().servers;
+
+    for (server_name, server) in &config.servers {
+        if !builtin_servers.contains_key(server_name) {
+            return Err(ConfigLoadError::Invalid {
+                message: format!("config lsp.{server_name} is not a built-in server"),
+            });
+        }
+        validate_partial_lsp_server_config(server_name.as_str(), server)?;
+    }
+
+    Ok(())
+}
+
+fn validate_partial_lsp_server_config(
+    server_name: &str,
+    config: &PartialLspServerConfig,
+) -> Result<(), ConfigLoadError> {
+    if let Some(command) = config.command.as_ref()
+        && command.trim().is_empty()
+    {
+        return Err(ConfigLoadError::invalid(format!(
+            "config lsp.{server_name}.command must not be empty or whitespace",
+        )));
+    }
+
+    if let Some(filetypes) = config.filetypes.as_ref() {
+        validate_non_empty_string_list(&format!("lsp.{server_name}.filetypes"), filetypes)?;
+    }
+
+    if let Some(root_markers) = config.root_markers.as_ref() {
+        validate_non_empty_string_list(&format!("lsp.{server_name}.root_markers"), root_markers)?;
+    }
+
+    if let Some(args) = config.args.as_ref() {
+        validate_string_list(&format!("lsp.{server_name}.args"), args)?;
+    }
+
+    if let Some(env) = config.env.as_ref() {
+        validate_env_map(&format!("lsp.{server_name}.env"), env)?;
+    }
+
+    if let Some(settings) = config.settings.as_ref()
+        && !matches!(settings, Value::Table(_))
+    {
+        return Err(ConfigLoadError::invalid(format!(
+            "config lsp.{server_name}.settings must be a table",
+        )));
+    }
+
+    Ok(())
+}
+
+fn validate_string_list(field: &str, values: &[String]) -> Result<(), ConfigLoadError> {
+    for value in values {
+        if value.trim().is_empty() {
+            return Err(ConfigLoadError::invalid(format!(
+                "config {field} entries must not be empty or whitespace",
+            )));
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_non_empty_string_list(field: &str, values: &[String]) -> Result<(), ConfigLoadError> {
+    validate_string_list(field, values)
+}
+
+fn validate_env_map(field: &str, values: &BTreeMap<String, String>) -> Result<(), ConfigLoadError> {
+    for (key, value) in values {
+        if key.trim().is_empty() {
+            return Err(ConfigLoadError::invalid(format!(
+                "config {field} keys must not be empty or whitespace",
+            )));
+        }
+        if value.trim().is_empty() {
+            return Err(ConfigLoadError::invalid(format!(
+                "config {field}.{key} values must not be empty or whitespace",
+            )));
+        }
+    }
+
+    Ok(())
 }
 
 fn default_todo_markers() -> Vector<SmolStr> {
@@ -657,6 +911,48 @@ mod tests {
         values.iter().map(|value| SmolStr::new(*value)).collect()
     }
 
+    fn table_value(entries: &[(&str, Value)]) -> Value {
+        let mut table = toml::map::Map::new();
+        for (key, value) in entries {
+            table.insert((*key).to_string(), value.clone());
+        }
+        Value::Table(table)
+    }
+
+    fn partial_lsp_settings(check_on_save_command: &str) -> PartialLspConfig {
+        let mut settings = toml::map::Map::new();
+        settings.insert(
+            "checkOnSave".to_string(),
+            table_value(&[("command", Value::String(check_on_save_command.to_string()))]),
+        );
+
+        PartialLspConfig {
+            servers: BTreeMap::from([(
+                "rust_analyzer".to_string(),
+                PartialLspServerConfig {
+                    enabled: Some(true),
+                    command: Some("rust-analyzer".to_string()),
+                    args: Some(vec!["--stdio".to_string()]),
+                    env: Some(BTreeMap::from([(
+                        "RUST_LOG".to_string(),
+                        "debug".to_string(),
+                    )])),
+                    filetypes: Some(vec!["rust".to_string()]),
+                    root_markers: Some(vec!["Cargo.toml".to_string()]),
+                    settings: Some(Value::Table(settings)),
+                },
+            )]),
+        }
+    }
+
+    fn lsp_server<'a>(config: &'a Config, name: &str) -> &'a LspServerConfig {
+        config
+            .lsp
+            .servers
+            .get(name)
+            .unwrap_or_else(|| panic!("missing lsp server {name}"))
+    }
+
     #[test]
     fn resolve_prefers_cli_then_file_then_default() {
         let file = PartialConfig {
@@ -731,6 +1027,21 @@ mod tests {
             Config::resolve(None, None, None).default_registers,
             DefaultRegisters::default()
         );
+        let default_lsp = Config::resolve(None, None, None);
+        let default_rust_analyzer = lsp_server(&default_lsp, "rust_analyzer");
+        assert!(!default_rust_analyzer.enabled);
+        assert_eq!(default_rust_analyzer.command, "rust-analyzer");
+        assert_eq!(default_rust_analyzer.args, Vec::<String>::new());
+        assert!(default_rust_analyzer.env.is_empty());
+        assert_eq!(default_rust_analyzer.filetypes, vec!["rust".to_string()]);
+        assert_eq!(
+            default_rust_analyzer.root_markers,
+            vec![
+                "Cargo.toml".to_string(),
+                "rust-project.json".to_string(),
+                ".git".to_string(),
+            ]
+        );
         assert!(Config::resolve(None, None, None).advanced_glyphs.is_empty());
         assert_eq!(
             Config::resolve(None, None, None).todo_markers,
@@ -771,6 +1082,58 @@ mod tests {
                 AdvancedGlyphCapability::UnicodeBorders,
                 AdvancedGlyphCapability::UnicodeIndent
             ])
+        );
+        assert!(!lsp_server(&Config::resolve(Some(&file), None, None), "rust_analyzer").enabled);
+    }
+
+    #[test]
+    fn resolve_loads_lsp_rust_analyzer_settings() {
+        let file = PartialConfig {
+            lsp: Some(partial_lsp_settings("clippy")),
+            ..Default::default()
+        };
+
+        let config = Config::resolve(Some(&file), None, None);
+        let server = lsp_server(&config, "rust_analyzer");
+        assert!(server.enabled);
+        assert_eq!(server.command, "rust-analyzer");
+        assert_eq!(server.args, vec!["--stdio".to_string()]);
+        assert_eq!(
+            server.env,
+            BTreeMap::from([("RUST_LOG".to_string(), "debug".to_string())])
+        );
+        assert_eq!(server.filetypes, vec!["rust".to_string()]);
+        assert_eq!(server.root_markers, vec!["Cargo.toml".to_string()]);
+        assert_eq!(
+            server.settings,
+            table_value(&[(
+                "checkOnSave",
+                table_value(&[("command", Value::String("clippy".to_string()))]),
+            )])
+        );
+    }
+
+    #[test]
+    fn resolve_merges_nested_lsp_settings() {
+        let mut base_check_on_save = toml::map::Map::new();
+        base_check_on_save.insert("command".to_string(), Value::String("check".to_string()));
+        base_check_on_save.insert("extra".to_string(), Value::String("1".to_string()));
+
+        let base = table_value(&[("checkOnSave", Value::Table(base_check_on_save))]);
+        let overlay = table_value(&[(
+            "checkOnSave",
+            table_value(&[("command", Value::String("clippy".to_string()))]),
+        )]);
+
+        assert_eq!(
+            merge_toml_values(base, Some(&overlay)),
+            table_value(&[(
+                "checkOnSave",
+                table_value(&[
+                    ("command", Value::String("clippy".to_string())),
+                    ("extra", Value::String("1".to_string())),
+                ]),
+            )])
         );
     }
 
@@ -866,6 +1229,84 @@ mod tests {
         match error {
             ConfigLoadError::Parse { .. } => {}
             other => panic!("expected parse error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn load_from_locations_loads_lsp_rust_analyzer_config() {
+        let home = unique_temp_dir("lsp-home");
+        write_config(
+            &home,
+            r#"
+[lsp.rust_analyzer]
+enabled = true
+command = "rust-analyzer"
+args = ["--stdio"]
+filetypes = ["rust"]
+root_markers = ["Cargo.toml", "rust-project.json", ".git"]
+
+[lsp.rust_analyzer.env]
+RUST_LOG = "debug"
+
+[lsp.rust_analyzer.settings]
+checkOnSave = { command = "clippy" }
+"#,
+        );
+
+        let config = Config::load_from_locations(home, vec![], None, None).expect("should load");
+        let server = lsp_server(&config, "rust_analyzer");
+        assert!(server.enabled);
+        assert_eq!(server.command, "rust-analyzer");
+        assert_eq!(server.args, vec!["--stdio".to_string()]);
+        assert_eq!(
+            server.env,
+            BTreeMap::from([("RUST_LOG".to_string(), "debug".to_string())])
+        );
+        assert_eq!(server.filetypes, vec!["rust".to_string()]);
+        assert_eq!(
+            server.root_markers,
+            vec![
+                "Cargo.toml".to_string(),
+                "rust-project.json".to_string(),
+                ".git".to_string(),
+            ]
+        );
+        assert_eq!(
+            server.settings,
+            table_value(&[(
+                "checkOnSave",
+                table_value(&[("command", Value::String("clippy".to_string()))]),
+            )])
+        );
+    }
+
+    #[test]
+    fn load_from_locations_rejects_unknown_lsp_fields() {
+        let home = unique_temp_dir("lsp-unknown-home");
+        write_config(&home, "[lsp.unknown_server]\nenabled = true");
+
+        let error = Config::load_from_locations(home, vec![], None, None).expect_err("should fail");
+
+        match error {
+            ConfigLoadError::Invalid { message } => {
+                assert!(message.contains("lsp.unknown_server"));
+            }
+            other => panic!("expected validation error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn load_from_locations_rejects_empty_lsp_command() {
+        let home = unique_temp_dir("lsp-empty-command-home");
+        write_config(&home, "[lsp.rust_analyzer]\ncommand = \"   \"");
+
+        let error = Config::load_from_locations(home, vec![], None, None).expect_err("should fail");
+
+        match error {
+            ConfigLoadError::Invalid { message } => {
+                assert!(message.contains("lsp.rust_analyzer.command"));
+            }
+            other => panic!("expected validation error, got {other:?}"),
         }
     }
 

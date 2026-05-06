@@ -1,6 +1,7 @@
 use std::fmt;
 
 use crate::buffer::BufferCacheRefreshResult;
+use crate::ui::doc_symbols_picker::DocSymbolsPickerItem;
 use crate::ui::file_picker::FilePickerItem;
 use crate::ui::grep_picker::GrepPickerItem;
 use crate::ui::picker_preview::PreviewSyntaxRefreshResult;
@@ -26,8 +27,12 @@ pub enum JobPayload {
     FileSearchChunk(Vec<FilePickerItem>),
     /// Live grep picker search chunk.
     GrepSearchChunk(Vec<GrepPickerItem>),
+    /// Document symbol picker search chunk.
+    DocSymbolsSearchChunk(Vec<DocSymbolsPickerItem>),
     /// Picker preview syntax refresh result.
     PreviewSyntax(PreviewSyntaxRefreshResult),
+    /// LSP rename outcome.
+    LspRename(Result<(), String>),
 }
 
 /// A job lifecycle event.

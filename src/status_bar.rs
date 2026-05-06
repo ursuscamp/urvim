@@ -4,10 +4,12 @@
 //! editor state for the user.
 
 use crate::globals;
+use crate::lsp::diagnostics::{DiagnosticCounts, diagnostic_marker};
 use crate::screen::Screen;
 use crate::syntax::{FiletypeGlyph, builtin_syntax_registry};
-use crate::terminal::Style;
+use crate::terminal::{Color, Style};
 use crate::window::{Position, Size};
+use lsp_types::DiagnosticSeverity;
 use unicode_width::UnicodeWidthStr;
 
 /// Derived state used to render the footer status bar.
@@ -28,6 +30,8 @@ pub struct StatusBarContext<'a> {
     pub cursor_byte_col: usize,
     /// Total number of lines in the active buffer.
     pub line_count: usize,
+    /// Diagnostics currently attached to the active buffer by severity.
+    pub diagnostic_counts: DiagnosticCounts,
 }
 
 /// Root footer renderer for editor metadata.
@@ -53,7 +57,7 @@ impl StatusBar {
             context.buffer_name.to_string()
         };
 
-        format!(
+        let mut text = format!(
             "{} | {} | {} | {}:{} | {}%",
             context.mode_label,
             context.syntax_label,
@@ -61,7 +65,15 @@ impl StatusBar {
             line_number,
             context.cursor_byte_col,
             percent
-        )
+        );
+
+        let diagnostics = self.diagnostic_segment_text(context, false);
+        if !diagnostics.is_empty() {
+            text.push_str(" | ");
+            text.push_str(&diagnostics);
+        }
+
+        text
     }
 
     /// Renders the status bar into a single footer row.
@@ -129,13 +141,165 @@ impl StatusBar {
         );
         current_col = self.write_segment(screen, origin.row, current_col, style, " | ");
         let percent = self.progress_percent(context.cursor_line, context.line_count);
-        self.write_segment(
+        current_col = self.write_segment(
             screen,
             origin.row,
             current_col,
             style,
             &format!("{percent}%"),
         );
+
+        let segments = self
+            .diagnostic_items(context, nerdfont_enabled)
+            .into_iter()
+            .filter(|(_, count, _)| *count > 0)
+            .collect::<Vec<_>>();
+        if !segments.is_empty() {
+            current_col = self.write_segment(screen, origin.row, current_col, style, " | ");
+            self.write_diagnostic_items(
+                screen,
+                origin.row,
+                current_col,
+                style,
+                nerdfont_enabled,
+                &segments,
+            );
+        }
+    }
+
+    fn diagnostic_segment_text(
+        &self,
+        context: &StatusBarContext<'_>,
+        nerdfont_enabled: bool,
+    ) -> String {
+        let mut segments = Vec::new();
+        for (label, count, _) in self.diagnostic_items(context, nerdfont_enabled) {
+            if count == 0 {
+                continue;
+            }
+            segments.push(format!("{label}{count}"));
+        }
+
+        segments.join(" ")
+    }
+
+    fn diagnostic_items<'a>(
+        &self,
+        context: &'a StatusBarContext<'_>,
+        nerdfont_enabled: bool,
+    ) -> Vec<(&'a str, usize, DiagnosticSeverity)> {
+        let items = if nerdfont_enabled {
+            vec![
+                (
+                    diagnostic_marker(DiagnosticSeverity::ERROR, true),
+                    context.diagnostic_counts.error,
+                    DiagnosticSeverity::ERROR,
+                ),
+                (
+                    diagnostic_marker(DiagnosticSeverity::WARNING, true),
+                    context.diagnostic_counts.warning,
+                    DiagnosticSeverity::WARNING,
+                ),
+                (
+                    diagnostic_marker(DiagnosticSeverity::INFORMATION, true),
+                    context.diagnostic_counts.info,
+                    DiagnosticSeverity::INFORMATION,
+                ),
+                (
+                    diagnostic_marker(DiagnosticSeverity::HINT, true),
+                    context.diagnostic_counts.hint,
+                    DiagnosticSeverity::HINT,
+                ),
+            ]
+        } else {
+            vec![
+                (
+                    diagnostic_marker(DiagnosticSeverity::ERROR, false),
+                    context.diagnostic_counts.error,
+                    DiagnosticSeverity::ERROR,
+                ),
+                (
+                    diagnostic_marker(DiagnosticSeverity::WARNING, false),
+                    context.diagnostic_counts.warning,
+                    DiagnosticSeverity::WARNING,
+                ),
+                (
+                    diagnostic_marker(DiagnosticSeverity::INFORMATION, false),
+                    context.diagnostic_counts.info,
+                    DiagnosticSeverity::INFORMATION,
+                ),
+                (
+                    diagnostic_marker(DiagnosticSeverity::HINT, false),
+                    context.diagnostic_counts.hint,
+                    DiagnosticSeverity::HINT,
+                ),
+            ]
+        };
+
+        items
+    }
+
+    fn write_diagnostic_items(
+        &self,
+        screen: &mut Screen,
+        row: u16,
+        start_col: u16,
+        base_style: Style,
+        nerdfont_enabled: bool,
+        segments: &[(&str, usize, DiagnosticSeverity)],
+    ) -> u16 {
+        let mut current_col = start_col;
+        for (idx, (label, count, severity)) in segments.iter().enumerate() {
+            if idx > 0 {
+                current_col = self.write_segment(screen, row, current_col, base_style, " ");
+            }
+            let severity_style = self.diagnostic_style_for(*severity, base_style);
+            current_col = self.write_segment(screen, row, current_col, severity_style, label);
+            if nerdfont_enabled {
+                current_col = self.write_segment(screen, row, current_col, base_style, " ");
+            }
+            current_col =
+                self.write_segment(screen, row, current_col, severity_style, &count.to_string());
+        }
+        current_col
+    }
+
+    fn diagnostic_style_for(&self, severity: DiagnosticSeverity, base_style: Style) -> Style {
+        let theme_style = globals::with_active_theme(|theme| {
+            theme
+                .map(|theme| match severity {
+                    DiagnosticSeverity::ERROR => {
+                        theme.highlight_style_for_name("ui.diagnostic.error")
+                    }
+                    DiagnosticSeverity::WARNING => {
+                        theme.highlight_style_for_name("ui.diagnostic.warning")
+                    }
+                    DiagnosticSeverity::INFORMATION => {
+                        theme.highlight_style_for_name("ui.diagnostic.info")
+                    }
+                    DiagnosticSeverity::HINT => {
+                        theme.highlight_style_for_name("ui.diagnostic.hint")
+                    }
+                    _ => Style::default(),
+                })
+                .unwrap_or_default()
+        });
+
+        base_style
+            .accent(Self::fallback_diagnostic_style(severity))
+            .accent(theme_style)
+    }
+
+    fn fallback_diagnostic_style(severity: DiagnosticSeverity) -> Style {
+        let color = match severity {
+            DiagnosticSeverity::ERROR => Color::ansi(196),
+            DiagnosticSeverity::WARNING => Color::ansi(220),
+            DiagnosticSeverity::INFORMATION => Color::ansi(75),
+            DiagnosticSeverity::HINT => Color::ansi(81),
+            _ => Color::ansi(75),
+        };
+
+        Style::new().fg(color).bold()
     }
 
     fn progress_percent(&self, cursor_line: usize, line_count: usize) -> usize {
@@ -237,6 +401,7 @@ mod tests {
             cursor_line,
             cursor_byte_col,
             line_count,
+            diagnostic_counts: DiagnosticCounts::default(),
         }
     }
 
@@ -357,6 +522,85 @@ mod tests {
         )));
 
         assert!(text.ends_with("100%"));
+    }
+
+    #[test]
+    fn test_text_appends_diagnostics_counts() {
+        let status_bar = StatusBar::new();
+        let mut ctx = context(("NORMAL", false, "rust", "Rust", "notes.txt", 0, 0, 10));
+        ctx.diagnostic_counts = DiagnosticCounts {
+            error: 1,
+            warning: 2,
+            info: 3,
+            hint: 4,
+        };
+
+        assert!(status_bar.text(&ctx).ends_with("| E1 W2 I3 H4"));
+    }
+
+    #[test]
+    fn test_render_uses_diagnostic_glyphs_when_enabled() {
+        let status_bar = StatusBar::new();
+        let mut screen = Screen::new(1, 48);
+        let _config_guard = globals::set_test_config(Config {
+            theme: "demo".to_string(),
+            insert_escape: None,
+            syntax: true,
+            auto_close_pairs: true,
+            advanced_glyphs: BTreeSet::from([AdvancedGlyphCapability::Nerdfont]),
+            ..Default::default()
+        });
+
+        let mut ctx = context(("NORMAL", false, "rust", "Rust", "notes.txt", 0, 0, 10));
+        ctx.diagnostic_counts = DiagnosticCounts {
+            error: 1,
+            warning: 2,
+            ..DiagnosticCounts::default()
+        };
+
+        status_bar.render(&mut screen, Position::new(0, 0), Size::new(1, 48), &ctx);
+
+        let mut text = String::new();
+        for col in 0..48 {
+            text.push_str(&screen.get_cell_mut(0, col).unwrap().text);
+        }
+        let error_col = text
+            .find("")
+            .map(|byte_idx| text[..byte_idx].chars().count())
+            .expect("error glyph should render");
+        assert!(text.contains(" 1  2"));
+        assert_eq!(
+            screen.get_cell_mut(0, error_col as u16).unwrap().style,
+            status_bar.diagnostic_style_for(DiagnosticSeverity::ERROR, Style::default())
+        );
+    }
+
+    #[test]
+    fn test_render_uses_diagnostic_abbreviations_without_nerdfonts() {
+        let status_bar = StatusBar::new();
+        let mut screen = Screen::new(1, 48);
+        let mut ctx = context(("NORMAL", false, "rust", "Rust", "notes.txt", 0, 0, 10));
+        ctx.diagnostic_counts = DiagnosticCounts {
+            info: 1,
+            hint: 1,
+            ..DiagnosticCounts::default()
+        };
+
+        status_bar.render(&mut screen, Position::new(0, 0), Size::new(1, 48), &ctx);
+
+        let mut text = String::new();
+        for col in 0..48 {
+            text.push_str(&screen.get_cell_mut(0, col).unwrap().text);
+        }
+        let info_col = text
+            .find("I1")
+            .map(|byte_idx| text[..byte_idx].chars().count())
+            .expect("info abbreviation should render");
+        assert!(text.contains("I1 H1"));
+        assert_eq!(
+            screen.get_cell_mut(0, info_col as u16).unwrap().style,
+            status_bar.diagnostic_style_for(DiagnosticSeverity::INFORMATION, Style::default())
+        );
     }
 
     #[test]

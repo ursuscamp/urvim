@@ -49,6 +49,10 @@ bg = "bg"
 "ui.window" = { fg = "fg", bg = "bg" }
 "ui.window.lines" = { fg = "muted" }
 "ui.window.lines.resize" = { fg = "iris", bold = true }
+"ui.diagnostic.error" = { fg = "love", bold = true }
+"ui.diagnostic.warning" = { fg = "gold", bold = true }
+"ui.diagnostic.info" = { fg = "pine" }
+"ui.diagnostic.hint" = { fg = "foam" }
 "ui.input.prompt" = { fg = "iris", bold = true }
 "ui.input.prompt.exact" = { fg = "iris", bold = true }
 "ui.input.prompt.fuzzy" = { fg = "iris", italic = true }

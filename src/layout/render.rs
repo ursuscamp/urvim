@@ -122,6 +122,10 @@ impl Layout {
         let syntax_name = buffer_view.syntax_name();
         let syntax_label = buffer_view.syntax_label();
         let cursor = buffer_view.cursor();
+        let diagnostic_counts = globals::with_diagnostics_store(|store| {
+            store.diagnostic_counts_for_buffer(buffer_view.buffer_id())
+        })
+        .unwrap_or_default();
         let context = StatusBarContext {
             mode_label: self.mode_label(),
             modified: buffer_view.is_modified(),
@@ -131,6 +135,7 @@ impl Layout {
             cursor_line: cursor.line,
             cursor_byte_col: cursor.col,
             line_count: buffer_view.line_count(),
+            diagnostic_counts,
         };
 
         let footer_origin = Position::new(origin.row.saturating_add(content_rows), origin.col);
@@ -138,11 +143,17 @@ impl Layout {
             .render(screen, footer_origin, Size::new(1, size.cols), &context);
 
         notification::render_active_banner(screen, origin, size, std::time::Instant::now());
+        let mut progress_widget = notification::ProgressWidget::new();
+        progress_widget.render_widget(screen, UiRect::new(origin, size), &UiContext);
         self.render_colorscheme_picker_overlay(screen, origin, size);
+        self.render_doc_symbols_picker_overlay(screen, origin, size);
         self.render_grep_picker_overlay(screen, origin, size);
         self.render_file_picker_overlay(screen, origin, size);
         self.render_command_line_overlay(screen, origin, size);
+        self.render_lsp_rename_overlay(screen, origin, size);
         self.render_confirmation_box_overlay(screen, origin, size);
+        self.render_diagnostic_hover_overlay(screen, origin, size);
+        self.render_hover_overlay(screen, origin, size);
     }
 
     fn render_colorscheme_picker_overlay(
@@ -152,6 +163,21 @@ impl Layout {
         size: Size,
     ) {
         let Some(picker) = self.colorscheme_picker_mut() else {
+            return;
+        };
+
+        let ctx = UiContext;
+        let rect = UiRect::new(origin, size);
+        picker.render_widget(screen, rect, &ctx);
+    }
+
+    fn render_doc_symbols_picker_overlay(
+        &mut self,
+        screen: &mut Screen,
+        origin: Position,
+        size: Size,
+    ) {
+        let Some(picker) = self.doc_symbols_picker_mut() else {
             return;
         };
 
@@ -223,6 +249,15 @@ impl Layout {
         }
     }
 
+    fn render_lsp_rename_overlay(&mut self, screen: &mut Screen, origin: Position, size: Size) {
+        let Some(prompt) = self.lsp_rename_prompt_mut() else {
+            return;
+        };
+
+        let ctx = UiContext;
+        prompt.render_widget(screen, UiRect::new(origin, size), &ctx);
+    }
+
     fn render_confirmation_box_overlay(
         &mut self,
         screen: &mut Screen,
@@ -235,6 +270,29 @@ impl Layout {
 
         let ctx = UiContext;
         prompt.render_widget(screen, UiRect::new(origin, size), &ctx);
+    }
+
+    fn render_hover_overlay(&mut self, screen: &mut Screen, origin: Position, size: Size) {
+        let Some(hover) = self.hover_mut() else {
+            return;
+        };
+
+        let ctx = UiContext;
+        hover.render_widget(screen, UiRect::new(origin, size), &ctx);
+    }
+
+    fn render_diagnostic_hover_overlay(
+        &mut self,
+        screen: &mut Screen,
+        origin: Position,
+        size: Size,
+    ) {
+        let Some(hover) = self.diagnostic_hover_mut() else {
+            return;
+        };
+
+        let ctx = UiContext;
+        hover.render_widget(screen, UiRect::new(origin, size), &ctx);
     }
 
     fn render_split_borders(&self, screen: &mut Screen, origin: Position, size: Size) {

@@ -272,11 +272,14 @@ impl Window {
             .cursor_screen_position(self.buffer_view.cursor())
         {
             let total_lines = self.buffer_view.line_count();
+            let diagnostic_sign_width =
+                diagnostic_sign_width_for_buffer(self.buffer_view.buffer_id_opt());
             let gutter = Gutter::new(
                 self.buffer_view.scroll_offset().row as usize,
                 self.render_data.visible_rows(),
                 total_lines,
-            );
+            )
+            .with_diagnostic_sign_width(diagnostic_sign_width);
             pos.col += gutter.calculate_width();
             Some(pos)
         } else {

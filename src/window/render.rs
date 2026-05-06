@@ -78,6 +78,16 @@ impl RenderData {
         }
     }
 
+    /// Applies a style overlay to every chunk intersecting the cursor range.
+    pub fn overlay_range(&mut self, start: Cursor, end: Cursor, style: Style) {
+        self.apply_range_style(start, end, style, Style::overlay);
+    }
+
+    /// Applies a style accent to every chunk intersecting the cursor range.
+    pub fn accent_range(&mut self, start: Cursor, end: Cursor, style: Style) {
+        self.apply_range_style(start, end, style, Style::accent);
+    }
+
     pub fn cursor_screen_position(&self, cursor: Cursor) -> Option<Position> {
         let tab_width = configured_tab_width();
         for (screen_row, line_data) in self
@@ -117,6 +127,59 @@ impl RenderData {
         }
         None
     }
+
+    fn apply_range_style(
+        &mut self,
+        start: Cursor,
+        end: Cursor,
+        style: Style,
+        combine: fn(Style, Style) -> Style,
+    ) {
+        if end.line < start.line || (end.line == start.line && end.col <= start.col) {
+            return;
+        }
+
+        for line_data in &mut self.line_data {
+            if line_data.buffer_line < start.line || line_data.buffer_line > end.line {
+                continue;
+            }
+
+            let start_byte = if line_data.buffer_line == start.line {
+                start.col
+            } else {
+                0
+            };
+            let end_byte = if line_data.buffer_line == end.line {
+                end.col
+            } else {
+                line_data.end_byte
+            };
+
+            let visible_start = start_byte.max(line_data.byte_offset);
+            let visible_end = end_byte.min(line_data.end_byte);
+            if visible_start >= visible_end {
+                continue;
+            }
+
+            let mut selected_chunks = Vec::with_capacity(line_data.chunks.len());
+            let mut chunk_start = line_data.byte_offset;
+            for chunk in line_data.chunks.drain(..) {
+                let selected_style = combine(chunk.style, style);
+                push_split_render_chunk(
+                    &mut selected_chunks,
+                    &chunk.text,
+                    chunk_start,
+                    visible_start,
+                    visible_end,
+                    chunk.style,
+                    selected_style,
+                );
+                chunk_start += chunk.text.len();
+            }
+
+            line_data.chunks = selected_chunks;
+        }
+    }
 }
 
 fn visible_prefix_by_width(text: &str, max_cols: usize) -> String {
@@ -136,4 +199,36 @@ fn visible_prefix_by_width(text: &str, max_cols: usize) -> String {
     }
 
     text[..end_byte].to_string()
+}
+
+fn push_split_render_chunk(
+    chunks: &mut Vec<RenderChunk>,
+    text: &str,
+    chunk_start: usize,
+    range_start: usize,
+    range_end: usize,
+    base_style: Style,
+    selected_style: Style,
+) {
+    let chunk_end = chunk_start + text.len();
+    if chunk_end <= range_start || chunk_start >= range_end {
+        chunks.push(RenderChunk::new(text, base_style));
+        return;
+    }
+
+    let local_start = range_start.saturating_sub(chunk_start).min(text.len());
+    let local_end = range_end.saturating_sub(chunk_start).min(text.len());
+
+    if local_start > 0 {
+        chunks.push(RenderChunk::new(&text[..local_start], base_style));
+    }
+    if local_start < local_end {
+        chunks.push(RenderChunk::new(
+            &text[local_start..local_end],
+            selected_style,
+        ));
+    }
+    if local_end < text.len() {
+        chunks.push(RenderChunk::new(&text[local_end..], base_style));
+    }
 }
