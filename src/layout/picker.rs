@@ -84,6 +84,8 @@ impl Layout {
                     picker.handle_preview_syntax_refresh_chunk(token.generation(), result);
                 } else if let Some(picker) = self.doc_symbols_picker.as_mut() {
                     picker.handle_preview_syntax_refresh_chunk(token.generation(), result);
+                } else if let Some(picker) = self.workspace_symbols_picker.as_mut() {
+                    picker.handle_preview_syntax_refresh_chunk(token.generation(), result);
                 }
             }
             JobEvent::Chunk {
@@ -101,9 +103,24 @@ impl Layout {
             JobEvent::Chunk {
                 kind,
                 token,
-                payload: JobPayload::DocSymbolsSearchChunk(chunk),
-            } if kind == crate::background::JobKind::DocSymbolsPickerSearch => {
-                if let Some(picker) = self.doc_symbols_picker.as_mut() {
+                payload: JobPayload::DocSymbolsSearch(chunk),
+            } if matches!(
+                kind,
+                crate::background::JobKind::DocSymbolsPickerSearch
+                    | crate::background::JobKind::WorkspaceSymbolsPickerSearch
+            ) =>
+            {
+                let picker = match kind {
+                    crate::background::JobKind::DocSymbolsPickerSearch => {
+                        self.doc_symbols_picker.as_mut()
+                    }
+                    crate::background::JobKind::WorkspaceSymbolsPickerSearch => {
+                        self.workspace_symbols_picker.as_mut()
+                    }
+                    _ => None,
+                };
+
+                if let Some(picker) = picker {
                     picker.handle_search_event(PickerSearchEvent::PickerChunk {
                         generation: token.generation(),
                         chunk,
@@ -121,21 +138,58 @@ impl Layout {
                     picker.handle_preview_syntax_refresh(token.generation(), result);
                 } else if let Some(picker) = self.doc_symbols_picker.as_mut() {
                     picker.handle_preview_syntax_refresh(token.generation(), result);
+                } else if let Some(picker) = self.workspace_symbols_picker.as_mut() {
+                    picker.handle_preview_syntax_refresh(token.generation(), result);
                 }
             }
-            JobEvent::Completed { kind, token, .. }
-                if kind == crate::background::JobKind::DocSymbolsPickerSearch =>
+            JobEvent::Completed {
+                kind,
+                token,
+                payload: Some(JobPayload::DocSymbolsSearch(chunk)),
+            } if matches!(
+                kind,
+                crate::background::JobKind::DocSymbolsPickerSearch
+                    | crate::background::JobKind::WorkspaceSymbolsPickerSearch
+            ) =>
             {
-                if let Some(picker) = self.doc_symbols_picker.as_mut() {
+                let picker = match kind {
+                    crate::background::JobKind::DocSymbolsPickerSearch => {
+                        self.doc_symbols_picker.as_mut()
+                    }
+                    crate::background::JobKind::WorkspaceSymbolsPickerSearch => {
+                        self.workspace_symbols_picker.as_mut()
+                    }
+                    _ => None,
+                };
+
+                if let Some(picker) = picker {
+                    picker.handle_search_event(PickerSearchEvent::PickerChunk {
+                        generation: token.generation(),
+                        chunk,
+                    });
                     picker.handle_search_event(PickerSearchEvent::PickerSearchComplete {
                         generation: token.generation(),
                     });
                 }
             }
             JobEvent::Failed { kind, token, .. }
-                if kind == crate::background::JobKind::DocSymbolsPickerSearch =>
+                if matches!(
+                    kind,
+                    crate::background::JobKind::DocSymbolsPickerSearch
+                        | crate::background::JobKind::WorkspaceSymbolsPickerSearch
+                ) =>
             {
-                if let Some(picker) = self.doc_symbols_picker.as_mut() {
+                let picker = match kind {
+                    crate::background::JobKind::DocSymbolsPickerSearch => {
+                        self.doc_symbols_picker.as_mut()
+                    }
+                    crate::background::JobKind::WorkspaceSymbolsPickerSearch => {
+                        self.workspace_symbols_picker.as_mut()
+                    }
+                    _ => None,
+                };
+
+                if let Some(picker) = picker {
                     picker.handle_search_event(PickerSearchEvent::PickerSearchComplete {
                         generation: token.generation(),
                     });
@@ -149,6 +203,8 @@ impl Layout {
                 } else if let Some(picker) = self.grep_picker.as_mut() {
                     picker.handle_preview_syntax_refresh_failed(token.generation());
                 } else if let Some(picker) = self.doc_symbols_picker.as_mut() {
+                    picker.handle_preview_syntax_refresh_failed(token.generation());
+                } else if let Some(picker) = self.workspace_symbols_picker.as_mut() {
                     picker.handle_preview_syntax_refresh_failed(token.generation());
                 }
             }

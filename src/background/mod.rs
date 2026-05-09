@@ -27,6 +27,7 @@ use std::sync::mpsc::Sender;
 use crate::buffer::BufferCacheRefreshJob;
 use crate::buffer::BufferCacheRefreshResult;
 use crate::lsp::rename_job::LspRenameJob;
+use crate::ui::doc_symbols_picker::DocSymbolsPickerItem;
 use crate::ui::doc_symbols_picker::DocSymbolsPickerSearchJob;
 use crate::ui::file_picker::{FilePickerItem, PickerSearchJob};
 use crate::ui::grep_picker::{GrepPickerItem, GrepPickerSearchJob};
@@ -142,5 +143,12 @@ impl From<Vec<GrepPickerItem>> for JobPayload {
     /// Wraps a streamed grep picker chunk.
     fn from(value: Vec<GrepPickerItem>) -> Self {
         Self::GrepSearchChunk(value)
+    }
+}
+
+impl From<Vec<DocSymbolsPickerItem>> for JobPayload {
+    /// Wraps a document symbol picker result set.
+    fn from(value: Vec<DocSymbolsPickerItem>) -> Self {
+        Self::DocSymbolsSearch(value)
     }
 }

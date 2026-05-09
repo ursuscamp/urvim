@@ -5,4 +5,4 @@ args = []
 filetypes = ["rust"]
 root_markers = ["Cargo.toml", "rust-project.json", ".git"]
 env = {}
-settings = {}
+settings = { workspace = { symbol = { search = { kind = "all_symbols", limit = 5000 } } } }

@@ -31,6 +31,7 @@ impl Layout {
             lsp_rename_prompt: None,
             colorscheme_picker: None,
             doc_symbols_picker: None,
+            workspace_symbols_picker: None,
             file_picker: None,
             grep_picker: None,
             confirmation_box: None,

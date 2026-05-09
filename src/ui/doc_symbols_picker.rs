@@ -7,6 +7,10 @@ use crate::globals;
 use crate::lsp::runtime::{DocumentSymbolItem, DocumentSymbolTree};
 use crate::terminal::Style;
 use crate::ui::inputs::PromptSegment;
+use crate::ui::line_format::{
+    EllipsisPlacement, FormattedLineSection, FormattedLineTemplate, LineSectionAlignment,
+    LineSectionOverflow,
+};
 use crate::ui::picker::{
     PickerItem, PickerPreview, PickerPreviewEvent, PickerRenderSegment, PickerSearchEvent,
     PickerSource, PickerWidget, picker_indicator_glyph,
@@ -19,18 +23,30 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::Sender;
 use std::thread;
 
-const PICKER_CHUNK_SIZE: usize = 32;
 const DOC_SYMBOL_PREVIEW_CONTEXT_LINES: usize = 100;
 static NEXT_DOC_SYMBOLS_PICKER_GENERATION: AtomicU64 = AtomicU64::new(1);
+
+/// Scope for the symbols picker.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DocSymbolsPickerScope {
+    /// Symbol picker for the active document.
+    Document(BufferId),
+    /// Symbol picker for the entire workspace.
+    Workspace,
+}
 
 /// A document symbol displayed by the LSP picker.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DocSymbolsPickerItem {
     path: PathBuf,
+    /// Resolved cursor for document symbols, or a placeholder for workspace symbols.
     cursor: Cursor,
+    /// Raw LSP range used to lazily resolve workspace-symbol positions.
+    range: Option<lsp_types::Range>,
     kind: SymbolKind,
     name: String,
     depth: usize,
+    show_path: bool,
 }
 
 impl DocSymbolsPickerItem {
@@ -39,9 +55,24 @@ impl DocSymbolsPickerItem {
         Self {
             path: value.path.clone(),
             cursor: value.cursor,
+            range: value.range.clone(),
             kind: value.kind,
             name: value.name.clone(),
             depth: value.depth,
+            show_path: false,
+        }
+    }
+
+    /// Creates a workspace-symbol picker item.
+    pub fn new_workspace(value: &DocumentSymbolItem) -> Self {
+        Self {
+            path: value.path.clone(),
+            cursor: value.cursor,
+            range: value.range.clone(),
+            kind: value.kind,
+            name: value.name.clone(),
+            depth: value.depth,
+            show_path: true,
         }
     }
 }
@@ -49,7 +80,7 @@ impl DocSymbolsPickerItem {
 /// Picker source for document symbols in the active buffer.
 #[derive(Debug, Clone)]
 pub struct DocSymbolsPickerSource {
-    buffer_id: BufferId,
+    scope: DocSymbolsPickerScope,
     query_fuzzy: Arc<AtomicBool>,
     current_generation: Arc<AtomicU64>,
     preview_generation: Arc<AtomicU64>,
@@ -68,10 +99,9 @@ pub enum QueryMode {
 /// Document symbol picker search job.
 #[derive(Debug)]
 pub struct DocSymbolsPickerSearchJob {
-    buffer_id: BufferId,
+    scope: DocSymbolsPickerScope,
     query: String,
     query_mode: QueryMode,
-    chunk_size: usize,
 }
 
 /// Concrete document symbols picker widget.
@@ -79,9 +109,18 @@ pub type DocSymbolsPickerWidget = PickerWidget<DocSymbolsPickerSource>;
 
 impl DocSymbolsPickerSource {
     /// Creates a document symbol picker for the given buffer.
-    pub fn with_jobs(buffer_id: BufferId, jobs: Arc<JobManager>) -> Self {
+    pub fn with_document_jobs(buffer_id: BufferId, jobs: Arc<JobManager>) -> Self {
+        Self::with_scope(DocSymbolsPickerScope::Document(buffer_id), jobs)
+    }
+
+    /// Creates a workspace symbol picker.
+    pub fn with_workspace_jobs(jobs: Arc<JobManager>) -> Self {
+        Self::with_scope(DocSymbolsPickerScope::Workspace, jobs)
+    }
+
+    fn with_scope(scope: DocSymbolsPickerScope, jobs: Arc<JobManager>) -> Self {
         Self {
-            buffer_id,
+            scope,
             query_fuzzy: Arc::new(AtomicBool::new(false)),
             current_generation: Arc::new(AtomicU64::new(
                 NEXT_DOC_SYMBOLS_PICKER_GENERATION.fetch_add(1, Ordering::SeqCst),
@@ -104,6 +143,13 @@ impl DocSymbolsPickerSource {
     pub fn set_query_mode(&self, mode: QueryMode) {
         self.query_fuzzy
             .store(matches!(mode, QueryMode::Fuzzy), Ordering::SeqCst);
+    }
+
+    fn job_kind(&self) -> JobKind {
+        match self.scope {
+            DocSymbolsPickerScope::Document(_) => JobKind::DocSymbolsPickerSearch,
+            DocSymbolsPickerScope::Workspace => JobKind::WorkspaceSymbolsPickerSearch,
+        }
     }
 
     /// Toggles between exact and fuzzy query mode.
@@ -159,21 +205,18 @@ impl PickerSource for DocSymbolsPickerSource {
 
         let previous_generation = current_generation.saturating_sub(1);
         if previous_generation > 0 {
-            self.jobs.abort_generation(
-                JobKind::DocSymbolsPickerSearch,
-                JobToken::new(previous_generation),
-            );
+            self.jobs
+                .abort_generation(self.job_kind(), JobToken::new(previous_generation));
         }
 
         let token = JobToken::new(generation);
         let _ = self.jobs.submit_latest_only(
-            JobKind::DocSymbolsPickerSearch,
+            self.job_kind(),
             token,
             DocSymbolsPickerSearchJob {
-                buffer_id: self.buffer_id,
+                scope: self.scope,
                 query: query.to_string(),
                 query_mode: self.query_mode(),
-                chunk_size: PICKER_CHUNK_SIZE,
             },
         );
     }
@@ -214,7 +257,10 @@ impl PickerSource for DocSymbolsPickerSource {
     }
 
     fn select(&self, item: &Self::Item) -> Intent {
-        Intent::Command(Command::OpenFileAtCursor(item.path.clone(), item.cursor))
+        Intent::Command(Command::OpenFileAtCursor(
+            item.path.clone(),
+            item.resolved_cursor(),
+        ))
     }
 
     fn cancel_search(&self) {
@@ -224,23 +270,17 @@ impl PickerSource for DocSymbolsPickerSource {
         }
 
         self.jobs
-            .abort_generation(JobKind::DocSymbolsPickerSearch, JobToken::new(generation));
+            .abort_generation(self.job_kind(), JobToken::new(generation));
     }
 }
 
 impl DocSymbolsPickerSearchJob {
     /// Creates a document symbol picker search job.
-    pub fn new(
-        buffer_id: BufferId,
-        query: String,
-        query_mode: QueryMode,
-        chunk_size: usize,
-    ) -> Self {
+    pub fn new(scope: DocSymbolsPickerScope, query: String, query_mode: QueryMode) -> Self {
         Self {
-            buffer_id,
+            scope,
             query,
             query_mode,
-            chunk_size,
         }
     }
 
@@ -251,52 +291,76 @@ impl DocSymbolsPickerSearchJob {
             token: context.token(),
         });
 
-        if context.is_stopping() || context.is_aborted() {
-            return;
-        }
-
-        let result = globals::with_lsp_runtime_mut(|runtime| {
-            runtime.document_symbols_tree_buffer(self.buffer_id)
-        })
-        .ok_or_else(|| "LSP runtime is not available".to_string())
-        .and_then(|result| result)
-        .ok()
-        .flatten();
+        let mut completed_payload = None;
 
         if context.is_stopping() || context.is_aborted() {
             return;
         }
 
-        if let Some(nodes) = result {
-            let filtered = filter_document_symbol_trees(
-                nodes,
-                self.query.as_str(),
-                matches!(self.query_mode, QueryMode::Fuzzy),
-            );
-            let items = flatten_document_symbol_trees(filtered);
-            for chunk in items.chunks(self.chunk_size) {
+        match self.scope {
+            DocSymbolsPickerScope::Document(buffer_id) => {
+                let result = globals::with_lsp_runtime_mut(|runtime| {
+                    runtime.document_symbols_tree_buffer(buffer_id)
+                })
+                .ok_or_else(|| "LSP runtime is not available".to_string())
+                .and_then(|result| result)
+                .ok()
+                .flatten();
+
                 if context.is_stopping() || context.is_aborted() {
                     return;
                 }
 
-                let _ = event_tx.send(JobEvent::Chunk {
-                    kind: context.kind().clone(),
-                    token: context.token(),
-                    payload: JobPayload::DocSymbolsSearchChunk(
-                        chunk
+                if let Some(nodes) = result {
+                    let filtered = filter_document_symbol_trees(
+                        nodes,
+                        self.query.as_str(),
+                        matches!(self.query_mode, QueryMode::Fuzzy),
+                    );
+                    let items = flatten_document_symbol_trees(filtered);
+                    completed_payload = Some(JobPayload::DocSymbolsSearch(
+                        items
                             .iter()
                             .cloned()
                             .map(|item| DocSymbolsPickerItem::new(&item))
                             .collect(),
-                    ),
-                });
+                    ));
+                }
+            }
+            DocSymbolsPickerScope::Workspace => {
+                let result = globals::with_lsp_runtime_mut(|runtime| {
+                    runtime.workspace_symbols(self.query.as_str())
+                })
+                .ok_or_else(|| "LSP runtime is not available".to_string())
+                .and_then(|result| result)
+                .ok()
+                .flatten();
+
+                if context.is_stopping() || context.is_aborted() {
+                    return;
+                }
+
+                if let Some(items) = result {
+                    let items = filter_document_symbol_items(
+                        items,
+                        self.query.as_str(),
+                        matches!(self.query_mode, QueryMode::Fuzzy),
+                    );
+                    completed_payload = Some(JobPayload::DocSymbolsSearch(
+                        items
+                            .iter()
+                            .cloned()
+                            .map(|item| DocSymbolsPickerItem::new_workspace(&item))
+                            .collect(),
+                    ));
+                }
             }
         }
 
         let _ = event_tx.send(JobEvent::Completed {
             kind: context.kind().clone(),
             token: context.token(),
-            payload: None,
+            payload: completed_payload,
         });
     }
 }
@@ -322,7 +386,8 @@ fn filter_document_symbol_tree(
     }
 
     let children = filter_document_symbol_trees(node.children, query, fuzzy);
-    if document_symbol_matches(node.item.search_text.as_str(), query, fuzzy) || !children.is_empty() {
+    if document_symbol_matches(node.item.search_text.as_str(), query, fuzzy) || !children.is_empty()
+    {
         Some(DocumentSymbolTree {
             item: node.item,
             children,
@@ -336,6 +401,17 @@ fn flatten_document_symbol_trees(nodes: Vec<DocumentSymbolTree>) -> Vec<Document
     let mut items = Vec::new();
     flatten_document_symbol_trees_into(nodes, &mut items);
     items
+}
+
+fn filter_document_symbol_items(
+    items: Vec<DocumentSymbolItem>,
+    query: &str,
+    fuzzy: bool,
+) -> Vec<DocumentSymbolItem> {
+    items
+        .into_iter()
+        .filter(|item| document_symbol_matches(item.search_text.as_str(), query, fuzzy))
+        .collect()
 }
 
 fn flatten_document_symbol_trees_into(
@@ -386,7 +462,12 @@ impl PickerItem for DocSymbolsPickerItem {
         available_cols: usize,
         base_style: Style,
     ) -> Vec<PickerRenderSegment> {
-        let suffix = format!(":{}:{}", self.cursor.line + 1, self.cursor.col + 1);
+        if self.show_path {
+            return self.render_workspace_segments(available_cols, base_style);
+        }
+
+        let cursor = self.resolved_cursor();
+        let suffix = format!(":{}:{}", cursor.line + 1, cursor.col + 1);
         let suffix_cols = unicode_width::UnicodeWidthStr::width(suffix.as_str());
         if available_cols <= suffix_cols {
             let (visible_suffix, _) =
@@ -426,25 +507,146 @@ impl PickerItem for DocSymbolsPickerItem {
             visible_name,
             base_style.overlay(symbol_kind_style(self.kind)),
         ));
+
         segments.push(PickerRenderSegment::new(
             suffix,
             base_style.faint().accent(location_style()),
         ));
         segments
     }
+
+    fn pad_to_full_width(&self) -> bool {
+        !self.show_path
+    }
+}
+
+impl DocSymbolsPickerItem {
+    fn resolved_cursor(&self) -> Cursor {
+        let Some(range) = self.range.as_ref() else {
+            return self.cursor;
+        };
+
+        let Ok(contents) = std::fs::read_to_string(self.path.as_path()) else {
+            return self.cursor;
+        };
+        let lines = crate::buffer::Buffer::from_str(contents.as_str()).line_texts();
+        cursor_from_range_utf16(&lines, range).unwrap_or(self.cursor)
+    }
+
+    fn render_workspace_segments(
+        &self,
+        available_cols: usize,
+        base_style: Style,
+    ) -> Vec<PickerRenderSegment> {
+        let (line, col) = self.display_position();
+        let suffix = format!(":{}:{}", line + 1, col + 1);
+        let path_label = self.path_display();
+        let mut sections = Vec::new();
+        let mut values = Vec::new();
+
+        if self.depth > 0 {
+            sections.push(FormattedLineSection::measured(base_style));
+            values.push("  ".repeat(self.depth));
+        }
+
+        if let Some(glyph) = symbol_kind_glyph(self.kind) {
+            sections.push(FormattedLineSection::measured(
+                base_style.accent(accent_style()),
+            ));
+            values.push(glyph.to_string());
+            sections.push(FormattedLineSection::measured(base_style));
+            values.push(" ".to_string());
+        }
+
+        sections.push(FormattedLineSection::measured(
+            base_style.overlay(symbol_kind_style(self.kind)),
+        ));
+        values.push(self.name.clone());
+
+        sections.push(
+            FormattedLineSection::flex(1, base_style)
+                .with_alignment(LineSectionAlignment::Right)
+                .with_overflow(LineSectionOverflow::Ellipsis(EllipsisPlacement::Start)),
+        );
+        values.push(path_label);
+
+        sections.push(FormattedLineSection::measured(
+            base_style.faint().accent(location_style()),
+        ));
+        values.push(suffix);
+
+        let rendered = FormattedLineTemplate::new(sections)
+            .render_segments(
+                values.iter().map(String::as_str),
+                available_cols.min(u16::MAX as usize) as u16,
+            )
+            .expect("workspace symbol picker line template");
+
+        rendered
+            .into_iter()
+            .map(|segment| PickerRenderSegment::new(segment.text, segment.style))
+            .collect()
+    }
+
+    fn path_display(&self) -> String {
+        let Ok(cwd) = std::env::current_dir() else {
+            return self.path.to_string_lossy().into_owned();
+        };
+
+        self.path
+            .strip_prefix(cwd)
+            .unwrap_or(self.path.as_path())
+            .to_string_lossy()
+            .into_owned()
+    }
+
+    fn display_position(&self) -> (usize, usize) {
+        if let Some(range) = self.range.as_ref() {
+            (range.start.line as usize, range.start.character as usize)
+        } else {
+            (self.cursor.line, self.cursor.col)
+        }
+    }
+}
+
+fn cursor_from_range_utf16(
+    lines: &imbl::Vector<Arc<str>>,
+    range: &lsp_types::Range,
+) -> Option<Cursor> {
+    let line = lines.get(range.start.line as usize)?;
+    let col = position_character_to_byte_index(line.as_ref(), range.start.character)?;
+    Some(Cursor::new(range.start.line as usize, col))
+}
+
+fn position_character_to_byte_index(line: &str, character: u32) -> Option<usize> {
+    let target = character as usize;
+    let mut units = 0usize;
+    for (offset, ch) in line.char_indices() {
+        if units == target {
+            return Some(offset);
+        }
+        units = units.saturating_add(ch.len_utf16());
+        if units > target {
+            return None;
+        }
+    }
+
+    if units == target {
+        Some(line.len())
+    } else {
+        None
+    }
 }
 
 fn build_document_symbol_preview(item: &DocSymbolsPickerItem) -> std::io::Result<PickerPreview> {
-    let start_line = item
-        .cursor
-        .line
-        .saturating_sub(DOC_SYMBOL_PREVIEW_CONTEXT_LINES);
+    let (line, _) = item.display_position();
+    let start_line = line.saturating_sub(DOC_SYMBOL_PREVIEW_CONTEXT_LINES);
     let _ = std::fs::metadata(item.path.as_path())?;
 
     Ok(PickerPreview::new(
         item.path.to_string_lossy(),
         start_line + 1,
-        Some(item.cursor.line + 1),
+        Some(line + 1),
     ))
 }
 
@@ -567,15 +769,17 @@ mod tests {
         DocSymbolsPickerItem {
             path: PathBuf::from("/tmp/example.rs"),
             cursor: Cursor::new(7, 3),
+            range: None,
             kind: SymbolKind::FUNCTION,
             name: "example_function".to_string(),
             depth: 1,
+            show_path: false,
         }
     }
 
     #[test]
     fn doc_symbols_picker_selects_open_file_at_cursor_intent() {
-        let source = DocSymbolsPickerSource::with_jobs(
+        let source = DocSymbolsPickerSource::with_document_jobs(
             crate::buffer::BufferId::new(1),
             Arc::new(JobManager::new()),
         );
@@ -593,6 +797,32 @@ mod tests {
 
         assert!(!segments.is_empty());
         assert!(segments.iter().any(|segment| segment.text.contains(":8:4")));
+    }
+
+    #[test]
+    fn workspace_symbols_picker_item_uses_line_format_for_workspace_rows() {
+        let cwd = std::env::current_dir().unwrap();
+        let item = DocSymbolsPickerItem {
+            path: cwd.join("very/long/example/path/with/a/lot/of/components/example.rs"),
+            cursor: Cursor::new(7, 3),
+            range: None,
+            kind: SymbolKind::FUNCTION,
+            name: "example_function".to_string(),
+            depth: 1,
+            show_path: true,
+        };
+
+        let rendered = item.render_segments(60, Style::default());
+        let text = rendered
+            .iter()
+            .map(|segment| segment.text.as_str())
+            .collect::<String>();
+
+        assert!(text.starts_with("  "));
+        assert!(text.contains("example_function"));
+        assert!(text.contains("example.rs"));
+        assert!(text.contains(":8:4"));
+        assert!(text.contains("…"));
     }
 
     #[test]
@@ -615,9 +845,11 @@ mod tests {
         let item = DocSymbolsPickerItem {
             path: file_path,
             cursor: Cursor::new(9, 0),
+            range: None,
             kind: SymbolKind::FUNCTION,
             name: "example_function".to_string(),
             depth: 0,
+            show_path: false,
         };
 
         let preview = build_document_symbol_preview(&item).expect("preview");
@@ -635,6 +867,7 @@ mod tests {
         let item = DocumentSymbolItem {
             path: PathBuf::from("/tmp/example.rs"),
             cursor: Cursor::new(3, 7),
+            range: None,
             kind: SymbolKind::CLASS,
             name: "Example".to_string(),
             detail: Some("struct Example".to_string()),
@@ -674,9 +907,11 @@ mod tests {
         let item = DocSymbolsPickerItem {
             path: PathBuf::from("/tmp/example.rs"),
             cursor: Cursor::new(7, 3),
+            range: None,
             kind: SymbolKind::FUNCTION,
             name: "example_function".to_string(),
             depth: 0,
+            show_path: false,
         };
 
         let segments = item.render_segments(24, Style::new().bg(crate::terminal::Color::ansi(12)));
@@ -704,7 +939,7 @@ mod tests {
 
     #[test]
     fn doc_symbols_picker_toggles_query_mode() {
-        let source = DocSymbolsPickerSource::with_jobs(
+        let source = DocSymbolsPickerSource::with_document_jobs(
             crate::buffer::BufferId::new(1),
             Arc::new(JobManager::new()),
         );
@@ -724,10 +959,9 @@ mod tests {
                 JobKind::DocSymbolsPickerSearch,
                 JobToken::new(1),
                 DocSymbolsPickerSearchJob::new(
-                    crate::buffer::BufferId::new(1),
+                    DocSymbolsPickerScope::Document(crate::buffer::BufferId::new(1)),
                     "example".to_string(),
                     QueryMode::Exact,
-                    PICKER_CHUNK_SIZE,
                 ),
             )
             .unwrap();
@@ -741,11 +975,13 @@ mod tests {
                 JobEvent::Started { kind, .. } if kind == JobKind::DocSymbolsPickerSearch => {
                     saw_started = true;
                 }
-                JobEvent::Chunk {
+                JobEvent::Completed {
                     kind,
-                    payload: JobPayload::DocSymbolsSearchChunk(_),
+                    payload: Some(JobPayload::DocSymbolsSearch(_)),
                     ..
-                } if kind == JobKind::DocSymbolsPickerSearch => {}
+                } if kind == JobKind::DocSymbolsPickerSearch => {
+                    saw_complete = true;
+                }
                 JobEvent::Completed { kind, .. } | JobEvent::Failed { kind, .. }
                     if kind == JobKind::DocSymbolsPickerSearch =>
                 {
@@ -757,6 +993,96 @@ mod tests {
             assert!(
                 std::time::Instant::now() < deadline,
                 "timed out waiting for doc symbol job"
+            );
+            if !saw_complete {
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+        }
+
+        assert!(saw_started);
+        manager.shutdown();
+    }
+
+    #[test]
+    fn workspace_symbols_picker_search_runs_through_the_job_manager() {
+        let manager = JobManager::new();
+        manager
+            .submit(
+                JobKind::WorkspaceSymbolsPickerSearch,
+                JobToken::new(1),
+                DocSymbolsPickerSearchJob::new(
+                    DocSymbolsPickerScope::Workspace,
+                    "example".to_string(),
+                    QueryMode::Exact,
+                ),
+            )
+            .unwrap();
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        let mut saw_started = false;
+        let mut saw_complete = false;
+
+        while !saw_complete {
+            let _ = manager.process_events(|event| match event {
+                JobEvent::Started { kind, .. } if kind == JobKind::WorkspaceSymbolsPickerSearch => {
+                    saw_started = true;
+                }
+                JobEvent::Completed {
+                    kind,
+                    payload: Some(JobPayload::DocSymbolsSearch(_)),
+                    ..
+                } if kind == JobKind::WorkspaceSymbolsPickerSearch => {
+                    saw_complete = true;
+                }
+                JobEvent::Completed { kind, .. } | JobEvent::Failed { kind, .. }
+                    if kind == JobKind::WorkspaceSymbolsPickerSearch =>
+                {
+                    saw_complete = true;
+                }
+                _ => {}
+            });
+
+            assert!(
+                std::time::Instant::now() < deadline,
+                "timed out waiting for workspace symbol job"
+            );
+            if !saw_complete {
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+        }
+
+        assert!(saw_started);
+        manager.shutdown();
+    }
+
+    #[test]
+    fn workspace_symbols_picker_search_runs_with_an_empty_query() {
+        let manager = Arc::new(JobManager::new());
+        let source = DocSymbolsPickerSource::with_workspace_jobs(Arc::clone(&manager));
+        let mut picker = DocSymbolsPickerWidget::new(source);
+
+        picker.restart_search();
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        let mut saw_started = false;
+        let mut saw_complete = false;
+
+        while !saw_complete {
+            let _ = manager.process_events(|event| match event {
+                JobEvent::Started { kind, .. } if kind == JobKind::WorkspaceSymbolsPickerSearch => {
+                    saw_started = true;
+                }
+                JobEvent::Completed { kind, .. } | JobEvent::Failed { kind, .. }
+                    if kind == JobKind::WorkspaceSymbolsPickerSearch =>
+                {
+                    saw_complete = true;
+                }
+                _ => {}
+            });
+
+            assert!(
+                std::time::Instant::now() < deadline,
+                "timed out waiting for workspace symbol job"
             );
             if !saw_complete {
                 std::thread::sleep(std::time::Duration::from_millis(5));

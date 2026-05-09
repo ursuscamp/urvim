@@ -134,6 +134,11 @@ pub trait PickerItem: Clone + Send + 'static {
     /// Returns styled segments for the item using the provided width budget.
     fn render_segments(&self, available_cols: usize, base_style: Style)
     -> Vec<PickerRenderSegment>;
+
+    /// Returns whether the picker should pad the row to full width.
+    fn pad_to_full_width(&self) -> bool {
+        true
+    }
 }
 
 /// Source of picker results and selection behavior.
@@ -728,9 +733,7 @@ impl<S: PickerSource> PickerWidget<S> {
     }
 
     fn submit_selection(&mut self) -> UiEventResult {
-        let Some(index) = self.highlighted else {
-            return UiEventResult::Handled(Vec::new());
-        };
+        let index = self.highlighted.unwrap_or(0);
 
         let Some(item) = self.results.get(index).cloned() else {
             return UiEventResult::Handled(Vec::new());
@@ -967,7 +970,7 @@ fn render_result_line<T: PickerItem>(
     let mut segments = vec![PickerRenderSegment::new(prefix, style)];
     segments.extend(item.render_segments(item_cols, style));
 
-    if pad {
+    if pad && item.pad_to_full_width() {
         let width = segment_width(segments.as_slice());
         if width < max_cols {
             segments.push(PickerRenderSegment::new(
@@ -1298,6 +1301,25 @@ mod tests {
         );
         assert!(result.handled());
         assert!(!picker.is_open());
+    }
+
+    #[test]
+    fn picker_selects_first_result_when_none_is_highlighted() {
+        let source = TestSource::new();
+        let mut picker = PickerWidget::new(source.clone());
+        let mut ctx = UiContext;
+
+        picker.results = vec!["first".to_string(), "second".to_string()];
+        picker.highlighted = None;
+
+        let result = picker.handle_ui_event(
+            &UiEvent::Key(crate::terminal::Key::new(KeyCode::Enter)),
+            &mut ctx,
+        );
+
+        assert!(result.handled());
+        assert!(!picker.is_open());
+        assert_eq!(source.selected.lock().unwrap().as_slice(), &["first".to_string()]);
     }
 
     #[test]

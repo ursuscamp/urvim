@@ -60,6 +60,7 @@ pub struct Layout {
     lsp_rename_prompt: Option<LspRenamePrompt>,
     colorscheme_picker: Option<ColorschemePickerWidget>,
     doc_symbols_picker: Option<DocSymbolsPickerWidget>,
+    workspace_symbols_picker: Option<DocSymbolsPickerWidget>,
     file_picker: Option<FilePickerWidget>,
     grep_picker: Option<GrepPickerWidget>,
     confirmation_box: Option<ConfirmationBox>,
@@ -84,6 +85,7 @@ impl Layout {
             lsp_rename_prompt: None,
             colorscheme_picker: None,
             doc_symbols_picker: None,
+            workspace_symbols_picker: None,
             file_picker: None,
             grep_picker: None,
             confirmation_box: None,
@@ -217,6 +219,14 @@ impl Layout {
             return Some(position);
         }
 
+        if let Some(position) = self
+            .workspace_symbols_picker
+            .as_ref()
+            .and_then(|picker| picker.cursor())
+        {
+            return Some(position);
+        }
+
         if let Some(position) = self.file_picker.as_ref().and_then(|picker| picker.cursor()) {
             return Some(position);
         }
@@ -303,6 +313,7 @@ impl Layout {
         self.close_command_line();
         self.close_colorscheme_picker();
         self.close_doc_symbols_picker();
+        self.close_workspace_symbols_picker();
         self.close_file_picker();
         self.close_grep_picker();
         self.close_confirmation_box();
@@ -339,6 +350,10 @@ impl Layout {
             }
             Command::OpenDocumentSymbolsPicker => {
                 self.open_doc_symbols_picker();
+                true
+            }
+            Command::OpenWorkspaceSymbolsPicker => {
+                self.open_workspace_symbols_picker();
                 true
             }
             Command::OpenFilePicker => {
@@ -642,6 +657,10 @@ impl Layout {
     fn route_picker_ui_event(&mut self, event: &UiEvent) -> UiEventResult {
         if self.colorscheme_picker_is_open() {
             return self.handle_colorscheme_picker_event(event);
+        }
+
+        if self.workspace_symbols_picker_is_open() {
+            return self.handle_workspace_symbols_picker_event(event);
         }
 
         if self.doc_symbols_picker_is_open() {

@@ -7,10 +7,11 @@ use crate::json_rpc::{
 };
 use imbl::Vector;
 use lsp_types::{
-    CreateFile, DeleteFile, Diagnostic, DocumentChangeOperation, InitializeResult,
+    CreateFile, DeleteFile, Diagnostic, DocumentChangeOperation, InitializeResult, Location, OneOf,
     PositionEncodingKind, PrepareRenameResponse, ProgressParams, ProgressParamsValue, RenameFile,
     ResourceOp, ServerCapabilities, TextDocumentSyncCapability, TextDocumentSyncKind,
-    WorkDoneProgress, WorkDoneProgressBegin, WorkDoneProgressReport,
+    WorkDoneProgress, WorkDoneProgressBegin, WorkDoneProgressReport, WorkspaceLocation,
+    WorkspaceSymbol, WorkspaceSymbolResponse,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -85,6 +86,7 @@ struct LspServerSession {
     server_name: String,
     negotiated: NegotiatedCapabilities,
     position_encoding: Arc<Mutex<PositionEncodingKind>>,
+    initialization_options: Value,
 }
 
 #[derive(Debug)]
@@ -123,8 +125,13 @@ pub struct LspServerStatus {
 pub struct DocumentSymbolItem {
     /// The file that owns the symbol.
     pub path: PathBuf,
-    /// The buffer cursor for the symbol location.
+    /// The resolved buffer cursor for document-symbol locations.
+    ///
+    /// Workspace-symbol items keep a placeholder cursor and store the raw LSP
+    /// range separately so the picker can resolve it lazily.
     pub cursor: crate::buffer::Cursor,
+    /// Optional raw LSP range for lazy cursor resolution.
+    pub range: Option<lsp_types::Range>,
     /// The symbol kind reported by the language server.
     pub kind: lsp_types::SymbolKind,
     /// The symbol name.
@@ -349,6 +356,31 @@ impl LspRuntime {
         })
     }
 
+    /// Requests workspace symbols matching `query` from all attached servers.
+    pub fn workspace_symbols(
+        &mut self,
+        query: &str,
+    ) -> Result<Option<Vec<DocumentSymbolItem>>, String> {
+        self.sync();
+
+        let mut items = Vec::new();
+        for server in self.servers.values_mut() {
+            for session in server.sessions.values_mut() {
+                let Some(mut session_items) = session.workspace_symbols(query).ok().flatten()
+                else {
+                    continue;
+                };
+                items.append(&mut session_items);
+            }
+        }
+
+        if items.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(items))
+        }
+    }
+
     /// Returns whether the attached server for `buffer_id` supports document symbols.
     pub fn buffer_supports_document_symbols(&mut self, buffer_id: BufferId) -> bool {
         self.sync();
@@ -493,6 +525,7 @@ impl LspServerSession {
             server_name: server_name.to_string(),
             negotiated: NegotiatedCapabilities::default(),
             position_encoding,
+            initialization_options: serde_json::to_value(&config.settings).unwrap_or(Value::Null),
         };
 
         session.spawn_reader(stdout);
@@ -673,6 +706,7 @@ impl LspServerSession {
                 .file_name()
                 .and_then(|name| name.to_str())
                 .unwrap_or("workspace"),
+            self.initialization_options.clone(),
         );
 
         let result = self.request_raw("initialize", Some(params))?;
@@ -814,6 +848,19 @@ impl LspServerSession {
         {
             Some(lsp_types::OneOf::Left(enabled)) => *enabled,
             Some(lsp_types::OneOf::Right(_)) => true,
+            None => false,
+        }
+    }
+
+    fn supports_workspace_symbols(&self) -> bool {
+        match self
+            .negotiated
+            .server_capabilities
+            .as_ref()
+            .and_then(|capabilities| capabilities.workspace_symbol_provider.as_ref())
+        {
+            Some(OneOf::Left(enabled)) => *enabled,
+            Some(OneOf::Right(_)) => true,
             None => false,
         }
     }
@@ -979,6 +1026,45 @@ impl LspServerSession {
             self.negotiated.position_encoding.clone(),
         );
         Ok(Some(nodes))
+    }
+
+    fn workspace_symbols(
+        &mut self,
+        query: &str,
+    ) -> Result<Option<Vec<DocumentSymbolItem>>, String> {
+        if !self.supports_workspace_symbols() {
+            return Err("attached server does not support workspace symbols".to_string());
+        }
+
+        let params = json!({
+            "query": query,
+        });
+        let result = self
+            .request_raw("workspace/symbol", Some(params))
+            .map_err(|error| error.to_string())?;
+
+        let Some(value) = result else {
+            return Ok(None);
+        };
+
+        let response = serde_json::from_value::<Option<WorkspaceSymbolResponse>>(value)
+            .map_err(|error| error.to_string())?;
+        let Some(response) = response else {
+            return Ok(None);
+        };
+
+        let items: Vec<DocumentSymbolItem> = match response {
+            WorkspaceSymbolResponse::Flat(symbols) => symbols
+                .into_iter()
+                .filter_map(|symbol| workspace_symbol_information_to_item(symbol))
+                .collect(),
+            WorkspaceSymbolResponse::Nested(symbols) => symbols
+                .into_iter()
+                .filter_map(|symbol| workspace_symbol_to_item(symbol))
+                .collect(),
+        };
+
+        Ok(Some(items))
     }
 
     fn rename(
@@ -1612,10 +1698,11 @@ fn format_marked_string(marked: &lsp_types::MarkedString) -> String {
     }
 }
 
-fn initialize_params(root_uri: &str, workspace_name: &str) -> Value {
+fn initialize_params(root_uri: &str, workspace_name: &str, initialization_options: Value) -> Value {
     json!({
         "processId": std::process::id(),
         "rootUri": root_uri,
+        "initializationOptions": initialization_options,
         "capabilities": {
             "textDocument": {
                 "hover": {
@@ -1691,6 +1778,7 @@ fn build_document_symbol_nodes(
                     item: DocumentSymbolItem {
                         path: path.clone(),
                         cursor,
+                        range: None,
                         kind: symbol.kind,
                         name: symbol.name.clone(),
                         detail: None,
@@ -1741,6 +1829,7 @@ fn build_nested_document_symbol_nodes(
                 item: DocumentSymbolItem {
                     path: path.to_path_buf(),
                     cursor,
+                    range: None,
                     kind: symbol.kind,
                     name: symbol.name.clone(),
                     detail: symbol.detail.clone(),
@@ -1822,6 +1911,64 @@ fn document_symbol_search_text(
         text.push(' ');
         text.push_str(detail);
     }
+    text.to_lowercase()
+}
+
+fn workspace_symbol_information_to_item(
+    symbol: lsp_types::SymbolInformation,
+) -> Option<DocumentSymbolItem> {
+    let path = uri_to_file_path(symbol.location.uri.as_str()).ok()?;
+    let name = symbol.name;
+    let container_name = symbol.container_name;
+    let kind = symbol.kind;
+
+    Some(DocumentSymbolItem {
+        path,
+        cursor: crate::buffer::Cursor::new(0, 0),
+        range: Some(symbol.location.range),
+        kind,
+        name: name.clone(),
+        detail: container_name.clone(),
+        depth: 0,
+        search_text: workspace_symbol_search_text(name.as_str(), container_name.as_deref(), kind),
+    })
+}
+
+fn workspace_symbol_to_item(symbol: WorkspaceSymbol) -> Option<DocumentSymbolItem> {
+    let (uri, range) = match symbol.location {
+        OneOf::Left(Location { uri, range }) => (uri, Some(range)),
+        OneOf::Right(WorkspaceLocation { uri }) => (uri, None),
+    };
+    let path = uri_to_file_path(uri.as_str()).ok()?;
+    let name = symbol.name;
+    let container_name = symbol.container_name;
+    let kind = symbol.kind;
+
+    Some(DocumentSymbolItem {
+        path,
+        cursor: crate::buffer::Cursor::new(0, 0),
+        range,
+        kind,
+        name: name.clone(),
+        detail: container_name.clone(),
+        depth: 0,
+        search_text: workspace_symbol_search_text(name.as_str(), container_name.as_deref(), kind),
+    })
+}
+
+fn workspace_symbol_search_text(
+    name: &str,
+    container_name: Option<&str>,
+    kind: lsp_types::SymbolKind,
+) -> String {
+    let mut text = String::new();
+    text.push_str(name);
+    text.push(' ');
+    if let Some(container_name) = container_name.filter(|value| !value.trim().is_empty()) {
+        text.push_str(container_name);
+        text.push(' ');
+    }
+    text.push_str(symbol_kind_label(kind));
     text.to_lowercase()
 }
 
@@ -2805,11 +2952,25 @@ mod tests {
 
     #[test]
     fn initialize_params_advertise_hierarchical_document_symbols() {
-        let params = initialize_params("file:///tmp/example.rs", "workspace");
+        let params = initialize_params("file:///tmp/example.rs", "workspace", Value::Null);
 
         assert_eq!(
             params["capabilities"]["textDocument"]["documentSymbol"]["hierarchicalDocumentSymbolSupport"],
             true
+        );
+    }
+
+    #[test]
+    fn initialize_params_include_initialization_options() {
+        let params = initialize_params(
+            "file:///tmp/example.rs",
+            "workspace",
+            json!({"cargo": {"allTargets": false}}),
+        );
+
+        assert_eq!(
+            params["initializationOptions"]["cargo"]["allTargets"],
+            false
         );
     }
 

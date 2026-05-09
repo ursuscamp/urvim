@@ -146,6 +146,7 @@ impl Layout {
         let mut progress_widget = notification::ProgressWidget::new();
         progress_widget.render_widget(screen, UiRect::new(origin, size), &UiContext);
         self.render_colorscheme_picker_overlay(screen, origin, size);
+        self.render_workspace_symbols_picker_overlay(screen, origin, size);
         self.render_doc_symbols_picker_overlay(screen, origin, size);
         self.render_grep_picker_overlay(screen, origin, size);
         self.render_file_picker_overlay(screen, origin, size);
@@ -178,6 +179,21 @@ impl Layout {
         size: Size,
     ) {
         let Some(picker) = self.doc_symbols_picker_mut() else {
+            return;
+        };
+
+        let ctx = UiContext;
+        let rect = UiRect::new(origin, size);
+        picker.render_widget(screen, rect, &ctx);
+    }
+
+    fn render_workspace_symbols_picker_overlay(
+        &mut self,
+        screen: &mut Screen,
+        origin: Position,
+        size: Size,
+    ) {
+        let Some(picker) = self.workspace_symbols_picker_mut() else {
             return;
         };
 

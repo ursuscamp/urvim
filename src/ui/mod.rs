@@ -12,6 +12,7 @@ pub mod floating_window;
 pub mod grep_picker;
 pub mod hover;
 pub mod inputs;
+pub mod line_format;
 pub mod lsp_rename;
 pub mod picker;
 pub mod picker_preview;
@@ -122,6 +123,8 @@ pub enum Command {
     OpenColorschemePicker,
     /// Open the active-buffer document symbol picker overlay.
     OpenDocumentSymbolsPicker,
+    /// Open the workspace symbol picker overlay.
+    OpenWorkspaceSymbolsPicker,
     /// Open the live grep picker overlay.
     OpenGrepPicker,
     /// Write all modified buffers in the pool.

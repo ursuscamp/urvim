@@ -213,7 +213,7 @@ Controls built-in language server configurations.
 - Default: all servers disabled
 - Built-in servers: `rust_analyzer`
 - Behavior: builtin server definitions are loaded from statically included TOML files at startup; user overrides deep-merge into those built-in defaults, so you can enable a server by setting `enabled = true` and override individual server fields as needed
-- `rust_analyzer` defaults: `command = "rust-analyzer"`, `filetypes = ["rust"]`, `root_markers = ["Cargo.toml", "rust-project.json", ".git"]`
+- `rust_analyzer` defaults: `command = "rust-analyzer"`, `filetypes = ["rust"]`, `root_markers = ["Cargo.toml", "rust-project.json", ".git"]`, `settings.workspace.symbol.search.kind = "all_symbols"`
 - Scope: language-server startup and attachment only
 
 ## Sessions

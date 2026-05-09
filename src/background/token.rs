@@ -30,6 +30,8 @@ pub enum JobKind {
     GrepPickerSearch,
     /// Document symbol picker search.
     DocSymbolsPickerSearch,
+    /// Workspace symbol picker search.
+    WorkspaceSymbolsPickerSearch,
     /// Picker preview syntax refresh.
     PickerPreviewSyntax,
     /// LSP rename.
@@ -48,6 +50,7 @@ impl fmt::Display for JobKind {
             Self::FilePickerSearch => f.write_str("file-picker-search"),
             Self::GrepPickerSearch => f.write_str("grep-picker-search"),
             Self::DocSymbolsPickerSearch => f.write_str("doc-symbols-picker-search"),
+            Self::WorkspaceSymbolsPickerSearch => f.write_str("workspace-symbols-picker-search"),
             Self::PickerPreviewSyntax => f.write_str("picker-preview-syntax"),
             Self::LspRename(buffer_id) => write!(f, "lsp-rename:{}", buffer_id.get()),
             #[cfg(test)]

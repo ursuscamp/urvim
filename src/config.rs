@@ -1042,6 +1042,22 @@ mod tests {
                 ".git".to_string(),
             ]
         );
+        assert_eq!(
+            default_rust_analyzer.settings,
+            table_value(&[(
+                "workspace",
+                table_value(&[(
+                    "symbol",
+                    table_value(&[(
+                        "search",
+                        table_value(&[
+                            ("kind", Value::String("all_symbols".to_string())),
+                            ("limit", Value::Integer(5000)),
+                        ]),
+                    )]),
+                )]),
+            )])
+        );
         assert!(Config::resolve(None, None, None).advanced_glyphs.is_empty());
         assert_eq!(
             Config::resolve(None, None, None).todo_markers,
@@ -1106,10 +1122,25 @@ mod tests {
         assert_eq!(server.root_markers, vec!["Cargo.toml".to_string()]);
         assert_eq!(
             server.settings,
-            table_value(&[(
-                "checkOnSave",
-                table_value(&[("command", Value::String("clippy".to_string()))]),
-            )])
+            table_value(&[
+                (
+                    "checkOnSave",
+                    table_value(&[("command", Value::String("clippy".to_string()))]),
+                ),
+                (
+                    "workspace",
+                    table_value(&[(
+                        "symbol",
+                        table_value(&[(
+                            "search",
+                            table_value(&[
+                                ("kind", Value::String("all_symbols".to_string())),
+                                ("limit", Value::Integer(5000)),
+                            ]),
+                        )]),
+                    )]),
+                )
+            ])
         );
     }
 
@@ -1273,10 +1304,25 @@ checkOnSave = { command = "clippy" }
         );
         assert_eq!(
             server.settings,
-            table_value(&[(
-                "checkOnSave",
-                table_value(&[("command", Value::String("clippy".to_string()))]),
-            )])
+            table_value(&[
+                (
+                    "checkOnSave",
+                    table_value(&[("command", Value::String("clippy".to_string()))]),
+                ),
+                (
+                    "workspace",
+                    table_value(&[(
+                        "symbol",
+                        table_value(&[(
+                            "search",
+                            table_value(&[
+                                ("kind", Value::String("all_symbols".to_string())),
+                                ("limit", Value::Integer(5000)),
+                            ]),
+                        )]),
+                    )]),
+                )
+            ])
         );
     }
 

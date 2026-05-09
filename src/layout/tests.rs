@@ -398,6 +398,21 @@ fn test_layout_doc_symbols_picker_binding_opens_for_file_backed_buffer() {
 }
 
 #[test]
+fn test_layout_workspace_symbols_picker_binding_opens_without_a_file_path() {
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("fn example() {}")]);
+
+    assert!(layout.dispatch_intent(&Intent::Command(Command::OpenWorkspaceSymbolsPicker)));
+    assert!(layout.workspace_symbols_picker_is_open());
+
+    let mut screen = crate::screen::Screen::new(8, 40);
+    layout.render(&mut screen, Position::new(0, 0), Size::new(8, 40));
+    assert!(
+        layout.visual_cursor().is_some(),
+        "workspace picker prompt cursor should be visible"
+    );
+}
+
+#[test]
 fn test_layout_lsp_hover_closes_on_action() {
     let mut layout = layout_with_buffers(vec![Buffer::from_str("one")]);
     layout.open_lsp_hover("hover text".to_string(), Position::new(1, 1));

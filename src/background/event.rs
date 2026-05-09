@@ -27,8 +27,8 @@ pub enum JobPayload {
     FileSearchChunk(Vec<FilePickerItem>),
     /// Live grep picker search chunk.
     GrepSearchChunk(Vec<GrepPickerItem>),
-    /// Document symbol picker search chunk.
-    DocSymbolsSearchChunk(Vec<DocSymbolsPickerItem>),
+    /// Document symbol picker search result set.
+    DocSymbolsSearch(Vec<DocSymbolsPickerItem>),
     /// Picker preview syntax refresh result.
     PreviewSyntax(PreviewSyntaxRefreshResult),
     /// LSP rename outcome.
