@@ -51,6 +51,7 @@ bg = "bg0"
 "ui.input.prompt" = { fg = "orange", bold = true }
 "ui.input.prompt.exact" = { fg = "orange", bold = true }
 "ui.input.prompt.fuzzy" = { fg = "orange", italic = true }
+"ui.picker.accent" = { fg = "orange", bold = true }
 "ui.input.prompt.separator" = { fg = "bg4" }
 "ui.picker.location" = { fg = "gray" }
 "ui.notification.info" = { fg = "aqua" }

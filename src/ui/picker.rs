@@ -1319,7 +1319,10 @@ mod tests {
 
         assert!(result.handled());
         assert!(!picker.is_open());
-        assert_eq!(source.selected.lock().unwrap().as_slice(), &["first".to_string()]);
+        assert_eq!(
+            source.selected.lock().unwrap().as_slice(),
+            &["first".to_string()]
+        );
     }
 
     #[test]

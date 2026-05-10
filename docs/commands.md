@@ -48,6 +48,9 @@ urvim supports a normal-mode command line opened with `:`.
 - `pick doc-symbols`
   - Opens the active buffer's LSP document symbol picker.
 
+- `pick code-actions`
+  - Opens the active buffer's LSP code action picker.
+
 ### `lsp`
 
 - `lsp hover`
@@ -61,6 +64,9 @@ urvim supports a normal-mode command line opened with `:`.
 
 - `lsp rename <name>`
   - Renames the symbol under the cursor to `<name>`.
+
+- `lsp code-actions`
+  - Opens the active buffer's LSP code action picker.
 
 ## Quoted Paths
 

@@ -7,11 +7,12 @@ use crate::json_rpc::{
 };
 use imbl::Vector;
 use lsp_types::{
-    CreateFile, DeleteFile, Diagnostic, DocumentChangeOperation, InitializeResult, Location, OneOf,
-    PositionEncodingKind, PrepareRenameResponse, ProgressParams, ProgressParamsValue, RenameFile,
-    ResourceOp, ServerCapabilities, TextDocumentSyncCapability, TextDocumentSyncKind,
-    WorkDoneProgress, WorkDoneProgressBegin, WorkDoneProgressReport, WorkspaceLocation,
-    WorkspaceSymbol, WorkspaceSymbolResponse,
+    CodeActionContext, CodeActionOrCommand, CodeActionParams, CodeActionProviderCapability,
+    CodeActionTriggerKind, CreateFile, DeleteFile, Diagnostic, DocumentChangeOperation,
+    InitializeResult, Location, OneOf, PositionEncodingKind, PrepareRenameResponse, ProgressParams,
+    ProgressParamsValue, RenameFile, ResourceOp, ServerCapabilities, TextDocumentIdentifier,
+    TextDocumentSyncCapability, TextDocumentSyncKind, WorkDoneProgress, WorkDoneProgressBegin,
+    WorkDoneProgressReport, WorkspaceLocation, WorkspaceSymbol, WorkspaceSymbolResponse,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -142,6 +143,21 @@ pub struct DocumentSymbolItem {
     pub depth: usize,
     /// Lowercased searchable text for query filtering.
     pub search_text: String,
+}
+
+/// A code action ready to be shown in the picker and later applied.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CodeActionApplication {
+    /// Human-readable action title.
+    pub title: String,
+    /// Optional action kind string.
+    pub kind: Option<String>,
+    /// Optional edit to apply before any command.
+    pub edit: Option<lsp_types::WorkspaceEdit>,
+    /// Optional command name to execute after the edit is applied.
+    pub command: Option<String>,
+    /// Optional JSON-encoded command arguments.
+    pub command_arguments_json: Option<String>,
 }
 
 /// LSP runtime state and session management.
@@ -427,6 +443,55 @@ impl LspRuntime {
         self.sync();
         self.with_session_for_buffer(buffer_id, |session, _| Ok(session.supports_rename()))
             .unwrap_or(false)
+    }
+
+    /// Returns whether the attached server for `buffer_id` supports code actions.
+    pub fn buffer_supports_code_actions(&mut self, buffer_id: BufferId) -> bool {
+        self.sync();
+        self.with_session_for_buffer(buffer_id, |session, _| Ok(session.supports_code_actions()))
+            .unwrap_or(false)
+    }
+
+    /// Requests code actions for the attached server owning `buffer_id`.
+    pub fn code_actions_buffer(
+        &mut self,
+        buffer_id: BufferId,
+        cursor: crate::buffer::Cursor,
+    ) -> Result<Option<Vec<CodeActionApplication>>, String> {
+        self.sync();
+        self.with_session_for_buffer(buffer_id, |session, attachment| {
+            session.code_actions(buffer_id, attachment, cursor)
+        })
+    }
+
+    /// Applies a selected code action on the attached server owning `buffer_id`.
+    pub fn apply_code_action(
+        &mut self,
+        buffer_id: BufferId,
+        action: CodeActionApplication,
+    ) -> Result<(), String> {
+        self.sync();
+        let result = self.with_session_for_buffer(buffer_id, |session, _| {
+            session.apply_code_action_edit(&action)
+        })?;
+
+        if result.0 {
+            self.apply_workspace_file_operations(&result.1);
+            self.sync();
+        }
+
+        if let Some(command) = action.command.as_ref() {
+            let arguments: Option<Vec<serde_json::Value>> = action
+                .command_arguments_json
+                .as_ref()
+                .and_then(|json| serde_json::from_str(json).ok())
+                .unwrap_or_default();
+            self.with_session_for_buffer(buffer_id, |session, _| {
+                session.execute_command(command.as_str(), arguments.clone())
+            })?;
+        }
+
+        Ok(())
     }
 
     fn with_session_for_buffer<R>(
@@ -878,6 +943,19 @@ impl LspServerSession {
         }
     }
 
+    fn supports_code_actions(&self) -> bool {
+        match self
+            .negotiated
+            .server_capabilities
+            .as_ref()
+            .and_then(|capabilities| capabilities.code_action_provider.as_ref())
+        {
+            Some(CodeActionProviderCapability::Simple(enabled)) => *enabled,
+            Some(CodeActionProviderCapability::Options(_)) => true,
+            None => false,
+        }
+    }
+
     fn supports_prepare_rename(&self) -> bool {
         let Some(capabilities) = self.negotiated.server_capabilities.as_ref() else {
             return false;
@@ -1173,6 +1251,140 @@ impl LspServerSession {
             ),
             PrepareRenameResponse::DefaultBehavior { .. } => None,
         }
+    }
+
+    fn code_actions(
+        &mut self,
+        buffer_id: BufferId,
+        attachment: &BufferAttachment,
+        cursor: crate::buffer::Cursor,
+    ) -> Result<Option<Vec<CodeActionApplication>>, String> {
+        if !self.supports_code_actions() {
+            return Err("attached server does not support code actions".to_string());
+        }
+
+        let position = cursor_to_lsp_position(
+            &attachment.lines,
+            cursor,
+            self.negotiated.position_encoding.clone(),
+        );
+        let range_start = position.clone();
+        let diagnostics = globals::with_diagnostics_store(|store| {
+            store.diagnostics_at_buffer_cursor(buffer_id, cursor)
+        })
+        .ok_or_else(|| "LSP runtime is not available".to_string())?;
+        let params = CodeActionParams {
+            text_document: TextDocumentIdentifier {
+                uri: attachment
+                    .uri
+                    .parse::<lsp_types::Uri>()
+                    .map_err(|error| error.to_string())?,
+            },
+            range: lsp_types::Range::new(range_start, position),
+            context: CodeActionContext {
+                diagnostics,
+                only: None,
+                trigger_kind: Some(CodeActionTriggerKind::INVOKED),
+            },
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+        };
+
+        let result = self
+            .request_raw(
+                "textDocument/codeAction",
+                Some(serde_json::to_value(params).map_err(|error| error.to_string())?),
+            )
+            .map_err(|error| error.to_string())?;
+
+        let Some(value) = result else {
+            return Ok(None);
+        };
+
+        let actions = serde_json::from_value::<Option<Vec<CodeActionOrCommand>>>(value)
+            .map_err(|error| error.to_string())?;
+        let Some(actions) = actions else {
+            return Ok(None);
+        };
+
+        let actions = actions
+            .into_iter()
+            .filter_map(|action| match action {
+                CodeActionOrCommand::CodeAction(action)
+                    if action.edit.is_some() || action.command.is_some() =>
+                {
+                    let (command, command_arguments_json) = action
+                        .command
+                        .as_ref()
+                        .map(|command| {
+                            (
+                                Some(command.command.clone()),
+                                Some(serde_json::to_string(&command.arguments).unwrap_or_else(
+                                    |error| {
+                                        format!(
+                                            "[\"command arguments serialization failed: {error}\"]"
+                                        )
+                                    },
+                                )),
+                            )
+                        })
+                        .unwrap_or((None, None));
+                    Some(CodeActionApplication {
+                        title: action.title,
+                        kind: action.kind.map(|kind| kind.as_str().to_string()),
+                        edit: action.edit,
+                        command,
+                        command_arguments_json,
+                    })
+                }
+                CodeActionOrCommand::Command(command) => Some(CodeActionApplication {
+                    title: command.title,
+                    kind: None,
+                    edit: None,
+                    command: Some(command.command),
+                    command_arguments_json: Some(
+                        serde_json::to_string(&command.arguments).unwrap_or_else(|error| {
+                            format!("[\"command arguments serialization failed: {error}\"]")
+                        }),
+                    ),
+                }),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        if actions.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(actions))
+        }
+    }
+
+    fn apply_code_action_edit(
+        &mut self,
+        action: &CodeActionApplication,
+    ) -> Result<(bool, Vec<WorkspaceResourceOperationEffect>), String> {
+        let mut effects = Vec::new();
+
+        if let Some(edit) = action.edit.as_ref() {
+            effects = apply_workspace_edit(edit, self.negotiated.position_encoding.clone())?;
+        }
+
+        Ok((!effects.is_empty(), effects))
+    }
+
+    fn execute_command(
+        &mut self,
+        command: &str,
+        arguments: Option<Vec<serde_json::Value>>,
+    ) -> Result<(), String> {
+        let params = json!({
+            "command": command,
+            "arguments": arguments,
+        });
+        self.request_raw("workspace/executeCommand", Some(params))
+            .map_err(|error| error.to_string())?;
+
+        Ok(())
     }
 
     fn cleanup_detached_buffers(&mut self, live_buffers: &BTreeSet<BufferId>) {
@@ -1704,12 +1916,35 @@ fn initialize_params(root_uri: &str, workspace_name: &str, initialization_option
         "rootUri": root_uri,
         "initializationOptions": initialization_options,
         "capabilities": {
+            "workspace": {
+                "applyEdit": true
+            },
             "textDocument": {
                 "hover": {
                     "contentFormat": ["markdown", "plaintext"]
                 },
                 "documentSymbol": {
                     "hierarchicalDocumentSymbolSupport": true
+                },
+                "codeAction": {
+                    "codeActionLiteralSupport": {
+                        "codeActionKind": {
+                            "valueSet": [
+                                "",
+                                "quickfix",
+                                "refactor",
+                                "refactor.extract",
+                                "refactor.inline",
+                                "refactor.rewrite",
+                                "source",
+                                "source.organizeImports",
+                                "source.fixAll"
+                            ]
+                        }
+                    },
+                    "isPreferredSupport": true,
+                    "disabledSupport": true,
+                    "dataSupport": true
                 }
             },
             "window": {
@@ -2971,6 +3206,17 @@ mod tests {
         assert_eq!(
             params["initializationOptions"]["cargo"]["allTargets"],
             false
+        );
+    }
+
+    #[test]
+    fn initialize_params_advertise_code_actions() {
+        let params = initialize_params("file:///tmp/example.rs", "workspace", Value::Null);
+
+        assert_eq!(params["capabilities"]["workspace"]["applyEdit"], true);
+        assert_eq!(
+            params["capabilities"]["textDocument"]["codeAction"]["dataSupport"],
+            true
         );
     }
 

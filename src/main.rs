@@ -689,6 +689,11 @@ mod tests {
             .unwrap_or_else(|error| error.into_inner())
     }
 
+    fn cwd_lock() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(())).lock().unwrap()
+    }
+
     impl TestBackend {
         fn new(data: Vec<u8>) -> Self {
             Self {
@@ -993,6 +998,7 @@ mod tests {
 
     #[test]
     fn try_quit_saves_session_before_layout_is_cleared() {
+        let _guard = cwd_lock();
         let temp_dir = std::env::temp_dir().join(format!(
             "urvim-try-quit-session-{}-{}",
             std::process::id(),
@@ -1044,6 +1050,7 @@ mod tests {
 
     #[test]
     fn quit_saves_session_before_layout_is_cleared() {
+        let _guard = cwd_lock();
         let temp_dir = std::env::temp_dir().join(format!(
             "urvim-quit-session-{}-{}",
             std::process::id(),
@@ -1091,6 +1098,7 @@ mod tests {
 
     #[test]
     fn startup_layout_restores_existing_session_when_no_files_are_passed() {
+        let _guard = cwd_lock();
         let temp_dir = std::env::temp_dir().join(format!(
             "urvim-startup-restore-{}-{}",
             std::process::id(),
@@ -1146,6 +1154,7 @@ mod tests {
 
     #[test]
     fn startup_layout_uses_blank_buffer_when_no_session_exists() {
+        let _guard = cwd_lock();
         let temp_dir = std::env::temp_dir().join(format!(
             "urvim-startup-blank-{}-{}",
             std::process::id(),
@@ -1168,6 +1177,7 @@ mod tests {
 
     #[test]
     fn startup_layout_with_files_does_not_restore_session() {
+        let _guard = cwd_lock();
         let temp_dir = std::env::temp_dir().join(format!(
             "urvim-startup-files-{}-{}",
             std::process::id(),

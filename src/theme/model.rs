@@ -573,6 +573,11 @@ mod tests {
                 theme.default_style(),
                 "{name} should define a muted picker location style",
             );
+            assert_ne!(
+                theme.resolve_name_with_default("ui.picker.accent"),
+                theme.default_style(),
+                "{name} should define a picker accent style",
+            );
         }
     }
 }

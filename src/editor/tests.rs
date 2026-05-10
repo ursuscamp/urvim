@@ -215,6 +215,19 @@ fn test_picker_open_binding_is_available_in_modes() {
         HandleKeyResult::WaitForMore
     ));
     assert!(matches!(
+        normal.handle_key(&key('a')),
+        HandleKeyResult::Complete(intent)
+            if matches!(intent, crate::ui::Intent::Command(crate::ui::Command::LspCodeActions))
+    ));
+    assert!(matches!(
+        normal.handle_key(&key('g')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert!(matches!(
+        normal.handle_key(&key('r')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert!(matches!(
         normal.handle_key(&key('S')),
         HandleKeyResult::Complete(intent)
             if matches!(intent, crate::ui::Intent::Command(crate::ui::Command::OpenWorkspaceSymbolsPicker))

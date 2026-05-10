@@ -284,6 +284,7 @@ fn test_layout_lsp_hover_binding_noops_without_runtime() {
     assert!(layout.dispatch_intent(&Intent::Command(Command::LspNextDiagnostic)));
     assert!(layout.dispatch_intent(&Intent::Command(Command::LspPreviousErrorDiagnostic)));
     assert!(layout.dispatch_intent(&Intent::Command(Command::LspNextErrorDiagnostic)));
+    assert!(layout.dispatch_intent(&Intent::Command(Command::LspCodeActions)));
     assert!(layout.dispatch_intent(&Intent::Command(Command::LspRenamePrompt)));
     assert!(globals::active_notification(std::time::Instant::now()).is_none());
     assert!(!layout.command_line_is_open());

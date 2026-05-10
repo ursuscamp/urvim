@@ -4,6 +4,7 @@
 //! tree of pane-hosted window groups, routes split-management actions, and renders
 //! a footer status bar below the active editor region.
 
+mod code_actions_picker;
 mod colorscheme_picker;
 mod command_line;
 mod confirmation;
@@ -26,6 +27,7 @@ use crate::editor::{Action, ModeKind};
 use crate::screen::Screen;
 use crate::status_bar::StatusBar;
 use crate::terminal::CursorStyle;
+use crate::ui::code_actions_picker::CodeActionsPickerWidget;
 use crate::ui::colorscheme_picker::ColorschemePickerWidget;
 use crate::ui::confirmation_box::ConfirmationBox;
 use crate::ui::diagnostic_hover::DiagnosticHoverWidget;
@@ -59,6 +61,7 @@ pub struct Layout {
     command_line_open: bool,
     lsp_rename_prompt: Option<LspRenamePrompt>,
     colorscheme_picker: Option<ColorschemePickerWidget>,
+    code_actions_picker: Option<CodeActionsPickerWidget>,
     doc_symbols_picker: Option<DocSymbolsPickerWidget>,
     workspace_symbols_picker: Option<DocSymbolsPickerWidget>,
     file_picker: Option<FilePickerWidget>,
@@ -84,6 +87,7 @@ impl Layout {
             command_line_open: false,
             lsp_rename_prompt: None,
             colorscheme_picker: None,
+            code_actions_picker: None,
             doc_symbols_picker: None,
             workspace_symbols_picker: None,
             file_picker: None,
@@ -212,6 +216,14 @@ impl Layout {
         }
 
         if let Some(position) = self
+            .code_actions_picker
+            .as_ref()
+            .and_then(|picker| picker.cursor())
+        {
+            return Some(position);
+        }
+
+        if let Some(position) = self
             .doc_symbols_picker
             .as_ref()
             .and_then(|picker| picker.cursor())
@@ -312,6 +324,7 @@ impl Layout {
     pub(super) fn close_all_dialogs(&mut self) {
         self.close_command_line();
         self.close_colorscheme_picker();
+        self.close_code_actions_picker();
         self.close_doc_symbols_picker();
         self.close_workspace_symbols_picker();
         self.close_file_picker();
@@ -348,6 +361,21 @@ impl Layout {
                 self.open_colorscheme_picker();
                 true
             }
+            Command::LspCodeActions => {
+                if self.lsp_code_actions_supported() {
+                    self.open_lsp_code_actions_picker();
+                }
+                true
+            }
+            Command::LspApplyCodeAction { buffer_id, action } => self
+                .execute_lsp_code_action(*buffer_id, action.clone())
+                .map_or_else(
+                    |error| {
+                        crate::notify_error!("LSP code action failed: {}", error);
+                        true
+                    },
+                    |_| true,
+                ),
             Command::OpenDocumentSymbolsPicker => {
                 self.open_doc_symbols_picker();
                 true
@@ -659,6 +687,10 @@ impl Layout {
             return self.handle_colorscheme_picker_event(event);
         }
 
+        if self.code_actions_picker_is_open() {
+            return self.handle_code_actions_picker_event(event);
+        }
+
         if self.workspace_symbols_picker_is_open() {
             return self.handle_workspace_symbols_picker_event(event);
         }
@@ -729,12 +761,29 @@ impl Layout {
         .unwrap_or(false)
     }
 
+    fn lsp_code_actions_supported(&mut self) -> bool {
+        let buffer_id = self.active_buffer_view().buffer_id();
+        crate::globals::try_with_lsp_runtime_mut(|runtime| {
+            runtime.buffer_supports_code_actions(buffer_id)
+        })
+        .unwrap_or(false)
+    }
+
     fn lsp_rename_supported(&mut self) -> bool {
         let buffer_id = self.active_buffer_view().buffer_id();
         crate::globals::try_with_lsp_runtime_mut(|runtime| {
             runtime.buffer_supports_rename(buffer_id)
         })
         .unwrap_or(false)
+    }
+
+    fn execute_lsp_code_action(
+        &mut self,
+        buffer_id: crate::buffer::BufferId,
+        action: crate::lsp::runtime::CodeActionApplication,
+    ) -> Result<(), String> {
+        crate::globals::with_lsp_runtime_mut(|runtime| runtime.apply_code_action(buffer_id, action))
+            .ok_or_else(|| "LSP runtime is not available".to_string())?
     }
 }
 

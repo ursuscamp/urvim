@@ -42,6 +42,7 @@ bg = "bg"
 "ui.input.prompt" = { fg = "blue", bold = true }
 "ui.input.prompt.exact" = { fg = "blue", bold = true }
 "ui.input.prompt.fuzzy" = { fg = "blue", italic = true }
+"ui.picker.accent" = { fg = "blue", bold = true }
 "ui.input.prompt.separator" = { fg = "grey" }
 "ui.picker.location" = { fg = "light_grey" }
 "ui.notification.info" = { fg = "green" }

@@ -453,6 +453,7 @@ bold = true
 "ui.input.prompt" = { fg = "accent", bold = true }
 "ui.input.prompt.exact" = { fg = "accent", bold = true }
 "ui.input.prompt.fuzzy" = { fg = "accent", italic = true }
+"ui.picker.accent" = { fg = "accent", bold = true }
 "ui.input.prompt.separator" = { fg = "base" }
 "syntax.comment" = { fg = "base" }
 "syntax.constant" = { fg = "base" }

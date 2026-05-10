@@ -30,6 +30,7 @@ impl Layout {
             command_line_open: false,
             lsp_rename_prompt: None,
             colorscheme_picker: None,
+            code_actions_picker: None,
             doc_symbols_picker: None,
             workspace_symbols_picker: None,
             file_picker: None,

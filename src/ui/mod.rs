@@ -3,6 +3,7 @@
 //! These types provide a unified dispatch envelope that carries either editing
 //! actions or UI orchestration commands.
 
+pub mod code_actions_picker;
 pub mod colorscheme_picker;
 pub mod confirmation_box;
 pub mod diagnostic_hover;
@@ -145,6 +146,15 @@ pub enum Command {
     LspRenamePrompt,
     /// Run an LSP rename with the provided replacement name.
     LspRename(String),
+    /// Open a picker for available LSP code actions.
+    LspCodeActions,
+    /// Apply a selected LSP code action.
+    LspApplyCodeAction {
+        /// Buffer that owns the action.
+        buffer_id: crate::buffer::BufferId,
+        /// Action payload to apply.
+        action: crate::lsp::runtime::CodeActionApplication,
+    },
     /// Open a file selected from a picker.
     OpenFile(PathBuf),
     /// Open a file and place the cursor at the provided position.

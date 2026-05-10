@@ -396,6 +396,7 @@ fn register_misc_bindings(trie_keymap: &mut TrieKeymap) {
     trie_keymap.insert_str("<F3>", Command::OpenColorschemePicker);
     trie_keymap.insert_str("K", Command::LspHover);
     trie_keymap.insert_str("gd", Command::LspDefinition);
+    trie_keymap.insert_str("gra", Command::LspCodeActions);
     trie_keymap.insert_str("grn", Command::LspRenamePrompt);
     trie_keymap.insert_str("%", Action::new(ActionKind::MoveToMatchingBracket));
     trie_keymap.insert_str(";", Action::new(ActionKind::RepeatLastFind));
