@@ -33,6 +33,7 @@ impl Layout {
 
         let mut picker =
             ReferencesPickerWidget::new(ReferencesPickerSource::new(references, self.jobs.clone()));
+        picker.set_label("References");
         picker.set_query_prompt_segments(ReferencesPickerSource::query_prompt_segments(
             crate::ui::references_picker::QueryMode::Exact,
         ));

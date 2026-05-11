@@ -9,9 +9,7 @@ This is a list, in no particular order, of things that need to be addressed whic
 - buffer selector
 - reloading changed files on disk
 - examine preview pane and hover pane and see if there are any common patterns which can be extracted
-- create a fancy text formatter with layout and styling, use it for Gutter and status bar
 - folding
-- add labels to bordered window frames
 
 - something like extmarks
     - useful for ghost text (inline type hints, code action hints)

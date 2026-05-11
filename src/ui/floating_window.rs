@@ -8,6 +8,8 @@ use crate::globals;
 use crate::screen::Screen;
 use crate::terminal::Style;
 use crate::window::{Position, Size};
+use unicode_segmentation::UnicodeSegmentation;
+use unicode_width::UnicodeWidthStr;
 
 /// Placement anchor for floating windows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -33,6 +35,57 @@ pub struct FloatingWindowFrame {
     pub content_origin: Position,
     /// Inner content size inside the border.
     pub content_size: Size,
+}
+
+/// Label rendered into a floating window frame border.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FloatingWindowFrameLabel<'a> {
+    /// Text to render inside the border.
+    pub text: &'a str,
+    /// Frame side where the label should be rendered.
+    pub side: FloatingWindowFrameLabelSide,
+    /// Label alignment within the non-corner border span.
+    pub align: FloatingWindowFrameLabelAlign,
+}
+
+impl<'a> FloatingWindowFrameLabel<'a> {
+    /// Creates a frame label.
+    pub fn new(
+        text: &'a str,
+        side: FloatingWindowFrameLabelSide,
+        align: FloatingWindowFrameLabelAlign,
+    ) -> Self {
+        Self { text, side, align }
+    }
+
+    /// Creates a top-centered frame label.
+    pub fn top_center(text: &'a str) -> Self {
+        Self::new(
+            text,
+            FloatingWindowFrameLabelSide::Top,
+            FloatingWindowFrameLabelAlign::Center,
+        )
+    }
+}
+
+/// Side of a floating window frame where a label is rendered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FloatingWindowFrameLabelSide {
+    /// Render the label on the top border.
+    Top,
+    /// Render the label on the bottom border.
+    Bottom,
+}
+
+/// Alignment for a frame label within the non-corner border span.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FloatingWindowFrameLabelAlign {
+    /// Align the label to the left edge of the border span.
+    Left,
+    /// Center the label in the border span.
+    Center,
+    /// Align the label to the right edge of the border span.
+    Right,
 }
 
 impl FloatingWindowFrame {
@@ -138,6 +191,17 @@ impl FloatingWindowFrame {
 
     /// Draws the bordered floating frame and fills its body region.
     pub fn render_bordered(self, screen: &mut Screen, border_style: Style, body_style: Style) {
+        self.render_bordered_with_label(screen, border_style, body_style, None);
+    }
+
+    /// Draws the bordered floating frame with an optional border label.
+    pub fn render_bordered_with_label(
+        self,
+        screen: &mut Screen,
+        border_style: Style,
+        body_style: Style,
+        label: Option<FloatingWindowFrameLabel<'_>>,
+    ) {
         if self.size.rows < 3 || self.size.cols < 3 {
             return;
         }
@@ -173,6 +237,49 @@ impl FloatingWindowFrame {
             screen.write_string(row, left_col, border_style, glyphs.vertical);
             screen.write_string(row, right_col, border_style, glyphs.vertical);
         }
+
+        if let Some(label) = label {
+            self.render_label(screen, border_style, label);
+        }
+    }
+
+    fn render_label(
+        self,
+        screen: &mut Screen,
+        border_style: Style,
+        label: FloatingWindowFrameLabel<'_>,
+    ) {
+        let Some((row, col, text)) = self.resolve_label(label) else {
+            return;
+        };
+
+        screen.write_str(row, col, border_style, text.as_str());
+    }
+
+    fn resolve_label(self, label: FloatingWindowFrameLabel<'_>) -> Option<(u16, u16, String)> {
+        let available_cols = self.size.cols.checked_sub(2)? as usize;
+        if available_cols == 0 {
+            return None;
+        }
+
+        let text = clipped_label_text(label.text, available_cols);
+        let label_cols = UnicodeWidthStr::width(text.as_str());
+        if label_cols == 0 {
+            return None;
+        }
+
+        let offset = match label.align {
+            FloatingWindowFrameLabelAlign::Left => 0,
+            FloatingWindowFrameLabelAlign::Center => available_cols.saturating_sub(label_cols) / 2,
+            FloatingWindowFrameLabelAlign::Right => available_cols.saturating_sub(label_cols),
+        } as u16;
+        let row = match label.side {
+            FloatingWindowFrameLabelSide::Top => self.origin.row,
+            FloatingWindowFrameLabelSide::Bottom => self.origin.row + self.size.rows - 1,
+        };
+        let col = self.origin.col + 1 + offset;
+
+        Some((row, col, text))
     }
 
     /// Draws a horizontal separator connected to this frame's side borders.
@@ -190,6 +297,23 @@ impl FloatingWindowFrame {
         }
         screen.write_string(row, right_col, style, glyphs.separator_right);
     }
+}
+
+fn clipped_label_text(text: &str, max_cols: usize) -> String {
+    let text = text.lines().next().unwrap_or("");
+    let mut clipped = String::new();
+    let mut cols = 0usize;
+    for grapheme in text.graphemes(true) {
+        let width = UnicodeWidthStr::width(grapheme);
+        if cols.saturating_add(width) > max_cols {
+            break;
+        }
+
+        clipped.push_str(grapheme);
+        cols += width;
+    }
+
+    clipped
 }
 
 /// Glyph set used to draw bordered floating windows and internal separators.
@@ -374,5 +498,70 @@ mod tests {
         assert_eq!(glyphs.horizontal, "─");
         assert_eq!(glyphs.separator_left, "├");
         assert_eq!(glyphs.separator_right, "┤");
+    }
+
+    #[test]
+    fn label_resolves_top_center_inside_corners() {
+        let frame = frame_at_origin(Size::new(3, 12));
+        let label = FloatingWindowFrameLabel::top_center("Name");
+
+        assert_eq!(frame.resolve_label(label), Some((0, 4, "Name".to_string())));
+    }
+
+    #[test]
+    fn label_resolves_bottom_left_inside_corners() {
+        let frame = frame_at_origin(Size::new(5, 12));
+        let label = FloatingWindowFrameLabel::new(
+            "Name",
+            FloatingWindowFrameLabelSide::Bottom,
+            FloatingWindowFrameLabelAlign::Left,
+        );
+
+        assert_eq!(frame.resolve_label(label), Some((4, 1, "Name".to_string())));
+    }
+
+    #[test]
+    fn label_resolves_top_right_inside_corners() {
+        let frame = frame_at_origin(Size::new(3, 12));
+        let label = FloatingWindowFrameLabel::new(
+            "Name",
+            FloatingWindowFrameLabelSide::Top,
+            FloatingWindowFrameLabelAlign::Right,
+        );
+
+        assert_eq!(frame.resolve_label(label), Some((0, 7, "Name".to_string())));
+    }
+
+    #[test]
+    fn label_clips_to_non_corner_span() {
+        let frame = frame_at_origin(Size::new(3, 6));
+        let label = FloatingWindowFrameLabel::top_center("abcdef");
+
+        assert_eq!(frame.resolve_label(label), Some((0, 1, "abcd".to_string())));
+    }
+
+    #[test]
+    fn label_clips_wide_graphemes_without_exceeding_span() {
+        let frame = frame_at_origin(Size::new(3, 5));
+        let label = FloatingWindowFrameLabel::top_center("ab🙂");
+
+        assert_eq!(frame.resolve_label(label), Some((0, 1, "ab".to_string())));
+    }
+
+    #[test]
+    fn empty_label_does_not_resolve() {
+        let frame = frame_at_origin(Size::new(3, 6));
+        let label = FloatingWindowFrameLabel::top_center("");
+
+        assert_eq!(frame.resolve_label(label), None);
+    }
+
+    fn frame_at_origin(size: Size) -> FloatingWindowFrame {
+        FloatingWindowFrame {
+            origin: Position::new(0, 0),
+            size,
+            content_origin: Position::new(1, 1),
+            content_size: Size::new(size.rows.saturating_sub(2), size.cols.saturating_sub(2)),
+        }
     }
 }

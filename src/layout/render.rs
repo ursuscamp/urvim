@@ -10,7 +10,7 @@ use crate::notification;
 use crate::screen::Screen;
 use crate::status_bar::StatusBarContext;
 use crate::terminal::Style;
-use crate::ui::floating_window::{FloatingAnchor, FloatingWindowFrame};
+use crate::ui::floating_window::{FloatingAnchor, FloatingWindowFrame, FloatingWindowFrameLabel};
 use crate::ui::{UiContext, UiRect};
 use crate::widget::Widget;
 use crate::window::{Position, Size};
@@ -278,7 +278,12 @@ impl Layout {
             return;
         };
 
-        frame.render_bordered(screen, border_style, body_style);
+        frame.render_bordered_with_label(
+            screen,
+            border_style,
+            body_style,
+            Some(FloatingWindowFrameLabel::top_center("Command")),
+        );
         let cursor = {
             input.set_text_style(body_style);
             input.render_widget(

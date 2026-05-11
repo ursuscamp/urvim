@@ -7,7 +7,7 @@ use crate::background::JobManager;
 use crate::config::AdvancedGlyphCapability;
 use crate::screen::Screen;
 use crate::terminal::{KeyCode, Style};
-use crate::ui::floating_window::{FloatingAnchor, FloatingWindowFrame};
+use crate::ui::floating_window::{FloatingAnchor, FloatingWindowFrame, FloatingWindowFrameLabel};
 use crate::ui::inputs::{InputWidget, PromptSegment};
 pub use crate::ui::line_format::{
     EllipsisPlacement, FormattedLineSection, FormattedLineSegment, FormattedLineTemplate,
@@ -254,6 +254,7 @@ pub struct PickerWidget<S: PickerSource> {
     preview_adapter: PickerPreviewAdapter,
     preview_receiver: Receiver<PickerPreviewEvent>,
     preview_sender: Sender<PickerPreviewEvent>,
+    label: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -300,6 +301,7 @@ impl<S: PickerSource> PickerWidget<S> {
             preview_adapter: PickerPreviewAdapter::with_jobs(jobs),
             preview_receiver,
             preview_sender,
+            label: None,
         }
     }
 
@@ -355,6 +357,11 @@ impl<S: PickerSource> PickerWidget<S> {
     /// Returns a mutable reference to the backing picker source.
     pub fn source_mut(&mut self) -> &mut S {
         &mut self.source
+    }
+
+    /// Sets the label rendered in the picker's top border.
+    pub fn set_label(&mut self, label: impl Into<String>) {
+        self.label = Some(label.into());
     }
 
     fn reset_preview_scroll_for_key(&mut self, key: &str) {
@@ -875,7 +882,11 @@ impl<S: PickerSource> Widget for PickerWidget<S> {
         let border_style = theme_style("ui.window.lines.border");
         let body_style = theme_style("ui.window");
         let active_style = theme_style("ui.window.active_line");
-        frame.render_bordered(screen, border_style, body_style);
+        let label = self
+            .label
+            .as_deref()
+            .map(FloatingWindowFrameLabel::top_center);
+        frame.render_bordered_with_label(screen, border_style, body_style, label);
 
         self.query_input.set_text_style(body_style);
         {

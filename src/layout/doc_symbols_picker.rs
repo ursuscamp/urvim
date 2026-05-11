@@ -38,6 +38,10 @@ impl Layout {
         picker.set_query_prompt_segments(DocSymbolsPickerSource::query_prompt_segments(
             crate::ui::doc_symbols_picker::QueryMode::Exact,
         ));
+        picker.set_label(match scope {
+            DocSymbolsPickerScope::Document(_) => "Document Symbols",
+            DocSymbolsPickerScope::Workspace => "Workspace Symbols",
+        });
         picker.restart_search();
 
         match scope {

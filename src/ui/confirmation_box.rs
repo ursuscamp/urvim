@@ -6,7 +6,7 @@
 
 use crate::screen::Screen;
 use crate::terminal::{KeyCode, Style};
-use crate::ui::floating_window::{FloatingAnchor, FloatingWindowFrame};
+use crate::ui::floating_window::{FloatingAnchor, FloatingWindowFrame, FloatingWindowFrameLabel};
 use crate::ui::{FocusPolicy, Intent, UiContext, UiEvent, UiEventResult, UiRect};
 use crate::widget::Widget;
 use unicode_segmentation::UnicodeSegmentation;
@@ -109,7 +109,12 @@ impl ConfirmationBox {
             return;
         };
 
-        frame.render_bordered(screen, border_style, body_style);
+        frame.render_bordered_with_label(
+            screen,
+            border_style,
+            body_style,
+            Some(FloatingWindowFrameLabel::top_center("Confirm")),
+        );
         for (line_idx, line) in prompt_lines
             .iter()
             .take(content_height.saturating_sub(1))

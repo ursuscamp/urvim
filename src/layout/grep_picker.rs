@@ -14,8 +14,9 @@ impl Layout {
 
         match std::env::current_dir() {
             Ok(cwd) => {
-                let picker =
+                let mut picker =
                     GrepPickerWidget::new(GrepPickerSource::with_jobs(cwd, self.jobs.clone()));
+                picker.set_label("Grep");
                 self.grep_picker = Some(picker);
                 self.refresh_grep_picker_prompt();
             }

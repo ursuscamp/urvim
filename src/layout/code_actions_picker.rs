@@ -35,6 +35,7 @@ impl Layout {
             actions,
             self.jobs.clone(),
         ));
+        picker.set_label("Code Actions");
         picker.set_query_prompt_segments(CodeActionsPickerSource::query_prompt_segments());
         picker.restart_search();
         self.code_actions_picker = Some(picker);

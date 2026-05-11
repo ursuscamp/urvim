@@ -17,6 +17,7 @@ impl Layout {
             names,
             self.jobs.clone(),
         ));
+        picker.set_label("Colorschemes");
         picker.restart_search();
         self.colorscheme_picker = Some(picker);
     }

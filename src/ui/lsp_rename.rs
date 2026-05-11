@@ -2,7 +2,7 @@
 
 use crate::screen::Screen;
 use crate::terminal::{KeyCode, Style};
-use crate::ui::floating_window::{FloatingAnchor, FloatingWindowFrame};
+use crate::ui::floating_window::{FloatingAnchor, FloatingWindowFrame, FloatingWindowFrameLabel};
 use crate::ui::inputs::InputWidget;
 use crate::ui::{Command, FocusPolicy, Intent, UiContext, UiEvent, UiEventResult, UiRect};
 use crate::widget::Widget;
@@ -83,7 +83,12 @@ impl LspRenamePrompt {
             return;
         };
 
-        frame.render_bordered(screen, border_style, body_style);
+        frame.render_bordered_with_label(
+            screen,
+            border_style,
+            body_style,
+            Some(FloatingWindowFrameLabel::top_center("Rename")),
+        );
         self.input.render_widget(
             screen,
             UiRect::new(frame.content_origin, frame.content_size),

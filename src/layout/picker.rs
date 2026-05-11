@@ -14,8 +14,9 @@ impl Layout {
 
         match std::env::current_dir() {
             Ok(cwd) => {
-                let picker =
+                let mut picker =
                     FilePickerWidget::new(FilePickerSource::with_jobs(cwd, self.jobs.clone()));
+                picker.set_label("Files");
                 self.file_picker = Some(picker);
                 self.refresh_file_picker_prompt();
             }
