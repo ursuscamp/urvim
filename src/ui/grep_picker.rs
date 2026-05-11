@@ -8,8 +8,9 @@ use crate::syntax::FiletypeGlyph;
 use crate::terminal::Style;
 use crate::ui::inputs::PromptSegment;
 use crate::ui::picker::{
-    PickerItem, PickerPreview, PickerPreviewEvent, PickerRenderSegment, PickerSearchEvent,
-    PickerSource, PickerWidget, picker_indicator_glyph,
+    EllipsisPlacement, FormattedLineSection, FormattedLineTemplate, PickerFormattedLine,
+    PickerItem, PickerPreview, PickerPreviewEvent, PickerSearchEvent, PickerSource, PickerWidget,
+    picker_indicator_glyph,
 };
 use crate::ui::{Command, Intent};
 use ignore::WalkBuilder;
@@ -233,42 +234,34 @@ impl PickerSource for GrepPickerSource {
 }
 
 impl PickerItem for GrepPickerItem {
-    fn render_segments(
-        &self,
-        available_cols: usize,
-        base_style: Style,
-    ) -> Vec<PickerRenderSegment> {
+    fn formatted_line(&self, base_style: Style) -> PickerFormattedLine {
         let label = display_label(self.root.as_path(), self.path.as_path());
         let suffix = format!(":{}:{}", self.line + 1, self.column + 1);
-        let mut remaining_cols = available_cols;
-        let mut segments = Vec::new();
         let suffix_style = base_style.faint().accent(location_style());
-        let suffix_cols = unicode_width::UnicodeWidthStr::width(suffix.as_str());
-
-        if remaining_cols <= suffix_cols {
-            let (visible_suffix, _) =
-                crate::ui::picker::visible_tail_text(suffix.as_str(), remaining_cols, true);
-            return vec![PickerRenderSegment::new(visible_suffix, suffix_style)];
-        }
+        let mut sections = Vec::new();
+        let mut values: Vec<String> = Vec::new();
 
         if let Some(glyph) = FiletypeGlyph::from_path(self.path.as_path()) {
-            let glyph_cols = unicode_width::UnicodeWidthStr::width(glyph.glyph.as_str());
-            if remaining_cols > glyph_cols + 1 {
-                segments.push(PickerRenderSegment::new(
-                    glyph.glyph,
-                    base_style.accent(glyph.style),
-                ));
-                segments.push(PickerRenderSegment::new(" ", base_style));
-                remaining_cols = remaining_cols.saturating_sub(glyph_cols + 1);
-            }
+            let glyph_width = unicode_width::UnicodeWidthStr::width(glyph.glyph.as_str()) as u16;
+            sections.push(FormattedLineSection::fixed(
+                glyph_width,
+                base_style.accent(glyph.style),
+            ));
+            values.push(glyph.glyph.to_string());
+            sections.push(FormattedLineSection::fixed(1, base_style));
+            values.push(" ".to_string());
         }
 
-        let path_budget = remaining_cols.saturating_sub(suffix_cols);
-        let (visible_label, _) =
-            crate::ui::picker::visible_tail_text(label.as_str(), path_budget, true);
-        segments.push(PickerRenderSegment::new(visible_label, base_style));
-        segments.push(PickerRenderSegment::new(suffix, suffix_style));
-        segments
+        sections.push(FormattedLineSection::measured(base_style).with_overflow(
+            crate::ui::picker::LineSectionOverflow::Ellipsis(EllipsisPlacement::Start),
+        ));
+        values.push(label);
+
+        let suffix_width = unicode_width::UnicodeWidthStr::width(suffix.as_str()) as u16;
+        sections.push(FormattedLineSection::fixed(suffix_width, suffix_style));
+        values.push(suffix);
+
+        PickerFormattedLine::new(FormattedLineTemplate::new(sections), values)
     }
 }
 

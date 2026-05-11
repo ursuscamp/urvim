@@ -9,6 +9,10 @@ use crate::screen::Screen;
 use crate::terminal::{KeyCode, Style};
 use crate::ui::floating_window::{FloatingAnchor, FloatingWindowFrame};
 use crate::ui::inputs::{InputWidget, PromptSegment};
+pub use crate::ui::line_format::{
+    EllipsisPlacement, FormattedLineSection, FormattedLineSegment, FormattedLineTemplate,
+    LineSectionAlignment, LineSectionOverflow, LineSectionWidth,
+};
 use crate::ui::picker_preview::PickerPreviewAdapter;
 use crate::ui::{FocusPolicy, Intent, UiContext, UiEvent, UiEventResult, UiRect};
 use crate::widget::Widget;
@@ -118,22 +122,65 @@ impl PickerRenderSegment {
     }
 }
 
+impl From<FormattedLineSegment> for PickerRenderSegment {
+    fn from(segment: FormattedLineSegment) -> Self {
+        Self::new(segment.text, segment.style)
+    }
+}
+
+/// A formatted picker row described by a reusable line template.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PickerFormattedLine {
+    template: FormattedLineTemplate,
+    values: Vec<String>,
+}
+
+impl PickerFormattedLine {
+    /// Creates a picker row from a template and matching values.
+    pub fn new(template: FormattedLineTemplate, values: Vec<String>) -> Self {
+        Self { template, values }
+    }
+
+    /// Renders the picker row into styled segments.
+    pub fn render_segments(&self, available_cols: usize) -> Vec<PickerRenderSegment> {
+        self.template
+            .render_segments(
+                self.values.iter().map(String::as_str),
+                available_cols.min(u16::MAX as usize) as u16,
+            )
+            .expect("picker item line template")
+            .into_iter()
+            .map(Into::into)
+            .collect()
+    }
+}
+
 impl PickerItem for String {
-    fn render_segments(
-        &self,
-        available_cols: usize,
-        base_style: Style,
-    ) -> Vec<PickerRenderSegment> {
-        let (visible_label, _) = visible_tail_text(self.as_str(), available_cols, true);
-        vec![PickerRenderSegment::new(visible_label, base_style)]
+    fn formatted_line(&self, base_style: Style) -> PickerFormattedLine {
+        PickerFormattedLine::new(
+            FormattedLineTemplate::new(vec![
+                FormattedLineSection::measured(base_style)
+                    .with_overflow(LineSectionOverflow::Ellipsis(EllipsisPlacement::Start)),
+            ]),
+            vec![self.clone()],
+        )
     }
 }
 
 /// An item that can render itself for display inside a picker result row.
 pub trait PickerItem: Clone + Send + 'static {
+    /// Returns a formatted line description for the item.
+    fn formatted_line(&self, base_style: Style) -> PickerFormattedLine;
+
     /// Returns styled segments for the item using the provided width budget.
-    fn render_segments(&self, available_cols: usize, base_style: Style)
-    -> Vec<PickerRenderSegment>;
+    fn render_segments(
+        &self,
+        available_cols: usize,
+        base_style: Style,
+    ) -> Vec<PickerRenderSegment> {
+        self.formatted_line(base_style)
+            .render_segments(available_cols)
+    }
 
     /// Returns whether the picker should pad the row to full width.
     fn pad_to_full_width(&self) -> bool {

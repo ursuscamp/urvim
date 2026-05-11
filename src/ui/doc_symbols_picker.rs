@@ -12,7 +12,7 @@ use crate::ui::line_format::{
     LineSectionOverflow,
 };
 use crate::ui::picker::{
-    PickerItem, PickerPreview, PickerPreviewEvent, PickerRenderSegment, PickerSearchEvent,
+    PickerFormattedLine, PickerItem, PickerPreview, PickerPreviewEvent, PickerSearchEvent,
     PickerSource, PickerWidget, picker_indicator_glyph,
 };
 use crate::ui::{Command, Intent};
@@ -457,62 +457,46 @@ fn fuzzy_matches(query: &str, candidate: &str) -> bool {
 }
 
 impl PickerItem for DocSymbolsPickerItem {
-    fn render_segments(
-        &self,
-        available_cols: usize,
-        base_style: Style,
-    ) -> Vec<PickerRenderSegment> {
+    fn formatted_line(&self, base_style: Style) -> PickerFormattedLine {
         if self.show_path {
-            return self.render_workspace_segments(available_cols, base_style);
+            return self.workspace_formatted_line(base_style);
         }
 
         let cursor = self.resolved_cursor();
         let suffix = format!(":{}:{}", cursor.line + 1, cursor.col + 1);
-        let suffix_cols = unicode_width::UnicodeWidthStr::width(suffix.as_str());
-        if available_cols <= suffix_cols {
-            let (visible_suffix, _) =
-                crate::ui::picker::visible_tail_text(suffix.as_str(), available_cols, true);
-            return vec![PickerRenderSegment::new(
-                visible_suffix,
-                base_style.faint().accent(location_style()),
-            )];
-        }
+        let mut sections = Vec::new();
+        let mut values = Vec::new();
 
-        let mut segments = Vec::new();
-        let mut remaining_cols = available_cols.saturating_sub(suffix_cols);
         let prefix = "  ".repeat(self.depth);
         if !prefix.is_empty() {
-            let prefix_cols = unicode_width::UnicodeWidthStr::width(prefix.as_str());
-            if remaining_cols > prefix_cols {
-                segments.push(PickerRenderSegment::new(prefix, base_style));
-                remaining_cols = remaining_cols.saturating_sub(prefix_cols);
-            }
+            let prefix_cols = unicode_width::UnicodeWidthStr::width(prefix.as_str()) as u16;
+            sections.push(FormattedLineSection::fixed(prefix_cols, base_style));
+            values.push(prefix);
         }
 
         if let Some(glyph) = symbol_kind_glyph(self.kind) {
-            let glyph_cols = unicode_width::UnicodeWidthStr::width(glyph);
-            if remaining_cols > glyph_cols + 1 {
-                segments.push(PickerRenderSegment::new(
-                    glyph,
-                    base_style.accent(accent_style()),
-                ));
-                segments.push(PickerRenderSegment::new(" ", base_style));
-                remaining_cols = remaining_cols.saturating_sub(glyph_cols + 1);
-            }
+            let glyph_cols = unicode_width::UnicodeWidthStr::width(glyph) as u16;
+            sections.push(FormattedLineSection::fixed(
+                glyph_cols,
+                base_style.accent(accent_style()),
+            ));
+            values.push(glyph.to_string());
+            sections.push(FormattedLineSection::fixed(1, base_style));
+            values.push(" ".to_string());
         }
 
-        let (visible_name, _) =
-            crate::ui::picker::visible_tail_text(self.name.as_str(), remaining_cols, true);
-        segments.push(PickerRenderSegment::new(
-            visible_name,
-            base_style.overlay(symbol_kind_style(self.kind)),
-        ));
+        sections.push(
+            FormattedLineSection::measured(base_style.overlay(symbol_kind_style(self.kind)))
+                .with_overflow(LineSectionOverflow::Ellipsis(EllipsisPlacement::Start)),
+        );
+        values.push(self.name.clone());
 
-        segments.push(PickerRenderSegment::new(
-            suffix,
-            base_style.faint().accent(location_style()),
-        ));
-        segments
+        let suffix_style = base_style.faint().accent(location_style());
+        let suffix_cols = unicode_width::UnicodeWidthStr::width(suffix.as_str()) as u16;
+        sections.push(FormattedLineSection::fixed(suffix_cols, suffix_style));
+        values.push(suffix);
+
+        PickerFormattedLine::new(FormattedLineTemplate::new(sections), values)
     }
 
     fn pad_to_full_width(&self) -> bool {
@@ -533,11 +517,7 @@ impl DocSymbolsPickerItem {
         cursor_from_range_utf16(&lines, range).unwrap_or(self.cursor)
     }
 
-    fn render_workspace_segments(
-        &self,
-        available_cols: usize,
-        base_style: Style,
-    ) -> Vec<PickerRenderSegment> {
+    fn workspace_formatted_line(&self, base_style: Style) -> PickerFormattedLine {
         let (line, col) = self.display_position();
         let suffix = format!(":{}:{}", line + 1, col + 1);
         let path_label = self.path_display();
@@ -545,16 +525,20 @@ impl DocSymbolsPickerItem {
         let mut values = Vec::new();
 
         if self.depth > 0 {
-            sections.push(FormattedLineSection::measured(base_style));
+            let prefix = "  ".repeat(self.depth);
+            let prefix_cols = unicode_width::UnicodeWidthStr::width(prefix.as_str()) as u16;
+            sections.push(FormattedLineSection::fixed(prefix_cols, base_style));
             values.push("  ".repeat(self.depth));
         }
 
         if let Some(glyph) = symbol_kind_glyph(self.kind) {
-            sections.push(FormattedLineSection::measured(
+            let glyph_cols = unicode_width::UnicodeWidthStr::width(glyph) as u16;
+            sections.push(FormattedLineSection::fixed(
+                glyph_cols,
                 base_style.accent(accent_style()),
             ));
             values.push(glyph.to_string());
-            sections.push(FormattedLineSection::measured(base_style));
+            sections.push(FormattedLineSection::fixed(1, base_style));
             values.push(" ".to_string());
         }
 
@@ -575,17 +559,7 @@ impl DocSymbolsPickerItem {
         ));
         values.push(suffix);
 
-        let rendered = FormattedLineTemplate::new(sections)
-            .render_segments(
-                values.iter().map(String::as_str),
-                available_cols.min(u16::MAX as usize) as u16,
-            )
-            .expect("workspace symbol picker line template");
-
-        rendered
-            .into_iter()
-            .map(|segment| PickerRenderSegment::new(segment.text, segment.style))
-            .collect()
+        PickerFormattedLine::new(FormattedLineTemplate::new(sections), values)
     }
 
     fn path_display(&self) -> String {

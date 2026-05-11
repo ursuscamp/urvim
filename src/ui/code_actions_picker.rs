@@ -7,8 +7,8 @@ use crate::lsp::runtime::CodeActionApplication;
 use crate::terminal::Style;
 use crate::ui::inputs::PromptSegment;
 use crate::ui::picker::{
-    PickerItem, PickerRenderSegment, PickerSearchEvent, PickerSource, PickerWidget,
-    picker_indicator_glyph, visible_tail_text,
+    EllipsisPlacement, FormattedLineSection, FormattedLineTemplate, PickerFormattedLine,
+    PickerItem, PickerSearchEvent, PickerSource, PickerWidget, picker_indicator_glyph,
 };
 use crate::ui::{Command, Intent};
 use std::sync::Arc;
@@ -135,54 +135,40 @@ impl PickerSource for CodeActionsPickerSource {
 }
 
 impl PickerItem for CodeActionsPickerItem {
-    fn render_segments(
-        &self,
-        available_cols: usize,
-        base_style: Style,
-    ) -> Vec<PickerRenderSegment> {
+    fn formatted_line(&self, base_style: Style) -> PickerFormattedLine {
         let number_style = base_style.accent(theme_style("ui.picker.accent"));
         let tag_style = base_style.accent(theme_style("ui.picker.location"));
         let title_style = base_style;
 
         let number = format!("{}.", self.number);
-        let number_cols = unicode_width::UnicodeWidthStr::width(number.as_str());
-        let mut segments = Vec::new();
-        let mut remaining_cols = available_cols;
-
-        if remaining_cols > 0 {
-            let (visible_number, _) = visible_tail_text(number.as_str(), remaining_cols, true);
-            if !visible_number.is_empty() {
-                remaining_cols = remaining_cols.saturating_sub(number_cols.min(remaining_cols));
-                segments.push(PickerRenderSegment::new(visible_number, number_style));
-            }
-        }
-
-        if remaining_cols > 0 {
-            let separator = " ";
-            let separator_cols = unicode_width::UnicodeWidthStr::width(separator);
-            if remaining_cols > separator_cols {
-                segments.push(PickerRenderSegment::new(separator, title_style));
-                remaining_cols = remaining_cols.saturating_sub(separator_cols);
-            }
-        }
-
         let kind_suffix = self
             .kind
-            .as_ref()
-            .map(|kind| format!(" [{}]", kind))
-            .unwrap_or_default();
-        let kind_cols = unicode_width::UnicodeWidthStr::width(kind_suffix.as_str());
-        let title_cols = remaining_cols.saturating_sub(kind_cols);
-        let (visible_title, _) = visible_tail_text(self.title.as_str(), title_cols, true);
-        if !visible_title.is_empty() {
-            segments.push(PickerRenderSegment::new(visible_title, title_style));
+            .as_deref()
+            .map(str::trim)
+            .filter(|kind| !kind.is_empty())
+            .map(|kind| format!(" [{}]", kind));
+        let mut sections = Vec::new();
+        let mut values = Vec::new();
+
+        let number_cols = unicode_width::UnicodeWidthStr::width(number.as_str()) as u16;
+        sections.push(FormattedLineSection::fixed(number_cols, number_style));
+        values.push(number);
+
+        sections.push(FormattedLineSection::fixed(1, title_style));
+        values.push(" ".to_string());
+
+        sections.push(FormattedLineSection::measured(title_style).with_overflow(
+            crate::ui::picker::LineSectionOverflow::Ellipsis(EllipsisPlacement::Start),
+        ));
+        values.push(self.title.clone());
+
+        if let Some(kind_suffix) = kind_suffix {
+            let kind_cols = unicode_width::UnicodeWidthStr::width(kind_suffix.as_str()) as u16;
+            sections.push(FormattedLineSection::fixed(kind_cols, tag_style));
+            values.push(kind_suffix);
         }
 
-        if !kind_suffix.is_empty() && remaining_cols > kind_cols {
-            segments.push(PickerRenderSegment::new(kind_suffix, tag_style));
-        }
-
-        segments
+        PickerFormattedLine::new(FormattedLineTemplate::new(sections), values)
     }
 }
 
@@ -196,9 +182,7 @@ fn theme_style(name: &str) -> Style {
 
 fn build_search_text(number: usize, title: &str, kind: Option<&str>) -> String {
     let mut text = format!("{} {}", number, title).to_lowercase();
-    if let Some(kind) = kind
-        && !kind.is_empty()
-    {
+    if let Some(kind) = kind.map(str::trim).filter(|kind| !kind.is_empty()) {
         text.push(' ');
         text.push_str(kind.to_lowercase().as_str());
     }
@@ -294,5 +278,31 @@ mod tests {
         assert_eq!(segments[0].text, "12.");
         assert_eq!(segments[1].text, " ");
         assert_eq!(segments[2].text, "Rename symbol");
+    }
+
+    #[test]
+    fn picker_item_omits_empty_kind_tag() {
+        let item = CodeActionsPickerItem {
+            number: 12,
+            title: "Rename symbol".to_string(),
+            kind: Some("   ".to_string()),
+            search_text: "12 rename symbol".to_string(),
+            application: CodeActionApplication {
+                title: "Rename symbol".to_string(),
+                kind: Some("   ".to_string()),
+                edit: None,
+                command: None,
+                command_arguments_json: None,
+            },
+        };
+
+        let segments = item.render_segments(80, Style::default());
+        let text = segments
+            .iter()
+            .map(|segment| segment.text.as_str())
+            .collect::<String>();
+
+        assert_eq!(text, "12. Rename symbol");
+        assert!(!text.contains("[]"));
     }
 }
