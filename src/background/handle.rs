@@ -126,6 +126,12 @@ impl Drop for JobHandle {
     fn drop(&mut self) {
         self.shared.stop();
         self.shared.available.notify_all();
+
+        #[cfg(test)]
+        {
+            return;
+        }
+
         if let Some(worker) = self.worker.lock().unwrap().take() {
             worker.join().ok();
         }

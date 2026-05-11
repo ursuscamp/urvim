@@ -682,7 +682,7 @@ mod tests {
         LOCK.get_or_init(|| Mutex::new(())).lock().unwrap()
     }
 
-    fn notification_state_lock() -> std::sync::MutexGuard<'static, ()> {
+    fn notification_test_lock() -> std::sync::MutexGuard<'static, ()> {
         static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
         LOCK.get_or_init(|| Mutex::new(()))
             .lock()
@@ -956,7 +956,7 @@ mod tests {
 
     #[test]
     fn handle_save_buffer_action_emits_success_notification() {
-        let _guard = notification_state_lock();
+        let _guard = notification_test_lock();
         globals::clear_notifications();
 
         let unique = format!(
@@ -986,7 +986,7 @@ mod tests {
 
     #[test]
     fn handle_save_buffer_action_emits_error_notification_for_missing_buffer() {
-        let _guard = notification_state_lock();
+        let _guard = notification_test_lock();
         globals::clear_notifications();
         let mut layout = Layout::new(WindowGroup::from_buffers(vec![Buffer::new()]));
 
