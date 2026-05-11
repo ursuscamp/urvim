@@ -9,21 +9,22 @@ impl Layout {
         positive_intent: impl Into<Intent>,
     ) {
         self.close_all_dialogs();
-        self.confirmation_box = Some(ConfirmationBox::new(query, positive_intent));
+        self.dialogs.confirmation_box = Some(ConfirmationBox::new(query, positive_intent));
     }
 
     pub(super) fn close_confirmation_box(&mut self) {
-        self.confirmation_box = None;
+        self.dialogs.confirmation_box = None;
     }
 
     pub(super) fn confirmation_box_is_open(&self) -> bool {
-        self.confirmation_box
+        self.dialogs
+            .confirmation_box
             .as_ref()
             .is_some_and(ConfirmationBox::is_open)
     }
 
     pub(super) fn handle_confirmation_box_event(&mut self, event: &UiEvent) -> UiEventResult {
-        let Some(prompt) = self.confirmation_box.as_mut() else {
+        let Some(prompt) = self.dialogs.confirmation_box.as_mut() else {
             return UiEventResult::NotHandled;
         };
 
@@ -37,6 +38,6 @@ impl Layout {
     }
 
     pub(super) fn confirmation_box_mut(&mut self) -> Option<&mut ConfirmationBox> {
-        self.confirmation_box.as_mut()
+        self.dialogs.confirmation_box.as_mut()
     }
 }

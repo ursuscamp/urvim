@@ -3,21 +3,14 @@
 //! These types provide a unified dispatch envelope that carries either editing
 //! actions or UI orchestration commands.
 
-pub mod code_actions_picker;
-pub mod colorscheme_picker;
 pub mod confirmation_box;
 pub mod diagnostic_hover;
-pub mod doc_symbols_picker;
-pub mod file_picker;
 pub mod floating_window;
-pub mod grep_picker;
 pub mod hover;
 pub mod inputs;
 pub mod line_format;
 pub mod lsp_rename;
 pub mod picker;
-pub mod picker_preview;
-pub mod references_picker;
 
 use crate::buffer::Cursor;
 use crate::editor::Action;

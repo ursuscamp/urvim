@@ -1,11 +1,11 @@
 use super::Layout;
-use crate::ui::code_actions_picker::{CodeActionsPickerSource, CodeActionsPickerWidget};
+use crate::ui::picker::code_actions::{CodeActionsPickerSource, CodeActionsPickerWidget};
 use crate::ui::{UiEvent, UiEventResult};
 use crate::widget::Widget;
 
 impl Layout {
     /// Opens the LSP code actions picker overlay.
-    pub(super) fn open_lsp_code_actions_picker(&mut self) {
+    pub(in crate::layout) fn open_lsp_code_actions_picker(&mut self) {
         self.close_all_dialogs();
 
         let buffer_id = self.active_buffer_view().buffer_id();
@@ -38,32 +38,38 @@ impl Layout {
         picker.set_label("Code Actions");
         picker.set_query_prompt_segments(CodeActionsPickerSource::query_prompt_segments());
         picker.restart_search();
-        self.code_actions_picker = Some(picker);
+        self.dialogs.code_actions_picker = Some(picker);
     }
 
     /// Closes the LSP code actions picker overlay.
-    pub(super) fn close_code_actions_picker(&mut self) {
-        if let Some(picker) = self.code_actions_picker.as_mut() {
+    pub(in crate::layout) fn close_code_actions_picker(&mut self) {
+        if let Some(picker) = self.dialogs.code_actions_picker.as_mut() {
             picker.close();
         }
-        self.code_actions_picker = None;
+        self.dialogs.code_actions_picker = None;
     }
 
     /// Returns true when the LSP code actions picker is open.
-    pub(super) fn code_actions_picker_is_open(&self) -> bool {
-        self.code_actions_picker
+    pub(in crate::layout) fn code_actions_picker_is_open(&self) -> bool {
+        self.dialogs
+            .code_actions_picker
             .as_ref()
             .is_some_and(CodeActionsPickerWidget::is_open)
     }
 
     /// Returns a mutable reference to the LSP code actions picker when open.
-    pub(super) fn code_actions_picker_mut(&mut self) -> Option<&mut CodeActionsPickerWidget> {
-        self.code_actions_picker.as_mut()
+    pub(in crate::layout) fn code_actions_picker_mut(
+        &mut self,
+    ) -> Option<&mut CodeActionsPickerWidget> {
+        self.dialogs.code_actions_picker.as_mut()
     }
 
     /// Routes an event to the LSP code actions picker overlay.
-    pub(super) fn handle_code_actions_picker_event(&mut self, event: &UiEvent) -> UiEventResult {
-        let Some(picker) = self.code_actions_picker.as_mut() else {
+    pub(in crate::layout) fn handle_code_actions_picker_event(
+        &mut self,
+        event: &UiEvent,
+    ) -> UiEventResult {
+        let Some(picker) = self.dialogs.code_actions_picker.as_mut() else {
             return UiEventResult::NotHandled;
         };
 

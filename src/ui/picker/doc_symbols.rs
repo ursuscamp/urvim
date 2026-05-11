@@ -11,9 +11,11 @@ use crate::ui::line_format::{
     EllipsisPlacement, FormattedLineSection, FormattedLineTemplate, LineSectionAlignment,
     LineSectionOverflow,
 };
+use crate::ui::picker::preview::spawn_preview_loader;
+use crate::ui::picker::query::{exact_matches, fuzzy_matches, query_prompt_segments};
 use crate::ui::picker::{
     PickerFormattedLine, PickerItem, PickerPreview, PickerPreviewEvent, PickerSearchEvent,
-    PickerSource, PickerWidget, picker_indicator_glyph,
+    PickerSource, PickerWidget,
 };
 use crate::ui::{Command, Intent};
 use lsp_types::SymbolKind;
@@ -21,7 +23,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::Sender;
-use std::thread;
 
 const DOC_SYMBOL_PREVIEW_CONTEXT_LINES: usize = 100;
 static NEXT_DOC_SYMBOLS_PICKER_GENERATION: AtomicU64 = AtomicU64::new(1);
@@ -88,13 +89,7 @@ pub struct DocSymbolsPickerSource {
 }
 
 /// Document symbol picker query mode.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum QueryMode {
-    /// Exact substring search.
-    Exact,
-    /// Fuzzy subsequence search.
-    Fuzzy,
-}
+pub type QueryMode = crate::ui::picker::query::PickerQueryMode;
 
 /// Document symbol picker search job.
 #[derive(Debug)]
@@ -154,32 +149,14 @@ impl DocSymbolsPickerSource {
 
     /// Toggles between exact and fuzzy query mode.
     pub fn toggle_query_mode(&self) -> QueryMode {
-        let next = match self.query_mode() {
-            QueryMode::Exact => QueryMode::Fuzzy,
-            QueryMode::Fuzzy => QueryMode::Exact,
-        };
+        let next = self.query_mode().toggled();
         self.set_query_mode(next);
         next
     }
 
     /// Returns picker prompt segments.
     pub fn query_prompt_segments(mode: QueryMode) -> Vec<PromptSegment> {
-        vec![
-            PromptSegment::new(
-                match mode {
-                    QueryMode::Exact => "Exact",
-                    QueryMode::Fuzzy => "Fuzzy",
-                },
-                highlight_style(match mode {
-                    QueryMode::Exact => "ui.input.prompt.exact",
-                    QueryMode::Fuzzy => "ui.input.prompt.fuzzy",
-                }),
-            ),
-            PromptSegment::new(
-                format!(" {} ", picker_indicator_glyph()),
-                highlight_style("ui.input.prompt.separator"),
-            ),
-        ]
+        query_prompt_segments(mode)
     }
 }
 
@@ -226,30 +203,13 @@ impl PickerSource for DocSymbolsPickerSource {
     }
 
     fn start_preview(&self, item: Self::Item, generation: u64, sender: Sender<PickerPreviewEvent>) {
-        self.preview_generation.store(generation, Ordering::SeqCst);
-        let current_generation = self.preview_generation.clone();
-        thread::spawn(move || {
-            sender.send(PickerPreviewEvent::Started { generation }).ok();
-            let result = build_document_symbol_preview(&item);
-            if current_generation.load(Ordering::SeqCst) != generation {
-                return;
-            }
-
-            match result {
-                Ok(preview) => sender
-                    .send(PickerPreviewEvent::Loaded {
-                        generation,
-                        preview,
-                    })
-                    .ok(),
-                Err(error) => sender
-                    .send(PickerPreviewEvent::Failed {
-                        generation,
-                        message: error.to_string(),
-                    })
-                    .ok(),
-            };
-        });
+        spawn_preview_loader(
+            item,
+            generation,
+            self.preview_generation.clone(),
+            sender,
+            |item| build_document_symbol_preview(&item),
+        );
     }
 
     fn cancel_preview(&self) {
@@ -432,30 +392,6 @@ fn document_symbol_matches(search_text: &str, query: &str, fuzzy: bool) -> bool 
     }
 }
 
-fn exact_matches(query: &str, candidate: &str) -> bool {
-    candidate
-        .to_lowercase()
-        .contains(query.to_lowercase().as_str())
-}
-
-fn fuzzy_matches(query: &str, candidate: &str) -> bool {
-    let mut query_chars = query.chars().flat_map(char::to_lowercase);
-    let Some(mut needle) = query_chars.next() else {
-        return true;
-    };
-
-    for hay in candidate.chars().flat_map(char::to_lowercase) {
-        if hay == needle {
-            match query_chars.next() {
-                Some(next) => needle = next,
-                None => return true,
-            }
-        }
-    }
-
-    false
-}
-
 impl PickerItem for DocSymbolsPickerItem {
     fn formatted_line(&self, base_style: Style) -> PickerFormattedLine {
         if self.show_path {
@@ -622,14 +558,6 @@ fn build_document_symbol_preview(item: &DocSymbolsPickerItem) -> std::io::Result
         start_line + 1,
         Some(line + 1),
     ))
-}
-
-fn highlight_style(name: &str) -> Style {
-    globals::with_active_theme(|theme| {
-        theme
-            .map(|theme| theme.highlight_style_for_name(name))
-            .unwrap_or_default()
-    })
 }
 
 fn location_style() -> Style {

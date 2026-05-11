@@ -1,12 +1,12 @@
 use super::Layout;
 use crate::terminal::KeyCode;
-use crate::ui::references_picker::{ReferencesPickerSource, ReferencesPickerWidget};
+use crate::ui::picker::references::{ReferencesPickerSource, ReferencesPickerWidget};
 use crate::ui::{UiEvent, UiEventResult};
 use crate::widget::Widget;
 
 impl Layout {
     /// Opens the LSP references picker overlay.
-    pub(super) fn open_lsp_references_picker(&mut self) {
+    pub(in crate::layout) fn open_lsp_references_picker(&mut self) {
         self.close_all_dialogs();
 
         let buffer_id = self.active_buffer_view().buffer_id();
@@ -35,35 +35,41 @@ impl Layout {
             ReferencesPickerWidget::new(ReferencesPickerSource::new(references, self.jobs.clone()));
         picker.set_label("References");
         picker.set_query_prompt_segments(ReferencesPickerSource::query_prompt_segments(
-            crate::ui::references_picker::QueryMode::Exact,
+            crate::ui::picker::references::QueryMode::Exact,
         ));
         picker.restart_search();
-        self.references_picker = Some(picker);
+        self.dialogs.references_picker = Some(picker);
     }
 
     /// Closes the LSP references picker overlay.
-    pub(super) fn close_references_picker(&mut self) {
-        if let Some(picker) = self.references_picker.as_mut() {
+    pub(in crate::layout) fn close_references_picker(&mut self) {
+        if let Some(picker) = self.dialogs.references_picker.as_mut() {
             picker.close();
         }
-        self.references_picker = None;
+        self.dialogs.references_picker = None;
     }
 
     /// Returns true when the LSP references picker is open.
-    pub(super) fn references_picker_is_open(&self) -> bool {
-        self.references_picker
+    pub(in crate::layout) fn references_picker_is_open(&self) -> bool {
+        self.dialogs
+            .references_picker
             .as_ref()
             .is_some_and(ReferencesPickerWidget::is_open)
     }
 
     /// Returns a mutable reference to the LSP references picker when open.
-    pub(super) fn references_picker_mut(&mut self) -> Option<&mut ReferencesPickerWidget> {
-        self.references_picker.as_mut()
+    pub(in crate::layout) fn references_picker_mut(
+        &mut self,
+    ) -> Option<&mut ReferencesPickerWidget> {
+        self.dialogs.references_picker.as_mut()
     }
 
     /// Routes an event to the LSP references picker overlay.
-    pub(super) fn handle_references_picker_event(&mut self, event: &UiEvent) -> UiEventResult {
-        let Some(picker) = self.references_picker.as_mut() else {
+    pub(in crate::layout) fn handle_references_picker_event(
+        &mut self,
+        event: &UiEvent,
+    ) -> UiEventResult {
+        let Some(picker) = self.dialogs.references_picker.as_mut() else {
             return UiEventResult::NotHandled;
         };
 

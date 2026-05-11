@@ -1,11 +1,11 @@
 use super::Layout;
 use crate::ui::UiEventResult;
-use crate::ui::colorscheme_picker::{ColorschemePickerSource, ColorschemePickerWidget};
+use crate::ui::picker::colorscheme::{ColorschemePickerSource, ColorschemePickerWidget};
 use crate::widget::Widget;
 
 impl Layout {
     /// Opens the colorscheme picker overlay.
-    pub(super) fn open_colorscheme_picker(&mut self) {
+    pub(in crate::layout) fn open_colorscheme_picker(&mut self) {
         self.close_all_dialogs();
 
         let names: Vec<String> = crate::globals::with_theme_registry(|registry| {
@@ -19,27 +19,30 @@ impl Layout {
         ));
         picker.set_label("Colorschemes");
         picker.restart_search();
-        self.colorscheme_picker = Some(picker);
+        self.dialogs.colorscheme_picker = Some(picker);
     }
 
     /// Closes the colorscheme picker overlay.
-    pub(super) fn close_colorscheme_picker(&mut self) {
-        if let Some(picker) = self.colorscheme_picker.as_mut() {
+    pub(in crate::layout) fn close_colorscheme_picker(&mut self) {
+        if let Some(picker) = self.dialogs.colorscheme_picker.as_mut() {
             picker.close();
         }
-        self.colorscheme_picker = None;
+        self.dialogs.colorscheme_picker = None;
     }
 
     /// Returns true when the colorscheme picker is open.
-    pub(super) fn colorscheme_picker_is_open(&self) -> bool {
-        self.colorscheme_picker
+    pub(in crate::layout) fn colorscheme_picker_is_open(&self) -> bool {
+        self.dialogs
+            .colorscheme_picker
             .as_ref()
             .is_some_and(ColorschemePickerWidget::is_open)
     }
 
     /// Returns a mutable reference to the colorscheme picker when open.
-    pub(super) fn colorscheme_picker_mut(&mut self) -> Option<&mut ColorschemePickerWidget> {
-        self.colorscheme_picker.as_mut()
+    pub(in crate::layout) fn colorscheme_picker_mut(
+        &mut self,
+    ) -> Option<&mut ColorschemePickerWidget> {
+        self.dialogs.colorscheme_picker.as_mut()
     }
 
     /// Routes an event to the colorscheme picker overlay.
@@ -47,28 +50,29 @@ impl Layout {
     /// While the picker is open this handles highlight changes by temporarily
     /// applying the highlighted theme. When the picker closes without a
     /// selection (Esc), the theme reverts to the originally configured one.
-    pub(super) fn handle_colorscheme_picker_event(
+    pub(in crate::layout) fn handle_colorscheme_picker_event(
         &mut self,
         event: &crate::ui::UiEvent,
     ) -> UiEventResult {
-        let previous_highlight = self.colorscheme_picker.as_ref().and_then(|p| {
+        let previous_highlight = self.dialogs.colorscheme_picker.as_ref().and_then(|p| {
             p.highlighted_index()
                 .and_then(|i| p.results().get(i).cloned())
         });
 
         let result = {
-            let Some(picker) = self.colorscheme_picker.as_mut() else {
+            let Some(picker) = self.dialogs.colorscheme_picker.as_mut() else {
                 return UiEventResult::NotHandled;
             };
             let mut ctx = crate::ui::UiContext;
             picker.handle_ui_event(event, &mut ctx)
         };
 
-        let current_highlight = self.colorscheme_picker.as_ref().and_then(|p| {
+        let current_highlight = self.dialogs.colorscheme_picker.as_ref().and_then(|p| {
             p.highlighted_index()
                 .and_then(|i| p.results().get(i).cloned())
         });
         let is_open = self
+            .dialogs
             .colorscheme_picker
             .as_ref()
             .map_or(false, |p| p.is_open());

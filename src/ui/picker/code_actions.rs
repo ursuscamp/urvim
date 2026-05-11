@@ -6,9 +6,10 @@ use crate::globals;
 use crate::lsp::runtime::CodeActionApplication;
 use crate::terminal::Style;
 use crate::ui::inputs::PromptSegment;
+use crate::ui::picker::query::{PickerQueryMode, query_prompt_segments};
 use crate::ui::picker::{
     EllipsisPlacement, FormattedLineSection, FormattedLineTemplate, PickerFormattedLine,
-    PickerItem, PickerSearchEvent, PickerSource, PickerWidget, picker_indicator_glyph,
+    PickerItem, PickerSearchEvent, PickerSource, PickerWidget,
 };
 use crate::ui::{Command, Intent};
 use std::sync::Arc;
@@ -76,13 +77,7 @@ impl CodeActionsPickerSource {
 
     /// Returns prompt segments for the code actions picker.
     pub fn query_prompt_segments() -> Vec<PromptSegment> {
-        vec![
-            PromptSegment::new("Exact", highlight_style("ui.input.prompt.exact")),
-            PromptSegment::new(
-                format!(" {} ", picker_indicator_glyph()),
-                highlight_style("ui.input.prompt.separator"),
-            ),
-        ]
+        query_prompt_segments(PickerQueryMode::Exact)
     }
 }
 
@@ -189,14 +184,6 @@ fn build_search_text(number: usize, title: &str, kind: Option<&str>) -> String {
     text
 }
 
-fn highlight_style(name: &str) -> Style {
-    globals::with_active_theme(|theme| {
-        theme
-            .map(|theme| theme.highlight_style_for_name(name))
-            .unwrap_or_default()
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -253,7 +240,10 @@ mod tests {
 
         assert_eq!(segments.len(), 2);
         assert_eq!(segments[0].text, "Exact");
-        assert_eq!(segments[1].text, format!(" {} ", picker_indicator_glyph()));
+        assert_eq!(
+            segments[1].text,
+            format!(" {} ", crate::ui::picker::picker_indicator_glyph())
+        );
     }
 
     #[test]

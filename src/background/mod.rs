@@ -27,11 +27,10 @@ use std::sync::mpsc::Sender;
 use crate::buffer::BufferCacheRefreshJob;
 use crate::buffer::BufferCacheRefreshResult;
 use crate::lsp::rename_job::LspRenameJob;
-use crate::ui::doc_symbols_picker::DocSymbolsPickerItem;
-use crate::ui::doc_symbols_picker::DocSymbolsPickerSearchJob;
-use crate::ui::file_picker::{FilePickerItem, PickerSearchJob};
-use crate::ui::grep_picker::{GrepPickerItem, GrepPickerSearchJob};
-use crate::ui::picker_preview::PreviewSyntaxRefreshJob;
+use crate::ui::picker::doc_symbols::{DocSymbolsPickerItem, DocSymbolsPickerSearchJob};
+use crate::ui::picker::file::{FilePickerItem, PickerSearchJob};
+use crate::ui::picker::grep::{GrepPickerItem, GrepPickerSearchJob};
+use crate::ui::picker::preview::PreviewSyntaxRefreshJob;
 
 /// Concrete background jobs known to the editor.
 #[derive(Debug)]

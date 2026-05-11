@@ -2,14 +2,14 @@
 
 use crate::background::JobPayload;
 use crate::background::{JobContext, JobManager, JobToken};
-use crate::globals;
-use crate::syntax::FiletypeGlyph;
 use crate::terminal::Style;
 use crate::ui::inputs::PromptSegment;
+use crate::ui::picker::line::{display_path_relative_to, push_file_glyph, push_tail_label};
+use crate::ui::picker::preview::spawn_preview_loader;
+use crate::ui::picker::query::{exact_matches, fuzzy_matches, query_prompt_segments};
 use crate::ui::picker::{
-    EllipsisPlacement, FormattedLineSection, FormattedLineTemplate, PickerFormattedLine,
-    PickerItem, PickerPreview, PickerPreviewEvent, PickerSearchEvent, PickerSource, PickerWidget,
-    picker_indicator_glyph,
+    FormattedLineTemplate, PickerFormattedLine, PickerItem, PickerPreview, PickerPreviewEvent,
+    PickerSearchEvent, PickerSource, PickerWidget,
 };
 use crate::ui::{Command, Intent};
 use ignore::WalkBuilder;
@@ -17,7 +17,6 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::Sender;
-use std::thread;
 
 const PICKER_CHUNK_SIZE: usize = 32;
 static NEXT_FILE_PICKER_GENERATION: AtomicU64 = AtomicU64::new(1);
@@ -41,13 +40,7 @@ pub struct FilePickerSource {
 }
 
 /// Search mode used by the file picker.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum QueryMode {
-    /// Exact substring search.
-    Exact,
-    /// Fuzzy subsequence search.
-    Fuzzy,
-}
+pub type QueryMode = crate::ui::picker::query::PickerQueryMode;
 
 /// Query passed to the file picker search job.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -97,42 +90,14 @@ impl FilePickerSource {
 
     /// Toggles the current search mode.
     pub fn toggle_query_mode(&self) -> QueryMode {
-        let next = matches!(self.query_mode(), QueryMode::Exact)
-            .then_some(QueryMode::Fuzzy)
-            .unwrap_or(QueryMode::Exact);
+        let next = self.query_mode().toggled();
         self.set_query_mode(next);
         next
     }
 
     /// Returns prompt segments for the current search mode.
     pub fn query_prompt_segments(mode: QueryMode) -> Vec<PromptSegment> {
-        let label = match mode {
-            QueryMode::Exact => "Exact",
-            QueryMode::Fuzzy => "Fuzzy",
-        };
-
-        vec![
-            PromptSegment::new(label, highlight_style(mode_prompt_tag(mode))),
-            PromptSegment::new(
-                format!(" {} ", picker_indicator_glyph()),
-                highlight_style("ui.input.prompt.separator"),
-            ),
-        ]
-    }
-}
-
-fn highlight_style(name: &str) -> Style {
-    globals::with_active_theme(|theme| {
-        theme
-            .map(|theme| theme.highlight_style_for_name(name))
-            .unwrap_or_default()
-    })
-}
-
-fn mode_prompt_tag(mode: QueryMode) -> &'static str {
-    match mode {
-        QueryMode::Exact => "ui.input.prompt.exact",
-        QueryMode::Fuzzy => "ui.input.prompt.fuzzy",
+        query_prompt_segments(mode)
     }
 }
 
@@ -191,30 +156,13 @@ impl PickerSource for FilePickerSource {
     }
 
     fn start_preview(&self, item: Self::Item, generation: u64, sender: Sender<PickerPreviewEvent>) {
-        self.preview_generation.store(generation, Ordering::SeqCst);
-        let current_generation = self.preview_generation.clone();
-        thread::spawn(move || {
-            sender.send(PickerPreviewEvent::Started { generation }).ok();
-            let result = build_file_preview(item.path.as_path());
-            if current_generation.load(Ordering::SeqCst) != generation {
-                return;
-            }
-
-            match result {
-                Ok(preview) => sender
-                    .send(PickerPreviewEvent::Loaded {
-                        generation,
-                        preview,
-                    })
-                    .ok(),
-                Err(error) => sender
-                    .send(PickerPreviewEvent::Failed {
-                        generation,
-                        message: error.to_string(),
-                    })
-                    .ok(),
-            };
-        });
+        spawn_preview_loader(
+            item,
+            generation,
+            self.preview_generation.clone(),
+            sender,
+            |item| build_file_preview(item.path.as_path()),
+        );
     }
 
     fn cancel_preview(&self) {
@@ -240,25 +188,12 @@ impl PickerSource for FilePickerSource {
 
 impl PickerItem for FilePickerItem {
     fn formatted_line(&self, base_style: Style) -> PickerFormattedLine {
-        let label = display_label(self.root.as_path(), self.path.as_path());
+        let label = display_path_relative_to(self.root.as_path(), self.path.as_path());
         let mut sections = Vec::new();
         let mut values: Vec<String> = Vec::new();
 
-        if let Some(glyph) = FiletypeGlyph::from_path(self.path.as_path()) {
-            let glyph_width = unicode_width::UnicodeWidthStr::width(glyph.glyph.as_str()) as u16;
-            sections.push(FormattedLineSection::fixed(
-                glyph_width,
-                base_style.accent(glyph.style),
-            ));
-            values.push(glyph.glyph.to_string());
-            sections.push(FormattedLineSection::fixed(1, base_style));
-            values.push(" ".to_string());
-        }
-
-        sections.push(FormattedLineSection::measured(base_style).with_overflow(
-            crate::ui::picker::LineSectionOverflow::Ellipsis(EllipsisPlacement::Start),
-        ));
-        values.push(label);
+        push_file_glyph(&mut sections, &mut values, self.path.as_path(), base_style);
+        push_tail_label(&mut sections, &mut values, label, base_style);
 
         PickerFormattedLine::new(FormattedLineTemplate::new(sections), values)
     }
@@ -268,37 +203,6 @@ fn build_file_preview(path: &Path) -> std::io::Result<PickerPreview> {
     let _ = std::fs::metadata(path)?;
 
     Ok(PickerPreview::new(path.to_string_lossy(), 1, None))
-}
-
-fn display_label(root: &Path, path: &Path) -> String {
-    path.strip_prefix(root)
-        .unwrap_or(path)
-        .to_string_lossy()
-        .into_owned()
-}
-
-fn fuzzy_matches(query: &str, candidate: &str) -> bool {
-    let mut query_chars = query.chars().flat_map(char::to_lowercase);
-    let Some(mut needle) = query_chars.next() else {
-        return true;
-    };
-
-    for hay in candidate.chars().flat_map(char::to_lowercase) {
-        if hay == needle {
-            match query_chars.next() {
-                Some(next) => needle = next,
-                None => return true,
-            }
-        }
-    }
-
-    false
-}
-
-fn exact_matches(query: &str, candidate: &str) -> bool {
-    candidate
-        .to_lowercase()
-        .contains(query.to_lowercase().as_str())
 }
 
 #[derive(Debug)]
@@ -334,7 +238,7 @@ impl PickerSearchJob {
             }
 
             let path = entry.path().to_path_buf();
-            let label = display_label(&self.root, &path);
+            let label = display_path_relative_to(&self.root, &path);
             let matched = match &query {
                 QueryStyle::Exact(query) => {
                     exact_matches(query.as_str(), path.to_string_lossy().as_ref())
@@ -401,7 +305,10 @@ mod tests {
     fn display_label_strips_root_prefix() {
         let root = PathBuf::from("/tmp/project");
         let path = PathBuf::from("/tmp/project/src/main.rs");
-        assert_eq!(display_label(root.as_path(), path.as_path()), "src/main.rs");
+        assert_eq!(
+            display_path_relative_to(root.as_path(), path.as_path()),
+            "src/main.rs"
+        );
     }
 
     #[test]
@@ -506,7 +413,7 @@ mod tests {
     fn file_picker_fuzzy_matches_non_substring_queries() {
         let temp_root = unique_temp_dir();
         fs::create_dir_all(&temp_root).unwrap();
-        let file_path = temp_root.join("src").join("file_picker.rs");
+        let file_path = temp_root.join("src").join("picker").join("file.rs");
         fs::create_dir_all(file_path.parent().unwrap()).unwrap();
         fs::write(&file_path, "hello").unwrap();
 
@@ -606,13 +513,13 @@ mod tests {
 
     #[test]
     fn fuzzy_matches_subsequence_case_insensitively() {
-        assert!(fuzzy_matches("fp", "src/ui/file_picker.rs"));
+        assert!(fuzzy_matches("fp", "src/ui/file/path.rs"));
         assert!(fuzzy_matches("FM", "FuzzyMatch.TXT"));
     }
 
     #[test]
     fn fuzzy_matches_rejects_out_of_order_characters() {
-        assert!(!fuzzy_matches("pf", "src/ui/file_picker.rs"));
+        assert!(!fuzzy_matches("pf", "src/ui/file/path.rs"));
     }
 
     #[test]

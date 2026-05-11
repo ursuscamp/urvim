@@ -8,8 +8,8 @@ This is a list, in no particular order, of things that need to be addressed whic
 - build-time compiled themes and syntax grammar
 - buffer selector
 - reloading changed files on disk
-- examine preview pane and hover pane and see if there are any common patterns which can be extracted
 - folding
+- show code action modification in preview window
 
 - something like extmarks
     - useful for ghost text (inline type hints, code action hints)

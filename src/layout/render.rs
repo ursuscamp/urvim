@@ -295,10 +295,11 @@ impl Layout {
         };
 
         if let Some(cursor) = cursor {
-            self.command_line
+            self.dialogs
+                .command_line
                 .set_cursor(Some(Position::new(cursor.row, cursor.col)));
         } else {
-            self.command_line.set_cursor(None);
+            self.dialogs.command_line.set_cursor(None);
         }
     }
 

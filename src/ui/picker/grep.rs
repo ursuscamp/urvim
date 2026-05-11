@@ -3,24 +3,27 @@
 use crate::background::JobPayload;
 use crate::background::{JobContext, JobKind, JobManager, JobToken};
 use crate::buffer::Cursor;
-use crate::globals;
-use crate::syntax::FiletypeGlyph;
 use crate::terminal::Style;
 use crate::ui::inputs::PromptSegment;
+use crate::ui::picker::line::{
+    display_path_relative_to, push_file_glyph, push_fixed_text, push_tail_label,
+};
+use crate::ui::picker::preview::spawn_preview_loader;
+use crate::ui::picker::query::{
+    exact_matches, fuzzy_match_column, fuzzy_matches, query_prompt_segments,
+};
 use crate::ui::picker::{
-    EllipsisPlacement, FormattedLineSection, FormattedLineTemplate, PickerFormattedLine,
-    PickerItem, PickerPreview, PickerPreviewEvent, PickerSearchEvent, PickerSource, PickerWidget,
-    picker_indicator_glyph,
+    FormattedLineTemplate, PickerFormattedLine, PickerItem, PickerPreview, PickerPreviewEvent,
+    PickerSearchEvent, PickerSource, PickerWidget,
 };
 use crate::ui::{Command, Intent};
 use ignore::WalkBuilder;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::Sender;
-use std::thread;
 
 const PICKER_CHUNK_SIZE: usize = 32;
 const GREP_PREVIEW_CONTEXT_LINES: usize = 100;
@@ -50,13 +53,7 @@ pub struct GrepPickerSource {
 }
 
 /// Search mode used by the live grep picker.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum QueryMode {
-    /// Exact substring search.
-    Exact,
-    /// Fuzzy subsequence search.
-    Fuzzy,
-}
+pub type QueryMode = crate::ui::picker::query::PickerQueryMode;
 
 /// Query passed to the live grep search job.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -106,27 +103,14 @@ impl GrepPickerSource {
 
     /// Toggles the current search mode.
     pub fn toggle_query_mode(&self) -> QueryMode {
-        let next = matches!(self.query_mode(), QueryMode::Exact)
-            .then_some(QueryMode::Fuzzy)
-            .unwrap_or(QueryMode::Exact);
+        let next = self.query_mode().toggled();
         self.set_query_mode(next);
         next
     }
 
     /// Returns prompt segments for the current search mode.
     pub fn query_prompt_segments(mode: QueryMode) -> Vec<PromptSegment> {
-        let label = match mode {
-            QueryMode::Exact => "Exact",
-            QueryMode::Fuzzy => "Fuzzy",
-        };
-
-        vec![
-            PromptSegment::new(label, highlight_style(mode_prompt_tag(mode))),
-            PromptSegment::new(
-                format!(" {} ", picker_indicator_glyph()),
-                highlight_style("ui.input.prompt.separator"),
-            ),
-        ]
+        query_prompt_segments(mode)
     }
 }
 
@@ -185,30 +169,13 @@ impl PickerSource for GrepPickerSource {
     }
 
     fn start_preview(&self, item: Self::Item, generation: u64, sender: Sender<PickerPreviewEvent>) {
-        self.preview_generation.store(generation, Ordering::SeqCst);
-        let current_generation = self.preview_generation.clone();
-        thread::spawn(move || {
-            sender.send(PickerPreviewEvent::Started { generation }).ok();
-            let result = build_grep_preview(&item);
-            if current_generation.load(Ordering::SeqCst) != generation {
-                return;
-            }
-
-            match result {
-                Ok(preview) => sender
-                    .send(PickerPreviewEvent::Loaded {
-                        generation,
-                        preview,
-                    })
-                    .ok(),
-                Err(error) => sender
-                    .send(PickerPreviewEvent::Failed {
-                        generation,
-                        message: error.to_string(),
-                    })
-                    .ok(),
-            };
-        });
+        spawn_preview_loader(
+            item,
+            generation,
+            self.preview_generation.clone(),
+            sender,
+            |item| build_grep_preview(&item),
+        );
     }
 
     fn cancel_preview(&self) {
@@ -235,31 +202,15 @@ impl PickerSource for GrepPickerSource {
 
 impl PickerItem for GrepPickerItem {
     fn formatted_line(&self, base_style: Style) -> PickerFormattedLine {
-        let label = display_label(self.root.as_path(), self.path.as_path());
+        let label = display_path_relative_to(self.root.as_path(), self.path.as_path());
         let suffix = format!(":{}:{}", self.line + 1, self.column + 1);
         let suffix_style = base_style.faint().accent(location_style());
         let mut sections = Vec::new();
         let mut values: Vec<String> = Vec::new();
 
-        if let Some(glyph) = FiletypeGlyph::from_path(self.path.as_path()) {
-            let glyph_width = unicode_width::UnicodeWidthStr::width(glyph.glyph.as_str()) as u16;
-            sections.push(FormattedLineSection::fixed(
-                glyph_width,
-                base_style.accent(glyph.style),
-            ));
-            values.push(glyph.glyph.to_string());
-            sections.push(FormattedLineSection::fixed(1, base_style));
-            values.push(" ".to_string());
-        }
-
-        sections.push(FormattedLineSection::measured(base_style).with_overflow(
-            crate::ui::picker::LineSectionOverflow::Ellipsis(EllipsisPlacement::Start),
-        ));
-        values.push(label);
-
-        let suffix_width = unicode_width::UnicodeWidthStr::width(suffix.as_str()) as u16;
-        sections.push(FormattedLineSection::fixed(suffix_width, suffix_style));
-        values.push(suffix);
+        push_file_glyph(&mut sections, &mut values, self.path.as_path(), base_style);
+        push_tail_label(&mut sections, &mut values, label, base_style);
+        push_fixed_text(&mut sections, &mut values, suffix, suffix_style);
 
         PickerFormattedLine::new(FormattedLineTemplate::new(sections), values)
     }
@@ -276,77 +227,8 @@ fn build_grep_preview(item: &GrepPickerItem) -> std::io::Result<PickerPreview> {
     ))
 }
 
-fn display_label(root: &Path, path: &Path) -> String {
-    path.strip_prefix(root)
-        .unwrap_or(path)
-        .to_string_lossy()
-        .into_owned()
-}
-
-fn highlight_style(name: &str) -> Style {
-    globals::with_active_theme(|theme| {
-        theme
-            .map(|theme| theme.highlight_style_for_name(name))
-            .unwrap_or_default()
-    })
-}
-
-fn mode_prompt_tag(mode: QueryMode) -> &'static str {
-    match mode {
-        QueryMode::Exact => "ui.input.prompt.exact",
-        QueryMode::Fuzzy => "ui.input.prompt.fuzzy",
-    }
-}
-
-fn exact_matches(query: &str, candidate: &str) -> bool {
-    candidate
-        .to_lowercase()
-        .contains(query.to_lowercase().as_str())
-}
-
-fn fuzzy_matches(query: &str, candidate: &str) -> bool {
-    let mut query_chars = query.chars().flat_map(char::to_lowercase);
-    let Some(mut needle) = query_chars.next() else {
-        return true;
-    };
-
-    for hay in candidate.chars().flat_map(char::to_lowercase) {
-        if hay == needle {
-            match query_chars.next() {
-                Some(next) => needle = next,
-                None => return true,
-            }
-        }
-    }
-
-    false
-}
-
-fn fuzzy_match_column(query: &str, candidate: &str) -> usize {
-    let mut query_chars = query.chars().flat_map(char::to_lowercase);
-    let Some(mut needle) = query_chars.next() else {
-        return 0;
-    };
-
-    let mut first_match = None;
-    for (byte_idx, hay) in candidate
-        .char_indices()
-        .flat_map(|(idx, ch)| ch.to_lowercase().map(move |lower| (idx, lower)))
-    {
-        if hay == needle {
-            first_match.get_or_insert(byte_idx);
-            match query_chars.next() {
-                Some(next) => needle = next,
-                None => return first_match.unwrap_or(0),
-            }
-        }
-    }
-
-    first_match.unwrap_or(0)
-}
-
 fn location_style() -> Style {
-    globals::with_active_theme(|theme| {
+    crate::globals::with_active_theme(|theme| {
         theme
             .map(|theme| theme.resolve_name_with_default("ui.picker.location"))
             .unwrap_or_default()
@@ -468,6 +350,7 @@ impl GrepPickerSearchJob {
 mod tests {
     use super::*;
     use crate::background::{JobEvent, JobHandle, JobKind, JobManager, JobToken};
+    use crate::globals;
     use crate::terminal::Style;
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -668,13 +551,13 @@ mod tests {
 
     #[test]
     fn grep_picker_fuzzy_matches_subsequence_case_insensitively() {
-        assert!(fuzzy_matches("fp", "src/ui/file_picker.rs"));
+        assert!(fuzzy_matches("fp", "src/ui/file/path.rs"));
         assert!(fuzzy_matches("GM", "gamma target"));
     }
 
     #[test]
     fn grep_picker_fuzzy_matches_rejects_out_of_order_characters() {
-        assert!(!fuzzy_matches("pf", "src/ui/file_picker.rs"));
+        assert!(!fuzzy_matches("pf", "src/ui/file/path.rs"));
     }
 
     #[test]

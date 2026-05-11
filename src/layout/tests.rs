@@ -837,6 +837,7 @@ fn test_layout_render_uses_a_fixed_width_command_line_frame() {
     let mut layout = layout_with_buffers(vec![Buffer::from_str("alpha")]);
     layout.open_command_line();
     layout
+        .dialogs
         .command_line
         .input_widget_mut()
         .set_text("1234567890123456789012345678901234567890123456789012345678901234");

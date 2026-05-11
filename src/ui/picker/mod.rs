@@ -3,6 +3,16 @@
 //! This module provides a generic overlay picker that can stream results from a
 //! background source and emit selection intents for different result types.
 
+pub mod code_actions;
+pub mod colorscheme;
+pub mod doc_symbols;
+pub mod file;
+pub mod grep;
+pub mod line;
+pub mod preview;
+pub mod query;
+pub mod references;
+
 use crate::background::JobManager;
 use crate::config::AdvancedGlyphCapability;
 use crate::screen::Screen;
@@ -13,7 +23,7 @@ pub use crate::ui::line_format::{
     EllipsisPlacement, FormattedLineSection, FormattedLineSegment, FormattedLineTemplate,
     LineSectionAlignment, LineSectionOverflow, LineSectionWidth,
 };
-use crate::ui::picker_preview::PickerPreviewAdapter;
+use crate::ui::picker::preview::PickerPreviewAdapter;
 use crate::ui::{FocusPolicy, Intent, UiContext, UiEvent, UiEventResult, UiRect};
 use crate::widget::Widget;
 use crate::window::{Position, Size};
@@ -708,7 +718,7 @@ impl<S: PickerSource> PickerWidget<S> {
     pub fn handle_preview_syntax_refresh(
         &mut self,
         _generation: u64,
-        result: crate::ui::picker_preview::PreviewSyntaxRefreshResult,
+        result: crate::ui::picker::preview::PreviewSyntaxRefreshResult,
     ) {
         let _ = self
             .preview_adapter
@@ -719,7 +729,7 @@ impl<S: PickerSource> PickerWidget<S> {
     pub fn handle_preview_syntax_refresh_chunk(
         &mut self,
         _generation: u64,
-        result: crate::ui::picker_preview::PreviewSyntaxRefreshResult,
+        result: crate::ui::picker::preview::PreviewSyntaxRefreshResult,
     ) {
         let _ = self
             .preview_adapter
@@ -1419,7 +1429,7 @@ mod tests {
         picker.preview_state = PickerPreviewState::Ready(PickerPreview::new(key.clone(), 1, None));
         picker.preview_adapter.insert(
             key.clone(),
-            crate::ui::picker_preview::PreviewPane::new(crate::buffer::Buffer::from_str(
+            crate::ui::picker::preview::PreviewPane::new(crate::buffer::Buffer::from_str(
                 "one\ntwo\nthree\nfour\nfive\n",
             )),
         );
@@ -1483,7 +1493,7 @@ mod tests {
             PickerPreviewState::Ready(PickerPreview::new(old_key.clone(), 1, None));
         picker.preview_adapter.insert(
             new_key.clone(),
-            crate::ui::picker_preview::PreviewPane::new(crate::buffer::Buffer::from_str(
+            crate::ui::picker::preview::PreviewPane::new(crate::buffer::Buffer::from_str(
                 "one\ntwo\nthree\nfour\n",
             )),
         );
@@ -1518,7 +1528,7 @@ mod tests {
         picker.preview_state = PickerPreviewState::Ready(PickerPreview::new(key.clone(), 1, None));
         picker.preview_adapter.insert(
             key.clone(),
-            crate::ui::picker_preview::PreviewPane::new(crate::buffer::Buffer::from_str(
+            crate::ui::picker::preview::PreviewPane::new(crate::buffer::Buffer::from_str(
                 "one\ntwo\nthree\n",
             )),
         );
@@ -1551,7 +1561,7 @@ mod tests {
         picker.preview_state = PickerPreviewState::Ready(PickerPreview::new(key.clone(), 1, None));
         picker.preview_adapter.insert(
             key.clone(),
-            crate::ui::picker_preview::PreviewPane::new(crate::buffer::Buffer::from_str(
+            crate::ui::picker::preview::PreviewPane::new(crate::buffer::Buffer::from_str(
                 "one\ntwo\nthree\n",
             )),
         );
@@ -1569,7 +1579,7 @@ mod tests {
 
         picker.handle_preview_syntax_refresh(
             1,
-            crate::ui::picker_preview::PreviewSyntaxRefreshResult {
+            crate::ui::picker::preview::PreviewSyntaxRefreshResult {
                 key: key.clone(),
                 result,
             },
@@ -1787,7 +1797,7 @@ mod tests {
         let file_path = temp_root.join("preview.rs");
         std::fs::write(&file_path, "alpha\nbeta\n").unwrap();
 
-        let mut adapter = crate::ui::picker_preview::PickerPreviewAdapter::new();
+        let mut adapter = crate::ui::picker::preview::PickerPreviewAdapter::new();
         let pane = adapter.preview_for_path(file_path.as_path()).unwrap();
         let mut preview_screen = crate::screen::Screen::new(5, 20);
         pane.render(
@@ -1822,10 +1832,10 @@ mod tests {
     #[test]
     fn preview_render_is_separate_from_widget_focus() {
         let preview = PickerPreview::new("/tmp/example.txt", 1, None);
-        let mut adapter = crate::ui::picker_preview::PickerPreviewAdapter::new();
+        let mut adapter = crate::ui::picker::preview::PickerPreviewAdapter::new();
         adapter.insert(
             preview.title.clone(),
-            crate::ui::picker_preview::PreviewPane::new(crate::buffer::Buffer::from_str(
+            crate::ui::picker::preview::PreviewPane::new(crate::buffer::Buffer::from_str(
                 "hello\nworld\n",
             )),
         );

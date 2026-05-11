@@ -1,6 +1,6 @@
 use super::Layout;
 use crate::terminal::KeyCode;
-use crate::ui::doc_symbols_picker::{
+use crate::ui::picker::doc_symbols::{
     DocSymbolsPickerScope, DocSymbolsPickerSource, DocSymbolsPickerWidget,
 };
 use crate::ui::{UiEvent, UiEventResult};
@@ -8,7 +8,7 @@ use crate::widget::Widget;
 
 impl Layout {
     /// Opens the LSP document symbol picker overlay.
-    pub(super) fn open_doc_symbols_picker(&mut self) {
+    pub(in crate::layout) fn open_doc_symbols_picker(&mut self) {
         let buffer_id = self.active_buffer_view().buffer_id();
         if !crate::globals::with_buffer(buffer_id, |buffer| buffer.path().is_some())
             .unwrap_or(false)
@@ -21,7 +21,7 @@ impl Layout {
     }
 
     /// Opens the LSP workspace symbol picker overlay.
-    pub(super) fn open_workspace_symbols_picker(&mut self) {
+    pub(in crate::layout) fn open_workspace_symbols_picker(&mut self) {
         self.open_symbols_picker(DocSymbolsPickerScope::Workspace);
     }
 
@@ -36,7 +36,7 @@ impl Layout {
             }
         });
         picker.set_query_prompt_segments(DocSymbolsPickerSource::query_prompt_segments(
-            crate::ui::doc_symbols_picker::QueryMode::Exact,
+            crate::ui::picker::doc_symbols::QueryMode::Exact,
         ));
         picker.set_label(match scope {
             DocSymbolsPickerScope::Document(_) => "Document Symbols",
@@ -45,54 +45,65 @@ impl Layout {
         picker.restart_search();
 
         match scope {
-            DocSymbolsPickerScope::Document(_) => self.doc_symbols_picker = Some(picker),
-            DocSymbolsPickerScope::Workspace => self.workspace_symbols_picker = Some(picker),
+            DocSymbolsPickerScope::Document(_) => self.dialogs.doc_symbols_picker = Some(picker),
+            DocSymbolsPickerScope::Workspace => {
+                self.dialogs.workspace_symbols_picker = Some(picker)
+            }
         }
     }
 
     /// Closes the LSP document symbol picker overlay.
-    pub(super) fn close_doc_symbols_picker(&mut self) {
-        if let Some(picker) = self.doc_symbols_picker.as_mut() {
+    pub(in crate::layout) fn close_doc_symbols_picker(&mut self) {
+        if let Some(picker) = self.dialogs.doc_symbols_picker.as_mut() {
             picker.close();
         }
-        self.doc_symbols_picker = None;
+        self.dialogs.doc_symbols_picker = None;
     }
 
     /// Closes the LSP workspace symbol picker overlay.
-    pub(super) fn close_workspace_symbols_picker(&mut self) {
-        if let Some(picker) = self.workspace_symbols_picker.as_mut() {
+    pub(in crate::layout) fn close_workspace_symbols_picker(&mut self) {
+        if let Some(picker) = self.dialogs.workspace_symbols_picker.as_mut() {
             picker.close();
         }
-        self.workspace_symbols_picker = None;
+        self.dialogs.workspace_symbols_picker = None;
     }
 
     /// Returns true when the LSP document symbol picker is open.
-    pub(super) fn doc_symbols_picker_is_open(&self) -> bool {
-        self.doc_symbols_picker
+    pub(in crate::layout) fn doc_symbols_picker_is_open(&self) -> bool {
+        self.dialogs
+            .doc_symbols_picker
             .as_ref()
             .is_some_and(DocSymbolsPickerWidget::is_open)
     }
 
     /// Returns a mutable reference to the LSP document symbol picker when open.
-    pub(super) fn doc_symbols_picker_mut(&mut self) -> Option<&mut DocSymbolsPickerWidget> {
-        self.doc_symbols_picker.as_mut()
+    pub(in crate::layout) fn doc_symbols_picker_mut(
+        &mut self,
+    ) -> Option<&mut DocSymbolsPickerWidget> {
+        self.dialogs.doc_symbols_picker.as_mut()
     }
 
     /// Returns true when the LSP workspace symbol picker is open.
-    pub(super) fn workspace_symbols_picker_is_open(&self) -> bool {
-        self.workspace_symbols_picker
+    pub(in crate::layout) fn workspace_symbols_picker_is_open(&self) -> bool {
+        self.dialogs
+            .workspace_symbols_picker
             .as_ref()
             .is_some_and(DocSymbolsPickerWidget::is_open)
     }
 
     /// Returns a mutable reference to the LSP workspace symbol picker when open.
-    pub(super) fn workspace_symbols_picker_mut(&mut self) -> Option<&mut DocSymbolsPickerWidget> {
-        self.workspace_symbols_picker.as_mut()
+    pub(in crate::layout) fn workspace_symbols_picker_mut(
+        &mut self,
+    ) -> Option<&mut DocSymbolsPickerWidget> {
+        self.dialogs.workspace_symbols_picker.as_mut()
     }
 
     /// Routes an event to the LSP document symbol picker overlay.
-    pub(super) fn handle_doc_symbols_picker_event(&mut self, event: &UiEvent) -> UiEventResult {
-        let Some(picker) = self.doc_symbols_picker.as_mut() else {
+    pub(in crate::layout) fn handle_doc_symbols_picker_event(
+        &mut self,
+        event: &UiEvent,
+    ) -> UiEventResult {
+        let Some(picker) = self.dialogs.doc_symbols_picker.as_mut() else {
             return UiEventResult::NotHandled;
         };
 
@@ -116,11 +127,11 @@ impl Layout {
     }
 
     /// Routes an event to the LSP workspace symbol picker overlay.
-    pub(super) fn handle_workspace_symbols_picker_event(
+    pub(in crate::layout) fn handle_workspace_symbols_picker_event(
         &mut self,
         event: &UiEvent,
     ) -> UiEventResult {
-        let Some(picker) = self.workspace_symbols_picker.as_mut() else {
+        let Some(picker) = self.dialogs.workspace_symbols_picker.as_mut() else {
             return UiEventResult::NotHandled;
         };
 

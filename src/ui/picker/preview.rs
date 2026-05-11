@@ -11,6 +11,46 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::mpsc::Sender;
+
+use crate::ui::picker::{PickerPreview, PickerPreviewEvent};
+
+/// Starts a background picker preview load with stale-generation protection.
+pub fn spawn_preview_loader<T, F>(
+    item: T,
+    generation: u64,
+    current_generation: Arc<AtomicU64>,
+    sender: Sender<PickerPreviewEvent>,
+    build: F,
+) where
+    T: Send + 'static,
+    F: FnOnce(T) -> std::io::Result<PickerPreview> + Send + 'static,
+{
+    current_generation.store(generation, Ordering::SeqCst);
+    std::thread::spawn(move || {
+        sender.send(PickerPreviewEvent::Started { generation }).ok();
+        let result = build(item);
+        if current_generation.load(Ordering::SeqCst) != generation {
+            return;
+        }
+
+        match result {
+            Ok(preview) => sender
+                .send(PickerPreviewEvent::Loaded {
+                    generation,
+                    preview,
+                })
+                .ok(),
+            Err(error) => sender
+                .send(PickerPreviewEvent::Failed {
+                    generation,
+                    message: error.to_string(),
+                })
+                .ok(),
+        };
+    });
+}
 
 /// Temporary preview pane backed by an owned buffer outside the global pool.
 #[derive(Debug)]

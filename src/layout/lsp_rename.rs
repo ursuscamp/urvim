@@ -13,29 +13,31 @@ impl Layout {
         })
         .flatten();
 
-        self.lsp_rename_prompt = Some(LspRenamePrompt::new(placeholder.unwrap_or_default()));
+        self.dialogs.lsp_rename_prompt =
+            Some(LspRenamePrompt::new(placeholder.unwrap_or_default()));
     }
 
     /// Closes the dedicated LSP rename prompt.
     pub(super) fn close_lsp_rename_prompt(&mut self) {
-        self.lsp_rename_prompt = None;
+        self.dialogs.lsp_rename_prompt = None;
     }
 
     /// Returns true when the LSP rename prompt is open.
     pub(super) fn lsp_rename_prompt_is_open(&self) -> bool {
-        self.lsp_rename_prompt
+        self.dialogs
+            .lsp_rename_prompt
             .as_ref()
             .is_some_and(LspRenamePrompt::is_open)
     }
 
     /// Returns a mutable reference to the LSP rename prompt when it is open.
     pub(super) fn lsp_rename_prompt_mut(&mut self) -> Option<&mut LspRenamePrompt> {
-        self.lsp_rename_prompt.as_mut()
+        self.dialogs.lsp_rename_prompt.as_mut()
     }
 
     /// Routes a UI event to the dedicated LSP rename prompt.
     pub(super) fn handle_lsp_rename_event(&mut self, event: &UiEvent) -> UiEventResult {
-        let Some(prompt) = self.lsp_rename_prompt.as_mut() else {
+        let Some(prompt) = self.dialogs.lsp_rename_prompt.as_mut() else {
             return UiEventResult::NotHandled;
         };
 

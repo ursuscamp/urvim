@@ -1,10 +1,10 @@
 use std::fmt;
 
 use crate::buffer::BufferCacheRefreshResult;
-use crate::ui::doc_symbols_picker::DocSymbolsPickerItem;
-use crate::ui::file_picker::FilePickerItem;
-use crate::ui::grep_picker::GrepPickerItem;
-use crate::ui::picker_preview::PreviewSyntaxRefreshResult;
+use crate::ui::picker::doc_symbols::DocSymbolsPickerItem;
+use crate::ui::picker::file::FilePickerItem;
+use crate::ui::picker::grep::GrepPickerItem;
+use crate::ui::picker::preview::PreviewSyntaxRefreshResult;
 
 use super::error::JobError;
 use super::token::{JobKind, JobToken};

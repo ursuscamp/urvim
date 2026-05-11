@@ -151,22 +151,22 @@ impl ParseCommandError {
 impl Layout {
     pub(super) fn open_command_line(&mut self) {
         self.close_all_dialogs();
-        self.command_line_open = true;
-        self.command_line.input_widget_mut().set_prompt(":");
-        self.command_line.reset_input();
+        self.dialogs.command_line_open = true;
+        self.dialogs.command_line.input_widget_mut().set_prompt(":");
+        self.dialogs.command_line.reset_input();
     }
 
     pub(super) fn close_command_line(&mut self) {
-        self.command_line_open = false;
-        self.command_line.set_cursor(None);
+        self.dialogs.command_line_open = false;
+        self.dialogs.command_line.set_cursor(None);
     }
 
     pub fn command_line_is_open(&self) -> bool {
-        self.command_line_open
+        self.dialogs.command_line_open
     }
 
     pub(super) fn handle_command_line_key(&mut self, key: &Key) -> UiEventResult {
-        if !self.command_line_open {
+        if !self.dialogs.command_line_open {
             return UiEventResult::NotHandled;
         }
 
@@ -176,8 +176,8 @@ impl Layout {
                 UiEventResult::Handled(Vec::new())
             }
             KeyCode::Enter => {
-                let command = self.command_line.input().trim().to_string();
-                self.command_line.push_history(command.clone());
+                let command = self.dialogs.command_line.input().trim().to_string();
+                self.dialogs.command_line.push_history(command.clone());
                 self.close_command_line();
 
                 if command.is_empty() {
@@ -199,38 +199,48 @@ impl Layout {
                 }
             }
             KeyCode::Backspace => {
-                self.command_line.input_widget_mut().handle_key(key.clone());
+                self.dialogs
+                    .command_line
+                    .input_widget_mut()
+                    .handle_key(key.clone());
                 UiEventResult::Handled(Vec::new())
             }
             KeyCode::Up => {
-                self.command_line.history_previous();
+                self.dialogs.command_line.history_previous();
                 UiEventResult::Handled(Vec::new())
             }
             KeyCode::Down => {
-                self.command_line.history_next();
+                self.dialogs.command_line.history_next();
                 UiEventResult::Handled(Vec::new())
             }
             KeyCode::Char('p') if key.modifiers.has_ctrl() => {
-                self.command_line.history_previous();
+                self.dialogs.command_line.history_previous();
                 UiEventResult::Handled(Vec::new())
             }
             KeyCode::Char('n') if key.modifiers.has_ctrl() => {
-                self.command_line.history_next();
+                self.dialogs.command_line.history_next();
                 UiEventResult::Handled(Vec::new())
             }
             _ => {
-                let _ = self.command_line.input_widget_mut().handle_key(*key);
+                let _ = self
+                    .dialogs
+                    .command_line
+                    .input_widget_mut()
+                    .handle_key(*key);
                 UiEventResult::Handled(Vec::new())
             }
         }
     }
 
     pub(super) fn handle_command_line_paste(&mut self, text: &str) -> UiEventResult {
-        if !self.command_line_open {
+        if !self.dialogs.command_line_open {
             return UiEventResult::NotHandled;
         }
 
-        self.command_line.input_widget_mut().insert_str(text);
+        self.dialogs
+            .command_line
+            .input_widget_mut()
+            .insert_str(text);
         UiEventResult::Handled(Vec::new())
     }
 
@@ -476,23 +486,23 @@ impl Layout {
 
     #[allow(dead_code)]
     pub(super) fn command_line_input(&self) -> Option<&str> {
-        if self.command_line_open {
-            return Some(self.command_line.input());
+        if self.dialogs.command_line_open {
+            return Some(self.dialogs.command_line.input());
         }
 
         None
     }
 
     pub(super) fn command_line_input_widget_mut(&mut self) -> Option<&mut InputWidget> {
-        if self.command_line_open {
-            return Some(self.command_line.input_widget_mut());
+        if self.dialogs.command_line_open {
+            return Some(self.dialogs.command_line.input_widget_mut());
         }
 
         None
     }
 
     pub(super) fn command_line_should_capture_events(&self) -> bool {
-        self.command_line_open
+        self.dialogs.command_line_open
     }
 }
 
@@ -760,7 +770,11 @@ mod tests {
     fn enter_on_unknown_command_emits_error_and_closes_overlay() {
         let mut layout = Layout::new(WindowGroup::from_buffers(vec![Buffer::new()]));
         layout.open_command_line();
-        layout.command_line.input_widget_mut().set_text("unknown");
+        layout
+            .dialogs
+            .command_line
+            .input_widget_mut()
+            .set_text("unknown");
 
         let result = layout.handle_command_line_key(&KeyCode::Enter.key());
         let intents = result.into_intents();
@@ -778,8 +792,14 @@ mod tests {
     fn ctrl_p_and_ctrl_n_navigate_history() {
         let mut layout = Layout::new(WindowGroup::from_buffers(vec![Buffer::new()]));
         layout.open_command_line();
-        layout.command_line.push_history("write".to_string());
-        layout.command_line.push_history("edit one.txt".to_string());
+        layout
+            .dialogs
+            .command_line
+            .push_history("write".to_string());
+        layout
+            .dialogs
+            .command_line
+            .push_history("edit one.txt".to_string());
 
         let ctrl_p = KeyCode::Char('p').with_modifiers(Modifiers::CTRL);
         let ctrl_n = KeyCode::Char('n').with_modifiers(Modifiers::CTRL);

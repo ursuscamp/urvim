@@ -2,25 +2,27 @@
 
 use crate::background::JobManager;
 use crate::buffer::Cursor;
-use crate::globals;
 use crate::lsp::runtime::ReferenceItem;
-use crate::syntax::FiletypeGlyph;
 use crate::terminal::Style;
 use crate::ui::inputs::PromptSegment;
 use crate::ui::line_format::{
     EllipsisPlacement, FormattedLineSection, FormattedLineTemplate, LineSectionAlignment,
     LineSectionOverflow,
 };
+use crate::ui::picker::line::{
+    display_path_relative_to_cwd, push_file_glyph, push_fixed_text, push_tail_label,
+};
+use crate::ui::picker::preview::spawn_preview_loader;
+use crate::ui::picker::query::{fuzzy_matches, query_prompt_segments};
 use crate::ui::picker::{
     PickerFormattedLine, PickerItem, PickerPreview, PickerPreviewEvent, PickerSearchEvent,
-    PickerSource, PickerWidget, picker_indicator_glyph,
+    PickerSource, PickerWidget,
 };
 use crate::ui::{Command, Intent};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::Sender;
-use std::thread;
 
 const REFERENCES_PREVIEW_CONTEXT_LINES: usize = 100;
 static NEXT_REFERENCES_PICKER_GENERATION: AtomicU64 = AtomicU64::new(1);
@@ -44,13 +46,7 @@ pub struct ReferencesPickerSource {
 }
 
 /// References picker query mode.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum QueryMode {
-    /// Exact substring search.
-    Exact,
-    /// Fuzzy subsequence search.
-    Fuzzy,
-}
+pub type QueryMode = crate::ui::picker::query::PickerQueryMode;
 
 /// Concrete LSP references picker widget.
 pub type ReferencesPickerWidget = PickerWidget<ReferencesPickerSource>;
@@ -97,32 +93,14 @@ impl ReferencesPickerSource {
 
     /// Toggles between exact and fuzzy query mode.
     pub fn toggle_query_mode(&self) -> QueryMode {
-        let next = match self.query_mode() {
-            QueryMode::Exact => QueryMode::Fuzzy,
-            QueryMode::Fuzzy => QueryMode::Exact,
-        };
+        let next = self.query_mode().toggled();
         self.set_query_mode(next);
         next
     }
 
     /// Returns prompt segments for the references picker.
     pub fn query_prompt_segments(mode: QueryMode) -> Vec<PromptSegment> {
-        vec![
-            PromptSegment::new(
-                match mode {
-                    QueryMode::Exact => "Exact",
-                    QueryMode::Fuzzy => "Fuzzy",
-                },
-                highlight_style(match mode {
-                    QueryMode::Exact => "ui.input.prompt.exact",
-                    QueryMode::Fuzzy => "ui.input.prompt.fuzzy",
-                }),
-            ),
-            PromptSegment::new(
-                format!(" {} ", picker_indicator_glyph()),
-                highlight_style("ui.input.prompt.separator"),
-            ),
-        ]
+        query_prompt_segments(mode)
     }
 }
 
@@ -168,30 +146,13 @@ impl PickerSource for ReferencesPickerSource {
     }
 
     fn start_preview(&self, item: Self::Item, generation: u64, sender: Sender<PickerPreviewEvent>) {
-        self.preview_generation.store(generation, Ordering::SeqCst);
-        let current_generation = self.preview_generation.clone();
-        thread::spawn(move || {
-            sender.send(PickerPreviewEvent::Started { generation }).ok();
-            let result = build_references_preview(&item);
-            if current_generation.load(Ordering::SeqCst) != generation {
-                return;
-            }
-
-            match result {
-                Ok(preview) => sender
-                    .send(PickerPreviewEvent::Loaded {
-                        generation,
-                        preview,
-                    })
-                    .ok(),
-                Err(error) => sender
-                    .send(PickerPreviewEvent::Failed {
-                        generation,
-                        message: error.to_string(),
-                    })
-                    .ok(),
-            };
-        });
+        spawn_preview_loader(
+            item,
+            generation,
+            self.preview_generation.clone(),
+            sender,
+            |item| build_references_preview(&item),
+        );
     }
 
     fn cancel_preview(&self) {
@@ -205,34 +166,19 @@ impl PickerSource for ReferencesPickerSource {
 
 impl PickerItem for ReferencesPickerItem {
     fn formatted_line(&self, base_style: Style) -> PickerFormattedLine {
-        let label = display_label(self.path.as_path());
+        let label = display_path_relative_to_cwd(self.path.as_path());
         let suffix = format!(":{}:{}", self.cursor.line + 1, self.cursor.col + 1);
         let mut sections = Vec::new();
         let mut values = Vec::new();
 
-        if let Some(glyph) = FiletypeGlyph::from_path(self.path.as_path()) {
-            let glyph_width = unicode_width::UnicodeWidthStr::width(glyph.glyph.as_str()) as u16;
-            sections.push(FormattedLineSection::fixed(
-                glyph_width,
-                base_style.accent(glyph.style),
-            ));
-            values.push(glyph.glyph.to_string());
-            sections.push(FormattedLineSection::fixed(1, base_style));
-            values.push(" ".to_string());
-        }
-
-        sections.push(
-            FormattedLineSection::measured(base_style)
-                .with_overflow(LineSectionOverflow::Ellipsis(EllipsisPlacement::Start)),
-        );
-        values.push(label);
-
-        let suffix_width = unicode_width::UnicodeWidthStr::width(suffix.as_str()) as u16;
-        sections.push(FormattedLineSection::fixed(
-            suffix_width,
+        push_file_glyph(&mut sections, &mut values, self.path.as_path(), base_style);
+        push_tail_label(&mut sections, &mut values, label, base_style);
+        push_fixed_text(
+            &mut sections,
+            &mut values,
+            suffix,
             base_style.faint().accent(location_style()),
-        ));
-        values.push(suffix);
+        );
 
         sections.push(
             FormattedLineSection::flex(1, base_style.faint())
@@ -250,31 +196,17 @@ fn reference_matches(item: &ReferencesPickerItem, query: &str, fuzzy: bool) -> b
         return true;
     }
 
-    let candidate =
-        format!("{} {}", display_label(item.path.as_path()), item.line_text).to_lowercase();
+    let candidate = format!(
+        "{} {}",
+        display_path_relative_to_cwd(item.path.as_path()),
+        item.line_text
+    )
+    .to_lowercase();
     if fuzzy {
         fuzzy_matches(query, candidate.as_str())
     } else {
         candidate.contains(query)
     }
-}
-
-fn fuzzy_matches(query: &str, candidate: &str) -> bool {
-    let mut query_chars = query.chars().flat_map(char::to_lowercase);
-    let Some(mut needle) = query_chars.next() else {
-        return true;
-    };
-
-    for hay in candidate.chars().flat_map(char::to_lowercase) {
-        if hay == needle {
-            match query_chars.next() {
-                Some(next) => needle = next,
-                None => return true,
-            }
-        }
-    }
-
-    false
 }
 
 fn build_references_preview(item: &ReferencesPickerItem) -> std::io::Result<PickerPreview> {
@@ -291,27 +223,8 @@ fn build_references_preview(item: &ReferencesPickerItem) -> std::io::Result<Pick
     ))
 }
 
-fn display_label(path: &Path) -> String {
-    let Ok(cwd) = std::env::current_dir() else {
-        return path.to_string_lossy().into_owned();
-    };
-
-    path.strip_prefix(cwd)
-        .unwrap_or(path)
-        .to_string_lossy()
-        .into_owned()
-}
-
-fn highlight_style(name: &str) -> Style {
-    globals::with_active_theme(|theme| {
-        theme
-            .map(|theme| theme.highlight_style_for_name(name))
-            .unwrap_or_default()
-    })
-}
-
 fn location_style() -> Style {
-    globals::with_active_theme(|theme| {
+    crate::globals::with_active_theme(|theme| {
         theme
             .map(|theme| theme.resolve_name_with_default("ui.picker.location"))
             .unwrap_or_default()

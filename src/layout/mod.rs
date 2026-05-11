@@ -4,40 +4,26 @@
 //! tree of pane-hosted window groups, routes split-management actions, and renders
 //! a footer status bar below the active editor region.
 
-mod code_actions_picker;
-mod colorscheme_picker;
 mod command_line;
 mod confirmation;
-mod doc_symbols_picker;
+mod dialogs;
 mod geometry;
-mod grep_picker;
 mod hover;
 mod lsp;
 mod lsp_rename;
 mod node;
 mod picker;
-mod references_picker;
 mod render;
 mod session;
 mod tree;
 
-use self::command_line::CommandLineState;
+use self::dialogs::Dialogs;
 use crate::action::ActionResult;
 use crate::background::{JobEvent, JobKind, JobManager};
 use crate::editor::{Action, ModeKind};
 use crate::screen::Screen;
 use crate::status_bar::StatusBar;
 use crate::terminal::CursorStyle;
-use crate::ui::code_actions_picker::CodeActionsPickerWidget;
-use crate::ui::colorscheme_picker::ColorschemePickerWidget;
-use crate::ui::confirmation_box::ConfirmationBox;
-use crate::ui::diagnostic_hover::DiagnosticHoverWidget;
-use crate::ui::doc_symbols_picker::DocSymbolsPickerWidget;
-use crate::ui::file_picker::FilePickerWidget;
-use crate::ui::grep_picker::GrepPickerWidget;
-use crate::ui::hover::HoverWidget;
-use crate::ui::lsp_rename::LspRenamePrompt;
-use crate::ui::references_picker::ReferencesPickerWidget;
 use crate::ui::{Command, Intent, UiEvent, UiEventResult};
 use crate::window::{BufferView, Position, Size};
 use std::path::PathBuf;
@@ -59,19 +45,7 @@ pub struct Layout {
     status_bar: StatusBar,
     origin: Position,
     size: Size,
-    command_line: CommandLineState,
-    command_line_open: bool,
-    lsp_rename_prompt: Option<LspRenamePrompt>,
-    colorscheme_picker: Option<ColorschemePickerWidget>,
-    code_actions_picker: Option<CodeActionsPickerWidget>,
-    doc_symbols_picker: Option<DocSymbolsPickerWidget>,
-    workspace_symbols_picker: Option<DocSymbolsPickerWidget>,
-    references_picker: Option<ReferencesPickerWidget>,
-    file_picker: Option<FilePickerWidget>,
-    grep_picker: Option<GrepPickerWidget>,
-    confirmation_box: Option<ConfirmationBox>,
-    hover: Option<HoverWidget>,
-    diagnostic_hover: Option<DiagnosticHoverWidget>,
+    dialogs: Dialogs,
     jobs: Arc<JobManager>,
 }
 
@@ -86,19 +60,7 @@ impl Layout {
             status_bar: StatusBar::new(),
             origin: Position::default(),
             size: Size::default(),
-            command_line: CommandLineState::new(),
-            command_line_open: false,
-            lsp_rename_prompt: None,
-            colorscheme_picker: None,
-            code_actions_picker: None,
-            doc_symbols_picker: None,
-            workspace_symbols_picker: None,
-            references_picker: None,
-            file_picker: None,
-            grep_picker: None,
-            confirmation_box: None,
-            hover: None,
-            diagnostic_hover: None,
+            dialogs: Dialogs::default(),
             jobs: Arc::new(JobManager::new()),
         }
     }
@@ -208,6 +170,7 @@ impl Layout {
     /// Returns the visual cursor for the focused pane, if any.
     pub fn visual_cursor(&self) -> Option<Position> {
         if let Some(position) = self
+            .dialogs
             .colorscheme_picker
             .as_ref()
             .and_then(|picker| picker.cursor())
@@ -215,11 +178,17 @@ impl Layout {
             return Some(position);
         }
 
-        if let Some(position) = self.grep_picker.as_ref().and_then(|picker| picker.cursor()) {
+        if let Some(position) = self
+            .dialogs
+            .grep_picker
+            .as_ref()
+            .and_then(|picker| picker.cursor())
+        {
             return Some(position);
         }
 
         if let Some(position) = self
+            .dialogs
             .code_actions_picker
             .as_ref()
             .and_then(|picker| picker.cursor())
@@ -228,6 +197,7 @@ impl Layout {
         }
 
         if let Some(position) = self
+            .dialogs
             .doc_symbols_picker
             .as_ref()
             .and_then(|picker| picker.cursor())
@@ -236,6 +206,7 @@ impl Layout {
         }
 
         if let Some(position) = self
+            .dialogs
             .workspace_symbols_picker
             .as_ref()
             .and_then(|picker| picker.cursor())
@@ -244,6 +215,7 @@ impl Layout {
         }
 
         if let Some(position) = self
+            .dialogs
             .references_picker
             .as_ref()
             .and_then(|picker| picker.cursor())
@@ -251,11 +223,17 @@ impl Layout {
             return Some(position);
         }
 
-        if let Some(position) = self.file_picker.as_ref().and_then(|picker| picker.cursor()) {
+        if let Some(position) = self
+            .dialogs
+            .file_picker
+            .as_ref()
+            .and_then(|picker| picker.cursor())
+        {
             return Some(position);
         }
 
         if let Some(position) = self
+            .dialogs
             .lsp_rename_prompt
             .as_ref()
             .and_then(|prompt| prompt.cursor())
@@ -263,7 +241,7 @@ impl Layout {
             return Some(position);
         }
 
-        if let Some(position) = self.command_line.cursor() {
+        if let Some(position) = self.dialogs.command_line.cursor() {
             return Some(position);
         }
 
@@ -334,18 +312,7 @@ impl Layout {
 impl Layout {
     /// Closes all open dialogs and overlays.
     pub(super) fn close_all_dialogs(&mut self) {
-        self.close_command_line();
-        self.close_colorscheme_picker();
-        self.close_code_actions_picker();
-        self.close_doc_symbols_picker();
-        self.close_workspace_symbols_picker();
-        self.close_references_picker();
-        self.close_file_picker();
-        self.close_grep_picker();
-        self.close_confirmation_box();
-        self.close_hover();
-        self.close_diagnostic_hover();
-        self.close_lsp_rename_prompt();
+        self.dialogs.close_all();
     }
 
     /// Dispatches a unified intent through the root layout.
