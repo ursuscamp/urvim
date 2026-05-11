@@ -88,6 +88,7 @@ fn register_motion_bindings(trie_keymap: &mut TrieKeymap) {
     trie_keymap.insert_str("J", Action::new(ActionKind::JoinWithSpace));
     trie_keymap.insert_str("gJ", Action::new(ActionKind::JoinWithoutSpace));
     trie_keymap.insert_str("gO", Command::OpenDocumentSymbolsPicker);
+    trie_keymap.insert_str("grr", Command::LspReferences);
     trie_keymap.insert_str("grS", Command::OpenWorkspaceSymbolsPicker);
 }
 

@@ -116,9 +116,11 @@ pub enum ParsedCommand {
     PickGrep,
     PickColorscheme,
     PickDocumentSymbols,
+    PickReferences,
     PickCodeActions,
     LspHover,
     LspDefinition,
+    LspReferences,
     LspRename { name: Option<String> },
 }
 
@@ -263,12 +265,20 @@ impl Layout {
                 self.open_doc_symbols_picker();
                 Ok(())
             }
+            ParsedCommand::PickReferences => {
+                self.open_lsp_references_picker();
+                Ok(())
+            }
             ParsedCommand::PickCodeActions => {
                 self.open_lsp_code_actions_picker();
                 Ok(())
             }
             ParsedCommand::LspHover => self.execute_lsp_hover(),
             ParsedCommand::LspDefinition => self.execute_lsp_definition(),
+            ParsedCommand::LspReferences => {
+                self.open_lsp_references_picker();
+                Ok(())
+            }
             ParsedCommand::LspRename { name: None } => {
                 if !self.lsp_rename_supported() {
                     return Err("attached server does not support rename".to_string());
@@ -503,16 +513,18 @@ pub fn parse_command_line(input: &str) -> Result<ParsedCommand, ParseCommandErro
             [target] if target == "grep" => Ok(ParsedCommand::PickGrep),
             [target] if target == "colorscheme" => Ok(ParsedCommand::PickColorscheme),
             [target] if target == "doc-symbols" => Ok(ParsedCommand::PickDocumentSymbols),
+            [target] if target == "references" => Ok(ParsedCommand::PickReferences),
             [target] if target == "code-actions" => Ok(ParsedCommand::PickCodeActions),
             [target, ..] => Err(ParseCommandError::UnknownCommand(format!("pick {target}"))),
             [] => Err(ParseCommandError::InvalidArity {
                 command: "pick".to_string(),
-                expected: "pick <file|grep|colorscheme|doc-symbols|code-actions>",
+                expected: "pick <file|grep|colorscheme|doc-symbols|references|code-actions>",
             }),
         },
         "lsp" => match args {
             [subcommand] if subcommand == "hover" => Ok(ParsedCommand::LspHover),
             [subcommand] if subcommand == "definition" => Ok(ParsedCommand::LspDefinition),
+            [subcommand] if subcommand == "references" => Ok(ParsedCommand::LspReferences),
             [subcommand] if subcommand == "rename" => Ok(ParsedCommand::LspRename { name: None }),
             [subcommand, name] if subcommand == "rename" => Ok(ParsedCommand::LspRename {
                 name: Some(name.clone()),
@@ -523,7 +535,7 @@ pub fn parse_command_line(input: &str) -> Result<ParsedCommand, ParseCommandErro
             ))),
             [] => Err(ParseCommandError::InvalidArity {
                 command: "lsp".to_string(),
-                expected: "lsp <hover|definition|rename|code-actions> [name]",
+                expected: "lsp <hover|definition|references|rename|code-actions> [name]",
             }),
         },
         "write" => match args {
@@ -649,6 +661,10 @@ mod tests {
             ParsedCommand::PickDocumentSymbols
         );
         assert_eq!(
+            parse_command_line("pick references").expect("references picker should parse"),
+            ParsedCommand::PickReferences
+        );
+        assert_eq!(
             parse_command_line("pick code-actions").expect("code actions picker should parse"),
             ParsedCommand::PickCodeActions
         );
@@ -667,6 +683,10 @@ mod tests {
         assert_eq!(
             parse_command_line("lsp definition").expect("definition should parse"),
             ParsedCommand::LspDefinition
+        );
+        assert_eq!(
+            parse_command_line("lsp references").expect("references should parse"),
+            ParsedCommand::LspReferences
         );
         assert_eq!(
             parse_command_line("lsp rename").expect("rename prompt should parse"),

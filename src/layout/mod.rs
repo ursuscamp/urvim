@@ -16,6 +16,7 @@ mod lsp;
 mod lsp_rename;
 mod node;
 mod picker;
+mod references_picker;
 mod render;
 mod session;
 mod tree;
@@ -36,6 +37,7 @@ use crate::ui::file_picker::FilePickerWidget;
 use crate::ui::grep_picker::GrepPickerWidget;
 use crate::ui::hover::HoverWidget;
 use crate::ui::lsp_rename::LspRenamePrompt;
+use crate::ui::references_picker::ReferencesPickerWidget;
 use crate::ui::{Command, Intent, UiEvent, UiEventResult};
 use crate::window::{BufferView, Position, Size};
 use std::path::PathBuf;
@@ -64,6 +66,7 @@ pub struct Layout {
     code_actions_picker: Option<CodeActionsPickerWidget>,
     doc_symbols_picker: Option<DocSymbolsPickerWidget>,
     workspace_symbols_picker: Option<DocSymbolsPickerWidget>,
+    references_picker: Option<ReferencesPickerWidget>,
     file_picker: Option<FilePickerWidget>,
     grep_picker: Option<GrepPickerWidget>,
     confirmation_box: Option<ConfirmationBox>,
@@ -90,6 +93,7 @@ impl Layout {
             code_actions_picker: None,
             doc_symbols_picker: None,
             workspace_symbols_picker: None,
+            references_picker: None,
             file_picker: None,
             grep_picker: None,
             confirmation_box: None,
@@ -239,6 +243,14 @@ impl Layout {
             return Some(position);
         }
 
+        if let Some(position) = self
+            .references_picker
+            .as_ref()
+            .and_then(|picker| picker.cursor())
+        {
+            return Some(position);
+        }
+
         if let Some(position) = self.file_picker.as_ref().and_then(|picker| picker.cursor()) {
             return Some(position);
         }
@@ -327,6 +339,7 @@ impl Layout {
         self.close_code_actions_picker();
         self.close_doc_symbols_picker();
         self.close_workspace_symbols_picker();
+        self.close_references_picker();
         self.close_file_picker();
         self.close_grep_picker();
         self.close_confirmation_box();
@@ -422,6 +435,13 @@ impl Layout {
                     },
                     |_| true,
                 )
+            }
+            Command::LspReferences => {
+                if !self.lsp_references_supported() {
+                    return true;
+                }
+                self.open_lsp_references_picker();
+                true
             }
             Command::LspPreviousDiagnostic => self.execute_lsp_previous_diagnostic().map_or_else(
                 |error| {
@@ -695,6 +715,10 @@ impl Layout {
             return self.handle_workspace_symbols_picker_event(event);
         }
 
+        if self.references_picker_is_open() {
+            return self.handle_references_picker_event(event);
+        }
+
         if self.doc_symbols_picker_is_open() {
             return self.handle_doc_symbols_picker_event(event);
         }
@@ -765,6 +789,14 @@ impl Layout {
         let buffer_id = self.active_buffer_view().buffer_id();
         crate::globals::try_with_lsp_runtime_mut(|runtime| {
             runtime.buffer_supports_code_actions(buffer_id)
+        })
+        .unwrap_or(false)
+    }
+
+    fn lsp_references_supported(&mut self) -> bool {
+        let buffer_id = self.active_buffer_view().buffer_id();
+        crate::globals::try_with_lsp_runtime_mut(|runtime| {
+            runtime.buffer_supports_references(buffer_id)
         })
         .unwrap_or(false)
     }

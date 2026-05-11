@@ -148,6 +148,7 @@ impl Layout {
         self.render_colorscheme_picker_overlay(screen, origin, size);
         self.render_code_actions_picker_overlay(screen, origin, size);
         self.render_workspace_symbols_picker_overlay(screen, origin, size);
+        self.render_references_picker_overlay(screen, origin, size);
         self.render_doc_symbols_picker_overlay(screen, origin, size);
         self.render_grep_picker_overlay(screen, origin, size);
         self.render_file_picker_overlay(screen, origin, size);
@@ -210,6 +211,21 @@ impl Layout {
         size: Size,
     ) {
         let Some(picker) = self.workspace_symbols_picker_mut() else {
+            return;
+        };
+
+        let ctx = UiContext;
+        let rect = UiRect::new(origin, size);
+        picker.render_widget(screen, rect, &ctx);
+    }
+
+    fn render_references_picker_overlay(
+        &mut self,
+        screen: &mut Screen,
+        origin: Position,
+        size: Size,
+    ) {
+        let Some(picker) = self.references_picker_mut() else {
             return;
         };
 

@@ -17,6 +17,7 @@ pub mod line_format;
 pub mod lsp_rename;
 pub mod picker;
 pub mod picker_preview;
+pub mod references_picker;
 
 use crate::buffer::Cursor;
 use crate::editor::Action;
@@ -134,6 +135,8 @@ pub enum Command {
     LspHover,
     /// Run an LSP go-to-definition query on the active buffer.
     LspDefinition,
+    /// Open a picker for references to the symbol under the cursor.
+    LspReferences,
     /// Jump to the previous diagnostic in the active buffer.
     LspPreviousDiagnostic,
     /// Jump to the next diagnostic in the active buffer.

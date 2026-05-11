@@ -232,6 +232,19 @@ fn test_picker_open_binding_is_available_in_modes() {
         HandleKeyResult::Complete(intent)
             if matches!(intent, crate::ui::Intent::Command(crate::ui::Command::OpenWorkspaceSymbolsPicker))
     ));
+    assert!(matches!(
+        normal.handle_key(&key('g')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert!(matches!(
+        normal.handle_key(&key('r')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert!(matches!(
+        normal.handle_key(&key('r')),
+        HandleKeyResult::Complete(intent)
+            if matches!(intent, crate::ui::Intent::Command(crate::ui::Command::LspReferences))
+    ));
 
     let mut insert = InsertMode::new();
     assert!(matches!(

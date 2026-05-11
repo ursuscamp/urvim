@@ -33,6 +33,7 @@ impl Layout {
             code_actions_picker: None,
             doc_symbols_picker: None,
             workspace_symbols_picker: None,
+            references_picker: None,
             file_picker: None,
             grep_picker: None,
             confirmation_box: None,

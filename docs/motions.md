@@ -53,6 +53,7 @@ Register behavior is documented separately in [docs/registers.md](docs/registers
 | `J` | Join lines with space |
 | `gJ` | Join lines without space |
 | `gO` | Open the active buffer's document symbol picker |
+| `grr` | Open references for the symbol under the cursor |
 | `gsa{text object}{pair}` | Add surrounding pair around a text object |
 | `gsr{from}{to}` | Replace nearest surrounding pair of `{from}` family with `{to}` family |
 | `gsd{pair}` | Delete nearest surrounding pair of `{pair}` family |

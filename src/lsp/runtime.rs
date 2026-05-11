@@ -10,9 +10,10 @@ use lsp_types::{
     CodeActionContext, CodeActionOrCommand, CodeActionParams, CodeActionProviderCapability,
     CodeActionTriggerKind, CreateFile, DeleteFile, Diagnostic, DocumentChangeOperation,
     InitializeResult, Location, OneOf, PositionEncodingKind, PrepareRenameResponse, ProgressParams,
-    ProgressParamsValue, RenameFile, ResourceOp, ServerCapabilities, TextDocumentIdentifier,
-    TextDocumentSyncCapability, TextDocumentSyncKind, WorkDoneProgress, WorkDoneProgressBegin,
-    WorkDoneProgressReport, WorkspaceLocation, WorkspaceSymbol, WorkspaceSymbolResponse,
+    ProgressParamsValue, ReferenceContext, RenameFile, ResourceOp, ServerCapabilities,
+    TextDocumentIdentifier, TextDocumentSyncCapability, TextDocumentSyncKind, WorkDoneProgress,
+    WorkDoneProgressBegin, WorkDoneProgressReport, WorkspaceLocation, WorkspaceSymbol,
+    WorkspaceSymbolResponse,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -347,6 +348,25 @@ impl LspRuntime {
     pub fn buffer_supports_definition(&mut self, buffer_id: BufferId) -> bool {
         self.sync();
         self.with_session_for_buffer(buffer_id, |session, _| Ok(session.supports_definition()))
+            .unwrap_or(false)
+    }
+
+    /// Requests references for the symbol at `cursor` in `buffer_id`.
+    pub fn references_buffer(
+        &mut self,
+        buffer_id: BufferId,
+        cursor: crate::buffer::Cursor,
+    ) -> Result<Option<Vec<ReferenceItem>>, String> {
+        self.sync();
+        self.with_session_for_buffer(buffer_id, |session, attachment| {
+            session.references(attachment, cursor)
+        })
+    }
+
+    /// Returns whether the attached server for `buffer_id` supports references.
+    pub fn buffer_supports_references(&mut self, buffer_id: BufferId) -> bool {
+        self.sync();
+        self.with_session_for_buffer(buffer_id, |session, _| Ok(session.supports_references()))
             .unwrap_or(false)
     }
 
@@ -917,6 +937,19 @@ impl LspServerSession {
         }
     }
 
+    fn supports_references(&self) -> bool {
+        match self
+            .negotiated
+            .server_capabilities
+            .as_ref()
+            .and_then(|capabilities| capabilities.references_provider.as_ref())
+        {
+            Some(lsp_types::OneOf::Left(enabled)) => *enabled,
+            Some(lsp_types::OneOf::Right(_)) => true,
+            None => false,
+        }
+    }
+
     fn supports_workspace_symbols(&self) -> bool {
         match self
             .negotiated
@@ -1034,6 +1067,43 @@ impl LspServerSession {
                 .ok_or_else(|| "failed to convert definition location".to_string())?;
 
         Ok(Some((buffer_id, cursor)))
+    }
+
+    fn references(
+        &mut self,
+        attachment: &BufferAttachment,
+        cursor: crate::buffer::Cursor,
+    ) -> Result<Option<Vec<ReferenceItem>>, String> {
+        if !self.supports_references() {
+            return Err("attached server does not support references".to_string());
+        }
+
+        let params = json!({
+            "textDocument": { "uri": attachment.uri },
+            "position": position_to_lsp_json(&attachment.lines, cursor, self.negotiated.position_encoding.clone()),
+            "context": ReferenceContext { include_declaration: true },
+        });
+        let result = self
+            .request_raw("textDocument/references", Some(params))
+            .map_err(|error| error.to_string())?;
+
+        let Some(value) = result else {
+            return Ok(None);
+        };
+
+        let response = serde_json::from_value::<Option<Vec<Location>>>(value)
+            .map_err(|error| error.to_string())?;
+        let Some(locations) = response else {
+            return Ok(None);
+        };
+
+        let items =
+            locations_to_reference_items(locations, self.negotiated.position_encoding.clone());
+        if items.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(items))
+        }
     }
 
     fn document_symbols(
@@ -1997,6 +2067,17 @@ pub struct DocumentSymbolTree {
     pub children: Vec<DocumentSymbolTree>,
 }
 
+/// A single LSP reference location shown by the references picker.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReferenceItem {
+    /// File containing the reference.
+    pub path: PathBuf,
+    /// Cursor position resolved to urvim byte-column coordinates.
+    pub cursor: crate::buffer::Cursor,
+    /// Source line text for display.
+    pub line_text: String,
+}
+
 fn build_document_symbol_nodes(
     response: lsp_types::DocumentSymbolResponse,
     path: PathBuf,
@@ -2205,6 +2286,36 @@ fn workspace_symbol_search_text(
     }
     text.push_str(symbol_kind_label(kind));
     text.to_lowercase()
+}
+
+fn locations_to_reference_items(
+    locations: Vec<Location>,
+    encoding: PositionEncodingKind,
+) -> Vec<ReferenceItem> {
+    locations
+        .into_iter()
+        .filter_map(|location| location_to_reference_item(location, encoding.clone()))
+        .collect()
+}
+
+fn location_to_reference_item(
+    location: Location,
+    encoding: PositionEncodingKind,
+) -> Option<ReferenceItem> {
+    let path = uri_to_file_path(location.uri.as_str()).ok()?;
+    let buffer_id = crate::globals::open_buffer(&path).ok()?;
+    let lines = crate::globals::with_buffer(buffer_id, |buffer| buffer.line_texts())?;
+    let cursor = position_to_cursor(&lines, location.range.start, encoding)?;
+    let line_text = lines
+        .get(cursor.line)
+        .map(|line| line.trim().to_string())
+        .unwrap_or_default();
+
+    Some(ReferenceItem {
+        path,
+        cursor,
+        line_text,
+    })
 }
 
 #[cfg(test)]

@@ -86,6 +86,8 @@ impl Layout {
                     picker.handle_preview_syntax_refresh_chunk(token.generation(), result);
                 } else if let Some(picker) = self.workspace_symbols_picker.as_mut() {
                     picker.handle_preview_syntax_refresh_chunk(token.generation(), result);
+                } else if let Some(picker) = self.references_picker.as_mut() {
+                    picker.handle_preview_syntax_refresh_chunk(token.generation(), result);
                 }
             }
             JobEvent::Chunk {
@@ -139,6 +141,8 @@ impl Layout {
                 } else if let Some(picker) = self.doc_symbols_picker.as_mut() {
                     picker.handle_preview_syntax_refresh(token.generation(), result);
                 } else if let Some(picker) = self.workspace_symbols_picker.as_mut() {
+                    picker.handle_preview_syntax_refresh(token.generation(), result);
+                } else if let Some(picker) = self.references_picker.as_mut() {
                     picker.handle_preview_syntax_refresh(token.generation(), result);
                 }
             }
@@ -205,6 +209,8 @@ impl Layout {
                 } else if let Some(picker) = self.doc_symbols_picker.as_mut() {
                     picker.handle_preview_syntax_refresh_failed(token.generation());
                 } else if let Some(picker) = self.workspace_symbols_picker.as_mut() {
+                    picker.handle_preview_syntax_refresh_failed(token.generation());
+                } else if let Some(picker) = self.references_picker.as_mut() {
                     picker.handle_preview_syntax_refresh_failed(token.generation());
                 }
             }
