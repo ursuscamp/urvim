@@ -126,6 +126,7 @@ impl Buffer {
                 self.buffer_cache = buffer_cache;
                 self.syntax_generation = self.syntax_generation.wrapping_add(1);
                 self.syntax_background_generation = None;
+                self.indent_background_generation = None;
                 Some(cursor)
             }
             None => None,
@@ -139,6 +140,7 @@ impl Buffer {
                 self.buffer_cache = buffer_cache;
                 self.syntax_generation = self.syntax_generation.wrapping_add(1);
                 self.syntax_background_generation = None;
+                self.indent_background_generation = None;
                 Some(cursor)
             }
             None => None,

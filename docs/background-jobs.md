@@ -4,7 +4,7 @@ urvim includes a small internal job framework for deferred editor work that shou
 
 ## Core Types
 
-- `JobHandle` owns the worker thread and the completion channel.
+- `JobHandle` owns the worker thread pool and the completion channel.
 - `JobManager` sits on the main thread, tracks the latest generation per job kind, and filters stale events.
 - `BackgroundJob` is the enum of built-in background work.
 - `JobPayload` is the enum of outputs produced by background work.
@@ -16,7 +16,8 @@ urvim includes a small internal job framework for deferred editor work that shou
 
 ## Current built-in jobs
 
-- buffer syntax/cache refresh
+- buffer syntax cache refresh
+- buffer indent scope cache refresh
 - file picker search
 - live grep search
 - picker preview syntax refresh
@@ -35,4 +36,5 @@ urvim includes a small internal job framework for deferred editor work that shou
 
 - `JobSubmissionMode::LatestOnly` prunes older queued work for the same kind.
 - Streaming jobs should check `JobContext::is_aborted()` and stop early.
-- The framework is intentionally serial; there is one worker thread.
+- The framework uses a thread pool (default: 4 workers) so independent jobs like syntax refresh and indent scope refresh can run in parallel.
+- `JobHandle::new()` creates 1 worker (used in tests); production code goes through `JobManager::new()` which creates 4 workers.

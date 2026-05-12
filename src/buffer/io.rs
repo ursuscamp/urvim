@@ -15,6 +15,7 @@ impl Buffer {
             path: None,
             syntax_generation: 0,
             syntax_background_generation: None,
+            indent_background_generation: None,
             buffer_cache: BufferCache::new(syntax_name.clone()),
             undo_state: UndoState::new(
                 undo_lines,
@@ -42,6 +43,7 @@ impl Buffer {
             path: None,
             syntax_generation: 0,
             syntax_background_generation: None,
+            indent_background_generation: None,
             buffer_cache: BufferCache::new(syntax_name.clone()),
             undo_state: UndoState::new(
                 undo_lines,
@@ -72,6 +74,7 @@ impl Buffer {
             path: Some(path),
             syntax_generation: 0,
             syntax_background_generation: None,
+            indent_background_generation: None,
             buffer_cache: BufferCache::new(syntax_name.clone()),
             undo_state: UndoState::new(
                 undo_lines,

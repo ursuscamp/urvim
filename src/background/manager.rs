@@ -24,10 +24,15 @@ impl Default for JobManager {
 }
 
 impl JobManager {
-    /// Creates a new job manager.
+    /// Creates a new job manager with the default worker thread count.
     pub fn new() -> Self {
+        Self::with_workers(4)
+    }
+
+    /// Creates a new job manager with the given number of worker threads.
+    pub fn with_workers(num_workers: usize) -> Self {
         Self {
-            handle: JobHandle::new(),
+            handle: JobHandle::with_workers(num_workers),
             redraw_requested: AtomicBool::new(false),
         }
     }

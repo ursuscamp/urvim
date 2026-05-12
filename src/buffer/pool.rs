@@ -7,6 +7,7 @@
 //! synchronized across threads.
 
 use super::Buffer;
+use super::syntax::{IndentScopeRefreshJob, SyntaxRefreshJob};
 use crate::background::JobPayload;
 use crate::background::{BackgroundJob, JobEvent, JobKind, JobManager, JobSubmitError, JobToken};
 use crate::path::AbsolutePath;
@@ -210,12 +211,25 @@ impl BufferPool {
         while let Some(event) = self.jobs.poll_event() {
             match event {
                 JobEvent::Completed {
-                    payload: Some(JobPayload::BufferCacheRefresh(result)),
+                    payload: Some(JobPayload::SyntaxRefresh(result)),
                     ..
                 } => {
                     if self
                         .with_buffer_mut(result.buffer_id, |buffer| {
-                            buffer.apply_buffer_cache_refresh_result(result)
+                            buffer.apply_syntax_refresh_result(result)
+                        })
+                        .unwrap_or(false)
+                    {
+                        accepted_redraw = true;
+                    }
+                }
+                JobEvent::Completed {
+                    payload: Some(JobPayload::IndentScopeRefresh(result)),
+                    ..
+                } => {
+                    if self
+                        .with_buffer_mut(result.buffer_id, |buffer| {
+                            buffer.apply_indent_scope_refresh_result(result)
                         })
                         .unwrap_or(false)
                     {
@@ -336,33 +350,60 @@ impl BufferPool {
 
     /// Requests buffer cache refresh for a buffer using the pool-owned job engine.
     pub fn request_buffer_cache_refresh(&mut self, buffer_id: BufferId) {
-        let Some((job, generation)) = self.buffers.get_mut(&buffer_id).and_then(|buffer| {
-            if buffer.buffer_cache_complete() || buffer.syntax_background_pending() {
-                return None;
+        let (syntax_job, indent_job, generation) = self
+            .buffers
+            .get_mut(&buffer_id)
+            .and_then(|buffer| {
+                let generation = buffer.syntax_generation();
+                let syntax_needed = !buffer.syntax_cache_complete()
+                    && buffer.syntax_background_generation != Some(generation);
+                let indent_needed = buffer.indent_scope_cache_stale()
+                    && buffer.indent_background_generation != Some(generation);
+
+                if !syntax_needed && !indent_needed {
+                    return None;
+                }
+
+                let syntax_job = syntax_needed.then(|| {
+                    SyntaxRefreshJob::new(
+                        buffer_id,
+                        generation,
+                        buffer.syntax_name().to_owned().into(),
+                        buffer.buffer_cache.syntax_cache.clone(),
+                        buffer.lines.clone(),
+                    )
+                });
+                let indent_job = indent_needed.then(|| {
+                    IndentScopeRefreshJob::new(
+                        buffer_id,
+                        generation,
+                        buffer.buffer_cache.indent_scope_cache.clone(),
+                        buffer.lines.clone(),
+                    )
+                });
+
+                Some((syntax_job, indent_job, generation))
+            })
+            .unwrap_or((None, None, 0));
+
+        if let Some(job) = syntax_job {
+            let kind = JobKind::SyntaxRefresh(buffer_id);
+            let token = JobToken::new(generation);
+            if self.submit_background_job(kind, token, job).is_ok()
+                && let Some(buffer) = self.buffers.get_mut(&buffer_id)
+            {
+                buffer.syntax_background_generation = Some(generation);
             }
+        }
 
-            let generation = buffer.syntax_generation();
-            Some((
-                crate::buffer::syntax::BufferCacheRefreshJob::new(
-                    buffer_id,
-                    generation,
-                    buffer.syntax_name().to_owned().into(),
-                    buffer.buffer_cache.clone(),
-                    buffer.lines.clone(),
-                ),
-                generation,
-            ))
-        }) else {
-            return;
-        };
-
-        let kind = JobKind::BufferCacheRefresh(buffer_id);
-        let token = JobToken::new(generation);
-
-        if self.submit_background_job(kind, token, job).is_ok()
-            && let Some(buffer) = self.buffers.get_mut(&buffer_id)
-        {
-            buffer.syntax_background_generation = Some(generation);
+        if let Some(job) = indent_job {
+            let kind = JobKind::IndentScopeRefresh(buffer_id);
+            let token = JobToken::new(generation);
+            if self.submit_background_job(kind, token, job).is_ok()
+                && let Some(buffer) = self.buffers.get_mut(&buffer_id)
+            {
+                buffer.indent_background_generation = Some(generation);
+            }
         }
     }
 

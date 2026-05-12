@@ -55,8 +55,8 @@ mod unicode;
 pub use indent::IndentDirection;
 pub use pool::{BufferId, BufferPool};
 pub use syntax::{
-    BufferCache, BufferCacheRefreshJob, BufferCacheRefreshResult, IndentScope, IndentScopeId,
-    SyntaxCatchUpResult, SyntaxSpan,
+    BufferCache, BufferCacheRefreshResult, IndentScope, IndentScopeId, IndentScopeRefreshJob,
+    IndentScopeRefreshResult, SyntaxRefreshJob, SyntaxRefreshResult, SyntaxSpan,
 };
 
 pub use unicode::{
@@ -170,6 +170,7 @@ pub struct Buffer {
     path: Option<AbsolutePath>,
     syntax_generation: u64,
     syntax_background_generation: Option<u64>,
+    indent_background_generation: Option<u64>,
     undo_state: UndoState,
     buffer_cache: BufferCache,
 }
@@ -182,6 +183,7 @@ impl Clone for Buffer {
             path: self.path.clone(),
             syntax_generation: self.syntax_generation,
             syntax_background_generation: self.syntax_background_generation,
+            indent_background_generation: self.indent_background_generation,
             undo_state: self.undo_state.clone(),
             buffer_cache: self.buffer_cache.clone(),
         }
@@ -337,6 +339,7 @@ impl Buffer {
         self.buffer_cache = BufferCache::new(syntax_name);
         self.syntax_generation = self.syntax_generation.wrapping_add(1);
         self.syntax_background_generation = None;
+        self.indent_background_generation = None;
     }
 
     fn refresh_syntax(&mut self) {
@@ -351,6 +354,7 @@ impl Buffer {
             self.buffer_cache.invalidate_from(0, 0);
             self.syntax_generation = self.syntax_generation.wrapping_add(1);
             self.syntax_background_generation = None;
+            self.indent_background_generation = None;
         }
     }
 

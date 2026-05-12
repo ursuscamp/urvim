@@ -22,8 +22,10 @@ impl JobToken {
 /// Identifies the kind of work a job performs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum JobKind {
-    /// Buffer cache refresh for a specific buffer.
-    BufferCacheRefresh(BufferId),
+    /// Syntax cache refresh for a specific buffer.
+    SyntaxRefresh(BufferId),
+    /// Indent scope cache refresh for a specific buffer.
+    IndentScopeRefresh(BufferId),
     /// File picker search.
     FilePickerSearch,
     /// Live grep picker search.
@@ -44,8 +46,11 @@ pub enum JobKind {
 impl fmt::Display for JobKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::BufferCacheRefresh(buffer_id) => {
-                write!(f, "buffer-cache:{}", buffer_id.get())
+            Self::SyntaxRefresh(buffer_id) => {
+                write!(f, "syntax-refresh:{}", buffer_id.get())
+            }
+            Self::IndentScopeRefresh(buffer_id) => {
+                write!(f, "indent-scope-refresh:{}", buffer_id.get())
             }
             Self::FilePickerSearch => f.write_str("file-picker-search"),
             Self::GrepPickerSearch => f.write_str("grep-picker-search"),

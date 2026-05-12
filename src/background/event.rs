@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::buffer::BufferCacheRefreshResult;
+use crate::buffer::{IndentScopeRefreshResult, SyntaxRefreshResult};
 use crate::ui::picker::doc_symbols::DocSymbolsPickerItem;
 use crate::ui::picker::file::FilePickerItem;
 use crate::ui::picker::grep::GrepPickerItem;
@@ -21,8 +21,10 @@ pub enum JobSubmissionMode {
 /// Payloads produced by background jobs.
 #[derive(Debug, Clone)]
 pub enum JobPayload {
-    /// Buffer cache refresh result.
-    BufferCacheRefresh(BufferCacheRefreshResult),
+    /// Syntax cache refresh result.
+    SyntaxRefresh(SyntaxRefreshResult),
+    /// Indent scope cache refresh result.
+    IndentScopeRefresh(IndentScopeRefreshResult),
     /// File picker search chunk.
     FileSearchChunk(Vec<FilePickerItem>),
     /// Live grep picker search chunk.

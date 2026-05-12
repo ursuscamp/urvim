@@ -11,11 +11,11 @@ use super::token::{JobKind, JobToken};
 use super::worker::worker_loop;
 use super::{BackgroundJob, JobSubmitError};
 
-/// Owns the background worker thread and event channel.
+/// Owns the background worker threads and event channel.
 pub struct JobHandle {
     pub(crate) shared: Arc<JobShared>,
     event_rx: Mutex<Receiver<JobEvent>>,
-    worker: Mutex<Option<JoinHandle<()>>>,
+    workers: Vec<JoinHandle<()>>,
 }
 
 impl Default for JobHandle {
@@ -31,19 +31,29 @@ impl std::fmt::Debug for JobHandle {
 }
 
 impl JobHandle {
-    /// Creates a new job handle with a dedicated worker thread.
+    /// Creates a new job handle with one worker thread (for testing).
     pub fn new() -> Self {
+        Self::with_workers(1)
+    }
+
+    /// Creates a new job handle with `num_workers` worker threads.
+    pub fn with_workers(num_workers: usize) -> Self {
+        assert!(num_workers > 0, "JobHandle requires at least one worker");
         let (event_tx, event_rx) = mpsc::channel();
         let shared = Arc::new(JobShared::new(event_tx));
-        let worker_shared = Arc::clone(&shared);
-        let worker = thread::Builder::new()
-            .name("urvim-job-worker".to_string())
-            .spawn(move || worker_loop(worker_shared))
-            .expect("failed to spawn job worker thread");
+        let workers: Vec<_> = (0..num_workers)
+            .map(|i| {
+                let worker_shared = Arc::clone(&shared);
+                thread::Builder::new()
+                    .name(format!("urvim-job-worker-{}", i))
+                    .spawn(move || worker_loop(worker_shared))
+                    .expect("failed to spawn job worker thread")
+            })
+            .collect();
         Self {
             shared,
             event_rx: Mutex::new(event_rx),
-            worker: Mutex::new(Some(worker)),
+            workers,
         }
     }
 
@@ -82,13 +92,12 @@ impl JobHandle {
         self.shared.abort_generation(kind, token);
     }
 
-    /// Stops the worker thread and waits for it to exit.
+    /// Stops all worker threads and waits for them to exit.
     pub fn shutdown(&self) {
         self.shared.stop();
         self.shared.available.notify_all();
-        if let Some(worker) = self.worker.lock().unwrap().take() {
-            worker.join().ok();
-        }
+        // Cannot take ownership from &self, so we signal and rely on workers
+        // to exit gracefully. The `workers` vec is joined in Drop.
     }
 
     fn submit_internal(
@@ -126,13 +135,7 @@ impl Drop for JobHandle {
     fn drop(&mut self) {
         self.shared.stop();
         self.shared.available.notify_all();
-
-        #[cfg(test)]
-        {
-            return;
-        }
-
-        if let Some(worker) = self.worker.lock().unwrap().take() {
+        for worker in self.workers.drain(..) {
             worker.join().ok();
         }
     }

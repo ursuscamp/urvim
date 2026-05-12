@@ -579,7 +579,7 @@ impl LspServerSession {
         command.envs(&config.env);
         command.stdin(Stdio::piped());
         command.stdout(Stdio::piped());
-        command.stderr(open_debug_log_stderr());
+        command.stderr(open_lsp_log_stderr());
 
         let mut child = command.spawn()?;
         let stdin = child
@@ -2713,12 +2713,8 @@ fn position_to_byte_offset(
     None
 }
 
-fn open_debug_log_stderr() -> Stdio {
-    match OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open("debug.log")
-    {
+fn open_lsp_log_stderr() -> Stdio {
+    match OpenOptions::new().create(true).append(true).open("lsp.log") {
         Ok(file) => Stdio::from(file),
         Err(error) => {
             tracing::warn!(
