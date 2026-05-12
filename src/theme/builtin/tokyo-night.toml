@@ -51,6 +51,7 @@ bg = "bg"
 "ui.window" = { fg = "fg", bg = "bg" }
 "ui.window.lines" = { fg = "fg_gutter" }
 "ui.window.lines.resize" = { fg = "accent", bold = true }
+"ui.inlay_hint" = { fg = "muted", italic = true }
 "ui.diagnostic.error" = { fg = "red", bold = true }
 "ui.diagnostic.warning" = { fg = "yellow", bold = true }
 "ui.diagnostic.info" = { fg = "blue" }

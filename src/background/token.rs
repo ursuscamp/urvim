@@ -38,6 +38,8 @@ pub enum JobKind {
     PickerPreviewSyntax,
     /// LSP rename.
     LspRename(BufferId),
+    /// LSP inlay hints.
+    LspInlayHints(BufferId),
     /// Test-only gate job.
     #[cfg(test)]
     TestGate,
@@ -58,6 +60,7 @@ impl fmt::Display for JobKind {
             Self::WorkspaceSymbolsPickerSearch => f.write_str("workspace-symbols-picker-search"),
             Self::PickerPreviewSyntax => f.write_str("picker-preview-syntax"),
             Self::LspRename(buffer_id) => write!(f, "lsp-rename:{}", buffer_id.get()),
+            Self::LspInlayHints(buffer_id) => write!(f, "lsp-inlay-hints:{}", buffer_id.get()),
             #[cfg(test)]
             Self::TestGate => f.write_str("gate"),
         }

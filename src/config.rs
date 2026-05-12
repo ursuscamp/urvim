@@ -37,6 +37,16 @@ pub enum AdvancedGlyphCapability {
     UnicodeIndent,
 }
 
+/// Enabled inlay-hint kinds that can be configured through startup config.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InlayHintCapability {
+    /// Enable type inlay hints.
+    Type,
+    /// Enable parameter inlay hints.
+    Parameter,
+}
+
 /// How insert-mode tab presses should insert text.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
@@ -246,6 +256,8 @@ pub struct Config {
     pub auto_indent: AutoIndentMode,
     /// Enabled advanced glyph capabilities.
     pub advanced_glyphs: BTreeSet<AdvancedGlyphCapability>,
+    /// Enabled inlay-hint kinds.
+    pub inlay_hints: BTreeSet<InlayHintCapability>,
     /// The configured insert-mode tab insertion setting.
     pub tab_insertion: TabInsertion,
     /// The configured insert-mode tab behavior setting.
@@ -286,6 +298,8 @@ pub struct PartialConfig {
     pub auto_indent: Option<AutoIndentMode>,
     /// Enabled advanced glyph capabilities in the config file.
     pub advanced_glyphs: Option<Vec<AdvancedGlyphCapability>>,
+    /// Enabled inlay-hint kinds in the config file.
+    pub inlay_hints: Option<Vec<InlayHintCapability>>,
     /// The tab insertion setting stored in the config file.
     pub tab_insertion: Option<TabInsertion>,
     /// The tab behavior setting stored in the config file.
@@ -377,7 +391,11 @@ impl Config {
         let advanced_glyphs = file
             .and_then(|config| config.advanced_glyphs.as_ref())
             .map(|glyphs| resolve_advanced_glyphs(glyphs))
-            .unwrap_or_default();
+            .unwrap_or_else(default_advanced_glyphs);
+        let inlay_hints = file
+            .and_then(|config| config.inlay_hints.as_ref())
+            .map(|kinds| kinds.iter().cloned().collect())
+            .unwrap_or_else(default_inlay_hint_kinds);
         let tab_insertion = file
             .and_then(|config| config.tab_insertion)
             .unwrap_or_default();
@@ -404,6 +422,7 @@ impl Config {
             todo_markers,
             auto_indent,
             advanced_glyphs,
+            inlay_hints,
             tab_insertion,
             tab_behavior,
             tab_width,
@@ -430,6 +449,16 @@ impl Config {
         self.advanced_glyphs
             .contains(&AdvancedGlyphCapability::UnicodeIndent)
     }
+
+    /// Returns whether any inlay hints are enabled.
+    pub fn inlay_hints_enabled(&self) -> bool {
+        !self.inlay_hints.is_empty()
+    }
+
+    /// Returns whether the given inlay-hint kind is enabled.
+    pub fn inlay_hint_kind_enabled(&self, kind: &InlayHintCapability) -> bool {
+        self.inlay_hints.contains(kind)
+    }
 }
 
 impl ConfigLoadError {
@@ -453,7 +482,8 @@ impl Default for Config {
             indent_guides: true,
             todo_markers: default_todo_markers(),
             auto_indent: AutoIndentMode::default(),
-            advanced_glyphs: BTreeSet::new(),
+            advanced_glyphs: default_advanced_glyphs(),
+            inlay_hints: default_inlay_hint_kinds(),
             tab_insertion: TabInsertion::default(),
             tab_behavior: TabBehavior::default(),
             tab_width: DEFAULT_TAB_WIDTH,
@@ -838,6 +868,16 @@ fn resolve_advanced_glyphs(
     resolved
 }
 
+fn default_advanced_glyphs() -> BTreeSet<AdvancedGlyphCapability> {
+    BTreeSet::new()
+}
+
+fn default_inlay_hint_kinds() -> BTreeSet<InlayHintCapability> {
+    [InlayHintCapability::Type, InlayHintCapability::Parameter]
+        .into_iter()
+        .collect()
+}
+
 fn all_unicode_advanced_glyph_capabilities() -> [AdvancedGlyphCapability; 2] {
     [
         AdvancedGlyphCapability::UnicodeBorders,
@@ -888,6 +928,10 @@ mod tests {
     }
 
     fn glyph_caps(values: &[AdvancedGlyphCapability]) -> BTreeSet<AdvancedGlyphCapability> {
+        values.iter().cloned().collect()
+    }
+
+    fn inlay_hint_caps(values: &[InlayHintCapability]) -> BTreeSet<InlayHintCapability> {
         values.iter().cloned().collect()
     }
 
@@ -1182,6 +1226,39 @@ mod tests {
                 AdvancedGlyphCapability::UnicodeIndent
             ])
         );
+    }
+
+    #[test]
+    fn resolve_defaults_to_all_inlay_hint_capabilities() {
+        assert_eq!(
+            Config::resolve(None, None, None).inlay_hints,
+            inlay_hint_caps(&[InlayHintCapability::Type, InlayHintCapability::Parameter])
+        );
+    }
+
+    #[test]
+    fn resolve_honors_explicit_inlay_hint_capabilities() {
+        let file = PartialConfig {
+            inlay_hints: Some(vec![InlayHintCapability::Parameter]),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            Config::resolve(Some(&file), None, None).inlay_hints,
+            inlay_hint_caps(&[InlayHintCapability::Parameter])
+        );
+    }
+
+    #[test]
+    fn resolve_allows_disabling_inlay_hints_entirely() {
+        let file = PartialConfig {
+            inlay_hints: Some(vec![]),
+            ..Default::default()
+        };
+
+        let config = Config::resolve(Some(&file), None, None);
+        assert!(!config.inlay_hints_enabled());
+        assert!(!config.inlay_hint_kind_enabled(&InlayHintCapability::Type));
     }
 
     #[test]

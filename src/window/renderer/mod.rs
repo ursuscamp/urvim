@@ -141,4 +141,5 @@ pub fn render_buffer_view(
     }
 
     render_data.render(screen, content_origin, content_size, theme.default_style);
+    buffer_view.mark_visual_generation_rendered();
 }

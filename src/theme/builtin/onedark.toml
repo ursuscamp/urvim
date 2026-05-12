@@ -15,6 +15,7 @@ yellow = "#e5c07b"
 cyan = "#56b6c2"
 red = "#e86671"
 grey = "#5c6370"
+muted = "#5c6370"
 light_grey = "#848b98"
 
 [default]
@@ -35,6 +36,7 @@ bg = "bg"
 "ui.window" = { fg = "fg", bg = "bg" }
 "ui.window.lines" = { fg = "grey" }
 "ui.window.lines.resize" = { fg = "blue", bold = true }
+"ui.inlay_hint" = { fg = "muted", italic = true }
 "ui.diagnostic.error" = { fg = "red", bold = true }
 "ui.diagnostic.warning" = { fg = "yellow", bold = true }
 "ui.diagnostic.info" = { fg = "blue" }

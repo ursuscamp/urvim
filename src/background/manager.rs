@@ -26,7 +26,15 @@ impl Default for JobManager {
 impl JobManager {
     /// Creates a new job manager with the default worker thread count.
     pub fn new() -> Self {
-        Self::with_workers(4)
+        #[cfg(test)]
+        {
+            return Self::with_workers(1);
+        }
+
+        #[cfg(not(test))]
+        {
+            Self::with_workers(4)
+        }
     }
 
     /// Creates a new job manager with the given number of worker threads.
@@ -105,15 +113,16 @@ impl JobManager {
         self.redraw_requested.swap(false, Ordering::SeqCst)
     }
 
-    /// Stops the worker thread.
-    pub fn shutdown(&self) {
-        self.handle.shutdown();
-    }
-
-    fn is_accepted(&self, kind: &JobKind, token: JobToken) -> bool {
+    /// Returns true when a job token still matches the latest submitted generation.
+    pub fn is_accepted(&self, kind: &JobKind, token: JobToken) -> bool {
         let generations = self.handle.shared.latest_generations.lock().unwrap();
         generations
             .get(kind)
             .is_some_and(|generation| *generation == token.generation())
+    }
+
+    /// Stops the worker thread.
+    pub fn shutdown(&self) {
+        self.handle.shutdown();
     }
 }

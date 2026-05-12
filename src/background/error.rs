@@ -7,6 +7,8 @@ pub enum JobError {
     Panicked,
     /// The job completed without producing an output in once mode.
     MissingOutput,
+    /// The job reported an explicit failure message.
+    Message(String),
 }
 
 /// Errors that can occur while submitting a job.
@@ -25,3 +27,15 @@ impl fmt::Display for JobSubmitError {
 }
 
 impl std::error::Error for JobSubmitError {}
+
+impl fmt::Display for JobError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Panicked => f.write_str("job panicked"),
+            Self::MissingOutput => f.write_str("job produced no output"),
+            Self::Message(message) => f.write_str(message),
+        }
+    }
+}
+
+impl std::error::Error for JobError {}

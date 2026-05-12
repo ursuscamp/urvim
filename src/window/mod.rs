@@ -89,6 +89,7 @@ pub struct GutterRenderState {
 pub struct RenderChunk {
     pub text: String,
     pub style: Style,
+    pub is_ghost_text: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -119,6 +120,7 @@ pub struct BufferView {
     remembered_visual_col: Option<usize>,
     visual_selection: Option<VisualSelection>,
     yank_flash: Option<YankFlash>,
+    rendered_visual_generation: u64,
 }
 
 /// Kind of visual selection currently active in a buffer view.

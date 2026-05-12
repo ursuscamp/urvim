@@ -41,6 +41,7 @@ mod cursor;
 mod edit;
 mod indent;
 mod io;
+mod marker;
 mod operator_target;
 mod pool;
 mod quote_text_object;
@@ -53,6 +54,10 @@ mod undo;
 mod unicode;
 
 pub use indent::IndentDirection;
+pub use marker::{
+    DeleteShape, Gravity, InsertShape, Marker, MarkerId, MarkerKind, MarkerPayload, MarkerShape,
+    MarkerStore, PointMarker, RangeMarker,
+};
 pub use pool::{BufferId, BufferPool};
 pub use syntax::{
     BufferCache, BufferCacheRefreshResult, IndentScope, IndentScopeId, IndentScopeRefreshJob,
@@ -78,7 +83,7 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 ///
 /// Line and column (byte position within line).
 /// Column can be from 0 to line byte length (inclusive, meaning cursor is at end of line).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, PartialOrd, Ord)]
 pub struct Cursor {
     pub line: usize,
     pub col: usize,
@@ -125,6 +130,8 @@ struct Snapshot {
     cursor: Cursor,
     /// The buffer cache state at this point in time.
     buffer_cache: BufferCache,
+    /// The marker state at this point in time.
+    markers: MarkersStore,
 }
 
 /// Stores undo/redo history for a buffer.
@@ -171,9 +178,14 @@ pub struct Buffer {
     syntax_generation: u64,
     syntax_background_generation: Option<u64>,
     indent_background_generation: Option<u64>,
+    visual_generation: u64,
     undo_state: UndoState,
     buffer_cache: BufferCache,
+    markers: MarkersStore,
 }
+
+/// Shared marker store used by `Buffer`.
+pub type MarkersStore = MarkerStore<MarkerPayload>;
 
 impl Clone for Buffer {
     fn clone(&self) -> Self {
@@ -184,8 +196,10 @@ impl Clone for Buffer {
             syntax_generation: self.syntax_generation,
             syntax_background_generation: self.syntax_background_generation,
             indent_background_generation: self.indent_background_generation,
+            visual_generation: self.visual_generation,
             undo_state: self.undo_state.clone(),
             buffer_cache: self.buffer_cache.clone(),
+            markers: self.markers.clone(),
         }
     }
 }
@@ -260,6 +274,11 @@ impl Buffer {
     /// Returns true when the current buffer contents differ from the last saved baseline.
     pub fn is_modified(&self) -> bool {
         self.lines != self.saved_lines
+    }
+
+    /// Returns the generation for rendered visual decorations.
+    pub fn visual_generation(&self) -> u64 {
+        self.visual_generation
     }
 
     /// Gets the line at the specified index.
@@ -340,6 +359,11 @@ impl Buffer {
         self.syntax_generation = self.syntax_generation.wrapping_add(1);
         self.syntax_background_generation = None;
         self.indent_background_generation = None;
+        self.clear_markers();
+    }
+
+    fn bump_visual_generation(&mut self) {
+        self.visual_generation = self.visual_generation.wrapping_add(1);
     }
 
     fn refresh_syntax(&mut self) {

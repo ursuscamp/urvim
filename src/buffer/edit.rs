@@ -1,12 +1,44 @@
 use super::*;
 
 impl Buffer {
+    fn insert_shape_for_text(cursor: Cursor, text: &str) -> InsertShape {
+        let line_delta = text.split('\n').count().saturating_sub(1);
+        let tail_col = if line_delta == 0 {
+            cursor.col + text.len()
+        } else {
+            text.rsplit('\n').next().map_or(0, |tail| tail.len())
+        };
+
+        InsertShape {
+            at: cursor,
+            line_delta,
+            tail_col,
+        }
+    }
+
+    fn insert_shape_for_char(cursor: Cursor, ch: char) -> InsertShape {
+        if ch == '\n' {
+            InsertShape {
+                at: cursor,
+                line_delta: 1,
+                tail_col: 0,
+            }
+        } else {
+            InsertShape {
+                at: cursor,
+                line_delta: 0,
+                tail_col: cursor.col + ch.len_utf8(),
+            }
+        }
+    }
+
     pub fn insert_char(&mut self, cursor: Cursor, ch: char) {
         debug_assert!(
             self.is_valid_cursor(cursor),
             "insert_char called with invalid cursor: {:?}",
             cursor
         );
+        let edit = Self::insert_shape_for_char(cursor, ch);
         let line_idx = cursor.line;
         let col = cursor.col;
 
@@ -37,6 +69,8 @@ impl Buffer {
             self.lines = self.lines.update(line_idx, Arc::from(new_line));
             self.invalidate_syntax_from(line_idx);
         }
+
+        self.markers.shift_insert(edit);
     }
 
     pub fn insert_text(&mut self, cursor: Cursor, text: &str) {
@@ -48,6 +82,8 @@ impl Buffer {
         if text.is_empty() {
             return;
         }
+
+        let edit = Self::insert_shape_for_text(cursor, text);
 
         let Some(line) = self.lines.get(cursor.line) else {
             return;
@@ -72,6 +108,7 @@ impl Buffer {
             new_line.push_str(&after);
             self.lines = self.lines.update(cursor.line, Arc::from(new_line));
             self.invalidate_syntax_from(cursor.line);
+            self.markers.shift_insert(edit);
             return;
         }
 
@@ -89,6 +126,8 @@ impl Buffer {
         self.lines = left;
         let line_delta = self.lines.len() as isize - old_line_count as isize;
         self.invalidate_syntax_from_with_line_delta(cursor.line, line_delta);
+
+        self.markers.shift_insert(edit);
     }
 
     pub fn remove(&mut self, start: Cursor, end: Cursor) {
@@ -105,6 +144,8 @@ impl Buffer {
         if start.line > end.line || (start.line == end.line && start.col >= end.col) {
             return;
         }
+        let edit = DeleteShape { start, end };
+        self.clear_inlay_hints_in_range(start, end);
         let start_line = start.line;
         let start_col = start.col;
         let end_line = end.line;
@@ -138,6 +179,8 @@ impl Buffer {
             let line_delta = self.lines.len() as isize - old_line_count as isize;
             self.invalidate_syntax_from_with_line_delta(start_line, line_delta);
         }
+
+        self.markers.shift_delete(edit);
     }
 
     /// Returns the exact text covered by a characterwise range.
@@ -352,6 +395,7 @@ impl Buffer {
             left.append(right);
             self.lines = left;
         }
+        self.markers.delete_lines(start_line, actual_count);
         let line_delta = self.lines.len() as isize - old_line_count as isize;
         self.invalidate_syntax_from_with_line_delta(start_line, line_delta);
         let new_line_count = self.lines.len();
@@ -428,6 +472,7 @@ impl Buffer {
                 0,
                 self.lines.len() as isize - total_lines as isize,
             );
+            self.markers.insert_lines(0, count);
             return Some(Cursor::new(0, 0));
         }
         let insert_after = line.min(total_lines);
@@ -443,6 +488,7 @@ impl Buffer {
                 total_lines,
                 self.lines.len() as isize - old_line_count as isize,
             );
+            self.markers.insert_lines(total_lines, count);
             Some(Cursor::new(total_lines, 0))
         } else {
             let mut left = self.lines.take(insert_after + 1);
@@ -456,6 +502,7 @@ impl Buffer {
                 insert_after + 1,
                 self.lines.len() as isize - old_line_count as isize,
             );
+            self.markers.insert_lines(insert_after + 1, count);
             Some(Cursor::new(insert_after + 1, 0))
         }
     }
@@ -470,6 +517,7 @@ impl Buffer {
                 0,
                 self.lines.len() as isize - total_lines as isize,
             );
+            self.markers.insert_lines(0, count);
             return Some(Cursor::new(0, 0));
         }
         if count == 0 {
@@ -484,6 +532,7 @@ impl Buffer {
                 0,
                 self.lines.len() as isize - old_line_count as isize,
             );
+            self.markers.insert_lines(0, count);
             Some(Cursor::new(0, 0))
         } else {
             let insert_before = line.saturating_sub(1);
@@ -495,6 +544,7 @@ impl Buffer {
                     total_lines,
                     self.lines.len() as isize - old_line_count as isize,
                 );
+                self.markers.insert_lines(total_lines, count);
                 Some(Cursor::new(total_lines, 0))
             } else {
                 let mut left = self.lines.take(insert_before + 1);
@@ -508,6 +558,7 @@ impl Buffer {
                     line,
                     self.lines.len() as isize - old_line_count as isize,
                 );
+                self.markers.insert_lines(line, count);
                 Some(Cursor::new(insert_before + 1, 0))
             }
         }
@@ -560,6 +611,8 @@ impl Buffer {
             left.append(right);
             self.lines = left;
         }
+
+        self.markers.insert_lines(insert_at, content_len);
 
         let line_delta = self.lines.len() as isize - old_line_count as isize;
         self.invalidate_syntax_from_with_line_delta(insert_at, line_delta);

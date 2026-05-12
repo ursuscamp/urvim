@@ -23,7 +23,7 @@ Command-line flags override config file values.
 
 ## Current Schema
 
-The canonical config values are `theme`, `insert_escape`, `default_registers`, `syntax`, `todo_markers`, `auto_close_pairs`, `active_line`, `relative_number`, `indent_guides`, `auto_indent`, `advanced_glyphs`, `tab_insertion`, `tab_behavior`, `tab_width`, `scroll_margin`, `wrap_mode`, and `lsp`.
+The canonical config values are `theme`, `insert_escape`, `default_registers`, `syntax`, `todo_markers`, `auto_close_pairs`, `active_line`, `relative_number`, `indent_guides`, `auto_indent`, `advanced_glyphs`, `inlay_hints`, `tab_insertion`, `tab_behavior`, `tab_width`, `scroll_margin`, `wrap_mode`, and `lsp`.
 
 ```toml
 theme = "Friday Night"
@@ -36,6 +36,7 @@ active_line = false
 indent_guides = true
 auto_indent = "off"
 advanced_glyphs = ["nerdfont"]
+inlay_hints = ["type", "parameter"]
 tab_insertion = "spaces"
 tab_behavior = "simple"
 tab_width = 4
@@ -159,6 +160,16 @@ Controls optional glyph rendering capabilities used by the editor UI.
 - Behavior: when `unicode_borders` is enabled, split borders render with Unicode box-drawing glyphs
 - Behavior: when `unicode_indent` is enabled, indent guides render with Unicode line-drawing glyphs
 - Validation: unknown capability names are rejected at startup
+
+### `inlay_hints`
+
+Controls which LSP inlay-hint kinds are requested and rendered.
+
+- Type: array of strings
+- Default: `['type', 'parameter']`
+- Supported values: `type`, `parameter`
+- Behavior: when a kind is not enabled, matching inlay hints are filtered out before rendering; when the list is empty, inlay hints are disabled entirely
+- Validation: unknown kind names are rejected at startup
 
 ### `tab_insertion`
 

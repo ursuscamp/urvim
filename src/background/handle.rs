@@ -135,6 +135,16 @@ impl Drop for JobHandle {
     fn drop(&mut self) {
         self.shared.stop();
         self.shared.available.notify_all();
+
+        #[cfg(test)]
+        {
+            // Test runs should not block on worker shutdown; the process will
+            // exit soon after and the workers already have the stop signal.
+            self.workers.clear();
+            return;
+        }
+
+        #[cfg(not(test))]
         for worker in self.workers.drain(..) {
             worker.join().ok();
         }

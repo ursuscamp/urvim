@@ -1,19 +1,23 @@
 use crate::buffer::BufferId;
-use crate::config::{Config, LspServerConfig};
+use crate::config::{Config, InlayHintCapability, LspServerConfig};
 use crate::globals;
 use crate::json_rpc::{
     ErrorResponse, Message, Notification, Request, RequestId, Response, SuccessResponse,
     decode_message, encode_message,
 };
+use crate::lsp::inlay_hint_job::LspInlayHintSnapshot;
+use crate::lsp::position::{
+    byte_index_to_position_character, position_character_to_byte_index, position_to_byte_offset,
+};
 use imbl::Vector;
 use lsp_types::{
     CodeActionContext, CodeActionOrCommand, CodeActionParams, CodeActionProviderCapability,
     CodeActionTriggerKind, CreateFile, DeleteFile, Diagnostic, DocumentChangeOperation,
-    InitializeResult, Location, OneOf, PositionEncodingKind, PrepareRenameResponse, ProgressParams,
-    ProgressParamsValue, ReferenceContext, RenameFile, ResourceOp, ServerCapabilities,
-    TextDocumentIdentifier, TextDocumentSyncCapability, TextDocumentSyncKind, WorkDoneProgress,
-    WorkDoneProgressBegin, WorkDoneProgressReport, WorkspaceLocation, WorkspaceSymbol,
-    WorkspaceSymbolResponse,
+    InitializeResult, InlayHint, InlayHintKind, InlayHintParams, Location, OneOf,
+    PositionEncodingKind, PrepareRenameResponse, ProgressParams, ProgressParamsValue,
+    ReferenceContext, RenameFile, ResourceOp, ServerCapabilities, TextDocumentIdentifier,
+    TextDocumentSyncCapability, TextDocumentSyncKind, WorkDoneProgress, WorkDoneProgressBegin,
+    WorkDoneProgressReport, WorkspaceLocation, WorkspaceSymbol, WorkspaceSymbolResponse,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -465,6 +469,100 @@ impl LspRuntime {
             .unwrap_or(false)
     }
 
+    /// Returns whether the attached server for `buffer_id` supports inlay hints.
+    pub fn buffer_supports_inlay_hints(&mut self, buffer_id: BufferId) -> bool {
+        self.sync();
+        self.with_session_for_buffer(buffer_id, |session, _| Ok(session.supports_inlay_hints()))
+            .unwrap_or(false)
+    }
+
+    /// Returns whether the attached server is reporting active progress for `buffer_id`.
+    pub fn buffer_has_active_progress(&mut self, buffer_id: BufferId) -> bool {
+        self.sync();
+        self.with_session_for_buffer(buffer_id, |session, _| Ok(session.has_active_progress()))
+            .unwrap_or(false)
+    }
+
+    /// Requests inlay hints for a buffer range.
+    pub fn request_inlay_hints_for_range(
+        &mut self,
+        buffer_id: BufferId,
+        uri: &str,
+        lines: &Vector<Arc<str>>,
+        start_line: usize,
+        end_line: usize,
+        encoding: PositionEncodingKind,
+    ) -> Result<Option<Vec<InlayHint>>, String> {
+        self.sync();
+        self.with_session_for_buffer(buffer_id, |session, attachment| {
+            session.request_inlay_hints_for_range(
+                attachment, uri, lines, start_line, end_line, encoding,
+            )
+        })
+    }
+
+    /// Returns a snapshot for chunked inlay-hint requests.
+    pub fn inlay_hint_snapshot(
+        &mut self,
+        buffer_id: BufferId,
+    ) -> Result<Option<LspInlayHintSnapshot>, String> {
+        self.sync();
+        self.with_session_for_buffer(buffer_id, |session, attachment| {
+            session.inlay_hint_snapshot(buffer_id, attachment)
+        })
+    }
+
+    /// Sends a viewport inlay-hint request and returns a response receiver.
+    ///
+    /// The caller briefly holds the global runtime mutex to send the request
+    /// and register a response channel, then releases it.  The receiver can
+    /// be waited on independently so the background worker does not block the
+    /// UI hot path.
+    pub fn send_inlay_hint_request_get_receiver(
+        &mut self,
+        buffer_id: BufferId,
+        snapshot: &LspInlayHintSnapshot,
+        start_line: usize,
+        end_line: usize,
+    ) -> Result<mpsc::Receiver<Message>, String> {
+        self.sync();
+        self.with_session_for_buffer(buffer_id, |session, _attachment| {
+            let Some(range) = line_range_to_lsp_range(
+                &snapshot.lines,
+                start_line,
+                end_line,
+                snapshot.position_encoding.clone(),
+            ) else {
+                return Err("invalid inlay hint range".to_string());
+            };
+
+            let params = InlayHintParams {
+                work_done_progress_params: Default::default(),
+                text_document: TextDocumentIdentifier {
+                    uri: snapshot
+                        .uri
+                        .parse::<lsp_types::Uri>()
+                        .map_err(|e| format!("invalid uri: {e}"))?,
+                },
+                range,
+            };
+
+            let id = RequestId::Number(session.next_request_id.fetch_add(1, Ordering::SeqCst));
+            let value = serde_json::to_value(params).map_err(|e| e.to_string())?;
+            let request = Message::Request(Request::new(
+                id.clone(),
+                "textDocument/inlayHint",
+                Some(value),
+            ));
+            let (tx, rx) = mpsc::channel();
+            if let Ok(mut pending) = session.pending.lock() {
+                pending.insert(id.clone(), tx);
+            }
+            session.write_message(&request).map_err(|e| e.to_string())?;
+            Ok(rx)
+        })
+    }
+
     /// Returns whether the attached server for `buffer_id` supports code actions.
     pub fn buffer_supports_code_actions(&mut self, buffer_id: BufferId) -> bool {
         self.sync();
@@ -734,6 +832,7 @@ impl LspServerSession {
                                     store.set(buffer_id, server_name.as_str(), converted)
                                 });
                             }
+                            globals::request_inlay_hint_retry();
                             globals::request_notification_redraw();
                         }
                     }
@@ -743,7 +842,9 @@ impl LspServerSession {
                         if let Some(params) = params
                             && let Ok(params) = serde_json::from_value::<ProgressParams>(params)
                         {
-                            handle_progress_notification(&progress, params);
+                            if handle_progress_notification(&progress, params) {
+                                globals::request_inlay_hint_retry();
+                            }
                             globals::request_notification_redraw();
                         }
                     }
@@ -974,6 +1075,33 @@ impl LspServerSession {
             Some(lsp_types::OneOf::Right(_)) => true,
             None => false,
         }
+    }
+
+    fn supports_inlay_hints(&self) -> bool {
+        self.server_supports_inlay_hints() && self.config_inlay_hints_enabled()
+    }
+
+    fn has_active_progress(&self) -> bool {
+        self.progress
+            .lock()
+            .is_ok_and(|progress| progress.has_active_progress())
+    }
+
+    fn server_supports_inlay_hints(&self) -> bool {
+        match self
+            .negotiated
+            .server_capabilities
+            .as_ref()
+            .and_then(|capabilities| capabilities.inlay_hint_provider.as_ref())
+        {
+            Some(lsp_types::OneOf::Left(enabled)) => *enabled,
+            Some(lsp_types::OneOf::Right(_)) => true,
+            None => false,
+        }
+    }
+
+    fn config_inlay_hints_enabled(&self) -> bool {
+        globals::with_config(|config| config.inlay_hints_enabled()).unwrap_or(true)
     }
 
     fn supports_code_actions(&self) -> bool {
@@ -1429,6 +1557,96 @@ impl LspServerSession {
         }
     }
 
+    fn request_inlay_hints_for_range(
+        &mut self,
+        _attachment: &BufferAttachment,
+        uri: &str,
+        lines: &Vector<Arc<str>>,
+        start_line: usize,
+        end_line: usize,
+        encoding: PositionEncodingKind,
+    ) -> Result<Option<Vec<InlayHint>>, String> {
+        if !self.config_inlay_hints_enabled() {
+            return Ok(None);
+        }
+
+        if !self.server_supports_inlay_hints() {
+            return Err("attached server does not support inlay hints".to_string());
+        }
+
+        let Some(range) = line_range_to_lsp_range(lines, start_line, end_line, encoding.clone())
+        else {
+            return Ok(None);
+        };
+
+        let params = InlayHintParams {
+            work_done_progress_params: Default::default(),
+            text_document: TextDocumentIdentifier {
+                uri: uri
+                    .parse::<lsp_types::Uri>()
+                    .map_err(|error| error.to_string())?,
+            },
+            range,
+        };
+        let result = self
+            .request_raw(
+                "textDocument/inlayHint",
+                Some(serde_json::to_value(params).map_err(|error| error.to_string())?),
+            )
+            .map_err(|error| error.to_string())?;
+
+        let Some(value) = result else {
+            return Ok(None);
+        };
+
+        let hints = serde_json::from_value::<Option<Vec<InlayHint>>>(value)
+            .map_err(|error| error.to_string())?;
+        Ok(hints.map(|hints| {
+            hints
+                .into_iter()
+                .filter(|hint| self.inlay_hint_enabled(hint.kind.as_ref()))
+                .collect()
+        }))
+    }
+
+    fn inlay_hint_snapshot(
+        &self,
+        buffer_id: BufferId,
+        attachment: &BufferAttachment,
+    ) -> Result<Option<LspInlayHintSnapshot>, String> {
+        if !self.config_inlay_hints_enabled() {
+            return Ok(None);
+        }
+
+        if !self.server_supports_inlay_hints() {
+            return Err("attached server does not support inlay hints".to_string());
+        }
+
+        Ok(Some(LspInlayHintSnapshot {
+            buffer_id,
+            uri: attachment.uri.clone(),
+            lines: attachment.lines.clone(),
+            position_encoding: self.negotiated.position_encoding.clone(),
+        }))
+    }
+
+    fn inlay_hint_enabled(&self, kind: Option<&InlayHintKind>) -> bool {
+        let Some(kind) = kind else {
+            return true;
+        };
+
+        globals::with_config(|config| match kind {
+            k if k == &InlayHintKind::TYPE => {
+                config.inlay_hint_kind_enabled(&InlayHintCapability::Type)
+            }
+            k if k == &InlayHintKind::PARAMETER => {
+                config.inlay_hint_kind_enabled(&InlayHintCapability::Parameter)
+            }
+            _ => false,
+        })
+        .unwrap_or(true)
+    }
+
     fn apply_code_action_edit(
         &mut self,
         action: &CodeActionApplication,
@@ -1684,26 +1902,32 @@ impl ServerProgressState {
                 format_progress_message(&entry.title, entry.message.as_deref(), entry.percentage)
             })
     }
+
+    fn has_active_progress(&self) -> bool {
+        !self.entries.is_empty()
+    }
 }
 
 fn handle_progress_notification(
     progress: &Arc<Mutex<ServerProgressState>>,
     params: ProgressParams,
-) {
+) -> bool {
     let Some(token) = progress_token_key(&params.token) else {
-        return;
+        return false;
     };
 
     let Ok(mut progress) = progress.lock() else {
-        return;
+        return false;
     };
 
     match params.value {
         ProgressParamsValue::WorkDone(WorkDoneProgress::Begin(begin)) => {
             progress.set_begin(token, begin);
+            false
         }
         ProgressParamsValue::WorkDone(WorkDoneProgress::Report(report)) => {
             progress.set_report(token, report);
+            false
         }
         ProgressParamsValue::WorkDone(WorkDoneProgress::End(end)) => {
             if let Some(message) = end.message {
@@ -1717,6 +1941,7 @@ fn handle_progress_notification(
                 );
             }
             progress.clear_token(&token);
+            true
         }
     }
 }
@@ -1829,6 +2054,39 @@ fn position_to_lsp_json(
     json!({"line": position.line, "character": position.character})
 }
 
+fn line_range_to_lsp_range(
+    lines: &Vector<Arc<str>>,
+    start_line: usize,
+    end_line: usize,
+    encoding: PositionEncodingKind,
+) -> Option<lsp_types::Range> {
+    if start_line >= end_line || start_line >= lines.len() {
+        return None;
+    }
+
+    let start = cursor_to_lsp_position(
+        lines,
+        crate::buffer::Cursor::new(start_line, 0),
+        encoding.clone(),
+    );
+    let end_line_index = end_line.min(lines.len());
+    let end = if end_line_index < lines.len() {
+        cursor_to_lsp_position(
+            lines,
+            crate::buffer::Cursor::new(end_line_index, 0),
+            encoding,
+        )
+    } else {
+        let last_line_index = lines.len().saturating_sub(1);
+        cursor_to_lsp_position(
+            lines,
+            crate::buffer::Cursor::new(last_line_index, lines.get(last_line_index)?.len()),
+            encoding,
+        )
+    };
+    Some(lsp_types::Range::new(start, end))
+}
+
 fn cursor_to_lsp_position(
     lines: &Vector<Arc<str>>,
     cursor: crate::buffer::Cursor,
@@ -1882,80 +2140,6 @@ fn range_text(
 
     result.push_str(end_line.get(..end_col)?);
     Some(result)
-}
-
-fn byte_index_to_position_character(
-    line: &str,
-    byte_index: usize,
-    encoding: PositionEncodingKind,
-) -> Option<u32> {
-    if byte_index > line.len() {
-        return None;
-    }
-
-    if encoding == PositionEncodingKind::UTF8 {
-        return Some(byte_index as u32);
-    }
-
-    if encoding == PositionEncodingKind::UTF16 {
-        let mut units = 0u32;
-        for (offset, ch) in line.char_indices() {
-            if offset >= byte_index {
-                return Some(units);
-            }
-            units = units.saturating_add(ch.len_utf16() as u32);
-        }
-        return Some(units);
-    }
-
-    if encoding == PositionEncodingKind::UTF32 {
-        return Some(line[..byte_index].chars().count() as u32);
-    }
-
-    Some(byte_index as u32)
-}
-
-fn position_character_to_byte_index(
-    line: &str,
-    character: u32,
-    encoding: PositionEncodingKind,
-) -> Option<usize> {
-    if encoding == PositionEncodingKind::UTF8 {
-        return Some(character as usize).filter(|byte_index| *byte_index <= line.len());
-    }
-
-    if encoding == PositionEncodingKind::UTF16 {
-        let target = character as usize;
-        let mut units = 0usize;
-        for (offset, ch) in line.char_indices() {
-            if units == target {
-                return Some(offset);
-            }
-            units = units.saturating_add(ch.len_utf16());
-            if units > target {
-                return None;
-            }
-        }
-        return if units == target {
-            Some(line.len())
-        } else {
-            None
-        };
-    }
-
-    if encoding == PositionEncodingKind::UTF32 {
-        let target = character as usize;
-        let count = line.chars().count();
-        if target > count {
-            return None;
-        }
-        if target == count {
-            return Some(line.len());
-        }
-        return line.char_indices().nth(target).map(|(offset, _)| offset);
-    }
-
-    Some(character as usize).filter(|byte_index| *byte_index <= line.len())
 }
 
 fn format_hover(contents: &lsp_types::HoverContents) -> String {
@@ -2015,6 +2199,9 @@ fn initialize_params(root_uri: &str, workspace_name: &str, initialization_option
                     "isPreferredSupport": true,
                     "disabledSupport": true,
                     "dataSupport": true
+                },
+                "inlayHint": {
+                    "dynamicRegistration": false
                 }
             },
             "window": {
@@ -2690,29 +2877,6 @@ fn apply_text_edits_to_string(
     Ok(current)
 }
 
-fn position_to_byte_offset(
-    text: &str,
-    position: lsp_types::Position,
-    encoding: PositionEncodingKind,
-) -> Option<usize> {
-    let mut offset = 0usize;
-    let total_lines = text.split('\n').count();
-
-    for (line_idx, line) in text.split('\n').enumerate() {
-        if line_idx == position.line as usize {
-            let line_offset = position_character_to_byte_index(line, position.character, encoding)?;
-            return Some(offset + line_offset);
-        }
-
-        offset = offset.saturating_add(line.len());
-        if line_idx + 1 < total_lines {
-            offset = offset.saturating_add(1);
-        }
-    }
-
-    None
-}
-
 fn open_lsp_log_stderr() -> Stdio {
     match OpenOptions::new().create(true).append(true).open("lsp.log") {
         Ok(file) => Stdio::from(file),
@@ -3325,6 +3489,10 @@ mod tests {
             params["capabilities"]["textDocument"]["codeAction"]["dataSupport"],
             true
         );
+        assert_eq!(
+            params["capabilities"]["textDocument"]["inlayHint"]["dynamicRegistration"],
+            false
+        );
     }
 
     #[test]
@@ -3404,6 +3572,28 @@ mod tests {
             position_to_cursor(&lines, utf16_position, PositionEncodingKind::UTF16),
             Some(utf16_cursor)
         );
+    }
+
+    #[test]
+    fn line_range_to_lsp_range_uses_next_line_as_exclusive_end() {
+        let lines = line_snapshot("zero\none\ntwo");
+
+        let range =
+            line_range_to_lsp_range(&lines, 0, 1, PositionEncodingKind::UTF8).expect("range");
+
+        assert_eq!(range.start, lsp_types::Position::new(0, 0));
+        assert_eq!(range.end, lsp_types::Position::new(1, 0));
+    }
+
+    #[test]
+    fn line_range_to_lsp_range_ends_at_file_end_for_final_chunk() {
+        let lines = line_snapshot("zero\none");
+
+        let range =
+            line_range_to_lsp_range(&lines, 1, 2, PositionEncodingKind::UTF8).expect("range");
+
+        assert_eq!(range.start, lsp_types::Position::new(1, 0));
+        assert_eq!(range.end, lsp_types::Position::new(1, 3));
     }
 
     #[test]

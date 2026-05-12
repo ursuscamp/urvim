@@ -879,6 +879,54 @@ fn test_window_render_keeps_todo_marker_above_active_line_base_style() {
 }
 
 #[test]
+fn test_window_render_keeps_inlay_hint_background_on_active_line() {
+    let mut buffer = Buffer::from_str("abcd");
+    buffer.insert_inlay_hint(Cursor::new(0, 2), crate::buffer::Gravity::Right, "hint");
+    let mut window = Window::new(buffer);
+    let theme = syntax_themed_window();
+    let expected_hint_style = theme
+        .default_style()
+        .overlay(theme.highlight_style_for_name("ui.window.active_line"))
+        .overlay(theme.highlight_style_for_name("ui.inlay_hint"));
+    let _theme_guard = globals::set_test_active_theme(theme);
+    let _config_guard = globals::set_test_config(Config {
+        active_line: true,
+        syntax: false,
+        ..Default::default()
+    });
+
+    let mut screen = crate::screen::Screen::new(1, 20);
+    window.render(&mut screen, Position::new(0, 0), Size::new(1, 20));
+
+    assert_eq!(
+        screen.get_cell_mut(0, 5).unwrap().style,
+        expected_hint_style
+    );
+}
+
+#[test]
+fn test_window_render_records_buffer_visual_generation() {
+    let mut buffer = Buffer::from_str("abcd");
+    buffer.insert_inlay_hint(Cursor::new(0, 2), crate::buffer::Gravity::Right, "hint");
+    let expected_generation = buffer.visual_generation();
+    let mut window = Window::new(buffer);
+    let _config_guard = globals::set_test_config(Config {
+        syntax: false,
+        ..Default::default()
+    });
+
+    assert_eq!(window.buffer_view().rendered_visual_generation(), 0);
+
+    let mut screen = crate::screen::Screen::new(1, 20);
+    window.render(&mut screen, Position::new(0, 0), Size::new(1, 20));
+
+    assert_eq!(
+        window.buffer_view().rendered_visual_generation(),
+        expected_generation
+    );
+}
+
+#[test]
 fn test_window_render_keeps_active_gutter_style_in_insert_mode() {
     let path = temp_path_with_ext("active-line-insert", "rs");
     let buffer = Buffer::from_str_with_path("fn main() {}", path);
@@ -2132,6 +2180,127 @@ fn test_render_data_get_line() {
 }
 
 #[test]
+fn test_render_data_inserts_ghost_text_inline() {
+    let mut buffer = Buffer::from_str("abcd");
+    buffer.insert_ghost_text(Cursor::new(0, 2), crate::buffer::Gravity::Right, "ghost");
+
+    let view = BufferView::new(buffer);
+    let render_data = view.build_render_data(Size::new(1, 80));
+    let line = render_data.get_line(0).expect("line should render");
+
+    assert_eq!(
+        line.iter()
+            .map(|chunk| chunk.text.as_str())
+            .collect::<Vec<_>>(),
+        vec!["ab", "ghost", "cd"]
+    );
+    assert!(!line[0].is_ghost_text);
+    assert!(line[1].is_ghost_text);
+    assert!(!line[2].is_ghost_text);
+}
+
+#[test]
+fn test_marker_mutations_advance_buffer_visual_generation() {
+    let mut buffer = Buffer::from_str("abcd");
+    let initial = buffer.visual_generation();
+
+    let marker_id = buffer.insert_ghost_text(Cursor::new(0, 2), crate::buffer::Gravity::Right, "x");
+    assert_ne!(buffer.visual_generation(), initial);
+
+    let after_insert = buffer.visual_generation();
+    buffer.remove_marker(marker_id);
+    assert_ne!(buffer.visual_generation(), after_insert);
+}
+
+#[test]
+fn test_render_data_adds_trailing_space_after_colon_inlay_hint() {
+    let mut buffer = Buffer::from_str("abcd");
+    buffer.insert_inlay_hint(Cursor::new(0, 2), crate::buffer::Gravity::Right, "name: ");
+
+    let view = BufferView::new(buffer);
+    let render_data = view.build_render_data(Size::new(1, 80));
+    let line = render_data.get_line(0).expect("line should render");
+
+    assert_eq!(
+        line.iter()
+            .map(|chunk| chunk.text.as_str())
+            .collect::<Vec<_>>(),
+        vec!["ab", "name: ", "cd"]
+    );
+    assert!(line[1].is_ghost_text);
+}
+
+#[test]
+fn test_render_data_adds_leading_space_before_eol_type_inlay_hint() {
+    let mut buffer = Buffer::from_str("abcd");
+    buffer.insert_inlay_hint(Cursor::new(0, 4), crate::buffer::Gravity::Right, " Type");
+
+    let view = BufferView::new(buffer);
+    let render_data = view.build_render_data(Size::new(1, 80));
+    let line = render_data.get_line(0).expect("line should render");
+
+    assert_eq!(
+        line.iter()
+            .map(|chunk| chunk.text.as_str())
+            .collect::<Vec<_>>(),
+        vec!["abcd", " Type"]
+    );
+    assert!(line[1].is_ghost_text);
+}
+
+#[test]
+fn test_render_data_adds_trailing_space_after_eol_colon_inlay_hint() {
+    let mut buffer = Buffer::from_str("abcd");
+    buffer.insert_inlay_hint(Cursor::new(0, 4), crate::buffer::Gravity::Right, "name: ");
+
+    let view = BufferView::new(buffer);
+    let render_data = view.build_render_data(Size::new(1, 80));
+    let line = render_data.get_line(0).expect("line should render");
+
+    assert_eq!(
+        line.iter()
+            .map(|chunk| chunk.text.as_str())
+            .collect::<Vec<_>>(),
+        vec!["abcd", "name: "]
+    );
+}
+
+#[test]
+fn test_render_data_wraps_ghost_text_with_the_line() {
+    let mut buffer = Buffer::from_str("abcd");
+    buffer.insert_ghost_text(Cursor::new(0, 2), crate::buffer::Gravity::Right, "XY");
+
+    let view = BufferView::new(buffer);
+    let render_data = view.build_render_data_with_options(
+        Size::new(2, 4),
+        Style::default(),
+        true,
+        WrapMode::Hard,
+        true,
+    );
+
+    assert_eq!(render_data.line_count(), 2);
+    assert_eq!(
+        render_data
+            .get_line(0)
+            .unwrap()
+            .iter()
+            .map(|chunk| chunk.text.as_str())
+            .collect::<Vec<_>>(),
+        vec!["ab", "XY"]
+    );
+    assert_eq!(
+        render_data
+            .get_line(1)
+            .unwrap()
+            .iter()
+            .map(|chunk| chunk.text.as_str())
+            .collect::<Vec<_>>(),
+        vec!["cd"]
+    );
+}
+
+#[test]
 fn test_render_data_out_of_bounds() {
     let buffer = Buffer::from_str("line1\nline2\nline3");
     let view = BufferView::new(buffer);
@@ -2487,6 +2656,155 @@ fn test_window_visual_cursor_with_gutter() {
     // The cursor is at column 2 in the content, plus 3 for gutter = column 5
     let gutter_width = 3; // digits(3) + 2 = 3
     assert_eq!(pos.col, 2 + gutter_width);
+}
+
+#[test]
+fn test_window_visual_cursor_ignores_ghost_text() {
+    let mut buffer = Buffer::from_str("abcd");
+    buffer.insert_ghost_text(Cursor::new(0, 2), crate::buffer::Gravity::Right, "ghost");
+    let mut window = Window::new(buffer);
+    window.buffer_view_mut().set_cursor(Cursor::new(0, 3));
+
+    let mut screen = crate::screen::Screen::new(1, 20);
+    window.render(&mut screen, Position::new(0, 0), Size::new(1, 20));
+
+    let pos = window.visual_cursor().expect("cursor should be visible");
+    assert_eq!(pos.col, 11);
+}
+
+#[test]
+fn test_window_visual_cursor_does_not_count_ghost_text_at_cursor() {
+    let mut buffer = Buffer::from_str("abcd");
+    buffer.insert_ghost_text(Cursor::new(0, 2), crate::buffer::Gravity::Right, "ghost");
+    let mut window = Window::new(buffer);
+    window.buffer_view_mut().set_cursor(Cursor::new(0, 2));
+
+    let mut screen = crate::screen::Screen::new(1, 20);
+    window.render(&mut screen, Position::new(0, 0), Size::new(1, 20));
+
+    let pos = window.visual_cursor().expect("cursor should be visible");
+    assert_eq!(pos.col, 10);
+}
+
+#[test]
+fn test_render_data_cursor_ignores_ghost_text_after_overlay_split() {
+    let mut render_data = RenderData::new(1);
+    render_data.line_data.push(LineData {
+        buffer_line: 0,
+        byte_offset: 0,
+        end_byte: 4,
+        width_offset: 0,
+        show_gutter_line_number: true,
+        base_style: Style::default(),
+        chunks: vec![
+            RenderChunk::new("ab", Style::default()),
+            RenderChunk::ghost_text("ghost", Style::default()),
+            RenderChunk::new("cd", Style::default()),
+        ],
+    });
+
+    render_data.accent_range(
+        Cursor::new(0, 0),
+        Cursor::new(0, 4),
+        Style::default().fg(Color::ansi(1)),
+    );
+
+    let ghost_text = render_data.line_data[0]
+        .chunks
+        .iter()
+        .filter(|chunk| chunk.is_ghost_text)
+        .map(|chunk| chunk.text.as_str())
+        .collect::<String>();
+    assert_eq!(ghost_text, "ghost");
+    assert_eq!(
+        render_data.cursor_screen_position(Cursor::new(0, 3)),
+        Some(Position::new(0, 8))
+    );
+}
+
+#[test]
+fn test_render_data_accent_range_ignores_ghost_text_when_counting_bytes() {
+    let mut render_data = RenderData::new(1);
+    render_data.line_data.push(LineData {
+        buffer_line: 0,
+        byte_offset: 0,
+        end_byte: 4,
+        width_offset: 0,
+        show_gutter_line_number: true,
+        base_style: Style::default(),
+        chunks: vec![
+            RenderChunk::new("ab", Style::default()),
+            RenderChunk::ghost_text("ghost", Style::default()),
+            RenderChunk::new("cd", Style::default()),
+        ],
+    });
+
+    render_data.accent_range(
+        Cursor::new(0, 3),
+        Cursor::new(0, 4),
+        Style::default().fg(Color::ansi(1)),
+    );
+
+    let styles = render_data.line_data[0]
+        .chunks
+        .iter()
+        .map(|chunk| (chunk.text.as_str(), chunk.style))
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        styles,
+        vec![
+            ("ab", Style::default()),
+            ("ghost", Style::default()),
+            ("c", Style::default()),
+            ("d", Style::default().fg(Color::ansi(1))),
+        ]
+    );
+}
+
+#[test]
+fn test_window_visual_cursor_drops_deleted_inlay_hint_after_di_paren() {
+    let mut buffer = Buffer::from_str("    let _guard = urvim::logger::init(\"debug.log\");");
+    buffer.insert_inlay_hint(
+        Cursor::new(0, 14),
+        crate::buffer::Gravity::Right,
+        ": WorkerGuard",
+    );
+    buffer.insert_inlay_hint(
+        Cursor::new(0, 37),
+        crate::buffer::Gravity::Right,
+        "log_file: ",
+    );
+    let mut window = Window::new(buffer);
+    window.set_cursor(Cursor::new(0, 36));
+
+    assert_eq!(
+        window.dispatch_action(&Action::operation(
+            Operator::Delete,
+            OperatorTarget::TextObject(TextObject::InnerBracket(BracketKind::Paren)),
+        )),
+        ActionResult::Handled
+    );
+
+    let mut screen = crate::screen::Screen::new(3, 136);
+    window.render(&mut screen, Position::new(0, 0), Size::new(3, 136));
+    let pos = window.visual_cursor().expect("cursor should be visible");
+    let rendered_text = window
+        .render_data()
+        .get_line(0)
+        .expect("line should render")
+        .iter()
+        .map(|chunk| chunk.text.as_str())
+        .collect::<String>();
+
+    assert_eq!(
+        buffer_text(window.buffer_view()),
+        "    let _guard = urvim::logger::init();"
+    );
+    assert!(rendered_text.contains(": WorkerGuard"));
+    assert!(!rendered_text.contains("log_file"));
+    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 37));
+    assert_eq!(pos.col, 53);
 }
 
 #[test]

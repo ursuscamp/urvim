@@ -157,6 +157,10 @@ impl Layout {
         self.render_confirmation_box_overlay(screen, origin, size);
         self.render_diagnostic_hover_overlay(screen, origin, size);
         self.render_hover_overlay(screen, origin, size);
+
+        if self.inlay_hint_request_pending() {
+            self.request_active_buffer_inlay_hints();
+        }
     }
 
     fn render_colorscheme_picker_overlay(

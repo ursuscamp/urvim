@@ -1,6 +1,8 @@
 use super::*;
 use crate::action::ActionResult;
-use crate::background::{JobEvent, JobKind, JobPayload, JobToken};
+use crate::background::{
+    JobEvent, JobKind, JobPayload, JobToken, LspInlayHint, LspInlayHintsChunk,
+};
 use crate::buffer::Buffer;
 use crate::buffer::Cursor;
 use crate::config::Config;
@@ -13,6 +15,7 @@ use crate::ui::{Command, Intent, UiEvent, UiEventResult};
 use crate::window::{Position, Size};
 use crate::window_group::WindowGroup;
 use lsp_types::{Diagnostic, DiagnosticSeverity, Range};
+use smol_str::SmolStr;
 use std::collections::BTreeSet;
 use std::fs;
 use std::thread;
@@ -440,6 +443,168 @@ fn test_layout_lsp_rename_job_failure_surfaces_notification() {
 
     let message = globals::active_notification(std::time::Instant::now()).expect("notification");
     assert!(message.text.contains("LSP rename failed: boom"));
+}
+
+#[test]
+fn test_layout_lsp_inlay_hint_chunk_replaces_existing_hints() {
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("let value = foo();")]);
+    let buffer_id = layout.active_buffer_view().buffer_id();
+    let syntax_generation = layout
+        .active_buffer_view()
+        .with_buffer(|buffer| buffer.syntax_generation())
+        .expect("buffer");
+
+    layout.dispatch_lsp_job_event(JobEvent::Chunk {
+        kind: JobKind::LspInlayHints(buffer_id),
+        token: JobToken::new(7),
+        payload: JobPayload::LspInlayHintsChunk(LspInlayHintsChunk {
+            buffer_id,
+            syntax_generation,
+            start_line: 0,
+            end_line: 1,
+            hints: vec![LspInlayHint {
+                position: Cursor::new(0, 4),
+                label: SmolStr::new("first"),
+            }],
+        }),
+    });
+
+    layout.dispatch_lsp_job_event(JobEvent::Chunk {
+        kind: JobKind::LspInlayHints(buffer_id),
+        token: JobToken::new(7),
+        payload: JobPayload::LspInlayHintsChunk(LspInlayHintsChunk {
+            buffer_id,
+            syntax_generation,
+            start_line: 0,
+            end_line: 1,
+            hints: vec![LspInlayHint {
+                position: Cursor::new(0, 4),
+                label: SmolStr::new("second"),
+            }],
+        }),
+    });
+
+    let line = layout
+        .active_buffer_view()
+        .with_buffer(|buffer| buffer.inlay_hints_for_line(0))
+        .flatten()
+        .expect("inlay hints");
+
+    assert_eq!(line.len(), 1);
+    assert_eq!(line[0].payload.label, SmolStr::new("second"));
+}
+
+#[test]
+fn test_layout_lsp_inlay_hint_chunk_marks_visible_visuals_stale() {
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("let value = foo();")]);
+    let buffer_id = layout.active_buffer_view().buffer_id();
+    let syntax_generation = layout
+        .active_buffer_view()
+        .with_buffer(|buffer| buffer.syntax_generation())
+        .expect("buffer");
+    let mut screen = crate::screen::Screen::new(2, 40);
+    layout.render(&mut screen, Position::new(0, 0), Size::new(2, 40));
+
+    assert!(!layout.has_stale_visible_visuals());
+
+    layout.dispatch_lsp_job_event(JobEvent::Chunk {
+        kind: JobKind::LspInlayHints(buffer_id),
+        token: JobToken::new(7),
+        payload: JobPayload::LspInlayHintsChunk(LspInlayHintsChunk {
+            buffer_id,
+            syntax_generation,
+            start_line: 0,
+            end_line: 1,
+            hints: vec![LspInlayHint {
+                position: Cursor::new(0, 4),
+                label: SmolStr::new("hint"),
+            }],
+        }),
+    });
+
+    assert!(layout.has_stale_visible_visuals());
+
+    layout.render(&mut screen, Position::new(0, 0), Size::new(2, 40));
+
+    assert!(!layout.has_stale_visible_visuals());
+}
+
+#[test]
+fn test_layout_lsp_inlay_hint_chunk_pads_labels_on_insert() {
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("abcd")]);
+    let buffer_id = layout.active_buffer_view().buffer_id();
+    let syntax_generation = layout
+        .active_buffer_view()
+        .with_buffer(|buffer| buffer.syntax_generation())
+        .expect("buffer");
+
+    layout.dispatch_lsp_job_event(JobEvent::Chunk {
+        kind: JobKind::LspInlayHints(buffer_id),
+        token: JobToken::new(7),
+        payload: JobPayload::LspInlayHintsChunk(LspInlayHintsChunk {
+            buffer_id,
+            syntax_generation,
+            start_line: 0,
+            end_line: 1,
+            hints: vec![
+                LspInlayHint {
+                    position: Cursor::new(0, 2),
+                    label: SmolStr::new("name:"),
+                },
+                LspInlayHint {
+                    position: Cursor::new(0, 4),
+                    label: SmolStr::new("Type"),
+                },
+            ],
+        }),
+    });
+
+    let line = layout
+        .active_buffer_view()
+        .with_buffer(|buffer| buffer.inlay_hints_for_line(0))
+        .flatten()
+        .expect("inlay hints");
+
+    assert_eq!(line.len(), 2);
+    assert_eq!(line[0].payload.label, SmolStr::new("name: "));
+    assert_eq!(line[1].payload.label, SmolStr::new(" Type"));
+}
+
+#[test]
+fn test_layout_lsp_inlay_hint_chunk_ignores_stale_buffer_generation() {
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("abcd")]);
+    let buffer_id = layout.active_buffer_view().buffer_id();
+    let stale_generation = layout
+        .active_buffer_view()
+        .with_buffer(|buffer| buffer.syntax_generation())
+        .expect("buffer")
+        .wrapping_add(1);
+
+    layout.dispatch_lsp_job_event(JobEvent::Chunk {
+        kind: JobKind::LspInlayHints(buffer_id),
+        token: JobToken::new(7),
+        payload: JobPayload::LspInlayHintsChunk(LspInlayHintsChunk {
+            buffer_id,
+            syntax_generation: stale_generation,
+            start_line: 0,
+            end_line: 1,
+            hints: vec![LspInlayHint {
+                position: Cursor::new(0, 2),
+                label: SmolStr::new("stale"),
+            }],
+        }),
+    });
+
+    assert!(
+        layout
+            .active_buffer_view()
+            .with_buffer(|buffer| {
+                buffer
+                    .inlay_hints_for_line(0)
+                    .is_none_or(|hints| hints.is_empty())
+            })
+            .expect("buffer")
+    );
 }
 
 #[test]

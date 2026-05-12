@@ -206,6 +206,7 @@ macro_rules! assert_linewise_range_with_count {
     };
 }
 
+mod markers;
 mod syntax;
 
 #[test]
@@ -556,6 +557,82 @@ fn test_save_and_load() {
     assert_eq!(loaded.as_str(), "hello world");
 
     fs::remove_file(&path).ok();
+}
+
+#[test]
+fn test_delete_lines_shifts_ghost_texts_with_surviving_lines() {
+    let mut buf = Buffer::from_str("line0\nline1\nline2");
+    let ghost_1 = buf.insert_ghost_text(Cursor::new(1, 2), Gravity::Right, "g1");
+    let ghost_2 = buf.insert_ghost_text(Cursor::new(2, 3), Gravity::Right, "g2");
+
+    let cursor = buf
+        .delete_lines(0, 1)
+        .expect("delete_lines should return a cursor");
+
+    assert_eq!(cursor, Cursor::new(0, 0));
+    assert_eq!(buf.line_count(), 2);
+
+    let line_0 = buf.ghost_texts_for_line(0).expect("line 0 should exist");
+    assert_eq!(line_0.len(), 1);
+    assert_eq!(line_0[0].id, ghost_1);
+
+    let line_1 = buf.ghost_texts_for_line(1).expect("line 1 should exist");
+    assert_eq!(line_1.len(), 1);
+    assert_eq!(line_1[0].id, ghost_2);
+}
+
+#[test]
+fn test_delete_lines_drops_ghost_texts_from_deleted_lines() {
+    let mut buf = Buffer::from_str("line0\nline1\nline2");
+    let deleted_ghost = buf.insert_ghost_text(Cursor::new(0, 2), Gravity::Right, "gone");
+    let kept_ghost = buf.insert_ghost_text(Cursor::new(2, 3), Gravity::Right, "stay");
+
+    buf.delete_lines(0, 1)
+        .expect("delete_lines should return a cursor");
+
+    assert!(buf.ghost_text(deleted_ghost).is_none());
+
+    let line_1 = buf.ghost_texts_for_line(1).expect("line 1 should exist");
+    assert_eq!(line_1.len(), 1);
+    assert_eq!(line_1[0].id, kept_ghost);
+}
+
+#[test]
+fn test_delete_lines_undo_restores_ghost_text_positions() {
+    let mut buf = Buffer::from_str("line0\nline1\nline2");
+    let ghost_0 = buf.insert_ghost_text(Cursor::new(0, 2), Gravity::Right, "g0");
+    let ghost_1 = buf.insert_ghost_text(Cursor::new(1, 2), Gravity::Right, "g1");
+    let ghost_2 = buf.insert_ghost_text(Cursor::new(2, 2), Gravity::Right, "g2");
+
+    buf.push_snapshot(Cursor::new(0, 0));
+    buf.delete_lines(0, 1)
+        .expect("delete_lines should return a cursor");
+    buf.push_snapshot(Cursor::new(0, 0));
+
+    buf.undo().expect("undo should restore the prior snapshot");
+
+    assert_eq!(buf.line_count(), 3);
+    assert_eq!(
+        buf.ghost_text(ghost_0).unwrap().kind,
+        MarkerShape::Point(PointMarker {
+            pos: Cursor::new(0, 2),
+            gravity: Gravity::Right,
+        })
+    );
+    assert_eq!(
+        buf.ghost_text(ghost_1).unwrap().kind,
+        MarkerShape::Point(PointMarker {
+            pos: Cursor::new(1, 2),
+            gravity: Gravity::Right,
+        })
+    );
+    assert_eq!(
+        buf.ghost_text(ghost_2).unwrap().kind,
+        MarkerShape::Point(PointMarker {
+            pos: Cursor::new(2, 2),
+            gravity: Gravity::Right,
+        })
+    );
 }
 
 #[test]
@@ -3495,6 +3572,22 @@ fn test_insert_lines_after_first_line() {
 }
 
 #[test]
+fn test_insert_lines_after_shifts_ghost_texts_below_insert() {
+    let mut buf = Buffer::from_str("line1\nline2\nline3");
+    let ghost = buf.insert_ghost_text(Cursor::new(1, 2), Gravity::Right, "g");
+
+    buf.insert_lines_after(0, 1);
+
+    assert_eq!(
+        buf.ghost_text(ghost).unwrap().kind,
+        MarkerShape::Point(PointMarker {
+            pos: Cursor::new(2, 2),
+            gravity: Gravity::Right,
+        })
+    );
+}
+
+#[test]
 fn test_insert_lines_after_middle_line() {
     let mut buf = Buffer::from_str("line1\nline2\nline3");
     let cursor = buf.insert_lines_after(1, 1); // Insert after line 2
@@ -3556,6 +3649,40 @@ fn test_insert_lines_before_first_line() {
     assert_eq!(cursor, Some(Cursor::new(0, 0))); // At new line 1
     assert_eq!(buf.line_count(), 4);
     assert_eq!(buf.as_str(), "\nline1\nline2\nline3");
+}
+
+#[test]
+fn test_insert_lines_before_shifts_ghost_texts_at_and_below_insert() {
+    let mut buf = Buffer::from_str("line1\nline2\nline3");
+    let ghost = buf.insert_ghost_text(Cursor::new(1, 2), Gravity::Right, "g");
+
+    buf.insert_lines_before(1, 1);
+
+    assert_eq!(
+        buf.ghost_text(ghost).unwrap().kind,
+        MarkerShape::Point(PointMarker {
+            pos: Cursor::new(2, 2),
+            gravity: Gravity::Right,
+        })
+    );
+}
+
+#[test]
+fn test_paste_linewise_content_shifts_ghost_texts() {
+    let mut buf = Buffer::from_str("line1\nline2\nline3");
+    let ghost = buf.insert_ghost_text(Cursor::new(1, 2), Gravity::Right, "g");
+    let pasted = vec![Arc::from("a"), Arc::from("b")];
+
+    buf.paste_linewise_content(0, &pasted, true)
+        .expect("paste should succeed");
+
+    assert_eq!(
+        buf.ghost_text(ghost).unwrap().kind,
+        MarkerShape::Point(PointMarker {
+            pos: Cursor::new(3, 2),
+            gravity: Gravity::Right,
+        })
+    );
 }
 
 #[test]

@@ -5,6 +5,7 @@ use crate::ui::picker::doc_symbols::DocSymbolsPickerItem;
 use crate::ui::picker::file::FilePickerItem;
 use crate::ui::picker::grep::GrepPickerItem;
 use crate::ui::picker::preview::PreviewSyntaxRefreshResult;
+use smol_str::SmolStr;
 
 use super::error::JobError;
 use super::token::{JobKind, JobToken};
@@ -35,6 +36,32 @@ pub enum JobPayload {
     PreviewSyntax(PreviewSyntaxRefreshResult),
     /// LSP rename outcome.
     LspRename(Result<(), String>),
+    /// LSP inlay hint chunk.
+    LspInlayHintsChunk(LspInlayHintsChunk),
+}
+
+/// A chunk of label-only inlay hints for a buffer line range.
+#[derive(Debug, Clone)]
+pub struct LspInlayHintsChunk {
+    /// Buffer receiving the hints.
+    pub buffer_id: crate::buffer::BufferId,
+    /// Buffer syntax generation used when this chunk was requested.
+    pub syntax_generation: u64,
+    /// First line covered by this chunk.
+    pub start_line: usize,
+    /// End line, exclusive.
+    pub end_line: usize,
+    /// Hint payloads to render.
+    pub hints: Vec<LspInlayHint>,
+}
+
+/// A single label-only inlay hint ready for rendering.
+#[derive(Debug, Clone)]
+pub struct LspInlayHint {
+    /// Hint position in buffer coordinates.
+    pub position: crate::buffer::Cursor,
+    /// Label text to render.
+    pub label: SmolStr,
 }
 
 /// A job lifecycle event.

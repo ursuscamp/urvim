@@ -490,6 +490,24 @@ impl Layout {
         }
     }
 
+    pub(super) fn node_has_stale_visible_visuals(node: &LayoutNode) -> bool {
+        match node {
+            LayoutNode::Pane(pane) => {
+                let view = pane.window_group.active_buffer_view();
+                view.with_buffer(|buffer| {
+                    let buffer_generation = buffer.visual_generation();
+                    let rendered_generation = view.rendered_visual_generation();
+                    buffer_generation != rendered_generation
+                })
+                .unwrap_or(false)
+            }
+            LayoutNode::Split(split) => {
+                Self::node_has_stale_visible_visuals(&split.first)
+                    || Self::node_has_stale_visible_visuals(&split.second)
+            }
+        }
+    }
+
     pub(super) fn focus_pane(&mut self, pane_id: PaneId) -> bool {
         let Some(root) = self.root.as_mut() else {
             return false;

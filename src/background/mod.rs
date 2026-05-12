@@ -17,7 +17,7 @@ mod worker;
 
 pub use context::JobContext;
 pub use error::{JobError, JobSubmitError};
-pub use event::{JobEvent, JobPayload, JobSubmissionMode};
+pub use event::{JobEvent, JobPayload, JobSubmissionMode, LspInlayHint, LspInlayHintsChunk};
 pub use handle::JobHandle;
 pub use manager::JobManager;
 pub use token::{JobKind, JobToken};
@@ -27,6 +27,7 @@ use std::sync::mpsc::Sender;
 use crate::buffer::{
     IndentScopeRefreshJob, IndentScopeRefreshResult, SyntaxRefreshJob, SyntaxRefreshResult,
 };
+use crate::lsp::inlay_hint_job::LspInlayHintJob;
 use crate::lsp::rename_job::LspRenameJob;
 use crate::ui::picker::doc_symbols::{DocSymbolsPickerItem, DocSymbolsPickerSearchJob};
 use crate::ui::picker::file::{FilePickerItem, PickerSearchJob};
@@ -50,6 +51,8 @@ pub enum BackgroundJob {
     PickerPreviewSyntax(PreviewSyntaxRefreshJob),
     /// Runs an LSP rename on a background thread.
     LspRename(LspRenameJob),
+    /// Streams LSP inlay hints on a background thread.
+    LspInlayHints(LspInlayHintJob),
     /// Test-only gate job used to block the worker thread.
     #[cfg(test)]
     Gate {
@@ -68,6 +71,7 @@ impl BackgroundJob {
             Self::DocSymbolsPickerSearch(job) => job.run(context, event_tx),
             Self::PickerPreviewSyntax(job) => job.run(context, event_tx),
             Self::LspRename(job) => job.run(context, event_tx),
+            Self::LspInlayHints(job) => job.run(context, event_tx),
             #[cfg(test)]
             Self::Gate { gate } => {
                 let (lock, cvar) = &*gate;
@@ -125,6 +129,12 @@ impl From<PreviewSyntaxRefreshJob> for BackgroundJob {
 impl From<LspRenameJob> for BackgroundJob {
     fn from(value: LspRenameJob) -> Self {
         Self::LspRename(value)
+    }
+}
+
+impl From<LspInlayHintJob> for BackgroundJob {
+    fn from(value: LspInlayHintJob) -> Self {
+        Self::LspInlayHints(value)
     }
 }
 

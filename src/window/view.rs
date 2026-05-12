@@ -1,6 +1,9 @@
 use super::*;
 use crate::buffer::BufferId;
-use crate::buffer::{configured_tab_width, display_grapheme_width, display_width_at};
+use crate::buffer::{
+    Marker, MarkerPayload, MarkerShape, configured_tab_width, display_grapheme_width,
+    display_width_at,
+};
 use crate::config::ScrollMargin;
 use crate::config::WrapMode;
 use crate::theme::Tag;
@@ -34,6 +37,7 @@ impl BufferView {
             remembered_visual_col: None,
             visual_selection: None,
             yank_flash: None,
+            rendered_visual_generation: 0,
         }
     }
 
@@ -47,6 +51,7 @@ impl BufferView {
             remembered_visual_col: None,
             visual_selection: None,
             yank_flash: None,
+            rendered_visual_generation: 0,
         }
     }
 
@@ -77,6 +82,18 @@ impl BufferView {
         match &self.buffer {
             BufferBacking::Pooled(buffer_id) => crate::globals::with_buffer_mut(*buffer_id, f),
             BufferBacking::Owned(buffer) => Some(f(&mut buffer.borrow_mut())),
+        }
+    }
+
+    /// Returns the last visual generation rendered for this view.
+    pub fn rendered_visual_generation(&self) -> u64 {
+        self.rendered_visual_generation
+    }
+
+    /// Records the current buffer visual generation as rendered.
+    pub fn mark_visual_generation_rendered(&mut self) {
+        if let Some(generation) = self.with_buffer(|buffer| buffer.visual_generation()) {
+            self.rendered_visual_generation = generation;
         }
     }
 
@@ -490,7 +507,12 @@ impl BufferView {
                     .line_at(line_idx)
                     .map(|line| line.as_ref())
                     .unwrap_or("");
-                let segments = Self::wrap_segments_for_line(line_text, visible_cols, wrap_mode);
+                let mut annotations = buffer.ghost_texts_for_line(line_idx).unwrap_or_default();
+                if let Some(inlay_hints) = buffer.inlay_hints_for_line(line_idx) {
+                    annotations.extend(inlay_hints);
+                }
+                let wrapped_text = Self::line_text_with_ghost_texts(line_text, &annotations);
+                let segments = Self::wrap_segments_for_line(&wrapped_text, visible_cols, wrap_mode);
                 let segment_count = segments.len().max(1);
 
                 if line_idx == cursor.line {
@@ -540,8 +562,13 @@ impl BufferView {
                     .line_at(line_idx)
                     .map(|line| line.as_ref())
                     .unwrap_or("");
+                let mut annotations = buffer.ghost_texts_for_line(line_idx).unwrap_or_default();
+                if let Some(inlay_hints) = buffer.inlay_hints_for_line(line_idx) {
+                    annotations.extend(inlay_hints);
+                }
+                let wrapped_text = Self::line_text_with_ghost_texts(line_text, &annotations);
                 let segment_count =
-                    Self::wrap_segments_for_line(line_text, visible_cols, wrap_mode)
+                    Self::wrap_segments_for_line(&wrapped_text, visible_cols, wrap_mode)
                         .len()
                         .max(1);
                 if accumulated_rows + segment_count > wrapped_row {
@@ -579,6 +606,9 @@ impl BufferView {
         let mut render_data = RenderData::new(size.rows);
         let syntax_styles =
             globals::with_active_theme(|theme| theme.map(|theme| theme.highlights.clone()));
+        let inlay_hint_style = globals::with_active_theme(|theme| {
+            theme.map(|theme| theme.highlight_style_for_name("ui.inlay_hint"))
+        });
         let selection_style = globals::with_active_theme(|theme| {
             theme.map(|theme| theme.highlight_style_for_name("ui.selection"))
         });
@@ -626,24 +656,31 @@ impl BufferView {
                         Vec::new()
                     };
                     if wrap_enabled {
+                        let mut annotations = buffer
+                            .ghost_texts_for_line(buffer_line_idx)
+                            .unwrap_or_default();
+                        if let Some(inlay_hints) = buffer.inlay_hints_for_line(buffer_line_idx) {
+                            annotations.extend(inlay_hints);
+                        }
+                        let chunks = Self::build_chunks_for_visible_line(
+                            line_text,
+                            0..line_text.len(),
+                            line_text,
+                            &syntax_spans,
+                            &todo_markers,
+                            &annotations,
+                            default_style,
+                            inlay_hint_style,
+                            syntax_styles.as_ref(),
+                        );
                         let segments =
-                            Self::wrap_segments_for_line(line_text, size.cols as usize, wrap_mode);
+                            Self::wrap_render_chunks(chunks, size.cols as usize, wrap_mode);
                         if rows_to_skip >= segments.len() {
                             rows_to_skip -= segments.len();
                             buffer_line_idx += 1;
                             continue;
                         }
                         for segment in segments.into_iter().skip(rows_to_skip) {
-                            let visible_text = &line_text[segment.start_byte..segment.end_byte];
-                            let chunks = Self::build_chunks_for_visible_line(
-                                line_text,
-                                segment.start_byte..segment.end_byte,
-                                visible_text,
-                                &syntax_spans,
-                                &todo_markers,
-                                default_style,
-                                syntax_styles.as_ref(),
-                            );
                             let line_data = LineData {
                                 buffer_line: buffer_line_idx,
                                 byte_offset: segment.start_byte,
@@ -651,7 +688,7 @@ impl BufferView {
                                 width_offset: 0,
                                 show_gutter_line_number: !segment.is_continuation,
                                 base_style: Style::default(),
-                                chunks,
+                                chunks: segment.chunks,
                             };
                             render_data.line_data.push(line_data);
                             rendered_rows += 1;
@@ -661,6 +698,12 @@ impl BufferView {
                         }
                         rows_to_skip = 0;
                     } else {
+                        let mut annotations = buffer
+                            .ghost_texts_for_line(buffer_line_idx)
+                            .unwrap_or_default();
+                        if let Some(inlay_hints) = buffer.inlay_hints_for_line(buffer_line_idx) {
+                            annotations.extend(inlay_hints);
+                        }
                         let (byte_offset, width_offset, visible_text) =
                             Self::calculate_horizontal_offset(line_text, horizontal_offset);
                         let chunks = Self::build_chunks_for_visible_line(
@@ -669,7 +712,9 @@ impl BufferView {
                             &visible_text,
                             &syntax_spans,
                             &todo_markers,
+                            &annotations,
                             default_style,
+                            inlay_hint_style,
                             syntax_styles.as_ref(),
                         );
                         let line_data = LineData {
@@ -825,13 +870,11 @@ impl BufferView {
         visible_text: &str,
         syntax_spans: &[crate::buffer::SyntaxSpan],
         todo_markers: &Vector<SmolStr>,
-        _default_style: Style,
+        markers: &[Marker<MarkerPayload>],
+        default_style: Style,
+        inlay_hint_style: Option<Style>,
         syntax_styles: Option<&crate::theme::HighlightStyles>,
     ) -> Vec<RenderChunk> {
-        if visible_text.is_empty() {
-            return vec![RenderChunk::new("", Style::default())];
-        }
-
         let visible_start = visible.start;
         let visible_end = visible.end;
         let mut chunks = Vec::new();
@@ -898,7 +941,202 @@ impl BufferView {
             chunks.push(RenderChunk::new(visible_text, Style::default()));
         }
 
+        Self::apply_marker_chunks(
+            &mut chunks,
+            visible_start,
+            visible_end,
+            markers,
+            default_style.faint().italic(),
+            inlay_hint_style.unwrap_or(default_style.faint().italic()),
+        );
+
         chunks
+    }
+
+    fn apply_marker_chunks(
+        chunks: &mut Vec<RenderChunk>,
+        visible_start: usize,
+        visible_end: usize,
+        markers: &[Marker<MarkerPayload>],
+        ghost_style: Style,
+        inlay_hint_style: Style,
+    ) {
+        let insertions: Vec<(usize, &MarkerPayload)> = markers
+            .iter()
+            .filter_map(|marker| match marker.kind {
+                MarkerShape::Point(point)
+                    if point.pos.col >= visible_start && point.pos.col <= visible_end =>
+                {
+                    Some((point.pos.col, &marker.payload))
+                }
+                _ => None,
+            })
+            .collect();
+
+        if insertions.is_empty() {
+            return;
+        }
+
+        let mut output = Vec::with_capacity(chunks.len() + insertions.len());
+        let mut ghost_idx = 0usize;
+        let mut chunk_start = visible_start;
+
+        for chunk in chunks.drain(..) {
+            let mut remaining = chunk.text.as_str();
+            let chunk_end = chunk_start + remaining.len();
+
+            while ghost_idx < insertions.len() && insertions[ghost_idx].0 <= chunk_start {
+                let payload = insertions[ghost_idx].1;
+                output.push(RenderChunk::ghost_text(
+                    payload.label.as_str(),
+                    payload.style(ghost_style, inlay_hint_style),
+                ));
+                ghost_idx += 1;
+            }
+
+            while ghost_idx < insertions.len() && insertions[ghost_idx].0 < chunk_end {
+                let ghost_col = insertions[ghost_idx].0;
+                let split_at = ghost_col.saturating_sub(chunk_start).min(remaining.len());
+                if split_at > 0 {
+                    output.push(RenderChunk::new(&remaining[..split_at], chunk.style));
+                    remaining = &remaining[split_at..];
+                    chunk_start += split_at;
+                }
+
+                while ghost_idx < insertions.len() && insertions[ghost_idx].0 == ghost_col {
+                    let payload = insertions[ghost_idx].1;
+                    output.push(RenderChunk::ghost_text(
+                        payload.label.as_str(),
+                        payload.style(ghost_style, inlay_hint_style),
+                    ));
+                    ghost_idx += 1;
+                }
+            }
+
+            if !remaining.is_empty() {
+                output.push(RenderChunk::new(remaining, chunk.style));
+            }
+            chunk_start = chunk_end;
+        }
+
+        while ghost_idx < insertions.len() {
+            let payload = insertions[ghost_idx].1;
+
+            output.push(RenderChunk::ghost_text(
+                payload.label.as_str(),
+                payload.style(ghost_style, inlay_hint_style),
+            ));
+            ghost_idx += 1;
+        }
+
+        *chunks = output;
+    }
+
+    fn wrap_render_chunks(
+        chunks: Vec<RenderChunk>,
+        max_width: usize,
+        wrap_mode: WrapMode,
+    ) -> Vec<WrappedRenderSegment> {
+        let virtual_text = chunks
+            .iter()
+            .map(|chunk| chunk.text.as_str())
+            .collect::<String>();
+        let wrap_segments = Self::wrap_segments_for_line(&virtual_text, max_width, wrap_mode);
+        let mut result = Vec::with_capacity(wrap_segments.len().max(1));
+
+        if wrap_segments.is_empty() {
+            result.push(WrappedRenderSegment {
+                start_byte: 0,
+                end_byte: 0,
+                is_continuation: false,
+                chunks: Vec::new(),
+            });
+            return result;
+        }
+
+        let mut chunk_iter = chunks.into_iter();
+        let mut current_chunk = chunk_iter.next();
+        let mut current_chunk_offset = 0usize;
+        let mut virtual_pos = 0usize;
+        let mut original_pos = 0usize;
+
+        for (segment_idx, segment) in wrap_segments.iter().enumerate() {
+            let mut row_chunks = Vec::new();
+            let row_start = original_pos;
+
+            while virtual_pos < segment.end_byte {
+                let Some(chunk) = current_chunk.as_ref() else {
+                    break;
+                };
+
+                let remaining = &chunk.text[current_chunk_offset..];
+                let take = remaining.len().min(segment.end_byte - virtual_pos);
+                if take == 0 {
+                    break;
+                }
+
+                row_chunks.push(RenderChunk {
+                    text: remaining[..take].to_string(),
+                    style: chunk.style,
+                    is_ghost_text: chunk.is_ghost_text,
+                });
+
+                virtual_pos += take;
+                if !chunk.is_ghost_text {
+                    original_pos += take;
+                }
+
+                if take == remaining.len() {
+                    current_chunk = chunk_iter.next();
+                    current_chunk_offset = 0;
+                } else {
+                    current_chunk_offset += take;
+                }
+            }
+
+            result.push(WrappedRenderSegment {
+                start_byte: row_start,
+                end_byte: original_pos,
+                is_continuation: segment_idx > 0,
+                chunks: row_chunks,
+            });
+        }
+
+        result
+    }
+
+    fn line_text_with_ghost_texts(line_text: &str, markers: &[Marker<MarkerPayload>]) -> String {
+        if markers.is_empty() {
+            return line_text.to_string();
+        }
+
+        let mut result = String::with_capacity(
+            line_text.len()
+                + markers
+                    .iter()
+                    .map(|marker| marker.payload.label.len())
+                    .sum::<usize>(),
+        );
+        let mut cursor = 0usize;
+
+        for marker in markers {
+            let MarkerShape::Point(point) = marker.kind else {
+                continue;
+            };
+
+            let insert_at = point.pos.col.min(line_text.len());
+            if cursor < insert_at {
+                result.push_str(&line_text[cursor..insert_at]);
+                cursor = insert_at;
+            }
+            result.push_str(marker.payload.label.as_str());
+        }
+
+        if cursor < line_text.len() {
+            result.push_str(&line_text[cursor..]);
+        }
+
+        result
     }
 
     fn build_comment_chunks(
@@ -1167,6 +1405,14 @@ struct TodoMatch {
     start_byte: usize,
     end_byte: usize,
     marker: String,
+}
+
+#[derive(Debug, Clone)]
+struct WrappedRenderSegment {
+    start_byte: usize,
+    end_byte: usize,
+    is_continuation: bool,
+    chunks: Vec<RenderChunk>,
 }
 
 fn todo_marker_tag(marker: &str) -> Tag {

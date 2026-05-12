@@ -9,6 +9,7 @@ impl Buffer {
         let syntax_name = SmolStr::new(crate::syntax::fallback_syntax_name());
         let saved_lines = lines.clone();
         let undo_lines = lines.clone();
+        let markers = MarkersStore::with_line_count(lines.len());
         Self {
             lines,
             saved_lines,
@@ -16,11 +17,14 @@ impl Buffer {
             syntax_generation: 0,
             syntax_background_generation: None,
             indent_background_generation: None,
+            visual_generation: 0,
             buffer_cache: BufferCache::new(syntax_name.clone()),
+            markers: markers.clone(),
             undo_state: UndoState::new(
                 undo_lines,
                 Cursor::new(0, 0),
                 BufferCache::new(syntax_name),
+                markers,
             ),
         }
     }
@@ -37,6 +41,7 @@ impl Buffer {
                 .unwrap_or_else(|| SmolStr::new(crate::syntax::fallback_syntax_name()));
         let saved_lines = lines.clone();
         let undo_lines = lines.clone();
+        let markers = MarkersStore::with_line_count(lines.len());
         Self {
             lines,
             saved_lines,
@@ -44,11 +49,14 @@ impl Buffer {
             syntax_generation: 0,
             syntax_background_generation: None,
             indent_background_generation: None,
+            visual_generation: 0,
             buffer_cache: BufferCache::new(syntax_name.clone()),
+            markers: markers.clone(),
             undo_state: UndoState::new(
                 undo_lines,
                 Cursor::new(0, 0),
                 BufferCache::new(syntax_name),
+                markers,
             ),
         }
     }
@@ -68,20 +76,25 @@ impl Buffer {
         .unwrap_or_else(|| SmolStr::new(crate::syntax::fallback_syntax_name()));
         let saved_lines = lines.clone();
         let undo_lines = lines.clone();
-        Self {
+        let markers = MarkersStore::with_line_count(lines.len());
+        let buffer = Self {
             lines,
             saved_lines,
             path: Some(path),
             syntax_generation: 0,
             syntax_background_generation: None,
             indent_background_generation: None,
+            visual_generation: 0,
             buffer_cache: BufferCache::new(syntax_name.clone()),
+            markers: markers.clone(),
             undo_state: UndoState::new(
                 undo_lines,
                 Cursor::new(0, 0),
                 BufferCache::new(syntax_name),
+                markers,
             ),
-        }
+        };
+        buffer
     }
 
     pub fn from_str_with_path(text: &str, path: AbsolutePath) -> Self {

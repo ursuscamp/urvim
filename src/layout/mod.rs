@@ -20,6 +20,7 @@ mod tree;
 use self::dialogs::Dialogs;
 use crate::action::ActionResult;
 use crate::background::{JobEvent, JobKind, JobManager};
+use crate::buffer::BufferId;
 use crate::editor::{Action, ModeKind};
 use crate::screen::Screen;
 use crate::status_bar::StatusBar;
@@ -47,6 +48,33 @@ pub struct Layout {
     size: Size,
     dialogs: Dialogs,
     jobs: Arc<JobManager>,
+    inlay_hints: InlayHintState,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct InlayHintRequestParams {
+    pub buffer_id: BufferId,
+    pub start_line: usize,
+    pub syntax_generation: u64,
+}
+
+#[derive(Debug)]
+pub(super) struct InFlightInlayHintRequest {
+    pub params: InlayHintRequestParams,
+    pub received_hints: bool,
+}
+
+#[derive(Debug)]
+pub(super) enum InlayHintState {
+    Idle,
+    Pending,
+    InFlight(InFlightInlayHintRequest),
+}
+
+impl InlayHintState {
+    pub fn is_pending(&self) -> bool {
+        matches!(self, Self::Pending)
+    }
 }
 
 impl Layout {
@@ -62,6 +90,7 @@ impl Layout {
             size: Size::default(),
             dialogs: Dialogs::default(),
             jobs: Arc::new(JobManager::new()),
+            inlay_hints: InlayHintState::Idle,
         }
     }
 
@@ -257,6 +286,29 @@ impl Layout {
         self.render_layout(screen, origin, size);
     }
 
+    /// Returns true when any visible pane has visual buffer changes not yet rendered.
+    pub fn has_stale_visible_visuals(&self) -> bool {
+        let Some(root) = self.root.as_ref() else {
+            return false;
+        };
+
+        Self::node_has_stale_visible_visuals(root)
+    }
+
+    /// Allows the active inlay hint request to be submitted again.
+    pub fn retry_inlay_hints(&mut self) {
+        let buffer_id = self.active_buffer_view().buffer_id();
+        if crate::globals::try_with_lsp_runtime_mut(|runtime| {
+            runtime.buffer_has_active_progress(buffer_id)
+        })
+        .unwrap_or(true)
+        {
+            return;
+        }
+
+        self.inlay_hints = InlayHintState::Pending;
+    }
+
     /// Processes picker-owned background jobs.
     pub fn process_background_jobs(&mut self) -> bool {
         let mut accepted_redraw = false;
@@ -267,7 +319,14 @@ impl Layout {
                 event @ JobEvent::Chunk { .. }
                 | event @ JobEvent::Completed { .. }
                 | event @ JobEvent::Failed { .. } => {
-                    if matches!(event.kind(), JobKind::LspRename(_)) {
+                    if !self.jobs.is_accepted(event.kind(), event.token()) {
+                        continue;
+                    }
+
+                    if matches!(
+                        event.kind(),
+                        JobKind::LspRename(_) | JobKind::LspInlayHints(_)
+                    ) {
                         self.dispatch_lsp_job_event(event);
                     } else {
                         self.dispatch_job_event(event);
@@ -553,6 +612,9 @@ impl Layout {
                 } else {
                     let handled = self.active_window_group_mut().dispatch_action(action)
                         == ActionResult::Handled;
+                    if handled {
+                        self.request_inlay_hints_for_active_viewport();
+                    }
                     if handled && self.active_window_group().is_empty() {
                         self.close_focused_pane();
                     }

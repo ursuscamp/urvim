@@ -387,6 +387,10 @@ mod tests {
             Style::new().fg(Color::ansi(9)),
         );
         highlights.insert(
+            tag("ui.inlay_hint"),
+            Style::new().fg(Color::ansi(24)).italic(),
+        );
+        highlights.insert(
             tag("syntax.comment"),
             Style::new().bold().fg(Color::ansi(10)),
         );
@@ -462,6 +466,10 @@ mod tests {
         assert_eq!(
             theme.highlight_style_for_name("ui.window"),
             Style::new().fg(Color::ansi(7))
+        );
+        assert_eq!(
+            theme.highlight_style_for_name("ui.inlay_hint"),
+            Style::new().fg(Color::ansi(24)).italic()
         );
     }
 

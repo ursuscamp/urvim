@@ -96,6 +96,15 @@ fn main() -> io::Result<()> {
             needs_redraw = true;
         }
 
+        if layout.has_stale_visible_visuals() {
+            needs_redraw = true;
+        }
+
+        if globals::take_inlay_hint_retry_requested() {
+            layout.retry_inlay_hints();
+            needs_redraw = true;
+        }
+
         if render_frame_if_needed(
             needs_redraw,
             &mut layout,

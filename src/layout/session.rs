@@ -1,4 +1,4 @@
-use super::{Layout, LayoutNode, PaneId, PaneNode, SplitNode};
+use super::{InlayHintState, Layout, LayoutNode, PaneId, PaneNode, SplitNode};
 use crate::session::{SessionFile, SessionNode, SessionPane, SessionSplit, SessionSplitSize};
 
 impl Layout {
@@ -28,6 +28,7 @@ impl Layout {
             size: Default::default(),
             dialogs: super::Dialogs::default(),
             jobs: std::sync::Arc::new(crate::background::JobManager::new()),
+            inlay_hints: InlayHintState::Idle,
         };
         layout.next_pane_id = layout.max_pane_id().map(|id| id.0 + 1).unwrap_or(0);
         if layout.root.is_some() {

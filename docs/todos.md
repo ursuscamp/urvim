@@ -10,11 +10,7 @@ This is a list, in no particular order, of things that need to be addressed whic
 - reloading changed files on disk
 - folding
 - show code action modification in preview window
-
-- something like extmarks
-    - useful for ghost text (inline type hints, code action hints)
-
-## LSP
+- code action hints for the current line (with ghost text)
 
 # Bugs
 
@@ -24,3 +20,4 @@ This is a list, in no particular order, of things that need to be addressed whic
 - look for places where we clip text at width, replace them with a utility method (if it exists) or a trait
 - for pickers tab (to switch query modes) is handled in layout. can it be in the picker itself like other keys?
 - refactor other pickers with formatted line templates
+- refactors to prevent thread contention/locks for tests

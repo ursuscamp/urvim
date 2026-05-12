@@ -4,6 +4,7 @@ use crate::background::JobManager;
 use crate::background::{JobContext, JobEvent, JobKind, JobPayload, JobToken};
 use crate::buffer::{BufferId, Cursor};
 use crate::globals;
+use crate::lsp::position::position_character_to_byte_index;
 use crate::lsp::runtime::{DocumentSymbolItem, DocumentSymbolTree};
 use crate::terminal::Style;
 use crate::ui::inputs::PromptSegment;
@@ -18,7 +19,7 @@ use crate::ui::picker::{
     PickerSource, PickerWidget,
 };
 use crate::ui::{Command, Intent};
-use lsp_types::SymbolKind;
+use lsp_types::{PositionEncodingKind, SymbolKind};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -524,28 +525,12 @@ fn cursor_from_range_utf16(
     range: &lsp_types::Range,
 ) -> Option<Cursor> {
     let line = lines.get(range.start.line as usize)?;
-    let col = position_character_to_byte_index(line.as_ref(), range.start.character)?;
+    let col = position_character_to_byte_index(
+        line.as_ref(),
+        range.start.character,
+        PositionEncodingKind::UTF16,
+    )?;
     Some(Cursor::new(range.start.line as usize, col))
-}
-
-fn position_character_to_byte_index(line: &str, character: u32) -> Option<usize> {
-    let target = character as usize;
-    let mut units = 0usize;
-    for (offset, ch) in line.char_indices() {
-        if units == target {
-            return Some(offset);
-        }
-        units = units.saturating_add(ch.len_utf16());
-        if units > target {
-            return None;
-        }
-    }
-
-    if units == target {
-        Some(line.len())
-    } else {
-        None
-    }
 }
 
 fn build_document_symbol_preview(item: &DocSymbolsPickerItem) -> std::io::Result<PickerPreview> {

@@ -1,12 +1,18 @@
 use super::*;
 
 impl UndoState {
-    pub(super) fn new(lines: Vector<Arc<str>>, cursor: Cursor, buffer_cache: BufferCache) -> Self {
+    pub(super) fn new(
+        lines: Vector<Arc<str>>,
+        cursor: Cursor,
+        buffer_cache: BufferCache,
+        markers: MarkersStore,
+    ) -> Self {
         Self {
             history: Vector::unit(Snapshot {
                 lines,
                 cursor,
                 buffer_cache,
+                markers,
             }),
             position: 0,
         }
@@ -17,6 +23,7 @@ impl UndoState {
         lines: Vector<Arc<str>>,
         cursor: Cursor,
         buffer_cache: BufferCache,
+        markers: MarkersStore,
     ) {
         if let Some(active) = self.history.get(self.position)
             && active.lines == lines
@@ -26,6 +33,7 @@ impl UndoState {
                     lines,
                     cursor,
                     buffer_cache,
+                    markers,
                 };
             }
             return;
@@ -39,6 +47,7 @@ impl UndoState {
             lines,
             cursor,
             buffer_cache,
+            markers,
         });
         self.position = self.history.len() - 1;
     }
@@ -55,7 +64,13 @@ impl UndoState {
         }
     }
 
-    fn undo(&mut self) -> Option<(Vector<Arc<str>>, BufferCache, Cursor)> {
+    pub(super) fn update_markers(&mut self, markers: MarkersStore) {
+        if let Some(active) = self.history.get_mut(self.position) {
+            active.markers = markers;
+        }
+    }
+
+    fn undo(&mut self) -> Option<(Vector<Arc<str>>, BufferCache, MarkersStore, Cursor)> {
         if self.position == 0 {
             return None;
         }
@@ -65,11 +80,12 @@ impl UndoState {
         Some((
             snapshot.lines.clone(),
             snapshot.buffer_cache.clone(),
+            snapshot.markers.clone(),
             snapshot.cursor,
         ))
     }
 
-    fn redo(&mut self) -> Option<(Vector<Arc<str>>, BufferCache, Cursor)> {
+    fn redo(&mut self) -> Option<(Vector<Arc<str>>, BufferCache, MarkersStore, Cursor)> {
         if self.position >= self.history.len() - 1 {
             return None;
         }
@@ -79,6 +95,7 @@ impl UndoState {
         Some((
             snapshot.lines.clone(),
             snapshot.buffer_cache.clone(),
+            snapshot.markers.clone(),
             snapshot.cursor,
         ))
     }
@@ -101,13 +118,27 @@ impl UndoState {
 impl Buffer {
     /// Records the current text and syntax state as an undo snapshot.
     pub fn push_snapshot(&mut self, cursor: Cursor) {
-        self.undo_state
-            .push_snapshot(self.lines.clone(), cursor, self.buffer_cache.clone());
+        self.undo_state.push_snapshot(
+            self.lines.clone(),
+            cursor,
+            self.buffer_cache.clone(),
+            self.markers.clone(),
+        );
     }
 
     /// Updates the cursor stored in the active undo snapshot.
     pub fn update_cursor(&mut self, cursor: Cursor) {
         self.undo_state.update_cursor(cursor);
+    }
+
+    /// Updates the marker state stored in the active undo snapshot.
+    pub fn update_markers(&mut self) {
+        self.undo_state.update_markers(self.markers.clone());
+    }
+
+    /// Updates the inlay hint state stored in the active undo snapshot.
+    pub fn update_inlay_hints(&mut self) {
+        self.update_markers();
     }
 
     /// Returns the cursor stored in the active undo snapshot.
@@ -121,9 +152,10 @@ impl Buffer {
 
     pub fn undo(&mut self) -> Option<Cursor> {
         match self.undo_state.undo() {
-            Some((lines, buffer_cache, cursor)) => {
+            Some((lines, buffer_cache, markers, cursor)) => {
                 self.lines = lines;
                 self.buffer_cache = buffer_cache;
+                self.markers = markers;
                 self.syntax_generation = self.syntax_generation.wrapping_add(1);
                 self.syntax_background_generation = None;
                 self.indent_background_generation = None;
@@ -135,9 +167,10 @@ impl Buffer {
 
     pub fn redo(&mut self) -> Option<Cursor> {
         match self.undo_state.redo() {
-            Some((lines, buffer_cache, cursor)) => {
+            Some((lines, buffer_cache, markers, cursor)) => {
                 self.lines = lines;
                 self.buffer_cache = buffer_cache;
+                self.markers = markers;
                 self.syntax_generation = self.syntax_generation.wrapping_add(1);
                 self.syntax_background_generation = None;
                 self.indent_background_generation = None;

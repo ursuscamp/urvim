@@ -25,6 +25,7 @@ neutral_blue = "#458588"
 neutral_purple = "#b16286"
 neutral_aqua = "#689d6a"
 gray = "#928374"
+muted = "#928374"
 
 [default]
 fg = "fg1"
@@ -44,6 +45,7 @@ bg = "bg0"
 "ui.window" = { fg = "fg1", bg = "bg0" }
 "ui.window.lines" = { fg = "bg3" }
 "ui.window.lines.resize" = { fg = "orange", bold = true }
+"ui.inlay_hint" = { fg = "muted", italic = true }
 "ui.diagnostic.error" = { fg = "red", bold = true }
 "ui.diagnostic.warning" = { fg = "yellow", bold = true }
 "ui.diagnostic.info" = { fg = "blue" }

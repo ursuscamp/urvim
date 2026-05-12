@@ -8,6 +8,7 @@ impl RenderChunk {
         Self {
             text: text.to_string(),
             style,
+            is_ghost_text: false,
         }
     }
 
@@ -15,6 +16,23 @@ impl RenderChunk {
         Self {
             text: text.to_string(),
             style: Style::default(),
+            is_ghost_text: false,
+        }
+    }
+
+    pub fn ghost_text(text: &str, style: Style) -> Self {
+        Self {
+            text: text.to_string(),
+            style,
+            is_ghost_text: true,
+        }
+    }
+
+    fn with_ghost_flag(text: &str, style: Style, is_ghost_text: bool) -> Self {
+        Self {
+            text: text.to_string(),
+            style,
+            is_ghost_text,
         }
     }
 }
@@ -96,32 +114,49 @@ impl RenderData {
             .take(self.visible_rows as usize)
             .enumerate()
         {
-            if line_data.buffer_line != cursor.line || cursor.col < line_data.byte_offset {
+            if line_data.buffer_line != cursor.line {
                 continue;
             }
-            if cursor.col > line_data.end_byte {
-                continue;
+
+            let mut row_has_real_text = false;
+            let mut row_byte_offset = line_data.byte_offset;
+            let mut row_end_byte = line_data.byte_offset;
+            for chunk in &line_data.chunks {
+                if chunk.is_ghost_text {
+                    continue;
+                }
+                row_has_real_text = true;
+                row_end_byte = row_end_byte.max(row_byte_offset + chunk.text.len());
+                row_byte_offset += chunk.text.len();
             }
-            if cursor.col == line_data.end_byte
-                && let Some(next_line_data) = self.line_data.get(screen_row + 1)
-                && next_line_data.buffer_line == cursor.line
-                && next_line_data.byte_offset == cursor.col
-            {
+
+            if !row_has_real_text {
+                if cursor.col < line_data.byte_offset || cursor.col > line_data.end_byte {
+                    continue;
+                }
+            } else if cursor.col < line_data.byte_offset || cursor.col > row_end_byte {
                 continue;
             }
 
             let mut visual_col = 0;
-            let mut byte_pos = line_data.byte_offset;
+            let mut original_col = line_data.byte_offset;
             for chunk in &line_data.chunks {
+                if chunk.is_ghost_text {
+                    if cursor.col < original_col {
+                        break;
+                    }
+                    visual_col += display_width_at(&chunk.text, visual_col, tab_width);
+                    continue;
+                }
                 let mut chunk_byte_pos = 0;
                 for grapheme in chunk.text.graphemes(true) {
-                    if byte_pos + chunk_byte_pos >= cursor.col {
+                    if original_col + chunk_byte_pos >= cursor.col {
                         break;
                     }
                     visual_col += display_grapheme_width(grapheme, visual_col, tab_width);
                     chunk_byte_pos += grapheme.len();
                 }
-                byte_pos += chunk.text.len();
+                original_col += chunk.text.len();
             }
             return Some(Position::new(screen_row as u16, visual_col as u16));
         }
@@ -164,6 +199,11 @@ impl RenderData {
             let mut selected_chunks = Vec::with_capacity(line_data.chunks.len());
             let mut chunk_start = line_data.byte_offset;
             for chunk in line_data.chunks.drain(..) {
+                if chunk.is_ghost_text {
+                    selected_chunks.push(chunk);
+                    continue;
+                }
+
                 let selected_style = combine(chunk.style, style);
                 push_split_render_chunk(
                     &mut selected_chunks,
@@ -173,6 +213,7 @@ impl RenderData {
                     visible_end,
                     chunk.style,
                     selected_style,
+                    false,
                 );
                 chunk_start += chunk.text.len();
             }
@@ -209,10 +250,15 @@ fn push_split_render_chunk(
     range_end: usize,
     base_style: Style,
     selected_style: Style,
+    is_ghost_text: bool,
 ) {
     let chunk_end = chunk_start + text.len();
     if chunk_end <= range_start || chunk_start >= range_end {
-        chunks.push(RenderChunk::new(text, base_style));
+        chunks.push(RenderChunk::with_ghost_flag(
+            text,
+            base_style,
+            is_ghost_text,
+        ));
         return;
     }
 
@@ -220,15 +266,24 @@ fn push_split_render_chunk(
     let local_end = range_end.saturating_sub(chunk_start).min(text.len());
 
     if local_start > 0 {
-        chunks.push(RenderChunk::new(&text[..local_start], base_style));
+        chunks.push(RenderChunk::with_ghost_flag(
+            &text[..local_start],
+            base_style,
+            is_ghost_text,
+        ));
     }
     if local_start < local_end {
-        chunks.push(RenderChunk::new(
+        chunks.push(RenderChunk::with_ghost_flag(
             &text[local_start..local_end],
             selected_style,
+            is_ghost_text,
         ));
     }
     if local_end < text.len() {
-        chunks.push(RenderChunk::new(&text[local_end..], base_style));
+        chunks.push(RenderChunk::with_ghost_flag(
+            &text[local_end..],
+            base_style,
+            is_ghost_text,
+        ));
     }
 }

@@ -14,6 +14,7 @@ use crate::register::RegisterStore;
 use crate::theme::{Theme, ThemeRegistry};
 use std::collections::VecDeque;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock, RwLock};
 
 #[cfg(test)]
@@ -80,6 +81,7 @@ static THEME_REGISTRY: OnceLock<RwLock<Option<ThemeRegistry>>> = OnceLock::new()
 static LSP_RUNTIME: OnceLock<Mutex<Option<LspRuntime>>> = OnceLock::new();
 static DIAGNOSTICS_STORE: OnceLock<DiagnosticsStore> = OnceLock::new();
 static NOTIFICATION_STATE: OnceLock<Mutex<NotificationState>> = OnceLock::new();
+static INLAY_HINT_RETRY_REQUESTED: AtomicBool = AtomicBool::new(false);
 static FILE_OPERATION_QUEUE: OnceLock<Mutex<VecDeque<WorkspaceFileOperationNotification>>> =
     OnceLock::new();
 #[cfg(not(test))]
@@ -475,6 +477,17 @@ pub fn request_notification_redraw() {
     if let Ok(mut state) = notification_state_slot().lock() {
         state.request_redraw();
     }
+}
+
+/// Requests a retry of the active inlay-hint request after LSP server state changes.
+pub fn request_inlay_hint_retry() {
+    INLAY_HINT_RETRY_REQUESTED.store(true, Ordering::SeqCst);
+    request_notification_redraw();
+}
+
+/// Returns and clears whether inlay hints should be retried.
+pub fn take_inlay_hint_retry_requested() -> bool {
+    INLAY_HINT_RETRY_REQUESTED.swap(false, Ordering::SeqCst)
 }
 
 fn file_operation_queue_slot() -> &'static Mutex<VecDeque<WorkspaceFileOperationNotification>> {

@@ -49,6 +49,7 @@ bg = "bg"
 "ui.window" = { fg = "fg", bg = "bg" }
 "ui.window.lines" = { fg = "muted" }
 "ui.window.lines.resize" = { fg = "iris", bold = true }
+"ui.inlay_hint" = { fg = "muted", italic = true }
 "ui.diagnostic.error" = { fg = "love", bold = true }
 "ui.diagnostic.warning" = { fg = "gold", bold = true }
 "ui.diagnostic.info" = { fg = "pine" }
