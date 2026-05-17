@@ -52,6 +52,8 @@ pub enum PickerSearchEvent<T> {
     PickerSearchStarted { generation: u64, query: String },
     /// A chunk of results is available.
     PickerChunk { generation: u64, chunk: Vec<T> },
+    /// A ranked snapshot of the current results is available.
+    PickerResults { generation: u64, results: Vec<T> },
     /// The search became stale before completion.
     PickerSearchStale { generation: u64 },
     /// The search finished for the current generation.
@@ -222,6 +224,11 @@ pub trait PickerSource: Send + 'static {
 
     /// Returns a stable key for the selected item's preview.
     fn preview_key(&self, _item: &Self::Item) -> Option<String> {
+        None
+    }
+
+    /// Returns a stable key for preserving selection across result refreshes.
+    fn result_key(&self, _item: &Self::Item) -> Option<String> {
         None
     }
 
@@ -579,6 +586,48 @@ impl<S: PickerSource> PickerWidget<S> {
         }
     }
 
+    fn selected_result_key(&self) -> Option<String> {
+        let index = self.highlighted?;
+        self.results
+            .get(index)
+            .and_then(|item| self.source.result_key(item))
+    }
+
+    fn restore_highlight_after_replace(
+        &mut self,
+        previous_key: Option<String>,
+        previous_index: Option<usize>,
+    ) {
+        if self.results.is_empty() {
+            self.highlighted = None;
+            self.visible_start = 0;
+            self.preview_highlighted = None;
+            self.refresh_preview_for_highlight();
+            return;
+        }
+
+        if let Some(key) = previous_key.as_deref() {
+            if let Some(index) = self
+                .results
+                .iter()
+                .position(|item| self.source.result_key(item).as_deref() == Some(key))
+            {
+                self.highlighted = Some(index);
+                self.ensure_highlight_visible();
+                self.refresh_preview_for_highlight();
+                return;
+            }
+        }
+
+        self.highlighted = previous_index.map(|index| index.min(self.results.len() - 1));
+        if self.highlighted.is_none() {
+            self.visible_start = 0;
+            self.preview_highlighted = None;
+        }
+        self.ensure_highlight_visible();
+        self.refresh_preview_for_highlight();
+    }
+
     fn move_highlight(&mut self, delta: isize) {
         if self.results.is_empty() {
             self.sync_query_right_prompt();
@@ -672,9 +721,7 @@ impl<S: PickerSource> PickerWidget<S> {
             return;
         };
 
-        if self.preview_key.as_deref() == Some(key.as_str())
-            && self.preview_highlighted == Some(index)
-        {
+        if self.preview_key.as_deref() == Some(key.as_str()) {
             return;
         }
 
@@ -771,6 +818,16 @@ impl<S: PickerSource> PickerWidget<S> {
                     self.ensure_highlight_visible();
                     self.refresh_preview_for_highlight();
                 }
+            }
+            PickerSearchEvent::PickerResults {
+                generation,
+                results,
+            } if generation == self.generation => {
+                let previous_key = self.selected_result_key();
+                let previous_index = self.highlighted;
+                self.pending_result_replacement = false;
+                self.results = results;
+                self.restore_highlight_after_replace(previous_key, previous_index);
             }
             PickerSearchEvent::PickerSearchComplete { generation }
                 if generation == self.generation =>
@@ -1246,6 +1303,10 @@ mod tests {
             Some(item.clone())
         }
 
+        fn result_key(&self, item: &Self::Item) -> Option<String> {
+            Some(item.clone())
+        }
+
         fn select(&self, item: &Self::Item) -> Intent {
             self.selected.lock().unwrap().push(item.clone());
             Intent::Command(crate::ui::Command::Quit)
@@ -1312,6 +1373,26 @@ mod tests {
 
         assert_eq!(picker.results(), &["ab-one".to_string()]);
         assert_eq!(picker.highlighted_index(), None);
+    }
+
+    #[test]
+    fn picker_preserves_selection_when_results_are_replaced() {
+        let source = TestSource::new();
+        let mut picker = PickerWidget::new(source);
+        picker.results = vec!["low".to_string(), "mid".to_string(), "high".to_string()];
+        picker.highlighted = Some(1);
+
+        let generation = picker.generation;
+        picker.handle_search_event(PickerSearchEvent::PickerResults {
+            generation,
+            results: vec!["high".to_string(), "mid".to_string(), "low".to_string()],
+        });
+
+        assert_eq!(picker.highlighted_index(), Some(1));
+        assert_eq!(
+            picker.results(),
+            &["high".to_string(), "mid".to_string(), "low".to_string()]
+        );
     }
 
     #[test]

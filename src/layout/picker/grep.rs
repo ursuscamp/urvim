@@ -78,12 +78,12 @@ impl Layout {
             JobEvent::Chunk {
                 kind,
                 token,
-                payload: JobPayload::GrepSearchChunk(chunk),
+                payload: JobPayload::GrepSearchSnapshot(results),
             } if kind == crate::background::JobKind::GrepPickerSearch => {
                 if let Some(picker) = self.dialogs.grep_picker.as_mut() {
-                    picker.handle_search_event(PickerSearchEvent::PickerChunk {
+                    picker.handle_search_event(PickerSearchEvent::PickerResults {
                         generation: token.generation(),
-                        chunk,
+                        results,
                     });
                 }
             }

@@ -25,12 +25,12 @@ impl Layout {
             JobEvent::Chunk {
                 kind,
                 token,
-                payload: JobPayload::FileSearchChunk(chunk),
+                payload: JobPayload::FileSearchSnapshot(results),
             } if kind == crate::background::JobKind::FilePickerSearch => {
                 if let Some(picker) = self.dialogs.file_picker.as_mut() {
-                    picker.handle_search_event(PickerSearchEvent::PickerChunk {
+                    picker.handle_search_event(PickerSearchEvent::PickerResults {
                         generation: token.generation(),
-                        chunk,
+                        results,
                     });
                 }
             }

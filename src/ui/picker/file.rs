@@ -6,7 +6,9 @@ use crate::terminal::Style;
 use crate::ui::inputs::PromptSegment;
 use crate::ui::picker::line::{display_path_relative_to, push_file_glyph, push_tail_label};
 use crate::ui::picker::preview::spawn_preview_loader;
-use crate::ui::picker::query::{exact_matches, fuzzy_matches, query_prompt_segments};
+use crate::ui::picker::query::{
+    FuzzyMatchScore, exact_matches, fuzzy_match_score, query_prompt_segments,
+};
 use crate::ui::picker::{
     FormattedLineTemplate, PickerFormattedLine, PickerItem, PickerPreview, PickerPreviewEvent,
     PickerSearchEvent, PickerSource, PickerWidget,
@@ -17,8 +19,13 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::Sender;
+use std::time::{Duration, Instant};
+
+#[cfg(test)]
+use crate::ui::picker::query::fuzzy_matches;
 
 const PICKER_CHUNK_SIZE: usize = 32;
+const RANKED_FLUSH_INTERVAL: Duration = Duration::from_millis(50);
 static NEXT_FILE_PICKER_GENERATION: AtomicU64 = AtomicU64::new(1);
 
 /// A file entry displayed by the file picker.
@@ -155,6 +162,10 @@ impl PickerSource for FilePickerSource {
         Some(item.path.to_string_lossy().into_owned())
     }
 
+    fn result_key(&self, item: &Self::Item) -> Option<String> {
+        Some(item.path.to_string_lossy().into_owned())
+    }
+
     fn start_preview(&self, item: Self::Item, generation: u64, sender: Sender<PickerPreviewEvent>) {
         spawn_preview_loader(
             item,
@@ -212,6 +223,12 @@ pub struct PickerSearchJob {
     chunk_size: usize,
 }
 
+#[derive(Debug, Clone)]
+struct RankedFilePickerItem {
+    score: FuzzyMatchScore,
+    item: FilePickerItem,
+}
+
 impl PickerSearchJob {
     /// Runs the file picker search job on the worker thread.
     pub fn run(
@@ -219,67 +236,109 @@ impl PickerSearchJob {
         context: &JobContext,
         event_tx: &std::sync::mpsc::Sender<crate::background::JobEvent>,
     ) {
-        let mut chunk = Vec::with_capacity(self.chunk_size);
-        let query = self.query;
+        let Self {
+            root,
+            query,
+            chunk_size,
+        } = self;
 
-        let mut builder = WalkBuilder::new(&self.root);
+        let mut builder = WalkBuilder::new(&root);
         builder.standard_filters(true);
 
-        for entry in builder.build().filter_map(Result::ok) {
-            if context.is_stopping() || context.is_aborted() {
-                return;
-            }
+        match query {
+            QueryStyle::Exact(query) => {
+                let mut results = Vec::with_capacity(chunk_size);
+                let mut last_flush = Instant::now();
 
-            if !entry
-                .file_type()
-                .is_some_and(|file_type| file_type.is_file())
-            {
-                continue;
-            }
+                for entry in builder.build().filter_map(Result::ok) {
+                    if context.is_stopping() || context.is_aborted() {
+                        return;
+                    }
 
-            let path = entry.path().to_path_buf();
-            let label = display_path_relative_to(&self.root, &path);
-            let matched = match &query {
-                QueryStyle::Exact(query) => {
-                    exact_matches(query.as_str(), path.to_string_lossy().as_ref())
-                        || exact_matches(query.as_str(), label.as_str())
+                    if !entry
+                        .file_type()
+                        .is_some_and(|file_type| file_type.is_file())
+                    {
+                        continue;
+                    }
+
+                    let path = entry.path().to_path_buf();
+                    let label = display_path_relative_to(&root, &path);
+                    let matched = exact_matches(query.as_str(), path.to_string_lossy().as_ref())
+                        || exact_matches(query.as_str(), label.as_str());
+
+                    if !matched {
+                        continue;
+                    }
+
+                    results.push(FilePickerItem {
+                        path,
+                        root: root.clone(),
+                    });
+
+                    if last_flush.elapsed() >= RANKED_FLUSH_INTERVAL {
+                        flush_file_snapshot(event_tx, context, &results);
+                        last_flush = Instant::now();
+                    }
                 }
-                QueryStyle::Fuzzy(query) => {
-                    fuzzy_matches(query.as_str(), path.to_string_lossy().as_ref())
-                        || fuzzy_matches(query.as_str(), label.as_str())
-                }
-            };
 
-            if !matched {
-                continue;
-            }
-
-            chunk.push(FilePickerItem {
-                path,
-                root: self.root.clone(),
-            });
-            if chunk.len() >= self.chunk_size {
-                let _ = event_tx.send(crate::background::JobEvent::Chunk {
-                    kind: context.kind().clone(),
-                    token: context.token(),
-                    payload: JobPayload::FileSearchChunk(std::mem::take(&mut chunk)),
-                });
                 if context.is_stopping() || context.is_aborted() {
                     return;
                 }
+
+                flush_file_snapshot(event_tx, context, &results);
             }
-        }
 
-        if context.is_stopping() || context.is_aborted() {
-            return;
-        }
+            QueryStyle::Fuzzy(query) => {
+                let mut ranked = Vec::new();
+                let mut last_flush = Instant::now();
+                let mut last_sent_count = 0usize;
 
-        if !chunk.is_empty() {
-            let _ = event_tx.send(crate::background::JobEvent::Chunk {
-                kind: context.kind().clone(),
-                token: context.token(),
-                payload: JobPayload::FileSearchChunk(chunk),
-            });
+                for entry in builder.build().filter_map(Result::ok) {
+                    if context.is_stopping() || context.is_aborted() {
+                        return;
+                    }
+
+                    if !entry
+                        .file_type()
+                        .is_some_and(|file_type| file_type.is_file())
+                    {
+                        continue;
+                    }
+
+                    let path = entry.path().to_path_buf();
+                    let label = display_path_relative_to(&root, &path);
+                    let Some(score) =
+                        file_fuzzy_score(query.as_str(), path.as_path(), label.as_str())
+                    else {
+                        continue;
+                    };
+
+                    ranked.push(RankedFilePickerItem {
+                        score,
+                        item: FilePickerItem {
+                            path,
+                            root: root.clone(),
+                        },
+                    });
+
+                    if last_flush.elapsed() >= RANKED_FLUSH_INTERVAL {
+                        flush_ranked_file_snapshot(
+                            event_tx,
+                            context,
+                            &mut ranked,
+                            &mut last_sent_count,
+                        );
+                        last_flush = Instant::now();
+                    }
+                }
+
+                if context.is_stopping() || context.is_aborted() {
+                    return;
+                }
+
+                flush_ranked_file_snapshot(event_tx, context, &mut ranked, &mut last_sent_count);
+            }
         }
 
         let _ = event_tx.send(crate::background::JobEvent::Completed {
@@ -288,6 +347,48 @@ impl PickerSearchJob {
             payload: None,
         });
     }
+}
+
+fn file_fuzzy_score(query: &str, path: &Path, label: &str) -> Option<FuzzyMatchScore> {
+    let path_score = fuzzy_match_score(query, path.to_string_lossy().as_ref());
+    let label_score = fuzzy_match_score(query, label);
+    match (path_score, label_score) {
+        (Some(left), Some(right)) => Some(left.min(right)),
+        (Some(score), None) | (None, Some(score)) => Some(score),
+        (None, None) => None,
+    }
+}
+
+fn flush_ranked_file_snapshot(
+    event_tx: &std::sync::mpsc::Sender<crate::background::JobEvent>,
+    context: &JobContext,
+    ranked: &mut Vec<RankedFilePickerItem>,
+    last_sent_count: &mut usize,
+) {
+    if ranked.len() == *last_sent_count {
+        return;
+    }
+
+    ranked.sort_by(|left, right| left.score.cmp(&right.score));
+    let results = ranked.iter().map(|entry| entry.item.clone()).collect();
+    let _ = event_tx.send(crate::background::JobEvent::Chunk {
+        kind: context.kind().clone(),
+        token: context.token(),
+        payload: JobPayload::FileSearchSnapshot(results),
+    });
+    *last_sent_count = ranked.len();
+}
+
+fn flush_file_snapshot(
+    event_tx: &std::sync::mpsc::Sender<crate::background::JobEvent>,
+    context: &JobContext,
+    results: &[FilePickerItem],
+) {
+    let _ = event_tx.send(crate::background::JobEvent::Chunk {
+        kind: context.kind().clone(),
+        token: context.token(),
+        payload: JobPayload::FileSearchSnapshot(results.to_vec()),
+    });
 }
 
 #[cfg(test)]
@@ -386,7 +487,7 @@ mod tests {
         while !saw_match {
             match handle.poll_event() {
                 Some(JobEvent::Chunk {
-                    payload: JobPayload::FileSearchChunk(chunk),
+                    payload: JobPayload::FileSearchSnapshot(chunk),
                     ..
                 }) => {
                     saw_match = chunk.iter().any(|item| item.path == file_path);
@@ -435,7 +536,7 @@ mod tests {
         while !saw_match {
             match handle.poll_event() {
                 Some(JobEvent::Chunk {
-                    payload: JobPayload::FileSearchChunk(chunk),
+                    payload: JobPayload::FileSearchSnapshot(chunk),
                     ..
                 }) => {
                     saw_match = chunk.iter().any(|item| item.path == file_path);
@@ -523,6 +624,24 @@ mod tests {
     }
 
     #[test]
+    fn fuzzy_match_score_prefers_tighter_file_matches() {
+        let tight = file_fuzzy_score(
+            "fp",
+            Path::new("/tmp/src/ui/file/path.rs"),
+            "src/ui/file/path.rs",
+        )
+        .expect("tight score");
+        let loose = file_fuzzy_score(
+            "fp",
+            Path::new("/tmp/src/ui/features/path.rs"),
+            "src/ui/features/path.rs",
+        )
+        .expect("loose score");
+
+        assert!(tight < loose);
+    }
+
+    #[test]
     fn file_picker_exact_matches_case_insensitively() {
         let temp_root = unique_temp_dir();
         fs::create_dir_all(&temp_root).unwrap();
@@ -547,7 +666,7 @@ mod tests {
         while !saw_match {
             match handle.poll_event() {
                 Some(JobEvent::Chunk {
-                    payload: JobPayload::FileSearchChunk(chunk),
+                    payload: JobPayload::FileSearchSnapshot(chunk),
                     ..
                 }) => {
                     saw_match = chunk.iter().any(|item| item.path == file_path);
@@ -599,12 +718,12 @@ mod tests {
                 JobEvent::Started { .. } => {}
                 JobEvent::Chunk {
                     token,
-                    payload: JobPayload::FileSearchChunk(chunk),
+                    payload: JobPayload::FileSearchSnapshot(chunk),
                     ..
                 } => {
-                    picker.handle_search_event(PickerSearchEvent::PickerChunk {
+                    picker.handle_search_event(PickerSearchEvent::PickerResults {
                         generation: token.generation(),
-                        chunk,
+                        results: chunk,
                     });
                 }
                 JobEvent::Chunk { .. } => {}

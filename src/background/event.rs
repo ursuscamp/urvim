@@ -26,10 +26,10 @@ pub enum JobPayload {
     SyntaxRefresh(SyntaxRefreshResult),
     /// Indent scope cache refresh result.
     IndentScopeRefresh(IndentScopeRefreshResult),
-    /// File picker search chunk.
-    FileSearchChunk(Vec<FilePickerItem>),
-    /// Live grep picker search chunk.
-    GrepSearchChunk(Vec<GrepPickerItem>),
+    /// File picker ranked snapshot.
+    FileSearchSnapshot(Vec<FilePickerItem>),
+    /// Live grep ranked snapshot.
+    GrepSearchSnapshot(Vec<GrepPickerItem>),
     /// Document symbol picker search result set.
     DocSymbolsSearch(Vec<DocSymbolsPickerItem>),
     /// Picker preview syntax refresh result.

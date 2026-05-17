@@ -30,8 +30,8 @@ use crate::buffer::{
 use crate::lsp::inlay_hint_job::LspInlayHintJob;
 use crate::lsp::rename_job::LspRenameJob;
 use crate::ui::picker::doc_symbols::{DocSymbolsPickerItem, DocSymbolsPickerSearchJob};
-use crate::ui::picker::file::{FilePickerItem, PickerSearchJob};
-use crate::ui::picker::grep::{GrepPickerItem, GrepPickerSearchJob};
+use crate::ui::picker::file::PickerSearchJob;
+use crate::ui::picker::grep::GrepPickerSearchJob;
 use crate::ui::picker::preview::PreviewSyntaxRefreshJob;
 
 /// Concrete background jobs known to the editor.
@@ -147,18 +147,6 @@ impl From<SyntaxRefreshResult> for JobPayload {
 impl From<IndentScopeRefreshResult> for JobPayload {
     fn from(value: IndentScopeRefreshResult) -> Self {
         Self::IndentScopeRefresh(value)
-    }
-}
-
-impl From<Vec<FilePickerItem>> for JobPayload {
-    fn from(value: Vec<FilePickerItem>) -> Self {
-        Self::FileSearchChunk(value)
-    }
-}
-
-impl From<Vec<GrepPickerItem>> for JobPayload {
-    fn from(value: Vec<GrepPickerItem>) -> Self {
-        Self::GrepSearchChunk(value)
     }
 }
 

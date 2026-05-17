@@ -10,7 +10,7 @@ use crate::ui::picker::line::{
 };
 use crate::ui::picker::preview::spawn_preview_loader;
 use crate::ui::picker::query::{
-    exact_matches, fuzzy_match_column, fuzzy_matches, query_prompt_segments,
+    FuzzyMatchScore, exact_matches, fuzzy_match_column, fuzzy_match_score, query_prompt_segments,
 };
 use crate::ui::picker::{
     FormattedLineTemplate, PickerFormattedLine, PickerItem, PickerPreview, PickerPreviewEvent,
@@ -24,8 +24,13 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::Sender;
+use std::time::{Duration, Instant};
+
+#[cfg(test)]
+use crate::ui::picker::query::fuzzy_matches;
 
 const PICKER_CHUNK_SIZE: usize = 32;
+const RANKED_FLUSH_INTERVAL: Duration = Duration::from_millis(50);
 const GREP_PREVIEW_CONTEXT_LINES: usize = 100;
 static NEXT_GREP_PICKER_GENERATION: AtomicU64 = AtomicU64::new(1);
 
@@ -168,6 +173,15 @@ impl PickerSource for GrepPickerSource {
         Some(item.path.to_string_lossy().into_owned())
     }
 
+    fn result_key(&self, item: &Self::Item) -> Option<String> {
+        Some(format!(
+            "{}:{}:{}",
+            item.path.to_string_lossy(),
+            item.line,
+            item.column
+        ))
+    }
+
     fn start_preview(&self, item: Self::Item, generation: u64, sender: Sender<PickerPreviewEvent>) {
         spawn_preview_loader(
             item,
@@ -242,6 +256,12 @@ pub struct GrepPickerSearchJob {
     chunk_size: usize,
 }
 
+#[derive(Debug, Clone)]
+struct RankedGrepPickerItem {
+    score: FuzzyMatchScore,
+    item: GrepPickerItem,
+}
+
 impl GrepPickerSearchJob {
     /// Runs the live grep search job on the worker thread.
     pub fn run(
@@ -249,93 +269,165 @@ impl GrepPickerSearchJob {
         context: &JobContext,
         event_tx: &std::sync::mpsc::Sender<crate::background::JobEvent>,
     ) {
-        let mut chunk = Vec::with_capacity(self.chunk_size);
-        let query = self.query;
+        let Self {
+            root,
+            query,
+            chunk_size,
+        } = self;
 
-        let mut builder = WalkBuilder::new(&self.root);
+        let mut builder = WalkBuilder::new(&root);
         builder.standard_filters(true);
 
-        for entry in builder.build().filter_map(Result::ok) {
-            if context.is_stopping() || context.is_aborted() {
-                return;
-            }
+        match query {
+            QueryStyle::Exact(query) => {
+                let mut results = Vec::with_capacity(chunk_size);
+                let mut last_flush = Instant::now();
 
-            if !entry
-                .file_type()
-                .is_some_and(|file_type| file_type.is_file())
-            {
-                continue;
-            }
+                for entry in builder.build().filter_map(Result::ok) {
+                    if context.is_stopping() || context.is_aborted() {
+                        return;
+                    }
 
-            let path = entry.path().to_path_buf();
-            let file = match File::open(&path) {
-                Ok(file) => file,
-                Err(_) => continue,
-            };
+                    if !entry
+                        .file_type()
+                        .is_some_and(|file_type| file_type.is_file())
+                    {
+                        continue;
+                    }
 
-            let mut reader = BufReader::new(file);
-            let mut line = String::new();
-            let mut line_index = 0usize;
+                    let path = entry.path().to_path_buf();
+                    let file = match File::open(&path) {
+                        Ok(file) => file,
+                        Err(_) => continue,
+                    };
 
-            loop {
+                    let mut reader = BufReader::new(file);
+                    let mut line = String::new();
+                    let mut line_index = 0usize;
+
+                    loop {
+                        if context.is_stopping() || context.is_aborted() {
+                            return;
+                        }
+
+                        line.clear();
+                        let read = match reader.read_line(&mut line) {
+                            Ok(read) => read,
+                            Err(_) => break,
+                        };
+                        if read == 0 {
+                            break;
+                        }
+
+                        let matched_column =
+                            exact_matches(query.as_str(), line.as_str()).then(|| {
+                                let lower_line = line.to_lowercase();
+                                let lower_query = query.to_lowercase();
+                                lower_line.find(lower_query.as_str()).unwrap_or(0)
+                            });
+
+                        if let Some(column) = matched_column {
+                            results.push(GrepPickerItem {
+                                path: path.clone(),
+                                root: root.clone(),
+                                line: line_index,
+                                column,
+                            });
+
+                            if last_flush.elapsed() >= RANKED_FLUSH_INTERVAL {
+                                flush_grep_snapshot(event_tx, context, &results);
+                                last_flush = Instant::now();
+                            }
+                        }
+
+                        line_index += 1;
+                    }
+                }
+
                 if context.is_stopping() || context.is_aborted() {
                     return;
                 }
 
-                line.clear();
-                let read = match reader.read_line(&mut line) {
-                    Ok(read) => read,
-                    Err(_) => break,
-                };
-                if read == 0 {
-                    break;
-                }
+                flush_grep_snapshot(event_tx, context, &results);
+            }
 
-                let matched_column = match &query {
-                    QueryStyle::Exact(query) => {
-                        let lower_line = line.to_lowercase();
-                        let lower_query = query.to_lowercase();
-                        exact_matches(query.as_str(), line.as_str())
-                            .then(|| lower_line.find(lower_query.as_str()).unwrap_or(0))
+            QueryStyle::Fuzzy(query) => {
+                let mut ranked = Vec::new();
+                let mut last_flush = Instant::now();
+                let mut last_sent_count = 0usize;
+
+                for entry in builder.build().filter_map(Result::ok) {
+                    if context.is_stopping() || context.is_aborted() {
+                        return;
                     }
-                    QueryStyle::Fuzzy(query) => fuzzy_matches(query.as_str(), line.as_str())
-                        .then(|| fuzzy_match_column(query.as_str(), line.as_str())),
-                };
 
-                if let Some(column) = matched_column {
-                    chunk.push(GrepPickerItem {
-                        path: path.clone(),
-                        root: self.root.clone(),
-                        line: line_index,
-                        column,
-                    });
+                    if !entry
+                        .file_type()
+                        .is_some_and(|file_type| file_type.is_file())
+                    {
+                        continue;
+                    }
 
-                    if chunk.len() >= self.chunk_size {
-                        let _ = event_tx.send(crate::background::JobEvent::Chunk {
-                            kind: context.kind().clone(),
-                            token: context.token(),
-                            payload: JobPayload::GrepSearchChunk(std::mem::take(&mut chunk)),
-                        });
+                    let path = entry.path().to_path_buf();
+                    let file = match File::open(&path) {
+                        Ok(file) => file,
+                        Err(_) => continue,
+                    };
+
+                    let mut reader = BufReader::new(file);
+                    let mut line = String::new();
+                    let mut line_index = 0usize;
+
+                    loop {
                         if context.is_stopping() || context.is_aborted() {
                             return;
                         }
+
+                        line.clear();
+                        let read = match reader.read_line(&mut line) {
+                            Ok(read) => read,
+                            Err(_) => break,
+                        };
+                        if read == 0 {
+                            break;
+                        }
+
+                        let Some(score) = fuzzy_match_score(query.as_str(), line.as_str()) else {
+                            line_index += 1;
+                            continue;
+                        };
+
+                        let column = fuzzy_match_column(query.as_str(), line.as_str());
+                        ranked.push(RankedGrepPickerItem {
+                            score,
+                            item: GrepPickerItem {
+                                path: path.clone(),
+                                root: root.clone(),
+                                line: line_index,
+                                column,
+                            },
+                        });
+
+                        if last_flush.elapsed() >= RANKED_FLUSH_INTERVAL {
+                            flush_ranked_grep_snapshot(
+                                event_tx,
+                                context,
+                                &mut ranked,
+                                &mut last_sent_count,
+                            );
+                            last_flush = Instant::now();
+                        }
+
+                        line_index += 1;
                     }
                 }
 
-                line_index += 1;
+                if context.is_stopping() || context.is_aborted() {
+                    return;
+                }
+
+                flush_ranked_grep_snapshot(event_tx, context, &mut ranked, &mut last_sent_count);
             }
-        }
-
-        if context.is_stopping() || context.is_aborted() {
-            return;
-        }
-
-        if !chunk.is_empty() {
-            let _ = event_tx.send(crate::background::JobEvent::Chunk {
-                kind: context.kind().clone(),
-                token: context.token(),
-                payload: JobPayload::GrepSearchChunk(chunk),
-            });
         }
 
         let _ = event_tx.send(crate::background::JobEvent::Completed {
@@ -344,6 +436,38 @@ impl GrepPickerSearchJob {
             payload: None,
         });
     }
+}
+
+fn flush_ranked_grep_snapshot(
+    event_tx: &std::sync::mpsc::Sender<crate::background::JobEvent>,
+    context: &JobContext,
+    ranked: &mut Vec<RankedGrepPickerItem>,
+    last_sent_count: &mut usize,
+) {
+    if ranked.len() == *last_sent_count {
+        return;
+    }
+
+    ranked.sort_by(|left, right| left.score.cmp(&right.score));
+    let results = ranked.iter().map(|entry| entry.item.clone()).collect();
+    let _ = event_tx.send(crate::background::JobEvent::Chunk {
+        kind: context.kind().clone(),
+        token: context.token(),
+        payload: JobPayload::GrepSearchSnapshot(results),
+    });
+    *last_sent_count = ranked.len();
+}
+
+fn flush_grep_snapshot(
+    event_tx: &std::sync::mpsc::Sender<crate::background::JobEvent>,
+    context: &JobContext,
+    results: &[GrepPickerItem],
+) {
+    let _ = event_tx.send(crate::background::JobEvent::Chunk {
+        kind: context.kind().clone(),
+        token: context.token(),
+        payload: JobPayload::GrepSearchSnapshot(results.to_vec()),
+    });
 }
 
 #[cfg(test)]
@@ -458,7 +582,7 @@ mod tests {
         while matches.len() < 2 {
             match handle.poll_event() {
                 Some(JobEvent::Chunk {
-                    payload: JobPayload::GrepSearchChunk(chunk),
+                    payload: JobPayload::GrepSearchSnapshot(chunk),
                     ..
                 }) => matches.extend(chunk),
                 Some(_) => {}
@@ -561,6 +685,14 @@ mod tests {
     }
 
     #[test]
+    fn fuzzy_match_score_prefers_tighter_grep_matches() {
+        let tight = fuzzy_match_score("gt", "gamma target").expect("tight score");
+        let loose = fuzzy_match_score("gt", "g a m m a   t a r g e t").expect("loose score");
+
+        assert!(tight < loose);
+    }
+
+    #[test]
     fn grep_picker_streams_results_through_the_job_manager() {
         let temp_root = unique_temp_dir();
         fs::create_dir_all(&temp_root).unwrap();
@@ -586,7 +718,7 @@ mod tests {
         while !saw_match {
             manager.process_events(|event| match event {
                 JobEvent::Chunk {
-                    payload: JobPayload::GrepSearchChunk(chunk),
+                    payload: JobPayload::GrepSearchSnapshot(chunk),
                     ..
                 } => {
                     saw_match = chunk.iter().any(|item| item.path == file_path);
