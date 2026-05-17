@@ -10,7 +10,7 @@ This is a list, in no particular order, of things that need to be addressed whic
 - folding
 - show code action modification in preview window
 - code action hints for the current line (with ghost text)
-- add more LSP servers
+- auto-completion
 
 # Bugs
 

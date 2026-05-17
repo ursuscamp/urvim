@@ -998,6 +998,43 @@ mod tests {
     }
 
     #[test]
+    fn builtin_lsp_config_exposes_curated_server_set() {
+        let servers = builtin_lsp_config()
+            .servers
+            .keys()
+            .cloned()
+            .collect::<BTreeSet<_>>();
+
+        assert_eq!(
+            servers,
+            BTreeSet::from([
+                "bashls".to_string(),
+                "clangd".to_string(),
+                "cssls".to_string(),
+                "csharp_ls".to_string(),
+                "gopls".to_string(),
+                "haskell_language_server".to_string(),
+                "html".to_string(),
+                "intelephense".to_string(),
+                "jdtls".to_string(),
+                "jsonls".to_string(),
+                "kotlin_language_server".to_string(),
+                "marksman".to_string(),
+                "metals".to_string(),
+                "ocamllsp".to_string(),
+                "pyright".to_string(),
+                "rust_analyzer".to_string(),
+                "sourcekit_lsp".to_string(),
+                "ruby_lsp".to_string(),
+                "taplo".to_string(),
+                "typescript_language_server".to_string(),
+                "yaml_language_server".to_string(),
+                "zls".to_string(),
+            ])
+        );
+    }
+
+    #[test]
     fn resolve_prefers_cli_then_file_then_default() {
         let file = PartialConfig {
             theme: Some("file-theme".to_string()),
@@ -1185,6 +1222,37 @@ mod tests {
                     )]),
                 )
             ])
+        );
+    }
+
+    #[test]
+    fn resolve_loads_lsp_gopls_settings() {
+        let file = PartialConfig {
+            lsp: Some(PartialLspConfig {
+                servers: BTreeMap::from([(
+                    "gopls".to_string(),
+                    PartialLspServerConfig {
+                        enabled: Some(true),
+                        ..Default::default()
+                    },
+                )]),
+            }),
+            ..Default::default()
+        };
+
+        let config = Config::resolve(Some(&file), None, None);
+        let server = lsp_server(&config, "gopls");
+        assert!(server.enabled);
+        assert_eq!(server.command, "gopls");
+        assert!(server.args.is_empty());
+        assert_eq!(server.filetypes, vec!["go".to_string()]);
+        assert_eq!(
+            server.root_markers,
+            vec![
+                "go.mod".to_string(),
+                "go.work".to_string(),
+                ".git".to_string()
+            ]
         );
     }
 
@@ -1401,6 +1469,25 @@ checkOnSave = { command = "clippy" }
                 )
             ])
         );
+    }
+
+    #[test]
+    fn load_from_locations_loads_lsp_pyright_config() {
+        let home = unique_temp_dir("pyright-home");
+        write_config(
+            &home,
+            r#"
+[lsp.pyright]
+enabled = true
+"#,
+        );
+
+        let config = Config::load_from_locations(home, vec![], None, None).expect("should load");
+        let server = lsp_server(&config, "pyright");
+        assert!(server.enabled);
+        assert_eq!(server.command, "pyright-langserver");
+        assert_eq!(server.args, vec!["--stdio".to_string()]);
+        assert_eq!(server.filetypes, vec!["python".to_string()]);
     }
 
     #[test]

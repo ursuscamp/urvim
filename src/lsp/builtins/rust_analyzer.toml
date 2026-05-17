@@ -1,8 +1,0 @@
-[rust_analyzer]
-enabled = false
-command = "rust-analyzer"
-args = []
-filetypes = ["rust"]
-root_markers = ["Cargo.toml", "rust-project.json", ".git"]
-env = {}
-settings = { workspace = { symbol = { search = { kind = "all_symbols", limit = 5000 } } } }

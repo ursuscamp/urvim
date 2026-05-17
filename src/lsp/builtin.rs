@@ -5,7 +5,7 @@ use crate::config::{
     ConfigLoadError, LspConfig, LspServerConfig, PartialLspConfig, PartialLspServerConfig,
 };
 
-const BUILTIN_LSP_SOURCE: &str = include_str!("builtins/rust_analyzer.toml");
+const BUILTIN_LSP_SOURCE: &str = include_str!("builtins.toml");
 
 static BUILTIN_LSP_CONFIG: OnceLock<LspConfig> = OnceLock::new();
 

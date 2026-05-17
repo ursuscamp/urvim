@@ -1,0 +1,144 @@
+[rust_analyzer]
+enabled = false
+command = "rust-analyzer"
+args = []
+filetypes = ["rust"]
+root_markers = ["Cargo.toml", "rust-project.json", ".git"]
+env = {}
+settings = { workspace = { symbol = { search = { kind = "all_symbols", limit = 5000 } } } }
+
+[bashls]
+enabled = false
+command = "bash-language-server"
+args = ["--stdio"]
+filetypes = ["bash", "shell", "zsh"]
+root_markers = [".git"]
+
+[clangd]
+enabled = false
+command = "clangd"
+filetypes = ["c", "cpp"]
+root_markers = ["compile_commands.json", "compile_flags.txt", ".git"]
+
+[cssls]
+enabled = false
+command = "vscode-css-language-server"
+args = ["--stdio"]
+filetypes = ["css"]
+root_markers = ["package.json", ".git"]
+
+[csharp_ls]
+enabled = false
+command = "csharp-ls"
+filetypes = ["csharp"]
+root_markers = ["global.json", "Directory.Build.props", "Directory.Build.targets", ".git"]
+
+[gopls]
+enabled = false
+command = "gopls"
+filetypes = ["go"]
+root_markers = ["go.mod", "go.work", ".git"]
+
+[haskell_language_server]
+enabled = false
+command = "haskell-language-server-wrapper"
+args = ["lsp"]
+filetypes = ["haskell"]
+root_markers = ["cabal.project", "stack.yaml", ".git"]
+
+[html]
+enabled = false
+command = "vscode-html-language-server"
+args = ["--stdio"]
+filetypes = ["html"]
+root_markers = ["package.json", ".git"]
+
+[intelephense]
+enabled = false
+command = "intelephense"
+args = ["--stdio"]
+filetypes = ["php"]
+root_markers = ["composer.json", ".git"]
+
+[jdtls]
+enabled = false
+command = "jdtls"
+filetypes = ["java"]
+root_markers = ["pom.xml", "build.gradle", "settings.gradle", ".git"]
+
+[jsonls]
+enabled = false
+command = "vscode-json-language-server"
+args = ["--stdio"]
+filetypes = ["json"]
+root_markers = ["package.json", ".git"]
+
+[kotlin_language_server]
+enabled = false
+command = "kotlin-language-server"
+filetypes = ["kotlin"]
+root_markers = ["settings.gradle.kts", "build.gradle.kts", "pom.xml", ".git"]
+
+[marksman]
+enabled = false
+command = "marksman"
+filetypes = ["markdown"]
+root_markers = [".git"]
+
+[metals]
+enabled = false
+command = "metals"
+filetypes = ["scala"]
+root_markers = ["build.sbt", "build.sc", ".git"]
+
+[ocamllsp]
+enabled = false
+command = "ocamllsp"
+filetypes = ["ocaml"]
+root_markers = ["dune-project", "dune-workspace", ".git"]
+
+[pyright]
+enabled = false
+command = "pyright-langserver"
+args = ["--stdio"]
+filetypes = ["python"]
+root_markers = ["pyproject.toml", "setup.py", "setup.cfg", "requirements.txt", "Pipfile", "pyrightconfig.json", ".git"]
+
+[sourcekit_lsp]
+enabled = false
+command = "sourcekit-lsp"
+filetypes = ["swift"]
+root_markers = ["Package.swift", ".git"]
+
+[ruby_lsp]
+enabled = false
+command = "ruby-lsp"
+filetypes = ["ruby"]
+root_markers = ["Gemfile", ".git"]
+
+[taplo]
+enabled = false
+command = "taplo"
+args = ["lsp", "stdio"]
+filetypes = ["toml"]
+root_markers = ["Cargo.toml", ".git"]
+
+[typescript_language_server]
+enabled = false
+command = "typescript-language-server"
+args = ["--stdio"]
+filetypes = ["javascript", "typescript"]
+root_markers = ["package.json", "tsconfig.json", "jsconfig.json", ".git"]
+
+[yaml_language_server]
+enabled = false
+command = "yaml-language-server"
+args = ["--stdio"]
+filetypes = ["yaml"]
+root_markers = ["package.json", ".git"]
+
+[zls]
+enabled = false
+command = "zls"
+filetypes = ["zig"]
+root_markers = ["build.zig", "build.zig.zon", ".git"]

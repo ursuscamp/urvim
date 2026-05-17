@@ -222,9 +222,10 @@ Controls built-in language server configurations.
 
 - Type: nested TOML table
 - Default: all servers disabled
-- Built-in servers: `rust_analyzer`
+- Built-in servers: `rust_analyzer`, `gopls`, `pyright`, `clangd`, `bashls`, `typescript_language_server`, `yaml_language_server`, `jsonls`, `html`, `cssls`, `taplo`, `marksman`, `jdtls`, `kotlin_language_server`, `csharp_ls`, `sourcekit_lsp`, `zls`, `ruby_lsp`, `haskell_language_server`, `metals`, `ocamllsp`, and `intelephense`
 - Behavior: builtin server definitions are loaded from statically included TOML files at startup; user overrides deep-merge into those built-in defaults, so you can enable a server by setting `enabled = true` and override individual server fields as needed
 - `rust_analyzer` defaults: `command = "rust-analyzer"`, `filetypes = ["rust"]`, `root_markers = ["Cargo.toml", "rust-project.json", ".git"]`, `settings.workspace.symbol.search.kind = "all_symbols"`
+- `gopls` defaults: `command = "gopls"`, `filetypes = ["go"]`, `root_markers = ["go.mod", "go.work", ".git"]`
 - Scope: language-server startup and attachment only
 
 ## Sessions
