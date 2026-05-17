@@ -84,11 +84,13 @@ fn main() -> io::Result<()> {
 
     let mut needs_redraw = true;
     loop {
-        let background_requested_redraw =
-            globals::with_buffer_pool(|pool| pool.process_background_jobs())
-                || layout.process_background_jobs()
-                || layout.process_workspace_file_operations()
-                || globals::take_notification_redraw_requested();
+        let background_requested_redraw = globals::with_buffer_pool(|pool| {
+            let jobs = pool.process_background_jobs();
+            let disk = pool.process_external_file_changes();
+            jobs || disk
+        }) || layout.process_background_jobs()
+            || layout.process_workspace_file_operations()
+            || globals::take_notification_redraw_requested();
 
         globals::try_with_lsp_runtime_mut(|runtime| runtime.sync());
 
@@ -281,7 +283,15 @@ fn main() -> io::Result<()> {
                                                     {
                                                         handled = handle_save_buffer_action(
                                                             &mut layout,
-                                                            dispatch_action.kind.as_ref(),
+                                                            dispatch_action.kind.as_ref().and_then(
+                                                                |kind| match kind {
+                                                                    ActionKind::SaveBuffer(
+                                                                        target,
+                                                                    ) => *target,
+                                                                    _ => None,
+                                                                },
+                                                            ),
+                                                            false,
                                                         );
                                                     }
                                                     _ if dispatch_action.kind.is_none() => {
@@ -384,6 +394,22 @@ fn main() -> io::Result<()> {
                                     break;
                                 }
 
+                                if let Command::OverwriteBuffer(target) = &command {
+                                    let handled =
+                                        handle_save_buffer_action(&mut layout, *target, true);
+                                    if handled {
+                                        needs_redraw = true;
+                                    }
+
+                                    if layout.should_exit() {
+                                        break;
+                                    }
+
+                                    terminal
+                                        .set_cursor_style(layout.active_window_cursor_style())?;
+                                    continue;
+                                }
+
                                 let handled = process_intent_queue(
                                     &mut layout,
                                     vec![Intent::Command(command.clone())],
@@ -441,13 +467,20 @@ fn select_active_theme(
     })
 }
 
-fn handle_save_buffer_action(layout: &mut Layout, kind: Option<&ActionKind>) -> bool {
-    let target = match kind {
-        Some(ActionKind::SaveBuffer(target)) => *target,
-        _ => None,
-    };
-
+fn handle_save_buffer_action(
+    layout: &mut Layout,
+    target: Option<urvim::buffer::BufferId>,
+    force: bool,
+) -> bool {
     let buffer_id = target.unwrap_or_else(|| layout.active_buffer_view().buffer_id());
+
+    if !force
+        && globals::with_buffer_pool(|pool| pool.buffer_needs_overwrite_confirmation(buffer_id))
+    {
+        layout.prompt_overwrite_buffer(buffer_id);
+        return true;
+    }
+
     let save_result = globals::with_buffer_pool(|pool| pool.save_buffer(buffer_id));
 
     match save_result {
@@ -699,6 +732,11 @@ mod tests {
     }
 
     fn cwd_lock() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(())).lock().unwrap()
+    }
+
+    fn buffer_pool_lock() -> std::sync::MutexGuard<'static, ()> {
         static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
         LOCK.get_or_init(|| Mutex::new(())).lock().unwrap()
     }
@@ -984,13 +1022,50 @@ mod tests {
         buffer.insert_text(Cursor::new(0, 0), "hello");
 
         let mut layout = Layout::new(WindowGroup::from_buffers(vec![buffer]));
-        assert!(handle_save_buffer_action(
-            &mut layout,
-            Some(&ActionKind::SaveBuffer(None))
-        ));
+        assert!(handle_save_buffer_action(&mut layout, None, false,));
 
         let saved_text = std::fs::read_to_string(path).expect("saved file should be readable");
         assert_eq!(saved_text, "hello");
+    }
+
+    #[test]
+    fn handle_save_buffer_action_prompts_when_disk_changed() {
+        let _pool_guard = buffer_pool_lock();
+        let _notification_guard = notification_test_lock();
+        globals::clear_notifications();
+
+        let unique = format!(
+            "urvim-save-confirm-{}-{}.txt",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time should be after epoch")
+                .as_nanos()
+        );
+        let path = std::env::temp_dir().join(unique);
+        std::fs::write(&path, "alpha").unwrap();
+        let buffer = Buffer::load_from_file(&path).unwrap();
+
+        let mut layout = Layout::new(WindowGroup::from_buffers(vec![buffer]));
+        layout
+            .active_buffer_view_mut()
+            .with_buffer_mut(|buffer| buffer.insert_text(Cursor::new(0, 5), "-dirty"))
+            .unwrap();
+        std::fs::write(&path, "alpha-external").unwrap();
+
+        let buffer_id = layout.active_buffer_view().buffer_id();
+        assert!(handle_save_buffer_action(
+            &mut layout,
+            Some(buffer_id),
+            false,
+        ));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "alpha-external");
+
+        let ui_result = layout.route_ui_event(&UiEvent::Key(Key::new(KeyCode::Enter)));
+        assert!(handle_ui_result(&mut layout, ui_result));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "alpha-dirty");
+
+        std::fs::remove_file(path).ok();
     }
 
     #[test]
@@ -1001,7 +1076,8 @@ mod tests {
 
         assert!(handle_save_buffer_action(
             &mut layout,
-            Some(&ActionKind::SaveBuffer(Some(BufferId::new(usize::MAX))))
+            Some(BufferId::new(usize::MAX)),
+            false,
         ));
     }
 

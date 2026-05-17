@@ -76,6 +76,7 @@ use std::fs::File;
 use std::io::{Read, Write};
 use std::path::Path;
 use std::sync::Arc;
+use std::time::SystemTime;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
@@ -134,6 +135,21 @@ struct Snapshot {
     markers: MarkersStore,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct DiskState {
+    modified: Option<SystemTime>,
+    len: u64,
+}
+
+impl DiskState {
+    fn from_metadata(metadata: &std::fs::Metadata) -> Self {
+        Self {
+            modified: metadata.modified().ok(),
+            len: metadata.len(),
+        }
+    }
+}
+
 /// Stores undo/redo history for a buffer.
 ///
 /// The history is a list of snapshots, with a position pointer indicating
@@ -174,6 +190,7 @@ struct UndoState {
 pub struct Buffer {
     lines: Vector<Arc<str>>,
     saved_lines: Vector<Arc<str>>,
+    saved_disk_state: Option<DiskState>,
     path: Option<AbsolutePath>,
     syntax_generation: u64,
     syntax_background_generation: Option<u64>,
@@ -192,6 +209,7 @@ impl Clone for Buffer {
         Self {
             lines: self.lines.clone(),
             saved_lines: self.saved_lines.clone(),
+            saved_disk_state: self.saved_disk_state,
             path: self.path.clone(),
             syntax_generation: self.syntax_generation,
             syntax_background_generation: self.syntax_background_generation,
@@ -274,6 +292,21 @@ impl Buffer {
     /// Returns true when the current buffer contents differ from the last saved baseline.
     pub fn is_modified(&self) -> bool {
         self.lines != self.saved_lines
+    }
+
+    fn disk_state_for_path(path: &Path) -> Option<DiskState> {
+        let metadata = std::fs::metadata(path).ok()?;
+        Some(DiskState::from_metadata(&metadata))
+    }
+
+    fn current_disk_state(&self) -> Option<DiskState> {
+        self.path
+            .as_ref()
+            .and_then(|path| Self::disk_state_for_path(path.as_path()))
+    }
+
+    fn refresh_saved_disk_state(&mut self) {
+        self.saved_disk_state = self.current_disk_state();
     }
 
     /// Returns the generation for rendered visual decorations.
@@ -386,6 +419,23 @@ impl Buffer {
     pub fn mark_saved(&mut self) {
         self.saved_lines = self.lines.clone();
         self.refresh_syntax();
+        self.refresh_saved_disk_state();
+    }
+
+    /// Reloads the buffer contents from its resolved path.
+    pub fn reload_from_disk(&mut self) -> std::io::Result<()> {
+        let path = self.path.clone().ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::InvalidInput, "buffer has no path")
+        })?;
+        let mut file = File::open(path.as_path())?;
+        let mut contents = String::new();
+        file.read_to_string(&mut contents)?;
+
+        let cursor = self.current_cursor();
+        self.replace_text(&contents);
+        self.push_snapshot(cursor);
+        self.mark_saved();
+        Ok(())
     }
 }
 

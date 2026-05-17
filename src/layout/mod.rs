@@ -438,6 +438,31 @@ impl Layout {
                 },
                 |_| true,
             ),
+            Command::OverwriteBuffer(target) => {
+                let buffer_id = (*target).unwrap_or_else(|| self.active_buffer_view().buffer_id());
+                match crate::globals::with_buffer_pool(|pool| pool.save_buffer(buffer_id)) {
+                    Ok(()) => {
+                        let label = crate::globals::with_buffer(buffer_id, |buffer| {
+                            buffer
+                                .file_name()
+                                .map(|name| name.to_string_lossy().into_owned())
+                                .unwrap_or_else(|| "Untitled".to_string())
+                        })
+                        .unwrap_or_else(|| "Untitled".to_string());
+                        crate::globals::with_lsp_runtime_mut(|runtime| {
+                            runtime.did_save_buffer(buffer_id)
+                        });
+                        crate::notify_info!("Saved {}", label);
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::InvalidInput => {
+                        tracing::info!("Skipping save for unnamed buffer {:?}", buffer_id);
+                    }
+                    Err(error) => {
+                        crate::notify_error!("Failed to save buffer {:?}: {}", buffer_id, error);
+                    }
+                }
+                true
+            }
             Command::LspHover => {
                 if !self.lsp_hover_supported() {
                     return true;

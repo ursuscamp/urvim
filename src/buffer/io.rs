@@ -13,6 +13,7 @@ impl Buffer {
         Self {
             lines,
             saved_lines,
+            saved_disk_state: None,
             path: None,
             syntax_generation: 0,
             syntax_background_generation: None,
@@ -45,6 +46,7 @@ impl Buffer {
         Self {
             lines,
             saved_lines,
+            saved_disk_state: None,
             path: None,
             syntax_generation: 0,
             syntax_background_generation: None,
@@ -80,6 +82,7 @@ impl Buffer {
         let buffer = Self {
             lines,
             saved_lines,
+            saved_disk_state: None,
             path: Some(path),
             syntax_generation: 0,
             syntax_background_generation: None,
@@ -114,7 +117,9 @@ impl Buffer {
                 "failed to resolve absolute path",
             )
         })?;
-        Ok(Self::from_str_with_path(&contents, abs_path))
+        let mut buffer = Self::from_str_with_path(&contents, abs_path);
+        buffer.mark_saved();
+        Ok(buffer)
     }
 
     /// Saves the buffer contents to a file.

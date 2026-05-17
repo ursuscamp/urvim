@@ -1,4 +1,6 @@
 use super::Layout;
+use crate::buffer::BufferId;
+use crate::ui::Command;
 use crate::ui::confirmation_box::ConfirmationBox;
 use crate::ui::{Intent, UiEvent, UiEventResult};
 
@@ -10,6 +12,27 @@ impl Layout {
     ) {
         self.close_all_dialogs();
         self.dialogs.confirmation_box = Some(ConfirmationBox::new(query, positive_intent));
+    }
+
+    /// Opens a confirmation box for overwriting a file that changed on disk.
+    pub fn prompt_overwrite_buffer(&mut self, buffer_id: BufferId) {
+        let label = crate::globals::with_buffer(buffer_id, |buffer| {
+            buffer
+                .path()
+                .map(|path| path.as_path().display().to_string())
+                .or_else(|| {
+                    buffer
+                        .file_name()
+                        .map(|name| name.to_string_lossy().into_owned())
+                })
+                .unwrap_or_else(|| "this buffer".to_string())
+        })
+        .unwrap_or_else(|| "this buffer".to_string());
+
+        self.open_confirmation_box(
+            format!("File {label} changed on disk. Overwrite anyway?"),
+            Command::OverwriteBuffer(Some(buffer_id)),
+        );
     }
 
     pub(super) fn close_confirmation_box(&mut self) {

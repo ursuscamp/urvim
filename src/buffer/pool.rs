@@ -14,6 +14,7 @@ use crate::path::AbsolutePath;
 use std::collections::HashMap;
 use std::io;
 use std::path::Path;
+use std::time::{Duration, Instant};
 
 /// Stable identifier for a buffer stored in the global buffer pool.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -37,6 +38,7 @@ pub struct BufferPool {
     buffers: HashMap<BufferId, Buffer>,
     paths: HashMap<AbsolutePath, BufferId>,
     jobs: JobManager,
+    last_disk_check: Option<Instant>,
 }
 
 impl BufferPool {
@@ -47,6 +49,7 @@ impl BufferPool {
             buffers: HashMap::new(),
             paths: HashMap::new(),
             jobs: JobManager::new(),
+            last_disk_check: None,
         }
     }
 
@@ -251,6 +254,80 @@ impl BufferPool {
         }
 
         accepted_redraw
+    }
+
+    /// Reloads clean file-backed buffers whose on-disk contents changed.
+    pub fn process_external_file_changes(&mut self) -> bool {
+        let now = Instant::now();
+        if self
+            .last_disk_check
+            .is_some_and(|last| now.saturating_duration_since(last) < Duration::from_secs(1))
+        {
+            return false;
+        }
+        self.last_disk_check = Some(now);
+
+        let mut accepted_redraw = false;
+
+        for buffer_id in self.buffer_ids() {
+            let mut should_refresh_cache = false;
+
+            {
+                let Some(buffer) = self.buffers.get_mut(&buffer_id) else {
+                    continue;
+                };
+
+                if buffer.is_modified() {
+                    continue;
+                }
+
+                if buffer.saved_disk_state.is_none() {
+                    continue;
+                }
+
+                let Some(path) = buffer.path().cloned() else {
+                    continue;
+                };
+
+                let current_state = Buffer::disk_state_for_path(path.as_path());
+                if current_state.is_none() || current_state == buffer.saved_disk_state {
+                    continue;
+                }
+
+                match buffer.reload_from_disk() {
+                    Ok(()) => {
+                        should_refresh_cache = true;
+                    }
+                    Err(error) => {
+                        tracing::warn!(?error, ?buffer_id, "failed to reload buffer from disk");
+                    }
+                }
+            }
+
+            if should_refresh_cache {
+                self.request_buffer_cache_refresh(buffer_id);
+                accepted_redraw = true;
+            }
+        }
+
+        accepted_redraw
+    }
+
+    /// Returns true when the buffer should confirm overwriting newer on-disk contents.
+    pub fn buffer_needs_overwrite_confirmation(&self, buffer_id: BufferId) -> bool {
+        let Some(buffer) = self.buffers.get(&buffer_id) else {
+            return false;
+        };
+
+        let Some(saved_state) = buffer.saved_disk_state else {
+            return false;
+        };
+
+        let Some(current_state) = buffer.current_disk_state() else {
+            return true;
+        };
+
+        current_state != saved_state
     }
 
     /// Warms syntax for all loaded buffers at startup using a visible/hidden split.
@@ -520,6 +597,61 @@ mod tests {
 
         assert_eq!(fs::read_to_string(&path).unwrap(), "hello");
         assert!(!pool.get(id).unwrap().is_modified());
+
+        fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn test_process_external_file_changes_reloads_clean_buffer() {
+        let path = temp_file("reload-clean.txt");
+        fs::write(&path, "alpha").unwrap();
+
+        let mut pool = BufferPool::new();
+        let id = pool.open_buffer(&path).unwrap();
+
+        fs::write(&path, "alphabet").unwrap();
+
+        assert!(pool.process_external_file_changes());
+        assert_eq!(pool.get(id).unwrap().as_str(), "alphabet");
+        assert!(!pool.get(id).unwrap().is_modified());
+
+        fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn test_process_external_file_changes_skips_modified_buffer() {
+        let path = temp_file("reload-skip-modified.txt");
+        fs::write(&path, "alpha").unwrap();
+
+        let mut pool = BufferPool::new();
+        let id = pool.open_buffer(&path).unwrap();
+        pool.with_buffer_mut(id, |buffer| {
+            buffer.insert_text(crate::buffer::Cursor::new(0, 5), "!");
+        })
+        .unwrap();
+
+        fs::write(&path, "beta").unwrap();
+
+        assert!(!pool.process_external_file_changes());
+        assert_eq!(pool.get(id).unwrap().as_str(), "alpha!");
+        assert!(pool.get(id).unwrap().is_modified());
+
+        fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn test_buffer_needs_overwrite_confirmation_detects_external_changes() {
+        let path = temp_file("overwrite-confirm.txt");
+        fs::write(&path, "alpha").unwrap();
+
+        let mut pool = BufferPool::new();
+        let id = pool.open_buffer(&path).unwrap();
+
+        assert!(!pool.buffer_needs_overwrite_confirmation(id));
+
+        fs::write(&path, "alphabet").unwrap();
+
+        assert!(pool.buffer_needs_overwrite_confirmation(id));
 
         fs::remove_file(&path).ok();
     }

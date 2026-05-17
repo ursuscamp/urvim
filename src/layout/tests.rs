@@ -748,6 +748,36 @@ fn test_layout_write_all_saves_hidden_modified_buffers() {
 }
 
 #[test]
+fn test_layout_write_all_prompts_when_disk_changed() {
+    let _pool_guard = globals::buffer_pool_test_lock();
+    globals::with_buffer_pool(|pool| *pool = crate::buffer::BufferPool::new());
+    let path = std::env::temp_dir().join(format!(
+        "urvim-write-all-confirm-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos()
+    ));
+    fs::write(&path, "alpha").unwrap();
+
+    let buffer = Buffer::load_from_file(&path).unwrap();
+    let mut layout = layout_with_buffers(vec![buffer]);
+    layout
+        .active_buffer_view_mut()
+        .with_buffer_mut(|buffer| buffer.insert_text(Cursor::new(0, 5), "-dirty"))
+        .unwrap();
+    fs::write(&path, "alpha-external").unwrap();
+
+    assert!(layout.dispatch_intent(&Intent::Command(Command::WriteAll)));
+    assert!(layout.confirmation_box_is_open());
+    assert_eq!(fs::read_to_string(&path).unwrap(), "alpha-external");
+
+    let _ = fs::remove_file(path);
+    globals::with_buffer_pool(|pool| *pool = crate::buffer::BufferPool::new());
+}
+
+#[test]
 fn test_layout_confirmation_prompt_returns_quit_intent_on_enter() {
     let mut layout = layout_with_buffers(vec![Buffer::from_str("one")]);
     let cursor = crate::buffer::Cursor::new(0, 1);

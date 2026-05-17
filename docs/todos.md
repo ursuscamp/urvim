@@ -7,10 +7,10 @@ This is a list, in no particular order, of things that need to be addressed whic
 - should panes hold dynamic widgets?
 - build-time compiled themes and syntax grammar
 - buffer selector
-- reloading changed files on disk
 - folding
 - show code action modification in preview window
 - code action hints for the current line (with ghost text)
+- add more LSP servers
 
 # Bugs
 

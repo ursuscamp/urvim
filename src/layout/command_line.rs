@@ -302,6 +302,13 @@ impl Layout {
 
     fn execute_save_current(&mut self) -> Result<(), String> {
         let buffer_id = self.active_buffer_view().buffer_id();
+        if crate::globals::with_buffer_pool(|pool| {
+            pool.buffer_needs_overwrite_confirmation(buffer_id)
+        }) {
+            self.prompt_overwrite_buffer(buffer_id);
+            return Ok(());
+        }
+
         match crate::globals::with_buffer_pool(|pool| pool.save_buffer(buffer_id)) {
             Ok(()) => Ok(()),
             Err(error) if error.kind() == io::ErrorKind::InvalidInput => {
@@ -325,6 +332,15 @@ impl Layout {
         let buffer_ids = crate::globals::with_buffer_pool(|pool| pool.modified_buffer_ids());
         let mut saved_buffer_ids = Vec::new();
         let mut unnamed_buffer_ids = Vec::new();
+
+        if let Some(buffer_id) = buffer_ids.iter().copied().find(|buffer_id| {
+            crate::globals::with_buffer_pool(|pool| {
+                pool.buffer_needs_overwrite_confirmation(*buffer_id)
+            })
+        }) {
+            self.prompt_overwrite_buffer(buffer_id);
+            return Ok(());
+        }
 
         for buffer_id in buffer_ids {
             let has_path = crate::globals::with_buffer(buffer_id, |buffer| buffer.path().is_some())

@@ -124,6 +124,8 @@ pub enum Command {
     OpenGrepPicker,
     /// Write all modified buffers in the pool.
     WriteAll,
+    /// Overwrite a file that changed on disk.
+    OverwriteBuffer(Option<crate::buffer::BufferId>),
     /// Run an LSP hover query on the active buffer.
     LspHover,
     /// Run an LSP go-to-definition query on the active buffer.
