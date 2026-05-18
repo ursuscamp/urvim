@@ -1,4 +1,5 @@
 use crate::buffer::BufferId;
+use crate::ui::completion::CompletionSourceKind;
 use std::fmt;
 
 /// A generation token used to reject stale job results.
@@ -32,6 +33,8 @@ pub enum JobKind {
     GrepPickerSearch,
     /// Document symbol picker search.
     DocSymbolsPickerSearch,
+    /// Insert-mode completion.
+    Completion(BufferId, CompletionSourceKind),
     /// Workspace symbol picker search.
     WorkspaceSymbolsPickerSearch,
     /// Picker preview syntax refresh.
@@ -57,6 +60,9 @@ impl fmt::Display for JobKind {
             Self::FilePickerSearch => f.write_str("file-picker-search"),
             Self::GrepPickerSearch => f.write_str("grep-picker-search"),
             Self::DocSymbolsPickerSearch => f.write_str("doc-symbols-picker-search"),
+            Self::Completion(buffer_id, source) => {
+                write!(f, "completion:{}:{}", buffer_id.get(), source.as_str())
+            }
             Self::WorkspaceSymbolsPickerSearch => f.write_str("workspace-symbols-picker-search"),
             Self::PickerPreviewSyntax => f.write_str("picker-preview-syntax"),
             Self::LspRename(buffer_id) => write!(f, "lsp-rename:{}", buffer_id.get()),

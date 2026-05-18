@@ -183,6 +183,72 @@ impl Buffer {
         self.markers.shift_delete(edit);
     }
 
+    /// Applies a completion replacement and any same-buffer edits.
+    pub fn apply_completion(
+        &mut self,
+        range: TextObjectRange,
+        replacement: &str,
+        cursor_offset: usize,
+        additional_text_edits: &[crate::ui::completion::CompletionTextEdit],
+    ) -> Option<Cursor> {
+        let mut main_start = completion_range_to_byte_offset(&self.lines, range.start)?;
+        let mut main_end = completion_range_to_byte_offset(&self.lines, range.end)?;
+
+        let mut edits: Vec<(usize, usize, &str)> =
+            Vec::with_capacity(additional_text_edits.len() + 1);
+        edits.push((main_start, main_end, replacement));
+
+        for edit in additional_text_edits {
+            let edit_start = completion_range_to_byte_offset(&self.lines, edit.range.start)?;
+            let edit_end = completion_range_to_byte_offset(&self.lines, edit.range.end)?;
+
+            if edit_end <= main_start {
+                let delta = edit.text.len() as isize - (edit_end as isize - edit_start as isize);
+                main_start = offset_with_delta(main_start, delta);
+                main_end = offset_with_delta(main_end, delta);
+            } else if edit_start < main_end {
+                return self.apply_completion_main_only(range, replacement, cursor_offset);
+            }
+
+            edits.push((edit_start, edit_end, edit.text.as_str()));
+        }
+
+        edits.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| right.1.cmp(&left.1)));
+
+        for (edit_start, edit_end, text) in edits {
+            let start_cursor = completion_cursor_from_byte_offset(&self.lines, edit_start)?;
+            let end_cursor = completion_cursor_from_byte_offset(&self.lines, edit_end)?;
+            self.remove(start_cursor, end_cursor);
+            self.insert_text(start_cursor, text);
+        }
+
+        let next_cursor = completion_cursor_from_byte_offset(
+            &self.lines,
+            main_start.saturating_add(cursor_offset),
+        )?;
+        self.push_snapshot(next_cursor);
+        Some(next_cursor)
+    }
+
+    fn apply_completion_main_only(
+        &mut self,
+        range: TextObjectRange,
+        replacement: &str,
+        cursor_offset: usize,
+    ) -> Option<Cursor> {
+        let start = range.start;
+        let end = range.end;
+        self.remove(start, end);
+        self.insert_text(start, replacement);
+        let start_offset = completion_range_to_byte_offset(&self.lines, start)?;
+        let next_cursor = completion_cursor_from_byte_offset(
+            &self.lines,
+            start_offset.saturating_add(cursor_offset),
+        )?;
+        self.push_snapshot(next_cursor);
+        Some(next_cursor)
+    }
+
     /// Returns the exact text covered by a characterwise range.
     pub fn text_in_range(&self, start: Cursor, end: Cursor) -> Option<String> {
         if start.line > end.line || (start.line == end.line && start.col >= end.col) {
@@ -617,5 +683,47 @@ impl Buffer {
         let line_delta = self.lines.len() as isize - old_line_count as isize;
         self.invalidate_syntax_from_with_line_delta(insert_at, line_delta);
         Some(Cursor::new(insert_at, 0))
+    }
+}
+
+fn completion_range_to_byte_offset(lines: &Vector<Arc<str>>, cursor: Cursor) -> Option<usize> {
+    let mut offset = 0usize;
+
+    for (line_idx, line) in lines.iter().enumerate() {
+        if line_idx == cursor.line {
+            return (cursor.col <= line.len()).then_some(offset + cursor.col);
+        }
+
+        offset = offset.saturating_add(line.len());
+        if line_idx + 1 < lines.len() {
+            offset = offset.saturating_add(1);
+        }
+    }
+
+    None
+}
+
+fn completion_cursor_from_byte_offset(lines: &Vector<Arc<str>>, offset: usize) -> Option<Cursor> {
+    let mut current = 0usize;
+
+    for (line_idx, line) in lines.iter().enumerate() {
+        if offset <= current + line.len() {
+            return Some(Cursor::new(line_idx, offset - current));
+        }
+
+        current = current.saturating_add(line.len());
+        if line_idx + 1 < lines.len() {
+            current = current.saturating_add(1);
+        }
+    }
+
+    None
+}
+
+fn offset_with_delta(offset: usize, delta: isize) -> usize {
+    if delta.is_negative() {
+        offset.saturating_sub(delta.unsigned_abs())
+    } else {
+        offset.saturating_add(delta as usize)
     }
 }

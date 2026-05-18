@@ -23,7 +23,7 @@ Command-line flags override config file values.
 
 ## Current Schema
 
-The canonical config values are `theme`, `insert_escape`, `default_registers`, `syntax`, `todo_markers`, `auto_close_pairs`, `active_line`, `relative_number`, `indent_guides`, `auto_indent`, `advanced_glyphs`, `inlay_hints`, `tab_insertion`, `tab_behavior`, `tab_width`, `scroll_margin`, `wrap_mode`, and `lsp`.
+The canonical config values are `theme`, `insert_escape`, `default_registers`, `syntax`, `todo_markers`, `auto_close_pairs`, `active_line`, `relative_number`, `indent_guides`, `auto_indent`, `completion_trigger`, `completion_sources`, `advanced_glyphs`, `inlay_hints`, `tab_insertion`, `tab_behavior`, `tab_width`, `scroll_margin`, `wrap_mode`, and `lsp`.
 
 ```toml
 theme = "Friday Night"
@@ -35,11 +35,13 @@ auto_close_pairs = true
 active_line = false
 indent_guides = true
 auto_indent = "off"
+completion_trigger = "manual"
 advanced_glyphs = ["nerdfont"]
 inlay_hints = ["type", "parameter"]
 tab_insertion = "spaces"
 tab_behavior = "simple"
 tab_width = 4
+completion_sources = ["lsp", "paths", "buffer_words"]
 scroll_margin = { vertical = 5, horizontal = 5 }
 wrap_mode = "hard"
 
@@ -147,6 +149,29 @@ Controls how insert mode chooses indentation when creating a new line.
 - Behavior: `off` preserves plain newline insertion; `neighbor` looks at nearby non-blank buffer lines and reuses the most-indented relevant leading whitespace prefix when creating a new line
 - Extensibility: the setting is intentionally enum-based so additional auto-indent styles can be added later without changing the config field shape
 - Scope: insert-mode newline creation and normal-mode open-line commands
+
+### `completion_trigger`
+
+Controls whether insert-mode completion may start automatically.
+
+- Type: string enum
+- Default: `"manual"`
+- Supported values: `manual`, `auto`
+- Behavior: `manual` only allows explicit completion commands; `auto` allows the debounce-driven autocomplete flow as well as manual completion
+- Scope: insert-mode completion only
+
+### `completion_sources`
+
+Sets the ordered list of insert-mode completion sources.
+
+- Type: array of strings
+- Default: `["lsp", "paths", "buffer_words"]`
+- Behavior: sources earlier in the list have higher priority when results are merged
+- Supported values: `lsp`, `paths`, `buffer_words`
+- `lsp` behavior: queries the attached language server for completion items and uses them before local sources when available
+- `paths` behavior: matches filesystem paths under the current working directory when the current token starts with `/` or `./`
+- `buffer_words` behavior: matches generic word prefixes case-insensitively and falls back to the full in-buffer word list when no prefix matches exist
+- Scope: insert-mode completion only
 
 ### `advanced_glyphs`
 

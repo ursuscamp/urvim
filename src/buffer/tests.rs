@@ -4038,3 +4038,49 @@ fn test_cursor_paragraph_single_line() {
         Some(Cursor::new(0, 11))
     );
 }
+
+#[test]
+fn test_apply_completion_applies_additional_edits() {
+    let mut buf = Buffer::from_str("abcdef");
+    let range = TextObjectRange {
+        start: Cursor::new(0, 2),
+        end: Cursor::new(0, 4),
+    };
+    let edits = vec![crate::ui::completion::CompletionTextEdit {
+        range: TextObjectRange {
+            start: Cursor::new(0, 0),
+            end: Cursor::new(0, 2),
+        },
+        text: "Z".to_string(),
+    }];
+
+    let cursor = buf
+        .apply_completion(range, "X", 1, edits.as_slice())
+        .expect("apply completion edits");
+
+    assert_eq!(buf.as_str(), "ZXef");
+    assert_eq!(cursor, Cursor::new(0, 2));
+}
+
+#[test]
+fn test_apply_completion_tracks_cursor_after_multiline_additional_edits() {
+    let mut buf = Buffer::from_str("abcdef");
+    let range = TextObjectRange {
+        start: Cursor::new(0, 2),
+        end: Cursor::new(0, 4),
+    };
+    let edits = vec![crate::ui::completion::CompletionTextEdit {
+        range: TextObjectRange {
+            start: Cursor::new(0, 0),
+            end: Cursor::new(0, 2),
+        },
+        text: "Z\nY".to_string(),
+    }];
+
+    let cursor = buf
+        .apply_completion(range, "X", 1, edits.as_slice())
+        .expect("apply completion edits");
+
+    assert_eq!(buf.as_str(), "Z\nYXef");
+    assert_eq!(cursor, Cursor::new(1, 2));
+}

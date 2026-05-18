@@ -29,6 +29,7 @@ impl Layout {
             dialogs: super::Dialogs::default(),
             jobs: std::sync::Arc::new(crate::background::JobManager::new()),
             inlay_hints: InlayHintState::Idle,
+            autocomplete: super::AutocompleteState::default(),
         };
         layout.next_pane_id = layout.max_pane_id().map(|id| id.0 + 1).unwrap_or(0);
         if layout.root.is_some() {

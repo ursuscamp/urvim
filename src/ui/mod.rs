@@ -3,6 +3,7 @@
 //! These types provide a unified dispatch envelope that carries either editing
 //! actions or UI orchestration commands.
 
+pub mod completion;
 pub mod confirmation_box;
 pub mod diagnostic_hover;
 pub mod floating_window;
@@ -112,6 +113,8 @@ pub enum Command {
     },
     /// Open the command-line overlay.
     OpenCommandLine,
+    /// Open the insert-mode completion popup.
+    OpenCompletion,
     /// Open the file picker overlay.
     OpenFilePicker,
     /// Open the colorscheme picker overlay.
@@ -144,6 +147,8 @@ pub enum Command {
     LspRenamePrompt,
     /// Run an LSP rename with the provided replacement name.
     LspRename(String),
+    /// Apply a selected completion replacement.
+    ApplyCompletion(ApplyCompletion),
     /// Open a picker for available LSP code actions.
     LspCodeActions,
     /// Apply a selected LSP code action.
@@ -187,6 +192,21 @@ pub enum Command {
     TryQuit,
     /// Exit the editor.
     Quit,
+}
+
+/// Payload for applying a selected completion replacement.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ApplyCompletion {
+    /// Buffer range to replace.
+    pub range: crate::buffer::TextObjectRange,
+    /// Replacement text.
+    pub text: String,
+    /// Extra edits to apply when the completion is accepted.
+    pub additional_text_edits: Vec<crate::ui::completion::CompletionTextEdit>,
+    /// Opaque serialized LSP completion item for resolve requests.
+    pub lsp_completion_item: Option<serde_json::Value>,
+    /// Replacement text insertion format.
+    pub format: crate::ui::completion::CompletionInsertFormat,
 }
 
 /// Widget focus policy.

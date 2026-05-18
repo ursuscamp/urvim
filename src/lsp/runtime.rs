@@ -9,15 +9,17 @@ use crate::lsp::inlay_hint_job::LspInlayHintSnapshot;
 use crate::lsp::position::{
     byte_index_to_position_character, position_character_to_byte_index, position_to_byte_offset,
 };
+use crate::ui::completion::{CompletionCandidate, CompletionInsertFormat};
 use imbl::Vector;
 use lsp_types::{
     CodeActionContext, CodeActionOrCommand, CodeActionParams, CodeActionProviderCapability,
-    CodeActionTriggerKind, CreateFile, DeleteFile, Diagnostic, DocumentChangeOperation,
-    InitializeResult, InlayHint, InlayHintKind, InlayHintParams, Location, OneOf,
-    PositionEncodingKind, PrepareRenameResponse, ProgressParams, ProgressParamsValue,
-    ReferenceContext, RenameFile, ResourceOp, ServerCapabilities, TextDocumentIdentifier,
-    TextDocumentSyncCapability, TextDocumentSyncKind, WorkDoneProgress, WorkDoneProgressBegin,
-    WorkDoneProgressReport, WorkspaceLocation, WorkspaceSymbol, WorkspaceSymbolResponse,
+    CodeActionTriggerKind, CompletionItem, CompletionParams, CompletionResponse, CreateFile,
+    DeleteFile, Diagnostic, DocumentChangeOperation, InitializeResult, InlayHint, InlayHintKind,
+    InlayHintParams, Location, OneOf, PositionEncodingKind, PrepareRenameResponse, ProgressParams,
+    ProgressParamsValue, ReferenceContext, RenameFile, ResourceOp, ServerCapabilities,
+    TextDocumentIdentifier, TextDocumentPositionParams, TextDocumentSyncCapability,
+    TextDocumentSyncKind, WorkDoneProgress, WorkDoneProgressBegin, WorkDoneProgressReport,
+    WorkspaceLocation, WorkspaceSymbol, WorkspaceSymbolResponse,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -326,6 +328,30 @@ impl LspRuntime {
         self.sync();
         self.with_session_for_buffer(buffer_id, |session, attachment| {
             session.hover(attachment, cursor)
+        })
+    }
+
+    /// Requests completion candidates for the attached server owning `buffer_id`.
+    pub fn completion_buffer(
+        &mut self,
+        buffer_id: BufferId,
+        cursor: crate::buffer::Cursor,
+    ) -> Result<Option<Vec<CompletionCandidate>>, String> {
+        self.sync();
+        self.with_session_for_buffer(buffer_id, |session, attachment| {
+            session.completion(attachment, cursor)
+        })
+    }
+
+    /// Resolves any deferred additional edits for a completion item.
+    pub fn resolve_completion_additional_text_edits(
+        &mut self,
+        buffer_id: BufferId,
+        item: &serde_json::Value,
+    ) -> Result<Option<Vec<crate::ui::completion::CompletionTextEdit>>, String> {
+        self.sync();
+        self.with_session_for_buffer(buffer_id, |session, attachment| {
+            session.resolve_completion_additional_text_edits(attachment, item)
         })
     }
 
@@ -720,11 +746,6 @@ impl LspServerSession {
             }
         };
         session.record_initialize_result(&initialize_result);
-        tracing::debug!(
-            position_encoding = ?session.negotiated.position_encoding,
-            text_document_sync = ?session.negotiated.text_document_sync,
-            "lsp session initialized"
-        );
         session.state = LspSessionState::Running;
         Ok(session)
     }
@@ -1012,6 +1033,14 @@ impl LspServerSession {
         )
     }
 
+    fn supports_completion(&self) -> bool {
+        self.negotiated
+            .server_capabilities
+            .as_ref()
+            .and_then(|capabilities| capabilities.completion_provider.as_ref())
+            .is_some()
+    }
+
     fn supports_definition(&self) -> bool {
         match self
             .negotiated
@@ -1153,6 +1182,86 @@ impl LspServerSession {
         let hover = serde_json::from_value::<Option<lsp_types::Hover>>(value)
             .map_err(|error| error.to_string())?;
         Ok(hover.map(|hover| format_hover(&hover.contents)))
+    }
+
+    fn completion(
+        &mut self,
+        attachment: &BufferAttachment,
+        cursor: crate::buffer::Cursor,
+    ) -> Result<Option<Vec<CompletionCandidate>>, String> {
+        if !self.supports_completion() {
+            return Ok(None);
+        }
+
+        let params = CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: attachment
+                        .uri
+                        .parse::<lsp_types::Uri>()
+                        .map_err(|error| error.to_string())?,
+                },
+                position: cursor_to_lsp_position(
+                    &attachment.lines,
+                    cursor,
+                    self.negotiated.position_encoding.clone(),
+                ),
+            },
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+            context: None,
+        };
+
+        let result = self
+            .request_raw(
+                "textDocument/completion",
+                Some(serde_json::to_value(params).map_err(|error| error.to_string())?),
+            )
+            .map_err(|error| error.to_string())?;
+
+        let Some(value) = result else {
+            return Ok(None);
+        };
+
+        let response = serde_json::from_value::<Option<CompletionResponse>>(value)
+            .map_err(|error| error.to_string())?;
+        let Some(response) = response else {
+            return Ok(None);
+        };
+
+        let items = completion_response_to_candidates(
+            response,
+            &attachment.lines,
+            cursor,
+            self.negotiated.position_encoding.clone(),
+        );
+        if items.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(items))
+        }
+    }
+
+    fn resolve_completion_additional_text_edits(
+        &mut self,
+        attachment: &BufferAttachment,
+        item: &serde_json::Value,
+    ) -> Result<Option<Vec<crate::ui::completion::CompletionTextEdit>>, String> {
+        let result = self
+            .request_raw("completionItem/resolve", Some(item.clone()))
+            .map_err(|error| error.to_string())?;
+
+        let Some(value) = result else {
+            return Ok(None);
+        };
+
+        let item =
+            serde_json::from_value::<CompletionItem>(value).map_err(|error| error.to_string())?;
+        Ok(Some(completion_item_additional_text_edits(
+            &item,
+            &attachment.lines,
+            self.negotiated.position_encoding.clone(),
+        )))
     }
 
     fn definition(
@@ -2142,6 +2251,234 @@ fn range_text(
     Some(result)
 }
 
+fn completion_response_to_candidates(
+    response: CompletionResponse,
+    lines: &Vector<Arc<str>>,
+    cursor: crate::buffer::Cursor,
+    encoding: PositionEncodingKind,
+) -> Vec<CompletionCandidate> {
+    let items = match response {
+        CompletionResponse::Array(items) => items,
+        CompletionResponse::List(list) => list.items,
+    };
+
+    let query = current_word_prefix_text(lines, cursor);
+    let mut items = items;
+    rank_completion_items(&mut items, query.as_str());
+
+    items
+        .into_iter()
+        .filter_map(|item| completion_item_to_candidate(item, lines, cursor, encoding.clone()))
+        .collect::<Vec<_>>()
+        .into_iter()
+        .fold(Vec::new(), |mut deduped, item| {
+            if let Some(existing) = deduped
+                .iter_mut()
+                .find(|existing| completion_candidate_same_identity(existing, &item))
+            {
+                if completion_candidate_score(&item) > completion_candidate_score(existing) {
+                    *existing = item;
+                }
+            } else {
+                deduped.push(item);
+            }
+            deduped
+        })
+}
+
+fn rank_completion_items(items: &mut Vec<CompletionItem>, query: &str) {
+    if query.trim().is_empty() {
+        return;
+    }
+
+    let query = query.to_lowercase();
+    items.retain(|item| {
+        item.filter_text
+            .as_deref()
+            .unwrap_or(item.label.as_str())
+            .to_lowercase()
+            .starts_with(query.as_str())
+    });
+    items.sort_by(|left, right| {
+        let left_sort = left
+            .sort_text
+            .as_deref()
+            .unwrap_or(left.label.as_str())
+            .to_lowercase();
+        let right_sort = right
+            .sort_text
+            .as_deref()
+            .unwrap_or(right.label.as_str())
+            .to_lowercase();
+        match left_sort.cmp(&right_sort) {
+            std::cmp::Ordering::Equal => left.label.to_lowercase().cmp(&right.label.to_lowercase()),
+            ordering => ordering,
+        }
+    });
+}
+
+fn completion_item_to_candidate(
+    item: CompletionItem,
+    lines: &Vector<Arc<str>>,
+    cursor: crate::buffer::Cursor,
+    encoding: PositionEncodingKind,
+) -> Option<CompletionCandidate> {
+    let deprecated = completion_item_is_deprecated(&item);
+    let additional_text_edits =
+        completion_item_additional_text_edits(&item, lines, encoding.clone());
+    let completion_item_json = serde_json::to_value(&item).ok();
+    let label = item.label;
+    let label_details = item.label_details;
+    let (range, replacement) = match item.text_edit {
+        Some(lsp_types::CompletionTextEdit::Edit(edit)) => (
+            lsp_range_to_cursor_range(lines, &edit.range, encoding.clone())?,
+            edit.new_text,
+        ),
+        Some(lsp_types::CompletionTextEdit::InsertAndReplace(edit)) => (
+            lsp_range_to_cursor_range(lines, &edit.replace, encoding.clone())?,
+            edit.new_text,
+        ),
+        None => {
+            let replacement = item.insert_text.unwrap_or_else(|| label.clone());
+            (current_word_range(lines, cursor), replacement)
+        }
+    };
+
+    let mut candidate = CompletionCandidate::new(label, replacement, range, None);
+    candidate.kind = item.kind;
+    candidate.insert_format = item.insert_text_format.map(|format| match format {
+        lsp_types::InsertTextFormat::PLAIN_TEXT => CompletionInsertFormat::PlainText,
+        lsp_types::InsertTextFormat::SNIPPET => CompletionInsertFormat::Snippet,
+        _ => CompletionInsertFormat::PlainText,
+    });
+    candidate.detail = item.detail;
+    candidate.additional_text_edits = additional_text_edits;
+    candidate.lsp_completion_item = completion_item_json;
+    candidate.label_detail = label_details
+        .as_ref()
+        .and_then(|details| details.detail.clone());
+    candidate.label_description = label_details
+        .as_ref()
+        .and_then(|details| details.description.clone());
+    candidate.deprecated = deprecated;
+    candidate.preselect = item.preselect.unwrap_or(false);
+
+    Some(candidate)
+}
+
+fn lsp_range_to_cursor_range(
+    lines: &Vector<Arc<str>>,
+    range: &lsp_types::Range,
+    encoding: PositionEncodingKind,
+) -> Option<crate::buffer::TextObjectRange> {
+    Some(crate::buffer::TextObjectRange {
+        start: position_to_cursor(lines, range.start, encoding.clone())?,
+        end: position_to_cursor(lines, range.end, encoding)?,
+    })
+}
+
+fn completion_candidate_same_identity(
+    left: &CompletionCandidate,
+    right: &CompletionCandidate,
+) -> bool {
+    left.label == right.label
+        && left.replacement == right.replacement
+        && left.range == right.range
+        && left.kind == right.kind
+        && left.symbol == right.symbol
+        && left.insert_format == right.insert_format
+}
+
+fn completion_candidate_score(candidate: &CompletionCandidate) -> usize {
+    candidate.additional_text_edits.len() + usize::from(candidate.lsp_completion_item.is_some())
+}
+
+fn completion_item_additional_text_edits(
+    item: &CompletionItem,
+    lines: &Vector<Arc<str>>,
+    encoding: PositionEncodingKind,
+) -> Vec<crate::ui::completion::CompletionTextEdit> {
+    item.additional_text_edits
+        .as_ref()
+        .into_iter()
+        .flatten()
+        .filter_map(|edit| {
+            lsp_range_to_cursor_range(lines, &edit.range, encoding.clone()).map(|range| {
+                crate::ui::completion::CompletionTextEdit {
+                    range,
+                    text: edit.new_text.clone(),
+                }
+            })
+        })
+        .collect()
+}
+
+fn current_word_prefix_text(lines: &Vector<Arc<str>>, cursor: crate::buffer::Cursor) -> String {
+    let line = lines
+        .get(cursor.line)
+        .map(|line| line.as_ref())
+        .unwrap_or("");
+    let cursor_col = cursor.col.min(line.len());
+    let mut start = cursor_col;
+
+    while start > 0 {
+        let Some((prev_start, prev)) = previous_char(line, start) else {
+            break;
+        };
+        if !is_word_char(prev) {
+            break;
+        }
+        start = prev_start;
+    }
+
+    line.get(start..cursor_col).unwrap_or("").to_string()
+}
+
+fn completion_item_is_deprecated(item: &CompletionItem) -> bool {
+    if item.deprecated.unwrap_or(false) {
+        return true;
+    }
+
+    item.tags
+        .as_ref()
+        .is_some_and(|tags| tags.contains(&lsp_types::CompletionItemTag::DEPRECATED))
+}
+
+fn current_word_range(
+    lines: &Vector<Arc<str>>,
+    cursor: crate::buffer::Cursor,
+) -> crate::buffer::TextObjectRange {
+    let line = lines
+        .get(cursor.line)
+        .map(|line| line.as_ref())
+        .unwrap_or("");
+    let cursor_col = cursor.col.min(line.len());
+    let mut start = cursor_col;
+
+    while start > 0 {
+        let Some((prev_start, prev)) = previous_char(line, start) else {
+            break;
+        };
+        if !is_word_char(prev) {
+            break;
+        }
+        start = prev_start;
+    }
+
+    crate::buffer::TextObjectRange {
+        start: crate::buffer::Cursor::new(cursor.line, start),
+        end: crate::buffer::Cursor::new(cursor.line, cursor_col),
+    }
+}
+
+fn previous_char(text: &str, byte_idx: usize) -> Option<(usize, char)> {
+    text.get(..byte_idx)?.char_indices().next_back()
+}
+
+fn is_word_char(ch: char) -> bool {
+    ch.is_alphanumeric() || ch == '_'
+}
+
 fn format_hover(contents: &lsp_types::HoverContents) -> String {
     match contents {
         lsp_types::HoverContents::Scalar(marked) => format_marked_string(marked),
@@ -2174,6 +2511,15 @@ fn initialize_params(root_uri: &str, workspace_name: &str, initialization_option
                 "applyEdit": true
             },
             "textDocument": {
+                "completion": {
+                    "completionItem": {
+                        "snippetSupport": true,
+                        "insertReplaceSupport": true,
+                        "resolveSupport": {
+                            "properties": ["additionalTextEdits"]
+                        }
+                    }
+                },
                 "hover": {
                     "contentFormat": ["markdown", "plaintext"]
                 },
@@ -2934,7 +3280,7 @@ fn read_framed_message<R: BufRead>(reader: &mut R) -> io::Result<Option<Vec<u8>>
 mod tests {
     use super::*;
     use crate::config::{Config, LspConfig, LspServerConfig};
-    use lsp_types::WorkDoneProgressEnd;
+    use lsp_types::{CompletionItem, CompletionItemTag, WorkDoneProgressEnd};
     use std::path::PathBuf;
 
     fn line_snapshot(text: &str) -> Vector<Arc<str>> {
@@ -2990,6 +3336,29 @@ mod tests {
             },
             container_name: None,
         }
+    }
+
+    #[test]
+    fn completion_item_deprecated_uses_flag_or_tags() {
+        let flagged = CompletionItem {
+            label: "flagged".to_string(),
+            deprecated: Some(true),
+            ..CompletionItem::default()
+        };
+        assert!(completion_item_is_deprecated(&flagged));
+
+        let tagged = CompletionItem {
+            label: "tagged".to_string(),
+            tags: Some(vec![CompletionItemTag::DEPRECATED]),
+            ..CompletionItem::default()
+        };
+        assert!(completion_item_is_deprecated(&tagged));
+
+        let plain = CompletionItem {
+            label: "plain".to_string(),
+            ..CompletionItem::default()
+        };
+        assert!(!completion_item_is_deprecated(&plain));
     }
 
     #[test]
@@ -3493,6 +3862,11 @@ mod tests {
             params["capabilities"]["textDocument"]["inlayHint"]["dynamicRegistration"],
             false
         );
+        assert_eq!(
+            params["capabilities"]["textDocument"]["completion"]["completionItem"]["resolveSupport"]
+                ["properties"],
+            json!(["additionalTextEdits"])
+        );
     }
 
     #[test]
@@ -3537,6 +3911,62 @@ mod tests {
 
         let (uri, _) = first_definition_target(response).expect("target");
         assert_eq!(uri, "file:///tmp/one.rs");
+    }
+
+    #[test]
+    fn completion_response_uses_text_edits_and_insert_text() {
+        let mut edit_item =
+            lsp_types::CompletionItem::new_simple("edit".to_string(), "".to_string());
+        edit_item.text_edit = Some(lsp_types::CompletionTextEdit::Edit(lsp_types::TextEdit {
+            range: lsp_types::Range {
+                start: lsp_types::Position::new(0, 0),
+                end: lsp_types::Position::new(0, 5),
+            },
+            new_text: "hi".to_string(),
+        }));
+
+        let mut insert_item =
+            lsp_types::CompletionItem::new_simple("insert".to_string(), "".to_string());
+        insert_item.insert_text = Some("earth".to_string());
+
+        let response = lsp_types::CompletionResponse::Array(vec![edit_item, insert_item]);
+        let items = completion_response_to_candidates(
+            response,
+            &line_snapshot("hello world"),
+            crate::buffer::Cursor::new(0, 0),
+            PositionEncodingKind::UTF8,
+        );
+
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].replacement, "hi");
+        assert_eq!(items[1].replacement, "earth");
+        assert!(items[0].lsp_completion_item.is_some());
+        assert!(items[1].lsp_completion_item.is_some());
+    }
+
+    #[test]
+    fn completion_response_prefers_items_with_additional_edits_when_labels_match() {
+        let plain = lsp_types::CompletionItem::new_simple("width".to_string(), "width".to_string());
+        let mut imported =
+            lsp_types::CompletionItem::new_simple("width".to_string(), "width".to_string());
+        imported.additional_text_edits = Some(vec![lsp_types::TextEdit {
+            range: lsp_types::Range {
+                start: lsp_types::Position::new(0, 0),
+                end: lsp_types::Position::new(0, 0),
+            },
+            new_text: "use foo::Width;\n".to_string(),
+        }]);
+
+        let items = completion_response_to_candidates(
+            CompletionResponse::Array(vec![plain, imported]),
+            &line_snapshot(""),
+            crate::buffer::Cursor::new(0, 0),
+            PositionEncodingKind::UTF8,
+        );
+
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].label, "width");
+        assert_eq!(items[0].additional_text_edits.len(), 1);
     }
 
     #[test]

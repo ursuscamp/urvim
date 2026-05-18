@@ -1,5 +1,6 @@
 use super::command_line::CommandLineState;
 use crate::ui::Intent;
+use crate::ui::completion::CompletionWidget;
 use crate::ui::confirmation_box::ConfirmationBox;
 use crate::ui::diagnostic_hover::DiagnosticHoverWidget;
 use crate::ui::hover::HoverWidget;
@@ -17,6 +18,7 @@ use crate::window::Position;
 pub(in crate::layout) struct Dialogs {
     pub command_line: CommandLineState,
     pub command_line_open: bool,
+    pub completion: Option<CompletionWidget>,
     pub lsp_rename_prompt: Option<LspRenamePrompt>,
     pub colorscheme_picker: Option<ColorschemePickerWidget>,
     pub code_actions_picker: Option<CodeActionsPickerWidget>,
@@ -35,6 +37,7 @@ impl Default for Dialogs {
         Self {
             command_line: CommandLineState::new(),
             command_line_open: false,
+            completion: None,
             lsp_rename_prompt: None,
             colorscheme_picker: None,
             code_actions_picker: None,
@@ -60,6 +63,23 @@ impl Dialogs {
     pub fn close_command_line(&mut self) {
         self.command_line_open = false;
         self.command_line.set_cursor(None);
+    }
+
+    pub fn close_completion(&mut self) {
+        if let Some(completion) = self.completion.as_mut() {
+            completion.close();
+        }
+        self.completion = None;
+    }
+
+    pub fn completion_is_open(&self) -> bool {
+        self.completion
+            .as_ref()
+            .is_some_and(|completion| completion.is_open())
+    }
+
+    pub fn completion_mut(&mut self) -> Option<&mut CompletionWidget> {
+        self.completion.as_mut()
     }
 
     pub fn command_line_is_open(&self) -> bool {
@@ -293,6 +313,7 @@ impl Dialogs {
 
     pub fn close_all(&mut self) {
         self.close_command_line();
+        self.close_completion();
         self.close_colorscheme_picker();
         self.close_code_actions_picker();
         self.close_doc_symbols_picker();

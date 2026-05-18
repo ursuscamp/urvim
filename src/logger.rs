@@ -10,7 +10,8 @@ pub fn init<P: AsRef<Path>>(log_file: P) -> WorkerGuard {
         .expect("Failed to open log file");
     let (non_blocking, guard) = tracing_appender::non_blocking(file);
 
-    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("debug"));
+    let env_filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("debug,ignore=off"));
 
     tracing_subscriber::registry()
         .with(env_filter)

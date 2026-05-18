@@ -1,6 +1,7 @@
 use std::fmt;
 
 use crate::buffer::{IndentScopeRefreshResult, SyntaxRefreshResult};
+use crate::ui::completion::{CompletionCandidate, CompletionSourceKind};
 use crate::ui::picker::doc_symbols::DocSymbolsPickerItem;
 use crate::ui::picker::file::FilePickerItem;
 use crate::ui::picker::grep::GrepPickerItem;
@@ -32,6 +33,13 @@ pub enum JobPayload {
     GrepSearchSnapshot(Vec<GrepPickerItem>),
     /// Document symbol picker search result set.
     DocSymbolsSearch(Vec<DocSymbolsPickerItem>),
+    /// Insert-mode completion results.
+    CompletionResults {
+        /// Source that produced these results.
+        source: CompletionSourceKind,
+        /// Candidates produced by the source.
+        items: Vec<CompletionCandidate>,
+    },
     /// Picker preview syntax refresh result.
     PreviewSyntax(PreviewSyntaxRefreshResult),
     /// LSP rename outcome.

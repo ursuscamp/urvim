@@ -153,6 +153,7 @@ impl Layout {
         self.render_grep_picker_overlay(screen, origin, size);
         self.render_file_picker_overlay(screen, origin, size);
         self.render_command_line_overlay(screen, origin, size);
+        self.render_completion_overlay(screen, origin, size);
         self.render_lsp_rename_overlay(screen, origin, size);
         self.render_confirmation_box_overlay(screen, origin, size);
         self.render_diagnostic_hover_overlay(screen, origin, size);
@@ -305,6 +306,20 @@ impl Layout {
         } else {
             self.dialogs.command_line.set_cursor(None);
         }
+    }
+
+    fn render_completion_overlay(&mut self, screen: &mut Screen, origin: Position, size: Size) {
+        let cursor = self.editor_cursor_position();
+        let Some(completion) = self.dialogs.completion_mut() else {
+            return;
+        };
+
+        if let Some(cursor) = cursor {
+            completion.set_cursor(Some(cursor));
+        }
+
+        let ctx = UiContext;
+        completion.render_widget(screen, UiRect::new(origin, size), &ctx);
     }
 
     fn render_lsp_rename_overlay(&mut self, screen: &mut Screen, origin: Position, size: Size) {

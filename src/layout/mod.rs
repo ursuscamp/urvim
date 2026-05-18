@@ -5,6 +5,7 @@
 //! a footer status bar below the active editor region.
 
 mod command_line;
+mod completion;
 mod confirmation;
 mod dialogs;
 mod geometry;
@@ -29,6 +30,7 @@ use crate::ui::{Command, Intent, UiEvent, UiEventResult};
 use crate::window::{BufferView, Position, Size};
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Instant;
 
 use self::tree::ResizeDirection;
 pub use node::{LayoutNode, PaneId, PaneNode, SplitAxis, SplitNode, SplitSize};
@@ -49,6 +51,7 @@ pub struct Layout {
     dialogs: Dialogs,
     jobs: Arc<JobManager>,
     inlay_hints: InlayHintState,
+    autocomplete: AutocompleteState,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -71,6 +74,36 @@ pub(super) enum InlayHintState {
     InFlight(InFlightInlayHintRequest),
 }
 
+#[derive(Debug)]
+pub(super) struct AutocompleteState {
+    pending_since: Option<Instant>,
+    debounce: std::time::Duration,
+}
+
+impl Default for AutocompleteState {
+    fn default() -> Self {
+        Self {
+            pending_since: None,
+            debounce: std::time::Duration::from_millis(150),
+        }
+    }
+}
+
+impl AutocompleteState {
+    fn schedule(&mut self, now: Instant) {
+        self.pending_since = Some(now);
+    }
+
+    fn cancel(&mut self) {
+        self.pending_since = None;
+    }
+
+    fn due(&self, now: Instant) -> bool {
+        self.pending_since
+            .is_some_and(|started| now.duration_since(started) >= self.debounce)
+    }
+}
+
 impl InlayHintState {
     pub fn is_pending(&self) -> bool {
         matches!(self, Self::Pending)
@@ -91,6 +124,7 @@ impl Layout {
             dialogs: Dialogs::default(),
             jobs: Arc::new(JobManager::new()),
             inlay_hints: InlayHintState::Idle,
+            autocomplete: AutocompleteState::default(),
         }
     }
 
@@ -323,6 +357,12 @@ impl Layout {
                         continue;
                     }
 
+                    if matches!(event.kind(), JobKind::Completion(_, _)) {
+                        self.handle_completion_job_event(&event);
+                        accepted_redraw = true;
+                        continue;
+                    }
+
                     if matches!(
                         event.kind(),
                         JobKind::LspRename(_) | JobKind::LspInlayHints(_)
@@ -394,6 +434,10 @@ impl Layout {
             }
             Command::OpenCommandLine => {
                 self.open_command_line();
+                true
+            }
+            Command::OpenCompletion => {
+                self.open_completion();
                 true
             }
             Command::OpenColorschemePicker => {
@@ -544,6 +588,7 @@ impl Layout {
                     |_| true,
                 )
             }
+            Command::ApplyCompletion(apply_completion) => self.apply_completion(apply_completion),
             Command::OpenFile(path) => {
                 match crate::globals::with_buffer_pool(|pool| pool.open_buffer(path)) {
                     Ok(buffer_id) => {
@@ -705,6 +750,8 @@ impl Layout {
                     self.handle_confirmation_box_event(event)
                 } else if self.lsp_rename_prompt_is_open() {
                     self.handle_lsp_rename_event(event)
+                } else if self.dialogs.completion.is_some() {
+                    self.handle_completion_event(event)
                 } else if self.command_line_should_capture_events() {
                     self.handle_command_line_key(key)
                 } else {
@@ -716,6 +763,8 @@ impl Layout {
                     self.handle_confirmation_box_event(event)
                 } else if self.lsp_rename_prompt_is_open() {
                     self.handle_lsp_rename_event(event)
+                } else if self.completion_is_open() {
+                    self.handle_completion_event(event)
                 } else if self.command_line_should_capture_events() {
                     self.handle_command_line_paste(text.as_str())
                 } else {
@@ -791,7 +840,10 @@ impl Layout {
     fn route_base_ui_event(&mut self, event: &UiEvent) -> UiEventResult {
         match event {
             UiEvent::Tick => {
+                let autocomplete = self.maybe_fire_autocomplete(Instant::now());
                 if self.prune_expired_yank_flashes() {
+                    UiEventResult::Handled(Vec::new())
+                } else if autocomplete {
                     UiEventResult::Handled(Vec::new())
                 } else {
                     UiEventResult::NotHandled
@@ -871,6 +923,160 @@ impl Layout {
         crate::globals::with_lsp_runtime_mut(|runtime| runtime.apply_code_action(buffer_id, action))
             .ok_or_else(|| "LSP runtime is not available".to_string())?
     }
+
+    fn apply_completion(&mut self, apply_completion: &crate::ui::ApplyCompletion) -> bool {
+        let (replacement, cursor_offset) =
+            apply_completion_text(apply_completion.text.as_str(), apply_completion.format);
+        let resolved_additional_text_edits = if apply_completion.additional_text_edits.is_empty() {
+            apply_completion
+                .lsp_completion_item
+                .as_ref()
+                .and_then(|item| self.resolve_completion_additional_text_edits(item))
+                .unwrap_or_default()
+        } else {
+            apply_completion.additional_text_edits.clone()
+        };
+
+        let window = self.active_window_group_mut().active_window_mut();
+
+        let next_cursor = window.buffer_view_mut().with_buffer_mut(|buffer| {
+            buffer.apply_completion(
+                apply_completion.range,
+                replacement.as_str(),
+                cursor_offset,
+                resolved_additional_text_edits.as_slice(),
+            )
+        });
+
+        if let Some(next_cursor) = next_cursor.flatten() {
+            window.buffer_view_mut().set_cursor(next_cursor);
+        }
+
+        true
+    }
+
+    fn resolve_completion_additional_text_edits(
+        &mut self,
+        item: &serde_json::Value,
+    ) -> Option<Vec<crate::ui::completion::CompletionTextEdit>> {
+        let buffer_id = self.active_buffer_view().buffer_id();
+        crate::globals::with_lsp_runtime_mut(|runtime| {
+            runtime.resolve_completion_additional_text_edits(buffer_id, item)
+        })
+        .and_then(Result::ok)
+        .flatten()
+    }
+}
+
+fn apply_completion_text(
+    text: &str,
+    format: crate::ui::completion::CompletionInsertFormat,
+) -> (String, usize) {
+    if !matches!(
+        format,
+        crate::ui::completion::CompletionInsertFormat::Snippet
+    ) {
+        return (text.to_string(), text.len());
+    }
+
+    let mut replacement = String::with_capacity(text.len());
+    let mut first_tabstop_offset = None;
+    let mut final_tabstop_offset = None;
+    let mut chars = text.char_indices().peekable();
+
+    while let Some((_, ch)) = chars.next() {
+        if ch == '$' {
+            match chars.peek().copied() {
+                Some((_, '0')) => {
+                    final_tabstop_offset.get_or_insert(replacement.len());
+                    chars.next();
+                    continue;
+                }
+                Some((_, '1'..='9')) => {
+                    let mut number = 0usize;
+                    while let Some(&(_, digit)) = chars.peek() {
+                        if !digit.is_ascii_digit() {
+                            break;
+                        }
+                        number = number
+                            .saturating_mul(10)
+                            .saturating_add(digit.to_digit(10).unwrap_or(0) as usize);
+                        chars.next();
+                    }
+                    if number > 0 {
+                        first_tabstop_offset.get_or_insert(replacement.len());
+                        continue;
+                    }
+                }
+                Some((_, '{')) => {
+                    chars.next();
+                    let mut number = 0usize;
+                    let mut has_digits = false;
+                    while let Some(&(_, digit)) = chars.peek() {
+                        if !digit.is_ascii_digit() {
+                            break;
+                        }
+                        has_digits = true;
+                        number = number
+                            .saturating_mul(10)
+                            .saturating_add(digit.to_digit(10).unwrap_or(0) as usize);
+                        chars.next();
+                    }
+                    if has_digits {
+                        match chars.peek().copied() {
+                            Some((_, '}')) => {
+                                chars.next();
+                                if number == 0 {
+                                    final_tabstop_offset.get_or_insert(replacement.len());
+                                } else {
+                                    first_tabstop_offset.get_or_insert(replacement.len());
+                                }
+                                continue;
+                            }
+                            Some((_, ':')) => {
+                                chars.next();
+                                let mut default_text = String::new();
+                                let mut depth = 1usize;
+                                while let Some((_, next_ch)) = chars.next() {
+                                    match next_ch {
+                                        '{' => {
+                                            depth = depth.saturating_add(1);
+                                            default_text.push(next_ch);
+                                        }
+                                        '}' => {
+                                            depth -= 1;
+                                            if depth == 0 {
+                                                break;
+                                            }
+                                            default_text.push(next_ch);
+                                        }
+                                        _ => default_text.push(next_ch),
+                                    }
+                                }
+                                if number == 0 {
+                                    final_tabstop_offset.get_or_insert(replacement.len());
+                                } else {
+                                    first_tabstop_offset.get_or_insert(replacement.len());
+                                    replacement.push_str(default_text.as_str());
+                                }
+                                continue;
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        replacement.push(ch);
+    }
+
+    let cursor_offset = first_tabstop_offset
+        .or(final_tabstop_offset)
+        .unwrap_or(replacement.len());
+
+    (replacement, cursor_offset)
 }
 
 #[cfg(test)]

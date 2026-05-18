@@ -364,6 +364,19 @@ fn main() -> io::Result<()> {
                                                     .unwrap_or(());
                                             }
 
+                                            if dispatch_action.from_mode == Some(ModeKind::Insert) {
+                                                match dispatch_action.kind.as_ref() {
+                                                    Some(ActionKind::InsertChar(_))
+                                                    | Some(ActionKind::InsertText(_))
+                                                    | Some(ActionKind::InsertNewline)
+                                                    | Some(ActionKind::DeleteBackward)
+                                                    | Some(ActionKind::DeleteForward) => {
+                                                        layout.handle_insert_completion_change();
+                                                    }
+                                                    _ => layout.cancel_autocomplete(),
+                                                }
+                                            }
+
                                             if let Some((repeat_action, repeat_count)) =
                                                 action.dot_repeat_source()
                                             {

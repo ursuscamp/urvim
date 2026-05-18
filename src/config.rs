@@ -80,6 +80,17 @@ pub enum AutoIndentMode {
     Neighbor,
 }
 
+/// Controls whether insert-mode completion may start automatically.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum CompletionTrigger {
+    /// Only start completion from explicit user actions.
+    #[default]
+    Manual,
+    /// Allow completion to start automatically as well as manually.
+    Auto,
+}
+
 /// How long logical lines should be wrapped when visual wrapping is enabled.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
@@ -254,6 +265,10 @@ pub struct Config {
     pub todo_markers: Vector<SmolStr>,
     /// How insert mode should resolve indentation for newly created lines.
     pub auto_indent: AutoIndentMode,
+    /// Whether insert-mode completion may trigger automatically.
+    pub completion_trigger: CompletionTrigger,
+    /// The ordered list of completion source names.
+    pub completion_sources: Vec<String>,
     /// Enabled advanced glyph capabilities.
     pub advanced_glyphs: BTreeSet<AdvancedGlyphCapability>,
     /// Enabled inlay-hint kinds.
@@ -296,6 +311,10 @@ pub struct PartialConfig {
     pub todo_markers: Option<Vec<String>>,
     /// How insert mode should resolve indentation for newly created lines.
     pub auto_indent: Option<AutoIndentMode>,
+    /// Whether insert-mode completion may trigger automatically.
+    pub completion_trigger: Option<CompletionTrigger>,
+    /// The ordered list of completion source names stored in the config file.
+    pub completion_sources: Option<Vec<String>>,
     /// Enabled advanced glyph capabilities in the config file.
     pub advanced_glyphs: Option<Vec<AdvancedGlyphCapability>>,
     /// Enabled inlay-hint kinds in the config file.
@@ -388,6 +407,12 @@ impl Config {
         let auto_indent = file
             .and_then(|config| config.auto_indent)
             .unwrap_or_default();
+        let completion_trigger = file
+            .and_then(|config| config.completion_trigger)
+            .unwrap_or_default();
+        let completion_sources = file
+            .and_then(|config| config.completion_sources.clone())
+            .unwrap_or_else(default_completion_sources);
         let advanced_glyphs = file
             .and_then(|config| config.advanced_glyphs.as_ref())
             .map(|glyphs| resolve_advanced_glyphs(glyphs))
@@ -421,6 +446,8 @@ impl Config {
             indent_guides,
             todo_markers,
             auto_indent,
+            completion_trigger,
+            completion_sources,
             advanced_glyphs,
             inlay_hints,
             tab_insertion,
@@ -482,6 +509,8 @@ impl Default for Config {
             indent_guides: true,
             todo_markers: default_todo_markers(),
             auto_indent: AutoIndentMode::default(),
+            completion_trigger: CompletionTrigger::default(),
+            completion_sources: default_completion_sources(),
             advanced_glyphs: default_advanced_glyphs(),
             inlay_hints: default_inlay_hint_kinds(),
             tab_insertion: TabInsertion::default(),
@@ -586,6 +615,14 @@ fn validate_partial_config(config: &PartialConfig) -> Result<(), ConfigLoadError
 
     if let Some(markers) = config.todo_markers.as_ref() {
         validate_todo_markers(markers)?;
+    }
+
+    if let Some(sources) = config.completion_sources.as_ref() {
+        validate_completion_sources(sources)?;
+    }
+
+    if let Some(trigger) = config.completion_trigger {
+        validate_completion_trigger(trigger)?;
     }
 
     if let Some(lsp) = config.lsp.as_ref() {
@@ -781,6 +818,18 @@ fn default_todo_markers() -> Vector<SmolStr> {
         .collect()
 }
 
+fn default_completion_sources() -> Vec<String> {
+    vec![
+        "lsp".to_string(),
+        "paths".to_string(),
+        "buffer_words".to_string(),
+    ]
+}
+
+fn validate_completion_trigger(_trigger: CompletionTrigger) -> Result<(), ConfigLoadError> {
+    Ok(())
+}
+
 fn resolve_default_registers(registers: &PartialDefaultRegisters) -> DefaultRegisters {
     DefaultRegisters {
         yank: parse_default_register(registers.yank.as_deref().unwrap_or("y")).unwrap_or('y'),
@@ -826,6 +875,29 @@ fn parse_default_register(value: &str) -> Option<char> {
 fn validate_todo_markers(markers: &[String]) -> Result<(), ConfigLoadError> {
     for marker in markers {
         validate_todo_marker(marker)?;
+    }
+
+    Ok(())
+}
+
+fn validate_completion_sources(sources: &[String]) -> Result<(), ConfigLoadError> {
+    for source in sources {
+        if source.trim().is_empty() {
+            return Err(ConfigLoadError::invalid(
+                "config completion_sources entries must not be empty or whitespace",
+            ));
+        }
+
+        match source.as_str() {
+            "lsp" => {}
+            "paths" => {}
+            "buffer_words" => {}
+            _ => {
+                return Err(ConfigLoadError::invalid(format!(
+                    "config completion_sources contains an unknown source name: {source}"
+                )));
+            }
+        }
     }
 
     Ok(())
@@ -1101,6 +1173,18 @@ mod tests {
         assert_eq!(
             Config::resolve(None, None, None).auto_indent,
             AutoIndentMode::Off
+        );
+        assert_eq!(
+            Config::resolve(None, None, None).completion_sources,
+            vec![
+                "lsp".to_string(),
+                "paths".to_string(),
+                "buffer_words".to_string()
+            ]
+        );
+        assert_eq!(
+            Config::resolve(None, None, None).completion_trigger,
+            CompletionTrigger::Manual
         );
         assert_eq!(Config::resolve(None, None, None).theme, DEFAULT_THEME);
         assert_eq!(Config::resolve(None, None, None).insert_escape, None);
@@ -1742,6 +1826,76 @@ enabled = true
         let config = Config::load_from_locations(home, vec![], None, None).expect("should load");
 
         assert_eq!(config.auto_indent, AutoIndentMode::Off);
+    }
+
+    #[test]
+    fn load_from_locations_loads_completion_sources() {
+        let home = unique_temp_dir("completion-sources-home");
+        write_config(
+            &home,
+            "completion_sources = [\"lsp\", \"paths\", \"buffer_words\"]",
+        );
+
+        let config = Config::load_from_locations(home, vec![], None, None).expect("should load");
+
+        assert_eq!(
+            config.completion_sources,
+            vec![
+                "lsp".to_string(),
+                "paths".to_string(),
+                "buffer_words".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn load_from_locations_defaults_completion_sources_to_lsp_first() {
+        let home = unique_temp_dir("completion-sources-default-home");
+
+        let config = Config::load_from_locations(home, vec![], None, None).expect("should load");
+
+        assert_eq!(
+            config.completion_sources,
+            vec![
+                "lsp".to_string(),
+                "paths".to_string(),
+                "buffer_words".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn load_from_locations_loads_completion_trigger() {
+        let home = unique_temp_dir("completion-trigger-home");
+        write_config(&home, "completion_trigger = \"auto\"");
+
+        let config = Config::load_from_locations(home, vec![], None, None).expect("should load");
+
+        assert_eq!(config.completion_trigger, CompletionTrigger::Auto);
+    }
+
+    #[test]
+    fn load_from_locations_defaults_completion_trigger_to_manual() {
+        let home = unique_temp_dir("completion-trigger-default-home");
+
+        let config = Config::load_from_locations(home, vec![], None, None).expect("should load");
+
+        assert_eq!(config.completion_trigger, CompletionTrigger::Manual);
+    }
+
+    #[test]
+    fn load_from_locations_rejects_unknown_completion_sources() {
+        let home = unique_temp_dir("completion-sources-invalid-home");
+        write_config(&home, "completion_sources = [\"unknown\"]");
+
+        let error = Config::load_from_locations(home, vec![], None, None).expect_err("should fail");
+
+        match error {
+            ConfigLoadError::Invalid { message } => {
+                assert!(message.contains("completion_sources"));
+            }
+            other => panic!("expected validation error, got {other:?}"),
+        }
     }
 
     #[test]

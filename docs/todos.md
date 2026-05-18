@@ -11,8 +11,16 @@ This is a list, in no particular order, of things that need to be addressed whic
 - show code action modification in preview window
 - code action hints for the current line (with ghost text)
 - auto-completion
+- icon/glyph utility, use everywhere nerdfont types icons are used
+
+## Auto completion
+
+- sources: buffer words, paths, LSP, snippets, dictionary
 
 # Bugs
+
+- figure out issue with C-Space
+- when repeatedly hitting <f1> to open an already open picker, it moved the picker down from the last known spot
 
 # Refactors
 

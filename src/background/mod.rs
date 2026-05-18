@@ -29,6 +29,7 @@ use crate::buffer::{
 };
 use crate::lsp::inlay_hint_job::LspInlayHintJob;
 use crate::lsp::rename_job::LspRenameJob;
+use crate::ui::completion::CompletionJob;
 use crate::ui::picker::doc_symbols::{DocSymbolsPickerItem, DocSymbolsPickerSearchJob};
 use crate::ui::picker::file::PickerSearchJob;
 use crate::ui::picker::grep::GrepPickerSearchJob;
@@ -47,6 +48,8 @@ pub enum BackgroundJob {
     GrepPickerSearch(GrepPickerSearchJob),
     /// Streams document symbol picker matches.
     DocSymbolsPickerSearch(DocSymbolsPickerSearchJob),
+    /// Runs insert-mode completion.
+    Completion(CompletionJob),
     /// Refreshes preview syntax for picker panes.
     PickerPreviewSyntax(PreviewSyntaxRefreshJob),
     /// Runs an LSP rename on a background thread.
@@ -69,6 +72,7 @@ impl BackgroundJob {
             Self::FilePickerSearch(job) => job.run(context, event_tx),
             Self::GrepPickerSearch(job) => job.run(context, event_tx),
             Self::DocSymbolsPickerSearch(job) => job.run(context, event_tx),
+            Self::Completion(job) => job.run(context, event_tx),
             Self::PickerPreviewSyntax(job) => job.run(context, event_tx),
             Self::LspRename(job) => job.run(context, event_tx),
             Self::LspInlayHints(job) => job.run(context, event_tx),
@@ -117,6 +121,12 @@ impl From<GrepPickerSearchJob> for BackgroundJob {
 impl From<DocSymbolsPickerSearchJob> for BackgroundJob {
     fn from(value: DocSymbolsPickerSearchJob) -> Self {
         Self::DocSymbolsPickerSearch(value)
+    }
+}
+
+impl From<CompletionJob> for BackgroundJob {
+    fn from(value: CompletionJob) -> Self {
+        Self::Completion(value)
     }
 }
 

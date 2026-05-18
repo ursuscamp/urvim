@@ -179,6 +179,49 @@ fn test_layout_session_round_trips_cursor_and_file_paths() {
     );
 }
 
+#[test]
+fn test_apply_completion_text_expands_basic_snippets() {
+    assert_eq!(
+        super::apply_completion_text(
+            "new($0)",
+            crate::ui::completion::CompletionInsertFormat::Snippet
+        ),
+        ("new()".to_string(), 4)
+    );
+    assert_eq!(
+        super::apply_completion_text(
+            "plain",
+            crate::ui::completion::CompletionInsertFormat::PlainText
+        ),
+        ("plain".to_string(), 5)
+    );
+}
+
+#[test]
+fn test_apply_completion_text_expands_snippet_tabstops() {
+    assert_eq!(
+        super::apply_completion_text(
+            "rfind(${1:pat})",
+            crate::ui::completion::CompletionInsertFormat::Snippet
+        ),
+        ("rfind(pat)".to_string(), 6)
+    );
+    assert_eq!(
+        super::apply_completion_text(
+            "rfind($1)",
+            crate::ui::completion::CompletionInsertFormat::Snippet
+        ),
+        ("rfind()".to_string(), 6)
+    );
+    assert_eq!(
+        super::apply_completion_text(
+            "${1:pat} + $0",
+            crate::ui::completion::CompletionInsertFormat::Snippet
+        ),
+        ("pat + ".to_string(), 0)
+    );
+}
+
 fn collect_pane_ids(node: &LayoutNode, ids: &mut Vec<PaneId>) {
     match node {
         LayoutNode::Pane(pane) => ids.push(pane.id),
@@ -248,6 +291,36 @@ fn test_layout_file_picker_opens_and_closes() {
     let result = layout.route_ui_event(&UiEvent::Key(key(KeyCode::Esc)));
     assert!(result.handled());
     assert!(!layout.file_picker_is_open());
+}
+
+#[test]
+fn test_layout_completion_esc_closes_popup_and_exits_insert_mode() {
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("alpha")]);
+    layout
+        .active_window_group_mut()
+        .active_window_mut()
+        .switch_mode(ModeKind::Insert);
+
+    assert!(layout.dispatch_intent(&Intent::Command(Command::OpenCompletion)));
+    assert!(layout.dialogs.completion.is_some());
+
+    let overlay = layout.route_ui_event(&UiEvent::Key(key(KeyCode::Esc)));
+    assert!(matches!(overlay, UiEventResult::NotHandled));
+    assert!(layout.dialogs.completion.is_none());
+
+    let result = layout
+        .active_window_group_mut()
+        .active_window_mut()
+        .handle_key(&key(KeyCode::Esc));
+    let intent = match result {
+        crate::editor::HandleKeyResult::Complete(intent) => intent,
+        other => panic!("expected insert mode to handle Esc, got {other:?}"),
+    };
+
+    match intent {
+        Intent::Action(action) => assert_eq!(action.to_mode, Some(ModeKind::Normal)),
+        other => panic!("expected an action intent, got {other:?}"),
+    }
 }
 
 #[test]
@@ -820,6 +893,50 @@ fn test_layout_routes_tick_to_overlay_before_base_layer() {
     let result = layout.route_ui_event(&UiEvent::Tick);
     assert!(matches!(result, UiEventResult::NotHandled));
     assert!(globals::active_notification(std::time::Instant::now()).is_some());
+}
+
+#[test]
+fn test_layout_autocomplete_fires_after_debounce_on_insert_edit() {
+    let _guard = globals::set_test_config(Config {
+        completion_trigger: crate::config::CompletionTrigger::Auto,
+        ..Config::default()
+    });
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("al")]);
+    layout
+        .active_buffer_view_mut()
+        .set_cursor(crate::buffer::Cursor::new(0, 2));
+    layout.handle_insert_completion_change();
+    layout.autocomplete.pending_since =
+        Some(std::time::Instant::now() - Duration::from_millis(200));
+
+    let result = layout.route_ui_event(&UiEvent::Tick);
+    assert!(result.handled());
+    let completion = layout
+        .dialogs
+        .completion
+        .as_ref()
+        .expect("autocomplete should open completion");
+    assert!(completion.is_pending());
+}
+
+#[test]
+fn test_layout_autocomplete_does_not_fire_on_whitespace() {
+    let _guard = globals::set_test_config(Config {
+        completion_trigger: crate::config::CompletionTrigger::Auto,
+        ..Config::default()
+    });
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("  ")]);
+    layout
+        .active_buffer_view_mut()
+        .set_cursor(crate::buffer::Cursor::new(0, 2));
+    layout.dispatch_intent(&Intent::Command(Command::OpenCompletion));
+    layout.handle_insert_completion_change();
+    layout.autocomplete.pending_since =
+        Some(std::time::Instant::now() - Duration::from_millis(200));
+
+    let result = layout.route_ui_event(&UiEvent::Tick);
+    assert!(matches!(result, UiEventResult::NotHandled));
+    assert!(layout.dialogs.completion.is_none());
 }
 
 #[test]
