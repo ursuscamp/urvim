@@ -13,7 +13,9 @@ use crate::ui::line_format::{
     LineSectionOverflow,
 };
 use crate::ui::picker::preview::spawn_preview_loader;
-use crate::ui::picker::query::{exact_matches, fuzzy_matches, query_prompt_segments};
+use crate::ui::picker::query::{
+    PickerQueryMode, exact_matches, fuzzy_matches, query_prompt_segments,
+};
 use crate::ui::picker::{
     PickerFormattedLine, PickerItem, PickerPreview, PickerPreviewEvent, PickerSearchEvent,
     PickerSource, PickerWidget,
@@ -170,6 +172,14 @@ impl PickerSource for DocSymbolsPickerSource {
 
     fn job_manager(&self) -> Arc<JobManager> {
         Arc::clone(&self.jobs)
+    }
+
+    fn toggle_query_mode(&self) -> Option<PickerQueryMode> {
+        Some(DocSymbolsPickerSource::toggle_query_mode(self))
+    }
+
+    fn query_prompt_segments_for_mode(&self, mode: PickerQueryMode) -> Option<Vec<PromptSegment>> {
+        Some(Self::query_prompt_segments(mode))
     }
 
     fn start_search(

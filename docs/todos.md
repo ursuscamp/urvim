@@ -18,6 +18,5 @@ This is a list, in no particular order, of things that need to be addressed whic
 
 - lots of repetition in globals.rs, maybe modularize it?
 - look for places where we clip text at width, replace them with a utility method (if it exists) or a trait
-- for pickers tab (to switch query modes) is handled in layout. can it be in the picker itself like other keys?
 - refactor other pickers with formatted line templates
 - refactors to prevent thread contention/locks for tests

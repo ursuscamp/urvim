@@ -24,6 +24,7 @@ pub use crate::ui::line_format::{
     LineSectionAlignment, LineSectionOverflow, LineSectionWidth,
 };
 use crate::ui::picker::preview::PickerPreviewAdapter;
+use crate::ui::picker::query::PickerQueryMode;
 use crate::ui::{FocusPolicy, Intent, UiContext, UiEvent, UiEventResult, UiRect};
 use crate::widget::Widget;
 use crate::window::{Position, Size};
@@ -221,6 +222,16 @@ pub trait PickerSource: Send + 'static {
 
     /// Cancels any active search, if the source supports it.
     fn cancel_search(&self) {}
+
+    /// Toggles the query mode, if the source supports mode switching.
+    fn toggle_query_mode(&self) -> Option<PickerQueryMode> {
+        None
+    }
+
+    /// Returns the prompt segments for the given query mode, if supported.
+    fn query_prompt_segments_for_mode(&self, _mode: PickerQueryMode) -> Option<Vec<PromptSegment>> {
+        None
+    }
 
     /// Returns a stable key for the selected item's preview.
     fn preview_key(&self, _item: &Self::Item) -> Option<String> {
@@ -884,6 +895,16 @@ impl<S: PickerSource> Widget for PickerWidget<S> {
             }
             UiEvent::Key(key) => {
                 match key.code {
+                    KeyCode::Tab if !key.modifiers.has_shift() => {
+                        let Some(mode) = self.source.toggle_query_mode() else {
+                            return UiEventResult::NotHandled;
+                        };
+
+                        if let Some(prompt) = self.source.query_prompt_segments_for_mode(mode) {
+                            self.set_query_prompt_segments(prompt);
+                        }
+                        self.restart_search();
+                    }
                     KeyCode::PageUp => {
                         self.scroll_current_preview(true);
                     }
@@ -1252,6 +1273,8 @@ mod tests {
     use super::*;
     use crate::background::JobManager;
     use crate::config::{AdvancedGlyphCapability, Config};
+    use crate::ui::inputs::PromptSegment;
+    use crate::ui::picker::query::query_prompt_segments;
     use crate::ui::{Intent, UiContext, UiEvent};
     use std::sync::{Arc, Mutex};
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -1262,11 +1285,26 @@ mod tests {
         selected: Arc<Mutex<Vec<String>>>,
     }
 
+    #[derive(Clone)]
+    struct ModeSource {
+        generation: Arc<Mutex<u64>>,
+        mode: Arc<Mutex<crate::ui::picker::query::PickerQueryMode>>,
+    }
+
     impl TestSource {
         fn new() -> Self {
             Self {
                 generation: Arc::new(Mutex::new(0)),
                 selected: Arc::new(Mutex::new(Vec::new())),
+            }
+        }
+    }
+
+    impl ModeSource {
+        fn new() -> Self {
+            Self {
+                generation: Arc::new(Mutex::new(0)),
+                mode: Arc::new(Mutex::new(crate::ui::picker::query::PickerQueryMode::Exact)),
             }
         }
     }
@@ -1313,6 +1351,60 @@ mod tests {
         }
     }
 
+    impl PickerSource for ModeSource {
+        type Item = String;
+
+        fn set_generation(&self, generation: u64) {
+            *self.generation.lock().unwrap() = generation;
+        }
+
+        fn start_search(
+            &self,
+            query: &str,
+            generation: u64,
+            sender: Sender<PickerSearchEvent<Self::Item>>,
+        ) {
+            let _ = sender.send(PickerSearchEvent::PickerSearchStarted {
+                generation,
+                query: query.to_string(),
+            });
+            let _ = sender.send(PickerSearchEvent::PickerChunk {
+                generation,
+                chunk: vec![format!("{query}-one")],
+            });
+            let _ = sender.send(PickerSearchEvent::PickerSearchComplete { generation });
+        }
+
+        fn job_manager(&self) -> std::sync::Arc<JobManager> {
+            std::sync::Arc::new(JobManager::new())
+        }
+
+        fn toggle_query_mode(&self) -> Option<crate::ui::picker::query::PickerQueryMode> {
+            let mut mode = self.mode.lock().unwrap();
+            *mode = mode.toggled();
+            Some(*mode)
+        }
+
+        fn query_prompt_segments_for_mode(
+            &self,
+            mode: crate::ui::picker::query::PickerQueryMode,
+        ) -> Option<Vec<PromptSegment>> {
+            Some(query_prompt_segments(mode))
+        }
+
+        fn preview_key(&self, item: &Self::Item) -> Option<String> {
+            Some(item.clone())
+        }
+
+        fn result_key(&self, item: &Self::Item) -> Option<String> {
+            Some(item.clone())
+        }
+
+        fn select(&self, _item: &Self::Item) -> Intent {
+            Intent::Command(crate::ui::Command::Quit)
+        }
+    }
+
     #[test]
     fn picker_restarts_search_on_input() {
         let source = TestSource::new();
@@ -1333,6 +1425,25 @@ mod tests {
             &["a-one".to_string(), "a-two".to_string()]
         );
         assert_eq!(picker.highlighted_index(), None);
+    }
+
+    #[test]
+    fn picker_toggles_query_mode_on_tab_when_supported() {
+        let source = ModeSource::new();
+        let mut picker = PickerWidget::new(source);
+        let mut ctx = UiContext;
+
+        picker.set_query_prompt_segments(query_prompt_segments(
+            crate::ui::picker::query::PickerQueryMode::Exact,
+        ));
+
+        let handled = picker.handle_ui_event(
+            &UiEvent::Key(crate::terminal::Key::new(KeyCode::Tab)),
+            &mut ctx,
+        );
+
+        assert!(handled.handled());
+        assert_eq!(picker.query_input.prompt_segments()[0].text, "Fuzzy");
     }
 
     #[test]

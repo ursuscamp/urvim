@@ -10,7 +10,8 @@ use crate::ui::picker::line::{
 };
 use crate::ui::picker::preview::spawn_preview_loader;
 use crate::ui::picker::query::{
-    FuzzyMatchScore, exact_matches, fuzzy_match_column, fuzzy_match_score, query_prompt_segments,
+    FuzzyMatchScore, PickerQueryMode, exact_matches, fuzzy_match_column, fuzzy_match_score,
+    query_prompt_segments,
 };
 use crate::ui::picker::{
     FormattedLineTemplate, PickerFormattedLine, PickerItem, PickerPreview, PickerPreviewEvent,
@@ -128,6 +129,14 @@ impl PickerSource for GrepPickerSource {
 
     fn job_manager(&self) -> Arc<JobManager> {
         Arc::clone(&self.jobs)
+    }
+
+    fn toggle_query_mode(&self) -> Option<PickerQueryMode> {
+        Some(GrepPickerSource::toggle_query_mode(self))
+    }
+
+    fn query_prompt_segments_for_mode(&self, mode: PickerQueryMode) -> Option<Vec<PromptSegment>> {
+        Some(Self::query_prompt_segments(mode))
     }
 
     fn start_search(

@@ -1,5 +1,4 @@
 use super::Layout;
-use crate::terminal::KeyCode;
 use crate::ui::picker::references::{ReferencesPickerSource, ReferencesPickerWidget};
 use crate::ui::{UiEvent, UiEventResult};
 use crate::widget::Widget;
@@ -72,16 +71,6 @@ impl Layout {
         let Some(picker) = self.dialogs.references_picker.as_mut() else {
             return UiEventResult::NotHandled;
         };
-
-        if let UiEvent::Key(key) = event {
-            if key.code == KeyCode::Tab {
-                let mode = picker.source_mut().toggle_query_mode();
-                picker
-                    .set_query_prompt_segments(ReferencesPickerSource::query_prompt_segments(mode));
-                picker.restart_search();
-                return UiEventResult::Handled(Vec::new());
-            }
-        }
 
         let mut ctx = crate::ui::UiContext;
         let result = picker.handle_ui_event(event, &mut ctx);

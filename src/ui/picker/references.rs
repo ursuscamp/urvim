@@ -13,7 +13,7 @@ use crate::ui::picker::line::{
     display_path_relative_to_cwd, push_file_glyph, push_fixed_text, push_tail_label,
 };
 use crate::ui::picker::preview::spawn_preview_loader;
-use crate::ui::picker::query::{fuzzy_matches, query_prompt_segments};
+use crate::ui::picker::query::{PickerQueryMode, fuzzy_matches, query_prompt_segments};
 use crate::ui::picker::{
     PickerFormattedLine, PickerItem, PickerPreview, PickerPreviewEvent, PickerSearchEvent,
     PickerSource, PickerWidget,
@@ -113,6 +113,14 @@ impl PickerSource for ReferencesPickerSource {
 
     fn job_manager(&self) -> Arc<JobManager> {
         Arc::clone(&self.jobs)
+    }
+
+    fn toggle_query_mode(&self) -> Option<PickerQueryMode> {
+        Some(ReferencesPickerSource::toggle_query_mode(self))
+    }
+
+    fn query_prompt_segments_for_mode(&self, mode: PickerQueryMode) -> Option<Vec<PromptSegment>> {
+        Some(Self::query_prompt_segments(mode))
     }
 
     fn start_search(
