@@ -732,7 +732,9 @@ impl<S: PickerSource> PickerWidget<S> {
             return;
         };
 
-        if self.preview_key.as_deref() == Some(key.as_str()) {
+        if self.preview_key.as_deref() == Some(key.as_str())
+            && self.preview_highlighted == Some(index)
+        {
             return;
         }
 
@@ -1291,6 +1293,11 @@ mod tests {
         mode: Arc<Mutex<crate::ui::picker::query::PickerQueryMode>>,
     }
 
+    #[derive(Clone)]
+    struct SamePreviewKeySource {
+        generation: Arc<Mutex<u64>>,
+    }
+
     impl TestSource {
         fn new() -> Self {
             Self {
@@ -1305,6 +1312,14 @@ mod tests {
             Self {
                 generation: Arc::new(Mutex::new(0)),
                 mode: Arc::new(Mutex::new(crate::ui::picker::query::PickerQueryMode::Exact)),
+            }
+        }
+    }
+
+    impl SamePreviewKeySource {
+        fn new() -> Self {
+            Self {
+                generation: Arc::new(Mutex::new(0)),
             }
         }
     }
@@ -1405,6 +1420,38 @@ mod tests {
         }
     }
 
+    impl PickerSource for SamePreviewKeySource {
+        type Item = String;
+
+        fn set_generation(&self, generation: u64) {
+            *self.generation.lock().unwrap() = generation;
+        }
+
+        fn start_search(
+            &self,
+            _query: &str,
+            _generation: u64,
+            _sender: Sender<PickerSearchEvent<Self::Item>>,
+        ) {
+        }
+
+        fn job_manager(&self) -> std::sync::Arc<JobManager> {
+            std::sync::Arc::new(JobManager::new())
+        }
+
+        fn preview_key(&self, _item: &Self::Item) -> Option<String> {
+            Some(String::from("same-file"))
+        }
+
+        fn result_key(&self, item: &Self::Item) -> Option<String> {
+            Some(item.clone())
+        }
+
+        fn select(&self, _item: &Self::Item) -> Intent {
+            Intent::Command(crate::ui::Command::Quit)
+        }
+    }
+
     #[test]
     fn picker_restarts_search_on_input() {
         let source = TestSource::new();
@@ -1444,6 +1491,21 @@ mod tests {
 
         assert!(handled.handled());
         assert_eq!(picker.query_input.prompt_segments()[0].text, "Fuzzy");
+    }
+
+    #[test]
+    fn picker_refreshes_preview_when_same_file_has_new_selected_line() {
+        let source = SamePreviewKeySource::new();
+        let mut picker = PickerWidget::new(source);
+        picker.results = vec!["first".to_string(), "second".to_string()];
+        picker.highlighted = Some(1);
+        picker.preview_key = Some(String::from("same-file"));
+        picker.preview_highlighted = Some(0);
+        picker.preview_state = PickerPreviewState::Ready(PickerPreview::new("same-file", 1, None));
+
+        picker.refresh_preview_for_highlight();
+
+        assert_eq!(picker.preview_highlighted, Some(1));
     }
 
     #[test]
