@@ -4,12 +4,11 @@ impl Buffer {
     pub fn find_char_forward(&self, cursor: Cursor, target: char, count: usize) -> Option<Cursor> {
         let line_idx = cursor.line;
         let line = self.line_at(line_idx)?;
-        let line_str = line.as_ref();
         let start_col = cursor.col + 1;
         let mut occurrences: Vec<usize> = Vec::new();
-        for (grapheme_idx, grapheme) in line_str.grapheme_indices(true) {
-            if grapheme_idx >= start_col && grapheme.starts_with(target) {
-                occurrences.push(grapheme_idx);
+        for grapheme in line.graphemes() {
+            if grapheme.byte_idx() >= start_col && grapheme.as_str().starts_with(target) {
+                occurrences.push(grapheme.byte_idx());
             }
         }
         let target_idx = occurrences.get(count.saturating_sub(1))?;
@@ -19,11 +18,12 @@ impl Buffer {
     pub fn find_char_backward(&self, cursor: Cursor, target: char, count: usize) -> Option<Cursor> {
         let line_idx = cursor.line;
         let line = self.line_at(line_idx)?;
-        let line_str = line.as_ref();
-        let occurrences: Vec<usize> = line_str
-            .grapheme_indices(true)
-            .filter(|&(idx, grapheme)| idx < cursor.col && grapheme.starts_with(target))
-            .map(|(idx, _)| idx)
+        let occurrences: Vec<usize> = line
+            .graphemes()
+            .filter(|grapheme| {
+                grapheme.byte_idx() < cursor.col && grapheme.as_str().starts_with(target)
+            })
+            .map(|grapheme| grapheme.byte_idx())
             .collect();
         let target_idx = occurrences.len().saturating_sub(count);
         let idx = *occurrences.get(target_idx)?;
@@ -51,15 +51,14 @@ impl Buffer {
         let Some(line) = self.line_at(cursor.line) else {
             return cursor;
         };
-        let line_str = line.as_ref();
         if cursor.col == 0 {
             return Cursor::new(cursor.line, 0);
         }
 
         let mut col = cursor.col;
-        for (byte_offset, grapheme) in line_str.grapheme_indices(true) {
-            if byte_offset >= cursor.col {
-                col = byte_offset + grapheme.len();
+        for grapheme in line.graphemes() {
+            if grapheme.byte_idx() >= cursor.col {
+                col = grapheme.byte_idx() + grapheme.len();
                 break;
             }
         }

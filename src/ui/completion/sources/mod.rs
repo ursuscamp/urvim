@@ -3,7 +3,7 @@
 pub(super) mod buffer_words;
 pub(super) mod paths;
 
-use crate::buffer::{Buffer, Cursor, TextObjectRange};
+use crate::buffer::{Buffer, Cursor, TextObjectRange, TextRef};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum PathPrefixKind {
@@ -21,12 +21,11 @@ pub(super) fn current_path_prefix(
         return None;
     };
 
-    let line = line.as_ref();
     let cursor_col = cursor.col.min(line.len());
     let mut start = cursor_col;
 
     while start > 0 {
-        let Some((prev_start, prev)) = previous_char(line, start) else {
+        let Some((prev_start, prev)) = line.previous_char(start) else {
             break;
         };
         if !is_path_char(prev) {
@@ -39,18 +38,18 @@ pub(super) fn current_path_prefix(
         return None;
     }
 
-    let prefix = line[start..cursor_col].to_string();
-    let kind = if prefix.starts_with("~/") {
+    let kind = if line.range_starts_with(start, cursor_col, "~/") == Some(true) {
         Some(PathPrefixKind::HomeDir)
-    } else if prefix.starts_with("../") {
+    } else if line.range_starts_with(start, cursor_col, "../") == Some(true) {
         Some(PathPrefixKind::ParentDir)
-    } else if prefix.starts_with("./") {
+    } else if line.range_starts_with(start, cursor_col, "./") == Some(true) {
         Some(PathPrefixKind::CurrentDir)
-    } else if prefix.starts_with('/') {
+    } else if line.range_starts_with(start, cursor_col, "/") == Some(true) {
         Some(PathPrefixKind::Absolute)
     } else {
         None
     }?;
+    let prefix = line.range_text(start, cursor_col)?;
 
     Some((Cursor::new(cursor.line, start), kind, prefix))
 }
@@ -60,12 +59,11 @@ pub(super) fn current_word_prefix(buffer: &Buffer, cursor: Cursor) -> (Cursor, S
         return (cursor, String::new());
     };
 
-    let line = line.as_ref();
     let cursor_col = cursor.col.min(line.len());
     let mut start = cursor_col;
 
     while start > 0 {
-        let Some((prev_start, prev)) = previous_char(line, start) else {
+        let Some((prev_start, prev)) = line.previous_char(start) else {
             break;
         };
         if !is_word_char(prev) {
@@ -78,7 +76,7 @@ pub(super) fn current_word_prefix(buffer: &Buffer, cursor: Cursor) -> (Cursor, S
         return (Cursor::new(cursor.line, cursor_col), String::new());
     }
 
-    let prefix = line[start..cursor_col].to_string();
+    let prefix = line.range_text(start, cursor_col).unwrap_or_default();
     (Cursor::new(cursor.line, start), prefix)
 }
 
@@ -102,11 +100,10 @@ fn unique_words_in_buffer(buffer: &Buffer) -> Vec<String> {
     let mut words = Vec::new();
     let mut seen = std::collections::HashSet::new();
 
-    for line in buffer.line_texts() {
-        let line = line.as_ref();
+    for line in buffer.lines() {
         let mut offset = 0usize;
         while offset < line.len() {
-            let Some((start, ch)) = next_char(line, offset) else {
+            let Some((start, ch)) = line.next_char(offset) else {
                 break;
             };
             if !is_word_char(ch) {
@@ -116,7 +113,7 @@ fn unique_words_in_buffer(buffer: &Buffer) -> Vec<String> {
 
             let mut end = start + ch.len_utf8();
             while end < line.len() {
-                let Some((next_idx, next_ch)) = next_char(line, end) else {
+                let Some((next_idx, next_ch)) = line.next_char(end) else {
                     break;
                 };
                 if !is_word_char(next_ch) {
@@ -125,7 +122,9 @@ fn unique_words_in_buffer(buffer: &Buffer) -> Vec<String> {
                 end = next_idx + next_ch.len_utf8();
             }
 
-            let word = line[start..end].to_string();
+            let Some(word) = line.range_text(start, end) else {
+                break;
+            };
             let key = word.to_lowercase();
             if seen.insert(key) {
                 words.push(word);
@@ -143,15 +142,6 @@ fn is_word_char(ch: char) -> bool {
 
 fn is_path_char(ch: char) -> bool {
     ch.is_alphanumeric() || matches!(ch, '_' | '-' | '.' | '/' | '~')
-}
-
-fn previous_char(text: &str, byte_idx: usize) -> Option<(usize, char)> {
-    text.get(..byte_idx)?.char_indices().next_back()
-}
-
-fn next_char(text: &str, byte_idx: usize) -> Option<(usize, char)> {
-    let mut chars = text.get(byte_idx..)?.char_indices();
-    chars.next().map(|(offset, ch)| (byte_idx + offset, ch))
 }
 
 #[cfg(test)]

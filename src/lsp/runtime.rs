@@ -1,4 +1,6 @@
-use crate::buffer::BufferId;
+use crate::buffer::{
+    BufferId, LineText, TextEncoding, TextPosition, TextRange, TextRef, TextSnapshot,
+};
 use crate::config::{Config, InlayHintCapability, LspServerConfig};
 use crate::globals;
 use crate::json_rpc::{
@@ -6,11 +8,8 @@ use crate::json_rpc::{
     decode_message, encode_message,
 };
 use crate::lsp::inlay_hint_job::LspInlayHintSnapshot;
-use crate::lsp::position::{
-    byte_index_to_position_character, position_character_to_byte_index, position_to_byte_offset,
-};
+use crate::lsp::position::position_to_byte_offset;
 use crate::ui::completion::{CompletionCandidate, CompletionInsertFormat};
-use imbl::Vector;
 use lsp_types::{
     CodeActionContext, CodeActionOrCommand, CodeActionParams, CodeActionProviderCapability,
     CodeActionTriggerKind, CompletionItem, CompletionParams, CompletionResponse, CreateFile,
@@ -32,11 +31,49 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 
+impl From<lsp_types::Position> for TextPosition {
+    fn from(position: lsp_types::Position) -> Self {
+        Self {
+            line: position.line as usize,
+            character: position.character as usize,
+        }
+    }
+}
+
+impl From<TextPosition> for lsp_types::Position {
+    fn from(position: TextPosition) -> Self {
+        Self::new(position.line as u32, position.character as u32)
+    }
+}
+
+impl From<lsp_types::Range> for TextRange {
+    fn from(range: lsp_types::Range) -> Self {
+        Self {
+            start: range.start.into(),
+            end: range.end.into(),
+        }
+    }
+}
+
+impl From<TextRange> for lsp_types::Range {
+    fn from(range: TextRange) -> Self {
+        Self::new(range.start.into(), range.end.into())
+    }
+}
+
+fn text_encoding_from_lsp(encoding: PositionEncodingKind) -> TextEncoding {
+    if encoding == PositionEncodingKind::UTF8 {
+        TextEncoding::Utf8
+    } else {
+        TextEncoding::Utf16
+    }
+}
+
 #[derive(Debug, Clone)]
 struct BufferAttachment {
     uri: String,
     version: i32,
-    lines: Vector<Arc<str>>,
+    lines: LineText,
     language_id: String,
 }
 
@@ -236,7 +273,7 @@ impl LspRuntime {
                     (
                         buffer.path().cloned(),
                         buffer.syntax_name().to_string(),
-                        buffer.line_texts(),
+                        buffer.text_snapshot(),
                     )
                 }) else {
                     continue;
@@ -514,7 +551,7 @@ impl LspRuntime {
         &mut self,
         buffer_id: BufferId,
         uri: &str,
-        lines: &Vector<Arc<str>>,
+        lines: &LineText,
         start_line: usize,
         end_line: usize,
         encoding: PositionEncodingKind,
@@ -935,7 +972,7 @@ impl LspServerSession {
         &mut self,
         buffer_id: BufferId,
         path: &Path,
-        lines: Vector<Arc<str>>,
+        lines: LineText,
         syntax_name: &str,
     ) {
         if !matches!(self.state, LspSessionState::Running) {
@@ -1297,7 +1334,7 @@ impl LspServerSession {
 
         let path = uri_to_file_path(&uri)?;
         let buffer_id = crate::globals::open_buffer(&path).map_err(|error| error.to_string())?;
-        let lines = crate::globals::with_buffer(buffer_id, |buffer| buffer.line_texts())
+        let lines = crate::globals::with_buffer(buffer_id, |buffer| buffer.text_snapshot())
             .ok_or_else(|| "failed to read definition target buffer".to_string())?;
         let cursor =
             position_to_cursor(&lines, position, self.negotiated.position_encoding.clone())
@@ -1670,7 +1707,7 @@ impl LspServerSession {
         &mut self,
         _attachment: &BufferAttachment,
         uri: &str,
-        lines: &Vector<Arc<str>>,
+        lines: &LineText,
         start_line: usize,
         end_line: usize,
         encoding: PositionEncodingKind,
@@ -2121,26 +2158,12 @@ fn uri_to_file_path(uri: &str) -> Result<PathBuf, String> {
         .map_err(|()| "LSP URI is not a file path".to_string())
 }
 
-fn buffer_text_from_lines(lines: &Vector<Arc<str>>) -> String {
-    if lines.is_empty() {
-        return String::new();
-    }
-
-    let mut text = String::with_capacity(
-        lines.iter().map(|line| line.len()).sum::<usize>() + lines.len().saturating_sub(1),
-    );
-    for (index, line) in lines.iter().enumerate() {
-        if index > 0 {
-            text.push('\n');
-        }
-        text.push_str(line);
-    }
-
-    text
+fn buffer_text_from_lines(lines: &LineText) -> String {
+    lines.text().to_text()
 }
 
 fn convert_diagnostic(
-    lines: &Vector<Arc<str>>,
+    lines: &LineText,
     diagnostic: Diagnostic,
     encoding: PositionEncodingKind,
 ) -> Option<Diagnostic> {
@@ -2155,7 +2178,7 @@ fn convert_diagnostic(
 }
 
 fn position_to_lsp_json(
-    lines: &Vector<Arc<str>>,
+    lines: &LineText,
     cursor: crate::buffer::Cursor,
     encoding: PositionEncodingKind,
 ) -> Value {
@@ -2164,96 +2187,49 @@ fn position_to_lsp_json(
 }
 
 fn line_range_to_lsp_range(
-    lines: &Vector<Arc<str>>,
+    lines: &LineText,
     start_line: usize,
     end_line: usize,
     encoding: PositionEncodingKind,
 ) -> Option<lsp_types::Range> {
-    if start_line >= end_line || start_line >= lines.len() {
-        return None;
-    }
-
-    let start = cursor_to_lsp_position(
-        lines,
-        crate::buffer::Cursor::new(start_line, 0),
-        encoding.clone(),
-    );
-    let end_line_index = end_line.min(lines.len());
-    let end = if end_line_index < lines.len() {
-        cursor_to_lsp_position(
-            lines,
-            crate::buffer::Cursor::new(end_line_index, 0),
-            encoding,
-        )
-    } else {
-        let last_line_index = lines.len().saturating_sub(1);
-        cursor_to_lsp_position(
-            lines,
-            crate::buffer::Cursor::new(last_line_index, lines.get(last_line_index)?.len()),
-            encoding,
-        )
-    };
-    Some(lsp_types::Range::new(start, end))
+    lines
+        .line_range_for_lines(start_line, end_line, text_encoding_from_lsp(encoding))
+        .map(Into::into)
 }
 
 fn cursor_to_lsp_position(
-    lines: &Vector<Arc<str>>,
+    lines: &LineText,
     cursor: crate::buffer::Cursor,
     encoding: PositionEncodingKind,
 ) -> lsp_types::Position {
-    let line = lines
-        .get(cursor.line)
-        .map(|line| line.as_ref())
-        .unwrap_or("");
-    let character = byte_index_to_position_character(line, cursor.col, encoding).unwrap_or(0);
-    lsp_types::Position::new(cursor.line as u32, character)
+    lines
+        .position_for_cursor(cursor, text_encoding_from_lsp(encoding))
+        .map(Into::into)
+        .unwrap_or_else(|| lsp_types::Position::new(cursor.line as u32, 0))
 }
 
 fn position_to_cursor(
-    lines: &Vector<Arc<str>>,
+    lines: &LineText,
     position: lsp_types::Position,
     encoding: PositionEncodingKind,
 ) -> Option<crate::buffer::Cursor> {
-    let line = lines.get(position.line as usize)?;
-    let col = position_character_to_byte_index(line, position.character, encoding)?;
-    Some(crate::buffer::Cursor::new(position.line as usize, col))
+    lines.cursor_for_position(position.into(), text_encoding_from_lsp(encoding))
 }
 
 fn range_text(
-    lines: &Vector<Arc<str>>,
+    lines: &LineText,
     range: &lsp_types::Range,
     encoding: PositionEncodingKind,
 ) -> Option<String> {
-    let start_line_idx = range.start.line as usize;
-    let end_line_idx = range.end.line as usize;
-    let start_line = lines.get(start_line_idx)?;
-    let end_line = lines.get(end_line_idx)?;
-    let start_col =
-        position_character_to_byte_index(start_line, range.start.character, encoding.clone())?;
-    let end_col = position_character_to_byte_index(end_line, range.end.character, encoding)?;
-
-    if start_line_idx == end_line_idx {
-        return start_line
-            .get(start_col..end_col)
-            .map(|slice| slice.to_string());
-    }
-
-    let mut result = String::new();
-    result.push_str(start_line.get(start_col..)?);
-    result.push('\n');
-
-    for line in lines.iter().take(end_line_idx).skip(start_line_idx + 1) {
-        result.push_str(line);
-        result.push('\n');
-    }
-
-    result.push_str(end_line.get(..end_col)?);
-    Some(result)
+    let range = lines.cursors_for_range((*range).into(), text_encoding_from_lsp(encoding))?;
+    lines
+        .range(range.start, range.end)
+        .map(|text| text.to_text())
 }
 
 fn completion_response_to_candidates(
     response: CompletionResponse,
-    lines: &Vector<Arc<str>>,
+    lines: &LineText,
     cursor: crate::buffer::Cursor,
     encoding: PositionEncodingKind,
 ) -> Vec<CompletionCandidate> {
@@ -2319,7 +2295,7 @@ fn rank_completion_items(items: &mut Vec<CompletionItem>, query: &str) {
 
 fn completion_item_to_candidate(
     item: CompletionItem,
-    lines: &Vector<Arc<str>>,
+    lines: &LineText,
     cursor: crate::buffer::Cursor,
     encoding: PositionEncodingKind,
 ) -> Option<CompletionCandidate> {
@@ -2367,7 +2343,7 @@ fn completion_item_to_candidate(
 }
 
 fn lsp_range_to_cursor_range(
-    lines: &Vector<Arc<str>>,
+    lines: &LineText,
     range: &lsp_types::Range,
     encoding: PositionEncodingKind,
 ) -> Option<crate::buffer::TextObjectRange> {
@@ -2395,7 +2371,7 @@ fn completion_candidate_score(candidate: &CompletionCandidate) -> usize {
 
 fn completion_item_additional_text_edits(
     item: &CompletionItem,
-    lines: &Vector<Arc<str>>,
+    lines: &LineText,
     encoding: PositionEncodingKind,
 ) -> Vec<crate::ui::completion::CompletionTextEdit> {
     item.additional_text_edits
@@ -2413,16 +2389,15 @@ fn completion_item_additional_text_edits(
         .collect()
 }
 
-fn current_word_prefix_text(lines: &Vector<Arc<str>>, cursor: crate::buffer::Cursor) -> String {
-    let line = lines
-        .get(cursor.line)
-        .map(|line| line.as_ref())
-        .unwrap_or("");
+fn current_word_prefix_text(lines: &LineText, cursor: crate::buffer::Cursor) -> String {
+    let Some(line) = lines.line(cursor.line) else {
+        return String::new();
+    };
     let cursor_col = cursor.col.min(line.len());
     let mut start = cursor_col;
 
     while start > 0 {
-        let Some((prev_start, prev)) = previous_char(line, start) else {
+        let Some((prev_start, prev)) = line.previous_char(start) else {
             break;
         };
         if !is_word_char(prev) {
@@ -2431,7 +2406,7 @@ fn current_word_prefix_text(lines: &Vector<Arc<str>>, cursor: crate::buffer::Cur
         start = prev_start;
     }
 
-    line.get(start..cursor_col).unwrap_or("").to_string()
+    line.range_text(start, cursor_col).unwrap_or_default()
 }
 
 fn completion_item_is_deprecated(item: &CompletionItem) -> bool {
@@ -2445,18 +2420,20 @@ fn completion_item_is_deprecated(item: &CompletionItem) -> bool {
 }
 
 fn current_word_range(
-    lines: &Vector<Arc<str>>,
+    lines: &LineText,
     cursor: crate::buffer::Cursor,
 ) -> crate::buffer::TextObjectRange {
-    let line = lines
-        .get(cursor.line)
-        .map(|line| line.as_ref())
-        .unwrap_or("");
+    let Some(line) = lines.line(cursor.line) else {
+        return crate::buffer::TextObjectRange {
+            start: cursor,
+            end: cursor,
+        };
+    };
     let cursor_col = cursor.col.min(line.len());
     let mut start = cursor_col;
 
     while start > 0 {
-        let Some((prev_start, prev)) = previous_char(line, start) else {
+        let Some((prev_start, prev)) = line.previous_char(start) else {
             break;
         };
         if !is_word_char(prev) {
@@ -2469,10 +2446,6 @@ fn current_word_range(
         start: crate::buffer::Cursor::new(cursor.line, start),
         end: crate::buffer::Cursor::new(cursor.line, cursor_col),
     }
-}
-
-fn previous_char(text: &str, byte_idx: usize) -> Option<(usize, char)> {
-    text.get(..byte_idx)?.char_indices().next_back()
 }
 
 fn is_word_char(ch: char) -> bool {
@@ -2587,7 +2560,7 @@ fn first_definition_target(
 fn flatten_document_symbol_response(
     response: lsp_types::DocumentSymbolResponse,
     path: PathBuf,
-    lines: &Vector<Arc<str>>,
+    lines: &LineText,
     encoding: PositionEncodingKind,
 ) -> Vec<DocumentSymbolItem> {
     let nodes = build_document_symbol_nodes(response, path, lines, encoding);
@@ -2614,7 +2587,7 @@ pub struct ReferenceItem {
 fn build_document_symbol_nodes(
     response: lsp_types::DocumentSymbolResponse,
     path: PathBuf,
-    lines: &Vector<Arc<str>>,
+    lines: &LineText,
     encoding: PositionEncodingKind,
 ) -> Vec<DocumentSymbolTree> {
     match response {
@@ -2651,7 +2624,7 @@ fn build_document_symbol_nodes(
 fn build_nested_document_symbol_nodes(
     symbols: Vec<lsp_types::DocumentSymbol>,
     path: &Path,
-    lines: &Vector<Arc<str>>,
+    lines: &LineText,
     encoding: PositionEncodingKind,
     ancestors: &[String],
 ) -> Vec<DocumentSymbolTree> {
@@ -2837,11 +2810,11 @@ fn location_to_reference_item(
 ) -> Option<ReferenceItem> {
     let path = uri_to_file_path(location.uri.as_str()).ok()?;
     let buffer_id = crate::globals::open_buffer(&path).ok()?;
-    let lines = crate::globals::with_buffer(buffer_id, |buffer| buffer.line_texts())?;
+    let lines = crate::globals::with_buffer(buffer_id, |buffer| buffer.text_snapshot())?;
     let cursor = position_to_cursor(&lines, location.range.start, encoding)?;
     let line_text = lines
         .get(cursor.line)
-        .map(|line| line.trim().to_string())
+        .map(|line| line.to_text().trim().to_string())
         .unwrap_or_default();
 
     Some(ReferenceItem {
@@ -3283,8 +3256,8 @@ mod tests {
     use lsp_types::{CompletionItem, CompletionItemTag, WorkDoneProgressEnd};
     use std::path::PathBuf;
 
-    fn line_snapshot(text: &str) -> Vector<Arc<str>> {
-        crate::buffer::Buffer::from_str(text).line_texts()
+    fn line_snapshot(text: &str) -> LineText {
+        LineText::from_text(text)
     }
 
     fn temp_dir(label: &str) -> PathBuf {
@@ -3573,9 +3546,7 @@ mod tests {
                 None,
             )]),
         )]);
-        let lines: Vector<Arc<str>> = vec![Arc::from("fn outer() { fn inner() {} }")]
-            .into_iter()
-            .collect();
+        let lines = LineText::from_text("fn outer() { fn inner() {} }");
         let nodes = build_document_symbol_nodes(
             response,
             PathBuf::from("/tmp/example.rs"),
@@ -3619,9 +3590,7 @@ mod tests {
                 None,
             )]),
         )]);
-        let lines: Vector<Arc<str>> = vec![Arc::from("struct ByteBuffer { fn push(&self) {} }")]
-            .into_iter()
-            .collect();
+        let lines = LineText::from_text("struct ByteBuffer { fn push(&self) {} }");
         let nodes = build_document_symbol_nodes(
             response,
             PathBuf::from("/tmp/example.rs"),
@@ -3678,10 +3647,7 @@ mod tests {
                 ),
             ]),
         )]);
-        let lines: Vector<Arc<str>> =
-            vec![Arc::from("struct ByteBuffer { buffer: usize, len: usize }")]
-                .into_iter()
-                .collect();
+        let lines = LineText::from_text("struct ByteBuffer { buffer: usize, len: usize }");
         let nodes = build_document_symbol_nodes(
             response,
             PathBuf::from("/tmp/example.rs"),
@@ -3723,9 +3689,7 @@ mod tests {
                 None,
             )]),
         )]);
-        let lines: Vector<Arc<str>> = vec![Arc::from("struct Container { struct Buffer {} }")]
-            .into_iter()
-            .collect();
+        let lines = LineText::from_text("struct Container { struct Buffer {} }");
         let nodes = build_document_symbol_nodes(
             response,
             PathBuf::from("/tmp/example.rs"),
@@ -3762,7 +3726,7 @@ mod tests {
                 ),
             ),
         ]);
-        let lines: Vector<Arc<str>> = vec![Arc::from("Alpha BetaBuffer")].into_iter().collect();
+        let lines = LineText::from_text("Alpha BetaBuffer");
         let nodes = build_document_symbol_nodes(
             response,
             PathBuf::from("/tmp/example.rs"),
@@ -3887,7 +3851,7 @@ mod tests {
         let items = flatten_document_symbol_response(
             response,
             std::path::PathBuf::from("/tmp/example.rs"),
-            &imbl::vector![std::sync::Arc::<str>::from("fn outer() { fn inner() {} }")],
+            &LineText::from_text("fn outer() { fn inner() {} }"),
             PositionEncodingKind::UTF16,
         );
 

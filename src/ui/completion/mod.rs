@@ -8,7 +8,7 @@ mod widget;
 pub use job::CompletionJob;
 pub use widget::CompletionWidget;
 
-use crate::buffer::{Buffer, Cursor};
+use crate::buffer::{Buffer, Cursor, TextRef};
 
 /// An insert-mode completion source.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -136,12 +136,11 @@ pub fn should_autocomplete(buffer: &Buffer, cursor: Cursor) -> bool {
         return false;
     };
 
-    let line = line.as_ref();
     let cursor_col = cursor.col.min(line.len());
 
     let mut path_start = cursor_col;
     while path_start > 0 {
-        let Some((prev_start, prev)) = previous_char(line, path_start) else {
+        let Some((prev_start, prev)) = line.previous_char(path_start) else {
             break;
         };
         if !is_path_char(prev) {
@@ -151,23 +150,21 @@ pub fn should_autocomplete(buffer: &Buffer, cursor: Cursor) -> bool {
     }
 
     if path_start < cursor_col {
-        let prefix = &line[path_start..cursor_col];
-        if prefix.starts_with("./")
-            || prefix.starts_with("../")
-            || prefix.starts_with("~/")
-            || prefix.starts_with('/')
-        {
+        if is_path_completion_prefix(&line, path_start, cursor_col) {
             return true;
         }
     }
 
-    if cursor_col > 0 && line[..cursor_col].ends_with('.') {
+    if line
+        .previous_char(cursor_col)
+        .is_some_and(|(_, ch)| ch == '.')
+    {
         return true;
     }
 
     let mut word_start = cursor_col;
     while word_start > 0 {
-        let Some((prev_start, prev)) = previous_char(line, word_start) else {
+        let Some((prev_start, prev)) = line.previous_char(word_start) else {
             break;
         };
         if !is_word_char(prev) {
@@ -198,8 +195,11 @@ fn is_word_char(ch: char) -> bool {
     ch.is_alphanumeric() || ch == '_'
 }
 
-fn previous_char(text: &str, byte_idx: usize) -> Option<(usize, char)> {
-    text.get(..byte_idx)?.char_indices().next_back()
+fn is_path_completion_prefix(line: &impl TextRef, start: usize, end: usize) -> bool {
+    line.range_starts_with(start, end, "./") == Some(true)
+        || line.range_starts_with(start, end, "../") == Some(true)
+        || line.range_starts_with(start, end, "~/") == Some(true)
+        || line.range_starts_with(start, end, "/") == Some(true)
 }
 
 #[cfg(test)]

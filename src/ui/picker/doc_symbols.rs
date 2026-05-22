@@ -2,9 +2,8 @@
 
 use crate::background::JobManager;
 use crate::background::{JobContext, JobEvent, JobKind, JobPayload, JobToken};
-use crate::buffer::{BufferId, Cursor};
+use crate::buffer::{BufferId, Cursor, LineText, TextEncoding, TextPosition, TextSnapshot};
 use crate::globals;
-use crate::lsp::position::position_character_to_byte_index;
 use crate::lsp::runtime::{DocumentSymbolItem, DocumentSymbolTree};
 use crate::terminal::Style;
 use crate::ui::inputs::PromptSegment;
@@ -21,7 +20,7 @@ use crate::ui::picker::{
     PickerSource, PickerWidget,
 };
 use crate::ui::{Command, Intent};
-use lsp_types::{PositionEncodingKind, SymbolKind};
+use lsp_types::SymbolKind;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -460,7 +459,7 @@ impl DocSymbolsPickerItem {
         let Ok(contents) = std::fs::read_to_string(self.path.as_path()) else {
             return self.cursor;
         };
-        let lines = crate::buffer::Buffer::from_str(contents.as_str()).line_texts();
+        let lines = LineText::from_text(contents.as_str());
         cursor_from_range_utf16(&lines, range).unwrap_or(self.cursor)
     }
 
@@ -530,17 +529,14 @@ impl DocSymbolsPickerItem {
     }
 }
 
-fn cursor_from_range_utf16(
-    lines: &imbl::Vector<Arc<str>>,
-    range: &lsp_types::Range,
-) -> Option<Cursor> {
-    let line = lines.get(range.start.line as usize)?;
-    let col = position_character_to_byte_index(
-        line.as_ref(),
-        range.start.character,
-        PositionEncodingKind::UTF16,
-    )?;
-    Some(Cursor::new(range.start.line as usize, col))
+fn cursor_from_range_utf16(lines: &LineText, range: &lsp_types::Range) -> Option<Cursor> {
+    lines.cursor_for_position(
+        TextPosition {
+            line: range.start.line as usize,
+            character: range.start.character as usize,
+        },
+        TextEncoding::Utf16,
+    )
 }
 
 fn build_document_symbol_preview(item: &DocSymbolsPickerItem) -> std::io::Result<PickerPreview> {

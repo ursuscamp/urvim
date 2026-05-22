@@ -597,7 +597,7 @@ impl Buffer {
 
     /// Clears all markers.
     pub fn clear_markers(&mut self) {
-        self.markers.clear_to_line_count(self.lines.len());
+        self.markers.clear_to_line_count(self.lines.line_count());
         self.bump_visual_generation();
         self.update_markers();
     }
@@ -677,7 +677,7 @@ impl Buffer {
     }
 
     fn retain_markers(&mut self, keep: impl Fn(&MarkerPayload) -> bool) {
-        self.retain_markers_in_line_range(0, self.lines.len(), keep);
+        self.retain_markers_in_line_range(0, self.lines.line_count(), keep);
     }
 
     fn retain_markers_in_line_range(

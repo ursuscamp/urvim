@@ -147,10 +147,7 @@ impl Buffer {
             let Some(line) = self.line_at(line_idx) else {
                 continue;
             };
-            for (col, grapheme) in line.grapheme_indices(true) {
-                let Some(ch) = grapheme.chars().next() else {
-                    continue;
-                };
+            for (col, ch) in line.char_indices() {
                 let cursor = Cursor::new(line_idx, col);
                 if kind.matches_opening(ch) {
                     stack.push(cursor);

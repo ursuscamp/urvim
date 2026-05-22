@@ -23,7 +23,10 @@ fn test_html_fixture_uses_grammar_rules() {
     let entity_line = buf
         .syntax_spans_for_line(4)
         .expect("entity line should exist");
-    let attribute_text = buf.line_at(5).expect("attribute line text should exist");
+    let attribute_text = buf
+        .line_at(5)
+        .expect("attribute line text should exist")
+        .to_text();
     let entity_start = attribute_text
         .find("&amp;")
         .expect("attribute entity should exist");

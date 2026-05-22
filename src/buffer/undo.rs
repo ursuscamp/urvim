@@ -2,7 +2,7 @@ use super::*;
 
 impl UndoState {
     pub(super) fn new(
-        lines: Vector<Arc<str>>,
+        lines: LineText,
         cursor: Cursor,
         buffer_cache: BufferCache,
         markers: MarkersStore,
@@ -20,7 +20,7 @@ impl UndoState {
 
     fn push_snapshot(
         &mut self,
-        lines: Vector<Arc<str>>,
+        lines: LineText,
         cursor: Cursor,
         buffer_cache: BufferCache,
         markers: MarkersStore,
@@ -70,7 +70,7 @@ impl UndoState {
         }
     }
 
-    fn undo(&mut self) -> Option<(Vector<Arc<str>>, BufferCache, MarkersStore, Cursor)> {
+    fn undo(&mut self) -> Option<(LineText, BufferCache, MarkersStore, Cursor)> {
         if self.position == 0 {
             return None;
         }
@@ -85,7 +85,7 @@ impl UndoState {
         ))
     }
 
-    fn redo(&mut self) -> Option<(Vector<Arc<str>>, BufferCache, MarkersStore, Cursor)> {
+    fn redo(&mut self) -> Option<(LineText, BufferCache, MarkersStore, Cursor)> {
         if self.position >= self.history.len() - 1 {
             return None;
         }
@@ -108,7 +108,7 @@ impl UndoState {
         self.position < self.history.len() - 1
     }
 
-    fn current_snapshot_matches(&self, lines: &Vector<Arc<str>>) -> bool {
+    fn current_snapshot_matches(&self, lines: &LineText) -> bool {
         self.history
             .get(self.position)
             .is_some_and(|active| active.lines == *lines)

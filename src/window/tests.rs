@@ -1,7 +1,7 @@
 use super::*;
 use crate::action::ActionResult;
 use crate::background::{BackgroundJob, JobKind, JobToken};
-use crate::buffer::{BufferId, Cursor};
+use crate::buffer::{BufferId, Cursor, TextRef};
 use crate::config::{
     AdvancedGlyphCapability, AutoIndentMode, Config, DefaultRegisters, ScrollMargin, WrapMode,
 };

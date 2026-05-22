@@ -3,12 +3,10 @@
 use crate::background::{
     JobContext, JobError, JobEvent, JobPayload, LspInlayHint, LspInlayHintsChunk,
 };
-use crate::buffer::{BufferId, Cursor};
+use crate::buffer::{BufferId, Cursor, LineText, TextEncoding, TextPosition, TextSnapshot};
 use crate::config::InlayHintCapability;
 use crate::globals;
 use crate::json_rpc::{ErrorResponse, Message, Response, SuccessResponse};
-use crate::lsp::position::position_character_to_byte_index;
-use imbl::Vector;
 use lsp_types::{
     InlayHint, InlayHintKind, InlayHintLabel, InlayHintLabelPart, PositionEncodingKind,
 };
@@ -26,7 +24,7 @@ pub struct LspInlayHintSnapshot {
     /// Document URI.
     pub uri: String,
     /// Buffer lines at the time the job started.
-    pub lines: Vector<std::sync::Arc<str>>,
+    pub lines: LineText,
     /// Position encoding negotiated for the server.
     pub position_encoding: PositionEncodingKind,
 }
@@ -67,12 +65,12 @@ impl LspInlayHintJob {
             token: context.token(),
         });
 
-        let line = self.start_line.min(self.snapshot.lines.len());
+        let line = self.start_line.min(self.snapshot.lines.line_count());
         if context.is_stopping() || !context.is_current() || context.is_aborted() {
             return;
         }
 
-        let end_line = (line + Self::VIEWPORT_LINES).min(self.snapshot.lines.len());
+        let end_line = (line + Self::VIEWPORT_LINES).min(self.snapshot.lines.line_count());
 
         // Brief lock to send the request and register a response channel.
         let rx = match globals::with_lsp_runtime_mut(|runtime| {
@@ -172,7 +170,7 @@ impl LspInlayHintJob {
 
 fn inlay_hint_to_payload(
     hint: &InlayHint,
-    lines: &Vector<std::sync::Arc<str>>,
+    lines: &LineText,
     encoding: PositionEncodingKind,
 ) -> Option<LspInlayHint> {
     let position = position_to_cursor(lines, hint.position, encoding)?;
@@ -193,13 +191,22 @@ fn inlay_hint_label_to_text(label: &InlayHintLabel) -> Option<SmolStr> {
 }
 
 fn position_to_cursor(
-    lines: &Vector<std::sync::Arc<str>>,
+    lines: &LineText,
     position: lsp_types::Position,
     encoding: PositionEncodingKind,
 ) -> Option<Cursor> {
-    let line = lines.get(position.line as usize)?;
-    let col = position_character_to_byte_index(line.as_ref(), position.character, encoding)?;
-    Some(Cursor::new(position.line as usize, col))
+    let encoding = if encoding == PositionEncodingKind::UTF8 {
+        TextEncoding::Utf8
+    } else {
+        TextEncoding::Utf16
+    };
+    lines.cursor_for_position(
+        TextPosition {
+            line: position.line as usize,
+            character: position.character as usize,
+        },
+        encoding,
+    )
 }
 
 /// Returns whether the given inlay-hint kind is enabled in the current config.
@@ -223,10 +230,9 @@ fn inlay_hint_kind_enabled(kind: Option<&InlayHintKind>) -> bool {
 mod tests {
     use super::*;
     use lsp_types::{InlayHintLabel, Position};
-    use std::sync::Arc;
 
-    fn line_vector(text: &str) -> Vector<Arc<str>> {
-        Vector::from_iter([Arc::from(text)])
+    fn line_vector(text: &str) -> LineText {
+        LineText::from_text(text)
     }
 
     #[test]

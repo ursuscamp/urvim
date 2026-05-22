@@ -57,7 +57,10 @@ fn test_perl_heredoc_opener_keeps_trailing_semicolon_out_of_body_text() {
     let opener = buf
         .syntax_spans_for_line(6)
         .expect("heredoc opener line should exist");
-    let line = buf.line_at(6).expect("heredoc opener line should exist");
+    let line = buf
+        .line_at(6)
+        .expect("heredoc opener line should exist")
+        .to_text();
     let semicolon = line
         .rfind(';')
         .expect("heredoc opener semicolon should exist");

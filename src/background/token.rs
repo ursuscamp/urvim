@@ -46,6 +46,9 @@ pub enum JobKind {
     /// Test-only gate job.
     #[cfg(test)]
     TestGate,
+    /// Test-only picker preview syntax refresh.
+    #[cfg(test)]
+    TestPickerPreviewSyntax,
 }
 
 impl fmt::Display for JobKind {
@@ -69,6 +72,8 @@ impl fmt::Display for JobKind {
             Self::LspInlayHints(buffer_id) => write!(f, "lsp-inlay-hints:{}", buffer_id.get()),
             #[cfg(test)]
             Self::TestGate => f.write_str("gate"),
+            #[cfg(test)]
+            Self::TestPickerPreviewSyntax => f.write_str("test-picker-preview-syntax"),
         }
     }
 }

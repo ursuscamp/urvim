@@ -1,7 +1,7 @@
 use super::*;
 use crate::buffer::BufferId;
 use crate::buffer::{
-    Marker, MarkerPayload, MarkerShape, configured_tab_width, display_grapheme_width,
+    Marker, MarkerPayload, MarkerShape, TextRef, configured_tab_width, display_grapheme_width,
     display_width_at,
 };
 use crate::config::ScrollMargin;
@@ -178,9 +178,7 @@ impl BufferView {
                     if end_line == eof_line
                         && buffer
                             .line_at(eof_line)
-                            .map(|line| {
-                                leading_indent_width(line.as_ref()) != active_scope.indent_width
-                            })
+                            .map(|line| leading_indent_width(&line) != active_scope.indent_width)
                             .unwrap_or(false) =>
                 {
                     line_count
@@ -501,11 +499,13 @@ impl BufferView {
         self.with_buffer(|buffer| {
             let mut total_rows = 0usize;
             let mut cursor_row = 0usize;
+            let mut scratch = String::new();
 
             for line_idx in 0..buffer.line_count() {
-                let line_text = buffer
-                    .line_at(line_idx)
-                    .map(|line| line.as_ref())
+                let line_ref = buffer.line_at(line_idx);
+                let line_text = line_ref
+                    .as_ref()
+                    .map(|line| line.contiguous_text_with_scratch(&mut scratch))
                     .unwrap_or("");
                 let mut annotations = buffer.ghost_texts_for_line(line_idx).unwrap_or_default();
                 if let Some(inlay_hints) = buffer.inlay_hints_for_line(line_idx) {
@@ -557,10 +557,12 @@ impl BufferView {
     ) -> Option<usize> {
         self.with_buffer(|buffer| {
             let mut accumulated_rows = 0usize;
+            let mut scratch = String::new();
             for line_idx in 0..buffer.line_count() {
-                let line_text = buffer
-                    .line_at(line_idx)
-                    .map(|line| line.as_ref())
+                let line_ref = buffer.line_at(line_idx);
+                let line_text = line_ref
+                    .as_ref()
+                    .map(|line| line.contiguous_text_with_scratch(&mut scratch))
                     .unwrap_or("");
                 let mut annotations = buffer.ghost_texts_for_line(line_idx).unwrap_or_default();
                 if let Some(inlay_hints) = buffer.inlay_hints_for_line(line_idx) {
@@ -646,8 +648,9 @@ impl BufferView {
                 0
             };
             loop {
-                if let Some(line_text) = buffer.line_at(buffer_line_idx).cloned() {
-                    let line_text = line_text.as_ref();
+                if let Some(line_text) = buffer.line_at(buffer_line_idx) {
+                    let mut line_scratch = String::new();
+                    let line_text = line_text.contiguous_text_with_scratch(&mut line_scratch);
                     let syntax_spans = if syntax_enabled {
                         buffer
                             .cached_syntax_spans_for_line(buffer_line_idx)
@@ -1392,9 +1395,10 @@ impl BufferView {
     }
 }
 
-fn leading_indent_width(line: &str) -> usize {
+fn leading_indent_width(line: &impl TextRef) -> usize {
     let tab_width = configured_tab_width();
-    line.chars()
+    line.char_indices()
+        .map(|(_, ch)| ch)
         .take_while(|ch| *ch == ' ' || *ch == '\t')
         .map(|ch| if ch == '\t' { tab_width } else { 1 })
         .sum()

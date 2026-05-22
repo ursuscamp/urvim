@@ -1,6 +1,6 @@
 use super::Layout;
 use crate::background::{JobEvent, JobKind, JobPayload, JobToken};
-use crate::buffer::{Buffer, Cursor, Gravity};
+use crate::buffer::{Buffer, Cursor, Gravity, TextRef};
 use crate::lsp::inlay_hint_job::LspInlayHintJob;
 use smol_str::SmolStr;
 

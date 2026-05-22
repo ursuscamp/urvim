@@ -1,11 +1,10 @@
 use crate::background::{JobContext, JobManager, JobToken};
-use crate::buffer::{Buffer, BufferCache, BufferCacheRefreshResult, BufferId, Cursor};
+use crate::buffer::{Buffer, BufferCache, BufferCacheRefreshResult, BufferId, Cursor, LineText};
 use crate::globals;
 use crate::screen::Screen;
 use crate::terminal::{Color, Style};
 use crate::window::renderer::{self, BufferRenderState, WindowRenderTheme};
 use crate::window::{BufferView, Position, RenderData, Size};
-use imbl::Vector;
 use smol_str::SmolStr;
 use std::collections::HashMap;
 use std::fs;
@@ -146,14 +145,7 @@ impl PreviewPane {
                     return None;
                 }
 
-                let line_texts: Vector<Arc<str>> = (0..buffer.line_count())
-                    .map(|line| {
-                        buffer
-                            .line_at(line)
-                            .cloned()
-                            .unwrap_or_else(|| Arc::from(""))
-                    })
-                    .collect();
+                let line_texts = buffer.text_snapshot();
 
                 Some((
                     SmolStr::new(buffer.syntax_name()),
@@ -429,16 +421,11 @@ pub struct PreviewSyntaxRefreshJob {
     key: String,
     syntax_name: SmolStr,
     generation: u64,
-    line_texts: Vector<Arc<str>>,
+    line_texts: LineText,
 }
 
 impl PreviewSyntaxRefreshJob {
-    fn new(
-        key: String,
-        syntax_name: SmolStr,
-        generation: u64,
-        line_texts: Vector<Arc<str>>,
-    ) -> Self {
+    fn new(key: String, syntax_name: SmolStr, generation: u64, line_texts: LineText) -> Self {
         Self {
             key,
             syntax_name,
@@ -461,8 +448,8 @@ impl PreviewSyntaxRefreshJob {
 
         let mut cache = BufferCache::new(self.syntax_name.clone());
         if !self.line_texts.is_empty() {
-            let last_line = self.line_texts.len() - 1;
-            let mut chunk_end = 0usize;
+            let last_line = self.line_texts.line_count() - 1;
+            let mut next_chunk_start = 0usize;
             let chunk_size = 100usize;
 
             loop {
@@ -470,8 +457,12 @@ impl PreviewSyntaxRefreshJob {
                     return;
                 }
 
-                chunk_end = chunk_end.saturating_add(chunk_size).min(last_line);
+                let chunk_end = next_chunk_start
+                    .saturating_add(chunk_size)
+                    .saturating_sub(1)
+                    .min(last_line);
                 cache.ensure_through(&self.syntax_name, &self.line_texts, chunk_end);
+                next_chunk_start = chunk_end.saturating_add(1);
 
                 let payload =
                     crate::background::JobPayload::PreviewSyntax(PreviewSyntaxRefreshResult {
@@ -551,7 +542,6 @@ mod tests {
     use crate::theme::{HighlightStyles, Tag, Theme, ThemeKind};
     use crate::window::Window;
     use smol_str::SmolStr;
-    use std::sync::Arc;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
@@ -739,9 +729,7 @@ mod tests {
                     key.clone(),
                     SmolStr::new("rust"),
                     generation,
-                    vec![Arc::<str>::from("fn main() { let value = 1; }")]
-                        .into_iter()
-                        .collect(),
+                    LineText::from_text("fn main() { let value = 1; }"),
                 ),
             )
             .unwrap();
@@ -819,12 +807,16 @@ mod tests {
 
     #[test]
     fn preview_syntax_refresh_job_populates_cached_spans_off_thread() {
-        let line_texts: Vector<Arc<str>> =
-            std::iter::repeat_n(Arc::<str>::from("fn main() { let value = 1; }"), 250).collect();
+        let line_texts = LineText::from_text(
+            std::iter::repeat_n("fn main() { let value = 1; }", 250)
+                .collect::<Vec<_>>()
+                .join("\n")
+                .as_str(),
+        );
         let handle = JobHandle::new();
         handle
             .submit_latest_only(
-                crate::background::JobKind::PickerPreviewSyntax,
+                crate::background::JobKind::TestPickerPreviewSyntax,
                 JobToken::new(7),
                 PreviewSyntaxRefreshJob::new(
                     String::from("/tmp/preview.rs"),

@@ -135,9 +135,8 @@ impl Buffer {
             let Some(line) = self.line_at(line_idx) else {
                 continue;
             };
-            let line_str = line.as_ref();
-            for (byte_idx, ch) in line_str.char_indices() {
-                if ch != delimiter || Self::is_escaped_quote(line_str, byte_idx) {
+            for (byte_idx, ch) in line.char_indices() {
+                if ch != delimiter || Self::is_escaped_quote(&line, byte_idx) {
                     continue;
                 }
 
@@ -161,21 +160,16 @@ impl Buffer {
             && Self::compare_cursor_positions(cursor, pair.close) != std::cmp::Ordering::Greater
     }
 
-    fn is_escaped_quote(line: &str, byte_idx: usize) -> bool {
-        if byte_idx == 0 {
-            return false;
-        }
-
-        let bytes = line.as_bytes();
+    fn is_escaped_quote(line: &impl TextRef, byte_idx: usize) -> bool {
         let mut slashes = 0usize;
         let mut idx = byte_idx;
-        while idx > 0 {
-            idx -= 1;
-            if bytes[idx] == b'\\' {
-                slashes += 1;
-            } else {
+
+        while let Some((prev_idx, ch)) = line.previous_char(idx) {
+            if ch != '\\' {
                 break;
             }
+            slashes += 1;
+            idx = prev_idx;
         }
 
         slashes % 2 == 1

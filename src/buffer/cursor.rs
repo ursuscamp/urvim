@@ -4,7 +4,7 @@ impl Buffer {
     /// Returns the character at the cursor, if the cursor is positioned on a character.
     pub fn char_at_cursor(&self, cursor: Cursor) -> Option<char> {
         let line = self.line_at(cursor.line)?;
-        line.get(cursor.col..)?.chars().next()
+        line.char_at(cursor.col)
     }
 
     /// Returns the character immediately before the cursor, if one exists.
@@ -13,15 +13,15 @@ impl Buffer {
             return None;
         }
         let line = self.line_at(cursor.line)?;
-        line.get(..cursor.col)?.chars().next_back()
+        line.previous_char(cursor.col).map(|(_, ch)| ch)
     }
 
     pub fn line_len(&self, line_idx: usize) -> usize {
-        self.lines.get(line_idx).map_or(0, |s| s.len())
+        self.lines.line_len(line_idx)
     }
 
     pub fn is_valid_cursor(&self, cursor: Cursor) -> bool {
-        if cursor.line >= self.lines.len() {
+        if cursor.line >= self.lines.line_count() {
             return false;
         }
         let line_len = self.line_len(cursor.line);
@@ -31,11 +31,8 @@ impl Buffer {
         if cursor.col == line_len {
             return true;
         }
-        if let Some(line) = self.lines.get(cursor.line) {
-            line.is_char_boundary(cursor.col)
-        } else {
-            false
-        }
+        self.line_at(cursor.line)
+            .is_some_and(|line| line.is_char_boundary(cursor.col))
     }
 
     /// Normalizes a cursor so it lands on a valid grapheme boundary in the current buffer.
@@ -58,18 +55,19 @@ impl Buffer {
         };
         let mut previous_boundary = 0usize;
 
-        for (byte_offset, grapheme) in line.grapheme_indices(true) {
-            let next_boundary = byte_offset + grapheme.len();
-            if col <= byte_offset {
-                return Cursor::new(line_idx, byte_offset);
+        for grapheme in line.graphemes() {
+            let grapheme_idx = grapheme.byte_idx();
+            let next_boundary = grapheme_idx + grapheme.len();
+            if col <= grapheme_idx {
+                return Cursor::new(line_idx, grapheme_idx);
             }
             if col < next_boundary {
-                let left_distance = col - byte_offset;
+                let left_distance = col - grapheme_idx;
                 let right_distance = next_boundary - col;
                 let synced_col = if right_distance < left_distance {
                     next_boundary
                 } else {
-                    byte_offset
+                    grapheme_idx
                 };
                 return Cursor::new(line_idx, synced_col);
             }
@@ -83,16 +81,15 @@ impl Buffer {
     pub fn next_cursor(&self, cursor: Cursor) -> Option<Cursor> {
         let line_len = self.line_len(cursor.line);
         if cursor.col < line_len {
-            let line = self.lines.get(cursor.line)?;
-            let line_str = line.as_ref();
-            for (relative_offset, _grapheme) in line_str[cursor.col..].grapheme_indices(true) {
-                if relative_offset == 0 {
+            let line = self.line_at(cursor.line)?;
+            for grapheme in line.graphemes() {
+                if grapheme.byte_idx() <= cursor.col {
                     continue;
                 }
-                return Some(Cursor::new(cursor.line, cursor.col + relative_offset));
+                return Some(Cursor::new(cursor.line, grapheme.byte_idx()));
             }
             Some(Cursor::new(cursor.line, line_len))
-        } else if cursor.line < self.lines.len() - 1 {
+        } else if cursor.line < self.lines.line_count() - 1 {
             Some(Cursor::new(cursor.line + 1, 0))
         } else {
             None
@@ -101,14 +98,9 @@ impl Buffer {
 
     pub fn prev_cursor(&self, cursor: Cursor) -> Option<Cursor> {
         if cursor.col > 0 {
-            let line = self.lines.get(cursor.line)?;
-            let line_str = line.as_ref();
-            let prefix = &line_str[..cursor.col];
-            let last_grapheme_offset = prefix
-                .grapheme_indices(true)
-                .next_back()
-                .map(|(offset, _)| offset)?;
-            Some(Cursor::new(cursor.line, last_grapheme_offset))
+            let line = self.line_at(cursor.line)?;
+            let previous = line.previous_grapheme(cursor.col)?;
+            Some(Cursor::new(cursor.line, previous.byte_idx()))
         } else if cursor.line > 0 {
             let prev_line_len = self.line_len(cursor.line - 1);
             Some(Cursor::new(cursor.line - 1, prev_line_len))
@@ -122,13 +114,12 @@ impl Buffer {
         if cursor.col >= line_len {
             return None;
         }
-        let line = self.lines.get(cursor.line)?;
-        let line_str = line.as_ref();
-        for (relative_offset, _grapheme) in line_str[cursor.col..].grapheme_indices(true) {
-            if relative_offset == 0 {
+        let line = self.line_at(cursor.line)?;
+        for grapheme in line.graphemes() {
+            if grapheme.byte_idx() <= cursor.col {
                 continue;
             }
-            return Some(Cursor::new(cursor.line, cursor.col + relative_offset));
+            return Some(Cursor::new(cursor.line, grapheme.byte_idx()));
         }
         Some(Cursor::new(cursor.line, line_len))
     }
@@ -137,18 +128,13 @@ impl Buffer {
         if cursor.col == 0 {
             return None;
         }
-        let line = self.lines.get(cursor.line)?;
-        let line_str = line.as_ref();
-        let prefix = &line_str[..cursor.col];
-        let last_grapheme_offset = prefix
-            .grapheme_indices(true)
-            .next_back()
-            .map(|(offset, _)| offset)?;
-        Some(Cursor::new(cursor.line, last_grapheme_offset))
+        let line = self.line_at(cursor.line)?;
+        let previous = line.previous_grapheme(cursor.col)?;
+        Some(Cursor::new(cursor.line, previous.byte_idx()))
     }
 
     pub fn cursor_down(&self, cursor: Cursor, visual_col: usize) -> Option<Cursor> {
-        if cursor.line >= self.lines.len() - 1 {
+        if cursor.line >= self.lines.line_count() - 1 {
             return None;
         }
         let next_line = cursor.line + 1;
@@ -167,17 +153,17 @@ impl Buffer {
 
     pub(super) fn first_non_whitespace_col(&self, line_idx: usize) -> Option<usize> {
         let line = self.line_at(line_idx)?;
-        line.grapheme_indices(true)
-            .find(|(_, grapheme)| !Self::is_whitespace_char(grapheme))
-            .map(|(idx, _)| idx)
+        line.graphemes()
+            .find(|grapheme| !Self::is_whitespace_char(grapheme.as_str()))
+            .map(|grapheme| grapheme.byte_idx())
     }
 
     pub(super) fn last_non_whitespace_col(&self, line_idx: usize) -> Option<usize> {
         let line = self.line_at(line_idx)?;
-        line.grapheme_indices(true)
-            .filter(|(_, grapheme)| !Self::is_whitespace_char(grapheme))
-            .map(|(idx, _)| idx)
-            .next_back()
+        line.graphemes()
+            .filter(|grapheme| !Self::is_whitespace_char(grapheme.as_str()))
+            .map(|grapheme| grapheme.byte_idx())
+            .last()
     }
 
     pub fn cursor_end_of_line(&self, cursor: Cursor) -> Option<Cursor> {
@@ -249,7 +235,7 @@ impl Buffer {
             Some(l) => l,
             None => return false,
         };
-        line.chars().all(|c| c.is_whitespace())
+        line.char_indices().all(|(_, c)| c.is_whitespace())
     }
 
     fn file_start_cursor(&self) -> Cursor {
@@ -326,10 +312,12 @@ impl Buffer {
     }
 
     pub fn visual_col_at(&self, cursor: Cursor) -> usize {
-        let line = match self.lines.get(cursor.line) {
-            Some(l) => l.as_ref(),
+        let line = match self.line_at(cursor.line) {
+            Some(l) => l,
             None => return 0,
         };
+        let mut scratch = String::new();
+        let line = line.contiguous_text_with_scratch(&mut scratch);
         let tab_width = configured_tab_width();
         let mut visual_col = 0;
         let mut byte_offset = 0;
@@ -344,10 +332,12 @@ impl Buffer {
     }
 
     pub fn byte_pos_at_visual_col(&self, line_idx: usize, visual_col: usize) -> usize {
-        let line = match self.lines.get(line_idx) {
-            Some(l) => l.as_ref(),
+        let line = match self.line_at(line_idx) {
+            Some(l) => l,
             None => return 0,
         };
+        let mut scratch = String::new();
+        let line = line.contiguous_text_with_scratch(&mut scratch);
         let tab_width = configured_tab_width();
         let mut current_visual = 0;
         let mut byte_offset = 0;
@@ -364,54 +354,39 @@ impl Buffer {
 
     /// Returns the visual width of the specified line using the configured tab width.
     pub fn visual_line_width(&self, line_idx: usize) -> usize {
-        let line = match self.lines.get(line_idx) {
-            Some(l) => l.as_ref(),
+        let line = match self.line_at(line_idx) {
+            Some(l) => l,
             None => return 0,
         };
+        let mut scratch = String::new();
+        let line = line.contiguous_text_with_scratch(&mut scratch);
 
         display_width_at(line, 0, configured_tab_width())
     }
 
-    pub(super) fn grapheme_at_byte(&self, line_idx: usize, byte_pos: usize) -> Option<&str> {
-        let line = self.lines.get(line_idx)?;
-        let line_str = line.as_ref();
-        for (byte_offset, grapheme) in line_str.grapheme_indices(true) {
-            if byte_offset == byte_pos {
-                return Some(grapheme);
-            }
-        }
-        None
+    pub(super) fn grapheme_at_byte(&self, line_idx: usize, byte_pos: usize) -> Option<String> {
+        let line = self.line_at(line_idx)?;
+        line.grapheme_at(byte_pos)
+            .map(|grapheme| grapheme.into_owned())
     }
 
     pub(super) fn prev_grapheme_before_byte(
         &self,
         line_idx: usize,
         byte_pos: usize,
-    ) -> Option<&str> {
-        let line = self.lines.get(line_idx)?;
-        let line_str = line.as_ref();
-        let mut prev = None;
-        for (byte_offset, grapheme) in line_str.grapheme_indices(true) {
-            if byte_offset >= byte_pos {
-                break;
-            }
-            prev = Some(grapheme);
-        }
-        prev
+    ) -> Option<String> {
+        let line = self.line_at(line_idx)?;
+        line.previous_grapheme(byte_pos)
+            .map(|grapheme| grapheme.into_owned())
     }
 
     pub(super) fn next_grapheme_at_or_after_byte(
         &self,
         line_idx: usize,
         byte_pos: usize,
-    ) -> Option<&str> {
-        let line = self.lines.get(line_idx)?;
-        let line_str = line.as_ref();
-        for (byte_offset, grapheme) in line_str.grapheme_indices(true) {
-            if byte_offset >= byte_pos {
-                return Some(grapheme);
-            }
-        }
-        None
+    ) -> Option<String> {
+        let line = self.line_at(line_idx)?;
+        line.next_grapheme(byte_pos)
+            .map(|grapheme| grapheme.into_owned())
     }
 }

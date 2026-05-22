@@ -1,7 +1,7 @@
 //! Path completion source.
 
 use super::{PathPrefixKind, current_path_prefix};
-use crate::buffer::{Buffer, Cursor};
+use crate::buffer::{Buffer, Cursor, TextRef};
 use crate::ui::completion::CompletionCandidate;
 use ignore::WalkBuilder;
 use std::path::{Path, PathBuf};

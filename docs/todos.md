@@ -19,6 +19,7 @@ This is a list, in no particular order, of things that need to be addressed whic
 
 # Bugs
 
+- no lsp on release build????
 - figure out issue with C-Space
 - when repeatedly hitting <f1> to open an already open picker, it moved the picker down from the last known spot
 

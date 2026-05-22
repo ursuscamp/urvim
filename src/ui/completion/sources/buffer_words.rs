@@ -1,7 +1,7 @@
 //! Buffer-word completion source.
 
 use super::{current_word_range, unique_words_in_buffer};
-use crate::buffer::{Buffer, Cursor};
+use crate::buffer::{Buffer, Cursor, TextRef};
 use crate::ui::completion::CompletionCandidate;
 
 const MAX_BUFFER_WORD_COMPLETIONS: usize = 50;
@@ -52,9 +52,8 @@ fn buffer_word_symbol() -> Option<String> {
 }
 
 fn current_word_text(buffer: &Buffer, range: crate::buffer::TextObjectRange) -> Option<String> {
-    let line = buffer.line_at(range.start.line)?.as_ref();
-    line.get(range.start.col..range.end.col)
-        .map(|text| text.to_string())
+    let line_ref = buffer.line_at(range.start.line)?;
+    line_ref.range_text(range.start.col, range.end.col)
 }
 
 #[cfg(test)]

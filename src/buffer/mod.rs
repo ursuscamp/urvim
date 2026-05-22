@@ -1,7 +1,7 @@
-//! Text buffer module backed by Vector<Arc<str>>.
+//! Text buffer module backed by isolated text storage.
 //!
 //! This module provides the `Buffer` type, a text buffer implementation built on
-//! top of imbl's Vector with Arc<str> for each line. The buffer supports
+//! top of a text storage abstraction. The buffer supports
 //! efficient text manipulation with proper Unicode handling including grapheme
 //! clusters, combining characters, and emoji.
 //!
@@ -49,6 +49,7 @@ mod search;
 mod surround;
 mod syntax;
 mod tab;
+mod text;
 mod text_object;
 mod undo;
 mod unicode;
@@ -62,6 +63,10 @@ pub use pool::{BufferId, BufferPool};
 pub use syntax::{
     BufferCache, BufferCacheRefreshResult, IndentScope, IndentScopeId, IndentScopeRefreshJob,
     IndentScopeRefreshResult, SyntaxRefreshJob, SyntaxRefreshResult, SyntaxSpan,
+};
+pub use text::{
+    LineText, LineTextRef, TextChange, TextEncoding, TextPosition, TextRange, TextRef,
+    TextSnapshot, TextStorage,
 };
 
 pub use unicode::{
@@ -126,7 +131,7 @@ pub struct TextObjectRange {
 #[derive(Debug, Clone)]
 struct Snapshot {
     /// The text content at this point in time.
-    lines: Vector<Arc<str>>,
+    lines: LineText,
     /// The cursor position at this point in time.
     cursor: Cursor,
     /// The buffer cache state at this point in time.
@@ -171,7 +176,7 @@ struct UndoState {
     position: usize,
 }
 
-/// A text buffer backed by a Vector of Arc<str> lines.
+/// A text buffer backed by isolated text storage.
 ///
 /// Buffer provides efficient text editing with proper Unicode support.
 /// Each line is stored as an Arc<str> without trailing newline characters.
@@ -188,8 +193,8 @@ struct UndoState {
 /// ```
 #[derive(Debug)]
 pub struct Buffer {
-    lines: Vector<Arc<str>>,
-    saved_lines: Vector<Arc<str>>,
+    lines: LineText,
+    saved_lines: LineText,
     saved_disk_state: Option<DiskState>,
     path: Option<AbsolutePath>,
     syntax_generation: u64,
@@ -242,7 +247,7 @@ impl Buffer {
     /// assert_eq!(buf.len(), 5);
     /// ```
     pub fn len(&self) -> usize {
-        self.lines.iter().map(|s| s.len()).sum::<usize>() + self.lines.len().saturating_sub(1)
+        self.lines.len()
     }
 
     /// Returns true if the buffer is empty.
@@ -256,7 +261,7 @@ impl Buffer {
     /// assert!(buf.is_empty());
     /// ```
     pub fn is_empty(&self) -> bool {
-        self.lines.len() == 1 && self.lines.get(0).is_none_or(|s| s.is_empty())
+        self.lines.is_empty()
     }
 
     /// Returns the resolved path for this buffer, if it has one.
@@ -333,8 +338,13 @@ impl Buffer {
     /// let line = buf.line_at(0);
     /// assert!(line.is_some());
     /// ```
-    pub fn line_at(&self, line_idx: usize) -> Option<&Arc<str>> {
-        self.lines.get(line_idx)
+    pub fn line_at(&self, line_idx: usize) -> Option<LineTextRef<'_>> {
+        self.lines.line(line_idx)
+    }
+
+    #[cfg(test)]
+    fn test_line_str(&self, line_idx: usize) -> Option<String> {
+        self.line_at(line_idx).map(|line| line.to_text())
     }
 
     /// Returns the number of lines in the buffer.
@@ -348,7 +358,7 @@ impl Buffer {
     /// assert_eq!(buf.line_count(), 3);
     /// ```
     pub fn line_count(&self) -> usize {
-        self.lines.len()
+        self.lines.line_count()
     }
 
     /// Returns the buffer contents as a String.
@@ -362,31 +372,22 @@ impl Buffer {
     /// assert_eq!(buf.as_str(), "Hello");
     /// ```
     pub fn as_str(&self) -> String {
-        if self.lines.is_empty() {
-            return String::new();
-        }
-        let mut result = String::new();
-        for (i, line) in self.lines.iter().enumerate() {
-            if i > 0 {
-                result.push('\n');
-            }
-            result.push_str(line);
-        }
-        result
+        self.lines.text().to_text()
     }
 
-    /// Returns a snapshot of the buffer lines.
-    pub fn line_texts(&self) -> Vector<Arc<str>> {
+    /// Iterates buffer lines.
+    pub fn lines(&self) -> impl Iterator<Item = LineTextRef<'_>> + '_ {
+        self.lines.lines()
+    }
+
+    /// Returns a snapshot of the buffer text.
+    pub fn text_snapshot(&self) -> LineText {
         self.lines.clone()
     }
 
     /// Replaces the full buffer contents and refreshes syntax state once.
     pub fn replace_text(&mut self, text: &str) {
-        self.lines = if text.is_empty() {
-            Vector::unit(Arc::from(""))
-        } else {
-            text.lines().map(Arc::from).collect::<Vector<_>>()
-        };
+        self.lines.replace_text(text);
         let syntax_name = self.buffer_cache.syntax_name().to_owned();
         self.buffer_cache = BufferCache::new(syntax_name);
         self.syntax_generation = self.syntax_generation.wrapping_add(1);
@@ -400,9 +401,10 @@ impl Buffer {
     }
 
     fn refresh_syntax(&mut self) {
+        let first_line = self.lines.line(0);
         let new_syntax_name = crate::syntax::resolve_builtin_syntax(
             self.path.as_ref().map(|path| path.as_path()),
-            self.lines.get(0).map(|line| line.as_ref()),
+            first_line.as_ref().and_then(|line| line.contiguous_text()),
         )
         .unwrap_or_else(|| smol_str::SmolStr::new(crate::syntax::fallback_syntax_name()));
 

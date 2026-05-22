@@ -3,6 +3,7 @@
 use crate::background::{JobContext, JobEvent, JobKind, JobPayload, JobToken};
 use crate::buffer::Buffer;
 use crate::buffer::BufferId;
+use crate::buffer::{LineText, TextRef, TextSnapshot};
 use crate::globals;
 use crate::syntax::{
     ContextControl, InjectedSyntaxFallback, InjectedSyntaxSelector, SyntaxDefinition, SyntaxRule,
@@ -127,11 +128,11 @@ impl SyntaxCache {
     pub fn spans_for_line(
         &mut self,
         syntax_name: &str,
-        line_texts: &Vector<Arc<str>>,
+        line_texts: &LineText,
         line: usize,
     ) -> Option<Vec<SyntaxSpan>> {
         self.set_syntax_name(syntax_name);
-        if line >= line_texts.len() {
+        if line >= line_texts.line_count() {
             return None;
         }
 
@@ -140,14 +141,14 @@ impl SyntaxCache {
     }
 
     /// Ensures syntax data exists through the requested line.
-    fn ensure_through(&mut self, syntax_name: &str, line_texts: &Vector<Arc<str>>, line: usize) {
+    fn ensure_through(&mut self, syntax_name: &str, line_texts: &LineText, line: usize) {
         self.ensure_through_with(syntax_name, line_texts, line, || true);
     }
 
     fn ensure_through_with<F>(
         &mut self,
         syntax_name: &str,
-        line_texts: &Vector<Arc<str>>,
+        line_texts: &LineText,
         line: usize,
         mut should_continue: F,
     ) where
@@ -155,15 +156,15 @@ impl SyntaxCache {
     {
         self.set_syntax_name(syntax_name);
 
-        if line_texts.is_empty() {
+        if line_texts.line_count() == 0 {
             self.lines = Vector::new();
             self.clear_dirty_suffix();
             return;
         }
 
-        let target_line = line.min(line_texts.len().saturating_sub(1));
-        if self.lines.len() > line_texts.len() {
-            self.lines.truncate(line_texts.len());
+        let target_line = line.min(line_texts.line_count().saturating_sub(1));
+        if self.lines.len() > line_texts.line_count() {
+            self.lines.truncate(line_texts.line_count());
         }
 
         if target_line < self.lines.len() {
@@ -179,6 +180,7 @@ impl SyntaxCache {
             .map(|line| line.state.clone())
             .unwrap_or_default();
         let mut current_line = self.lines.len();
+        let mut scratch = String::new();
 
         while current_line <= target_line {
             if !should_continue() {
@@ -188,10 +190,11 @@ impl SyntaxCache {
                 return;
             }
 
-            let line_text = line_texts[current_line].as_ref();
+            let line_ref = line_texts.line(current_line).expect("target line exists");
+            let line_text = line_ref.contiguous_text_with_scratch(&mut scratch);
             let (spans, next_state) = tokenize_line(syntax_name, line_text, state);
             self.lines.push_back(SyntaxLine::new(
-                line_texts[current_line].clone(),
+                Arc::from(line_text),
                 spans,
                 next_state.clone(),
             ));
@@ -214,7 +217,7 @@ impl SyntaxCache {
             current_line += 1;
         }
 
-        if target_line == line_texts.len() - 1 {
+        if target_line == line_texts.line_count() - 1 {
             self.clear_dirty_suffix();
         } else {
             self.dirty_suffix = dirty_suffix;
@@ -391,11 +394,11 @@ impl IndentScopeCache {
 
     pub(crate) fn ensure_through(
         &mut self,
-        line_texts: &Vector<Arc<str>>,
+        line_texts: &LineText,
         target_line: usize,
         tab_width: usize,
     ) -> bool {
-        if line_texts.is_empty() {
+        if line_texts.line_count() == 0 {
             self.scanned_through_line = 0;
             self.open_scope_stack = Vector::new();
             self.stale = false;
@@ -403,28 +406,24 @@ impl IndentScopeCache {
         }
 
         let normalized_tab_width = tab_width.max(1);
-        let target_line = target_line.min(line_texts.len() - 1);
+        let target_line = target_line.min(line_texts.line_count() - 1);
         if target_line < self.scanned_through_line {
-            return self.scanned_through_line >= line_texts.len();
+            return self.scanned_through_line >= line_texts.line_count();
         }
 
-        if self.line_to_scopes.len() > line_texts.len() {
-            self.line_to_scopes.truncate(line_texts.len());
+        if self.line_to_scopes.len() > line_texts.line_count() {
+            self.line_to_scopes.truncate(line_texts.line_count());
         }
 
-        for (line_idx, line_text) in line_texts
-            .iter()
-            .enumerate()
-            .take(target_line + 1)
-            .skip(self.scanned_through_line)
-        {
+        for line_idx in self.scanned_through_line..=target_line {
+            let line_text = line_texts.line(line_idx).expect("target line exists");
             self.ensure_row_for_line(line_idx);
             // Empty lines should not open or close scopes; they inherit the current stack.
             if line_text.is_empty() {
                 self.commit_row(line_idx, self.open_scope_stack.clone());
                 continue;
             }
-            let indent_width = leading_indent_width(line_text, normalized_tab_width);
+            let indent_width = leading_indent_width(&line_text, normalized_tab_width);
             let mut invalid_branch_start = None;
             let mut closed_scope_on_line = None;
 
@@ -481,7 +480,7 @@ impl IndentScopeCache {
         }
 
         self.scanned_through_line = target_line + 1;
-        if target_line == line_texts.len() - 1 {
+        if target_line == line_texts.line_count() - 1 {
             self.finalize_to_eof(line_texts);
             self.stale = false;
             return true;
@@ -562,12 +561,12 @@ impl IndentScopeCache {
         }
     }
 
-    fn finalize_to_eof(&mut self, line_texts: &Vector<Arc<str>>) {
-        if line_texts.is_empty() {
+    fn finalize_to_eof(&mut self, line_texts: &LineText) {
+        if line_texts.line_count() == 0 {
             return;
         }
 
-        let last_line = line_texts.len() - 1;
+        let last_line = line_texts.line_count() - 1;
         while let Some(&scope_id) = self.open_scope_stack.last() {
             if self.close_scope_line(scope_id, last_line) {
                 self.open_scope_stack.pop_back();
@@ -684,7 +683,7 @@ impl BufferCache {
     pub fn spans_for_line(
         &mut self,
         syntax_name: &str,
-        line_texts: &Vector<Arc<str>>,
+        line_texts: &LineText,
         line: usize,
     ) -> Option<Vec<SyntaxSpan>> {
         self.syntax_cache
@@ -692,12 +691,7 @@ impl BufferCache {
     }
 
     /// Ensures syntax and indent cache data exists through the requested line.
-    pub fn ensure_through(
-        &mut self,
-        syntax_name: &str,
-        line_texts: &Vector<Arc<str>>,
-        line: usize,
-    ) {
+    pub fn ensure_through(&mut self, syntax_name: &str, line_texts: &LineText, line: usize) {
         self.ensure_through_with_budget(
             syntax_name,
             line_texts,
@@ -709,7 +703,7 @@ impl BufferCache {
     fn ensure_syntax_through_with_budget(
         &mut self,
         syntax_name: &str,
-        line_texts: &Vector<Arc<str>>,
+        line_texts: &LineText,
         line: usize,
         budget: std::time::Duration,
     ) {
@@ -720,12 +714,12 @@ impl BufferCache {
             });
     }
 
-    fn ensure_indent_through(&mut self, line_texts: &Vector<Arc<str>>, line: usize) {
-        if line_texts.is_empty() {
+    fn ensure_indent_through(&mut self, line_texts: &LineText, line: usize) {
+        if line_texts.line_count() == 0 {
             return;
         }
 
-        let target_line = line.min(line_texts.len().saturating_sub(1));
+        let target_line = line.min(line_texts.line_count().saturating_sub(1));
         let tab_width = globals::with_config(|config| config.tab_width)
             .unwrap_or(4)
             .max(1);
@@ -736,7 +730,7 @@ impl BufferCache {
     fn ensure_through_with_budget(
         &mut self,
         syntax_name: &str,
-        line_texts: &Vector<Arc<str>>,
+        line_texts: &LineText,
         line: usize,
         budget: std::time::Duration,
     ) {
@@ -760,8 +754,9 @@ impl BufferCache {
     }
 }
 
-fn leading_indent_width(line: &str, tab_width: usize) -> usize {
-    line.chars()
+fn leading_indent_width(line: &impl TextRef, tab_width: usize) -> usize {
+    line.char_indices()
+        .map(|(_, ch)| ch)
         .take_while(|ch| matches!(*ch, ' ' | '\t'))
         .fold(0, |acc, ch| acc + if ch == '\t' { tab_width } else { 1 })
 }
@@ -773,7 +768,7 @@ pub struct SyntaxRefreshJob {
     generation: u64,
     syntax_name: SmolStr,
     cache: SyntaxCache,
-    line_texts: Vector<Arc<str>>,
+    line_texts: LineText,
 }
 
 impl SyntaxRefreshJob {
@@ -782,7 +777,7 @@ impl SyntaxRefreshJob {
         generation: u64,
         syntax_name: SmolStr,
         cache: SyntaxCache,
-        line_texts: Vector<Arc<str>>,
+        line_texts: LineText,
     ) -> Self {
         Self {
             buffer_id,
@@ -796,7 +791,7 @@ impl SyntaxRefreshJob {
     /// Runs the syntax refresh job on the worker thread.
     pub fn run(mut self, context: &JobContext, event_tx: &std::sync::mpsc::Sender<JobEvent>) {
         if !self.line_texts.is_empty() {
-            let target_line = self.line_texts.len() - 1;
+            let target_line = self.line_texts.line_count() - 1;
             self.cache.ensure_through_with(
                 &self.syntax_name,
                 &self.line_texts,
@@ -834,7 +829,7 @@ pub struct IndentScopeRefreshJob {
     buffer_id: BufferId,
     generation: u64,
     cache: IndentScopeCache,
-    line_texts: Vector<Arc<str>>,
+    line_texts: LineText,
 }
 
 impl IndentScopeRefreshJob {
@@ -842,7 +837,7 @@ impl IndentScopeRefreshJob {
         buffer_id: BufferId,
         generation: u64,
         cache: IndentScopeCache,
-        line_texts: Vector<Arc<str>>,
+        line_texts: LineText,
     ) -> Self {
         Self {
             buffer_id,
@@ -855,7 +850,7 @@ impl IndentScopeRefreshJob {
     /// Runs the indent scope refresh job on the worker thread.
     pub fn run(mut self, context: &JobContext, event_tx: &std::sync::mpsc::Sender<JobEvent>) {
         if !self.line_texts.is_empty() {
-            let target_line = self.line_texts.len() - 1;
+            let target_line = self.line_texts.line_count() - 1;
             let tab_width = globals::with_config(|config| config.tab_width)
                 .unwrap_or(4)
                 .max(1);
@@ -1817,44 +1812,40 @@ mod tests {
 
     #[test]
     fn budgeted_syntax_refresh_can_stop_before_eof() {
-        let lines: Vector<Arc<str>> =
+        let lines = LineText::from_text(
             std::iter::repeat_n("fn main() { let value = Some(\"hi\"); }", 64)
-                .map(Arc::from)
-                .collect();
+                .collect::<Vec<_>>()
+                .join("\n")
+                .as_str(),
+        );
         let mut cache = SyntaxCache::new("rust");
 
-        cache.ensure_through("rust", &lines, lines.len() - 1);
-        assert!(cache.is_complete_for_line_count(lines.len()));
+        cache.ensure_through("rust", &lines, lines.line_count() - 1);
+        assert!(cache.is_complete_for_line_count(lines.line_count()));
 
         cache.invalidate_from(1, 0);
-        cache.ensure_through_with("rust", &lines, lines.len() - 1, || false);
+        cache.ensure_through_with("rust", &lines, lines.line_count() - 1, || false);
 
         assert_eq!(cache.cached_line_count(), 1);
-        assert!(!cache.is_complete_for_line_count(lines.len()));
+        assert!(!cache.is_complete_for_line_count(lines.line_count()));
     }
 
     #[test]
     fn syntax_cache_stops_when_dirty_suffix_reconverges() {
-        let original: Vector<Arc<str>> = ["value = \"\"\"hello", "planet", "world\"\"\"", "after"]
-            .into_iter()
-            .map(Arc::from)
-            .collect();
-        let edited: Vector<Arc<str>> = ["value = \"\"\"hello", "galaxy", "world\"\"\"", "after"]
-            .into_iter()
-            .map(Arc::from)
-            .collect();
+        let original = LineText::from_text("value = \"\"\"hello\nplanet\nworld\"\"\"\nafter");
+        let edited = LineText::from_text("value = \"\"\"hello\ngalaxy\nworld\"\"\"\nafter");
         let mut cache = SyntaxCache::new("toml");
 
-        cache.ensure_through("toml", &original, original.len() - 1);
-        assert!(cache.is_complete_for_line_count(original.len()));
+        cache.ensure_through("toml", &original, original.line_count() - 1);
+        assert!(cache.is_complete_for_line_count(original.line_count()));
 
         cache.invalidate_from(1, 0);
-        assert!(!cache.is_complete_for_line_count(original.len()));
+        assert!(!cache.is_complete_for_line_count(original.line_count()));
 
         cache.ensure_through("toml", &edited, 2);
 
-        assert!(cache.is_complete_for_line_count(edited.len()));
-        assert_eq!(cache.cached_line_count(), edited.len());
+        assert!(cache.is_complete_for_line_count(edited.line_count()));
+        assert_eq!(cache.cached_line_count(), edited.line_count());
         assert!(cache.cached_spans_for_line(3).is_some());
     }
 

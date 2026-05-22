@@ -3,8 +3,7 @@
 //! This module provides functionality to find matching brackets (parentheses,
 //! square brackets, and curly braces) for the percent key motion.
 
-use crate::buffer::{Buffer, Cursor};
-use unicode_segmentation::UnicodeSegmentation;
+use crate::buffer::{Buffer, Cursor, TextRef};
 
 /// Mapping from opening brackets to their matching closing brackets.
 const OPENING_BRACKETS: &[(char, char)] = &[('(', ')'), ('[', ']'), ('{', '}')];
@@ -36,14 +35,7 @@ const CLOSING_BRACKETS: &[(char, char)] = &[(')', '('), (']', '['), ('}', '{')];
 /// ```
 pub fn find_matching_bracket(buffer: &Buffer, cursor: Cursor) -> Option<Cursor> {
     let line = buffer.line_at(cursor.line)?;
-    let line_str = line.as_ref();
-
-    // Get the grapheme at cursor.col (byte offset)
-    // cursor.col is a byte offset, not a char index, so we use grapheme_indices
-    let ch = line_str[cursor.col..]
-        .grapheme_indices(true)
-        .next()
-        .and_then(|(_, g)| g.chars().next())?;
+    let ch = line.char_at(cursor.col)?;
 
     // Check if it's an opening bracket
     for (open, close) in OPENING_BRACKETS {
@@ -77,7 +69,6 @@ fn find_matching_forward(
 
     while line_idx < total_lines {
         let line = buffer.line_at(line_idx)?;
-        let line_str = line.as_ref();
 
         // On the first line, start searching after the opening bracket
         // On subsequent lines, search from the beginning of the line
@@ -87,29 +78,17 @@ fn find_matching_forward(
             0
         };
 
-        let search_range = line_str[search_start..].grapheme_indices(true);
-
-        // Track absolute byte offset as we iterate
-        let base_offset = if line_idx == start.line {
-            search_start
-        } else {
-            0
-        };
-
-        for (rel_offset, grapheme) in search_range {
-            let abs_byte_offset = base_offset + rel_offset;
-
-            // Check if this grapheme starts with open or close bracket
-            // (brackets are ASCII, so checking first char is sufficient)
-            if let Some(ch) = grapheme.chars().next() {
-                if ch == open {
-                    depth += 1;
-                } else if ch == close {
-                    if depth == 0 {
-                        return Some(Cursor::new(line_idx, abs_byte_offset));
-                    }
-                    depth -= 1;
+        for (byte_offset, ch) in line.char_indices() {
+            if byte_offset < search_start {
+                continue;
+            }
+            if ch == open {
+                depth += 1;
+            } else if ch == close {
+                if depth == 0 {
+                    return Some(Cursor::new(line_idx, byte_offset));
                 }
+                depth -= 1;
             }
         }
 
@@ -137,7 +116,6 @@ fn find_matching_backward(
     while line_idx > 0 || search_end > 0 {
         // Get the line to search
         let line = buffer.line_at(line_idx)?;
-        let line_str = line.as_ref();
 
         // On the first iteration (start line), search before start.col
         // On subsequent iterations (previous lines), search from end of line
@@ -145,23 +123,20 @@ fn find_matching_backward(
             search_end
         } else {
             // After moving to previous line, search from end of that line
-            line_str.len()
+            line.len()
         };
 
-        // Use reversed grapheme iterator to search backward
-        for (rel_offset, grapheme) in line_str[..current_search_end].grapheme_indices(true).rev() {
-            let abs_byte_offset = rel_offset;
-
-            if let Some(ch) = grapheme.chars().next() {
-                if ch == close {
-                    depth += 1;
-                } else if ch == open {
-                    if depth == 0 {
-                        return Some(Cursor::new(line_idx, abs_byte_offset));
-                    }
-                    depth -= 1;
+        let mut byte_idx = current_search_end;
+        while let Some((byte_offset, ch)) = line.previous_char(byte_idx) {
+            if ch == close {
+                depth += 1;
+            } else if ch == open {
+                if depth == 0 {
+                    return Some(Cursor::new(line_idx, byte_offset));
                 }
+                depth -= 1;
             }
+            byte_idx = byte_offset;
         }
 
         // Move to previous line for next iteration

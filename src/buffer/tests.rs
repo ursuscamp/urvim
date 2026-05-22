@@ -296,19 +296,13 @@ fn test_toggle_line_comment_comments_and_uncomments() {
     let cursor = buf
         .toggle_line_comment(Cursor::new(0, 0), &prefix)
         .expect("toggle should comment the line");
-    assert_eq!(
-        buf.line_at(0).map(|line| line.as_ref()),
-        Some("// fn main() {}")
-    );
+    assert_eq!(buf.test_line_str(0).as_deref(), Some("// fn main() {}"));
     assert_eq!(cursor, Cursor::new(0, 3));
 
     let cursor = buf
         .toggle_line_comment(cursor, &prefix)
         .expect("toggle should uncomment the line");
-    assert_eq!(
-        buf.line_at(0).map(|line| line.as_ref()),
-        Some("fn main() {}")
-    );
+    assert_eq!(buf.test_line_str(0).as_deref(), Some("fn main() {}"));
     assert_eq!(cursor, Cursor::new(0, 0));
 }
 
@@ -325,7 +319,7 @@ fn test_toggle_line_comment_preserves_indentation() {
         .toggle_line_comment(Cursor::new(0, 4), &prefix)
         .expect("toggle should comment the indented line");
     assert_eq!(
-        buf.line_at(0).map(|line| line.as_ref()),
+        buf.test_line_str(0).as_deref(),
         Some("    # print('hello')")
     );
     assert_eq!(cursor, Cursor::new(0, 6));
@@ -343,14 +337,8 @@ fn test_toggle_line_comment_aligns_to_minimum_column_across_range() {
     let cursor = buf
         .toggle_line_comments(Cursor::new(0, 0), 2, &prefix)
         .expect("toggle should comment the range");
-    assert_eq!(
-        buf.line_at(0).map(|line| line.as_ref()),
-        Some("  // fn a() {}")
-    );
-    assert_eq!(
-        buf.line_at(1).map(|line| line.as_ref()),
-        Some("  //   fn b() {}")
-    );
+    assert_eq!(buf.test_line_str(0).as_deref(), Some("  // fn a() {}"));
+    assert_eq!(buf.test_line_str(1).as_deref(), Some("  //   fn b() {}"));
     assert_eq!(cursor, Cursor::new(0, 0));
 }
 
@@ -366,9 +354,9 @@ fn test_toggle_line_comment_skips_blank_lines() {
     let cursor = buf
         .toggle_line_comments(Cursor::new(0, 0), 2, &prefix)
         .expect("toggle should succeed");
-    assert_eq!(buf.line_at(0).map(|line| line.as_ref()), Some(""));
+    assert_eq!(buf.test_line_str(0).as_deref(), Some(""));
     assert_eq!(
-        buf.line_at(1).map(|line| line.as_ref()),
+        buf.test_line_str(1).as_deref(),
         Some("    # print('hello')")
     );
     assert_eq!(cursor, Cursor::new(0, 0));
@@ -530,9 +518,9 @@ fn test_line_count_empty() {
 #[test]
 fn test_line_at() {
     let buf = Buffer::from_str("line1\nline2\nline3");
-    assert_eq!(buf.line_at(0).map(|s| s.as_ref() as &str), Some("line1"));
-    assert_eq!(buf.line_at(1).map(|s| s.as_ref() as &str), Some("line2"));
-    assert_eq!(buf.line_at(2).map(|s| s.as_ref() as &str), Some("line3"));
+    assert_eq!(buf.test_line_str(0).as_deref(), Some("line1"));
+    assert_eq!(buf.test_line_str(1).as_deref(), Some("line2"));
+    assert_eq!(buf.test_line_str(2).as_deref(), Some("line3"));
 }
 
 #[test]
@@ -544,7 +532,7 @@ fn test_line_at_out_of_bounds() {
 #[test]
 fn test_line_grapheme_len() {
     let buf = Buffer::from_str("a😀c\n");
-    assert_eq!(buf.line_at(0).map(|s| str_width(s.as_ref())), Some(4));
+    assert_eq!(buf.line_at(0).map(|s| str_width(&s.to_text())), Some(4));
 }
 
 #[test]
@@ -1554,7 +1542,10 @@ fn test_rust_fixture_format_strings_follow_std_fmt_rules() {
     let escaped = buf
         .syntax_spans_for_line(26)
         .expect("escaped format line should exist");
-    let escaped_line = buf.line_at(26).expect("escaped format line should exist");
+    let escaped_line = buf
+        .line_at(26)
+        .expect("escaped format line should exist")
+        .to_text();
     let escaped_body_start = escaped_line.find('"').expect("opening quote should exist") + 1;
     let escaped_body_end = escaped_line.rfind('"').expect("closing quote should exist");
     let escaped_body = escaped
@@ -1663,9 +1654,9 @@ fn test_save_buffer_without_path_is_rejected() {
 fn test_multiline_with_empty_lines() {
     let buf = Buffer::from_str("a\n\nb");
     assert_eq!(buf.line_count(), 3);
-    assert_eq!(buf.line_at(0).map(|s| s.as_ref() as &str), Some("a"));
-    assert_eq!(buf.line_at(1).map(|s| s.as_ref() as &str), Some(""));
-    assert_eq!(buf.line_at(2).map(|s| s.as_ref() as &str), Some("b"));
+    assert_eq!(buf.test_line_str(0).as_deref(), Some("a"));
+    assert_eq!(buf.test_line_str(1).as_deref(), Some(""));
+    assert_eq!(buf.test_line_str(2).as_deref(), Some("b"));
 }
 
 #[test]

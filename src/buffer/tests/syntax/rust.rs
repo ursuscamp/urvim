@@ -159,7 +159,10 @@ fn test_rust_fixture_format_strings_follow_std_fmt_rules() {
     let escaped = buf
         .syntax_spans_for_line(26)
         .expect("escaped format line should exist");
-    let escaped_line = buf.line_at(26).expect("escaped format line should exist");
+    let escaped_line = buf
+        .line_at(26)
+        .expect("escaped format line should exist")
+        .to_text();
     let escaped_body_start = escaped_line.find('"').expect("opening quote should exist") + 1;
     let escaped_body_end = escaped_line.rfind('"').expect("closing quote should exist");
     let escaped_body = escaped
@@ -207,7 +210,10 @@ fn test_rust_format_string_keeps_capitalized_text_as_string() {
     let spans = buf
         .syntax_spans_for_line(24)
         .expect("format string line should exist");
-    let line = buf.line_at(24).expect("format string line should exist");
+    let line = buf
+        .line_at(24)
+        .expect("format string line should exist")
+        .to_text();
     let hello_start = line.find("Hello").expect("capitalized text should exist");
     let hello_end = hello_start + "Hello".len();
 

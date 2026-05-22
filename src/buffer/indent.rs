@@ -14,8 +14,12 @@ pub enum IndentDirection {
 impl Buffer {
     /// Returns the leading whitespace prefix for the given line, even if the line is blank.
     pub fn line_leading_whitespace_prefix(&self, line_idx: usize) -> Option<String> {
-        let line = self.line_at(line_idx)?.as_ref();
-        let prefix: String = line.chars().take_while(|ch| ch.is_whitespace()).collect();
+        let line = self.line_at(line_idx)?;
+        let prefix: String = line
+            .char_indices()
+            .map(|(_, ch)| ch)
+            .take_while(|ch| ch.is_whitespace())
+            .collect();
         Some(prefix)
     }
 
@@ -65,12 +69,8 @@ impl Buffer {
 
     /// Removes one indentation step from the start of the line and returns the removed byte length.
     pub fn decrease_line_indentation(&mut self, line_idx: usize) -> Option<usize> {
-        let line = self.line_at(line_idx)?.as_ref();
-        let prefix = line
-            .chars()
-            .take_while(|ch| ch.is_whitespace())
-            .collect::<String>();
-        let remove_len = indentation_step_prefix_byte_len(&prefix);
+        let line = self.line_at(line_idx)?;
+        let remove_len = indentation_step_prefix_byte_len(&line);
         if remove_len > 0 {
             self.remove(Cursor::new(line_idx, 0), Cursor::new(line_idx, remove_len));
         }
@@ -91,10 +91,10 @@ impl Buffer {
 
         let consider =
             |line_idx: usize, order: usize, best: &mut Option<(usize, usize, String)>| {
-                let Some(line) = self.line_at(line_idx).map(|line| line.as_ref()) else {
+                let Some(line) = self.line_at(line_idx) else {
                     return;
                 };
-                let Some((prefix, width)) = leading_whitespace_prefix(line) else {
+                let Some((prefix, width)) = leading_whitespace_prefix(&line) else {
                     return;
                 };
 
@@ -122,12 +122,15 @@ impl Buffer {
     }
 }
 
-fn indentation_step_prefix_byte_len(prefix: &str) -> usize {
+fn indentation_step_prefix_byte_len(line: &impl TextRef) -> usize {
     let step_width = crate::buffer::configured_tab_width().max(1);
     let mut removed_width = 0;
     let mut removed_bytes = 0;
 
-    for (byte_idx, ch) in prefix.char_indices() {
+    for (byte_idx, ch) in line.char_indices() {
+        if !ch.is_whitespace() {
+            break;
+        }
         let ch_width = if ch == '\t' {
             step_width
         } else {
@@ -154,14 +157,15 @@ fn leading_whitespace_width(prefix: &str) -> usize {
     })
 }
 
-fn leading_whitespace_prefix(line: &str) -> Option<(String, usize)> {
-    if line.chars().all(|ch| ch.is_whitespace()) {
+fn leading_whitespace_prefix(line: &impl TextRef) -> Option<(String, usize)> {
+    if line.char_indices().all(|(_, ch)| ch.is_whitespace()) {
         return None;
     }
 
     let tab_width = configured_tab_width().max(1);
     let prefix = line
-        .chars()
+        .char_indices()
+        .map(|(_, ch)| ch)
         .take_while(|ch| matches!(ch, ' ' | '\t'))
         .collect::<String>();
     let width = prefix

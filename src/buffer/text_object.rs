@@ -1,5 +1,4 @@
 use super::*;
-
 type GraphemePredicate = fn(&str) -> bool;
 
 impl Buffer {
@@ -61,15 +60,14 @@ impl Buffer {
         token_predicate: GraphemePredicate,
     ) -> Option<TextObjectRange> {
         let line = self.line_at(cursor.line)?;
-        let line_str = line.as_ref();
         let cursor_grapheme = self.grapheme_at_byte(cursor.line, cursor.col);
-        let region_predicate = if cursor_grapheme.is_none_or(token_predicate) {
+        let region_predicate = if cursor_grapheme.as_deref().is_none_or(token_predicate) {
             token_predicate
         } else {
             Self::is_whitespace_char
         };
-        let start = self.expand_left_matching(line_str, cursor.col, region_predicate);
-        let end = self.expand_right_matching(line_str, cursor.col, region_predicate);
+        let start = self.expand_left_matching(line, cursor.col, region_predicate);
+        let end = self.expand_right_matching(line, cursor.col, region_predicate);
         Some(TextObjectRange {
             start: Cursor::new(cursor.line, start),
             end: Cursor::new(cursor.line, end),
@@ -83,14 +81,13 @@ impl Buffer {
         inner_resolver: fn(&Self, Cursor) -> Option<TextObjectRange>,
     ) -> Option<TextObjectRange> {
         let line = self.line_at(cursor.line)?;
-        let line_str = line.as_ref();
         let cursor_grapheme = self.grapheme_at_byte(cursor.line, cursor.col);
 
-        if cursor_grapheme.is_none_or(token_predicate) {
+        if cursor_grapheme.as_deref().is_none_or(token_predicate) {
             // Around-text-objects on a token are just the inner selection plus
             // any immediately trailing whitespace.
             let inner = inner_resolver(self, cursor)?;
-            let end = self.expand_right_matching(line_str, inner.end.col, Self::is_whitespace_char);
+            let end = self.expand_right_matching(line, inner.end.col, Self::is_whitespace_char);
             return Some(TextObjectRange {
                 start: inner.start,
                 end: Cursor::new(cursor.line, end),
@@ -101,10 +98,9 @@ impl Buffer {
         // logical object after it. For `aw`, punctuation is a single object;
         // for `aW`, punctuation is part of the following BigWord.
         let whitespace_start =
-            self.expand_left_matching(line_str, cursor.col, Self::is_whitespace_char);
-        let whitespace_end =
-            self.expand_right_matching(line_str, cursor.col, Self::is_whitespace_char);
-        let end = self.end_after_whitespace_and_object(line_str, whitespace_end, token_predicate);
+            self.expand_left_matching(line, cursor.col, Self::is_whitespace_char);
+        let whitespace_end = self.expand_right_matching(line, cursor.col, Self::is_whitespace_char);
+        let end = self.end_after_whitespace_and_object(line, whitespace_end, token_predicate);
         Some(TextObjectRange {
             start: Cursor::new(cursor.line, whitespace_start),
             end: Cursor::new(cursor.line, end.max(whitespace_end)),
@@ -131,19 +127,19 @@ impl Buffer {
 
     fn expand_left_matching(
         &self,
-        line: &str,
+        line: impl TextRef,
         start_col: usize,
         predicate: GraphemePredicate,
     ) -> usize {
         let mut start = start_col;
         let mut col = start_col;
         while col > 0 {
-            let prev_col = self.prev_grapheme_start(line, col);
+            let prev_col = self.prev_grapheme_start(&line, col);
             if prev_col == col {
                 break;
             }
             col = prev_col;
-            if matches!(self.grapheme_at_col(line, col), Some(g) if predicate(g)) {
+            if matches!(line.grapheme_at(col), Some(g) if predicate(g.as_str())) {
                 start = col;
             } else {
                 break;
@@ -154,15 +150,15 @@ impl Buffer {
 
     fn expand_right_matching(
         &self,
-        line: &str,
+        line: impl TextRef,
         start_col: usize,
         predicate: GraphemePredicate,
     ) -> usize {
         let mut end = start_col;
         let mut col = start_col;
         while col < line.len() {
-            if let Some(g) = self.grapheme_at_col(line, col) {
-                if predicate(g) {
+            if let Some(g) = line.grapheme_at(col) {
+                if predicate(g.as_str()) {
                     end = col + g.len();
                     col = end;
                 } else {
@@ -177,12 +173,12 @@ impl Buffer {
 
     fn end_after_whitespace_and_object(
         &self,
-        line: &str,
+        line: impl TextRef,
         start_col: usize,
         token_predicate: GraphemePredicate,
     ) -> usize {
-        match self.grapheme_at_col(line, start_col) {
-            Some(g) if token_predicate(g) => {
+        match line.grapheme_at(start_col) {
+            Some(g) if token_predicate(g.as_str()) => {
                 self.expand_right_matching(line, start_col, token_predicate)
             }
             Some(g) => start_col + g.len(),
@@ -190,34 +186,24 @@ impl Buffer {
         }
     }
 
-    fn grapheme_at_col<'a>(&self, line: &'a str, col: usize) -> Option<&'a str> {
-        line.get(col..).and_then(|s| s.graphemes(true).next())
-    }
-
-    pub(super) fn prev_grapheme_start(&self, line: &str, byte_offset: usize) -> usize {
+    pub(super) fn prev_grapheme_start(&self, line: impl TextRef, byte_offset: usize) -> usize {
         if byte_offset == 0 {
             return 0;
         }
-        let mut prev_offset = 0;
-        for (byte_pos, _grapheme) in line.grapheme_indices(true) {
-            if byte_pos >= byte_offset {
-                break;
-            }
-            prev_offset = byte_pos;
-        }
-        prev_offset
+        line.previous_grapheme(byte_offset)
+            .map(|grapheme| grapheme.byte_idx())
+            .unwrap_or(0)
     }
 
     pub(super) fn next_non_whitespace_cursor(&self, cursor: Cursor) -> Option<Cursor> {
         let line = self.line_at(cursor.line)?;
-        let line_str = line.as_ref();
-        let mut col = cursor.col;
-        while col < line_str.len() {
-            let grapheme = line_str.get(col..).and_then(|s| s.graphemes(true).next())?;
-            if !Self::is_whitespace_char(grapheme) {
-                return Some(Cursor::new(cursor.line, col));
+        for grapheme in line.graphemes() {
+            if grapheme.byte_idx() < cursor.col {
+                continue;
             }
-            col += grapheme.len();
+            if !Self::is_whitespace_char(grapheme.as_str()) {
+                return Some(Cursor::new(cursor.line, grapheme.byte_idx()));
+            }
         }
         None
     }

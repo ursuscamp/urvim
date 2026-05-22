@@ -1,6 +1,6 @@
 //! LSP hover popup widget.
 
-use crate::buffer::Buffer;
+use crate::buffer::{Buffer, TextRef};
 use crate::config::WrapMode;
 use crate::path::AbsolutePath;
 use crate::screen::Screen;
@@ -114,11 +114,10 @@ impl HoverWidget {
         let line_count = self.buffer_view.with_buffer(|buffer| {
             let line_count = buffer.line_count();
             for line_idx in 0..line_count {
-                let line = buffer
-                    .line_at(line_idx)
-                    .map(|line| line.as_ref())
-                    .unwrap_or("");
-                max_width = max_width.max(UnicodeWidthStr::width(line));
+                if let Some(line) = buffer.line_at(line_idx) {
+                    let width = line.chunks().map(UnicodeWidthStr::width).sum::<usize>();
+                    max_width = max_width.max(width);
+                }
             }
             line_count
         })?;

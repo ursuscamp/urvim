@@ -58,7 +58,7 @@ fn test_cpp_printf_format_string_only_applies_to_first_string_argument() {
     );
 
     let spans = buf.syntax_spans_for_line(0).expect("line should exist");
-    let line = buf.line_at(0).expect("line should exist");
+    let line = buf.line_at(0).expect("line should exist").to_text();
 
     assert_spans_include_style(&spans, tag("function"));
     assert_spans_include_style(&spans, tag("punctuation"));
@@ -104,7 +104,7 @@ fn test_cpp_printf_format_string_keeps_plain_text_as_string() {
     let spans = buf
         .syntax_spans_for_line(18)
         .expect("printf line should exist");
-    let line = buf.line_at(18).expect("printf line should exist");
+    let line = buf.line_at(18).expect("printf line should exist").to_text();
     let value_start = line.find("value=").expect("printf body text should exist");
     let value_end = value_start + "value=".len();
 

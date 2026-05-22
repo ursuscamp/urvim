@@ -5,11 +5,11 @@ use smol_str::SmolStr;
 impl Buffer {
     /// Creates a new empty buffer.
     pub fn new() -> Self {
-        let lines: Vector<Arc<str>> = Vector::unit(Arc::from(""));
+        let lines = LineText::new_empty();
         let syntax_name = SmolStr::new(crate::syntax::fallback_syntax_name());
         let saved_lines = lines.clone();
         let undo_lines = lines.clone();
-        let markers = MarkersStore::with_line_count(lines.len());
+        let markers = MarkersStore::with_line_count(lines.line_count());
         Self {
             lines,
             saved_lines,
@@ -32,17 +32,16 @@ impl Buffer {
 
     /// Creates a buffer from a string slice.
     pub fn new_from_str(text: &str) -> Self {
-        let lines: Vector<Arc<str>> = if text.is_empty() {
-            Vector::unit(Arc::from(""))
-        } else {
-            text.lines().map(Arc::from).collect::<Vector<_>>()
-        };
-        let syntax_name =
-            crate::syntax::resolve_builtin_syntax(None, lines.get(0).map(|line| line.as_ref()))
-                .unwrap_or_else(|| SmolStr::new(crate::syntax::fallback_syntax_name()));
+        let lines = LineText::from_text(text);
+        let first_line = lines.line(0);
+        let syntax_name = crate::syntax::resolve_builtin_syntax(
+            None,
+            first_line.as_ref().and_then(|line| line.contiguous_text()),
+        )
+        .unwrap_or_else(|| SmolStr::new(crate::syntax::fallback_syntax_name()));
         let saved_lines = lines.clone();
         let undo_lines = lines.clone();
-        let markers = MarkersStore::with_line_count(lines.len());
+        let markers = MarkersStore::with_line_count(lines.line_count());
         Self {
             lines,
             saved_lines,
@@ -70,15 +69,16 @@ impl Buffer {
     }
 
     pub fn with_path(path: AbsolutePath) -> Self {
-        let lines: Vector<Arc<str>> = Vector::unit(Arc::from(""));
+        let lines = LineText::new_empty();
+        let first_line = lines.line(0);
         let syntax_name = crate::syntax::resolve_builtin_syntax(
             Some(path.as_path()),
-            lines.get(0).map(|line| line.as_ref()),
+            first_line.as_ref().and_then(|line| line.contiguous_text()),
         )
         .unwrap_or_else(|| SmolStr::new(crate::syntax::fallback_syntax_name()));
         let saved_lines = lines.clone();
         let undo_lines = lines.clone();
-        let markers = MarkersStore::with_line_count(lines.len());
+        let markers = MarkersStore::with_line_count(lines.line_count());
         let buffer = Self {
             lines,
             saved_lines,

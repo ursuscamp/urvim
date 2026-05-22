@@ -28,7 +28,7 @@ impl Buffer {
         }
 
         let line_idx = cursor.line;
-        let total_lines = self.lines.len();
+        let total_lines = self.line_count();
         if line_idx >= total_lines {
             return None;
         }
@@ -38,21 +38,21 @@ impl Buffer {
         let mut uncomment = true;
 
         for current_line in line_idx..end_line {
-            let Some(line) = self.lines.get(current_line) else {
+            let Some(line) = self.line_at(current_line) else {
                 continue;
             };
-            let line = line.as_ref();
-            if line.trim().is_empty() {
+            if line.char_indices().all(|(_, ch)| ch.is_whitespace()) {
                 continue;
             }
 
-            let indent_end = leading_whitespace_end(line);
+            let indent_end = leading_whitespace_end(&line);
             target_column = Some(match target_column {
                 Some(existing) => existing.min(indent_end),
                 None => indent_end,
             });
 
-            if !line[indent_end..].starts_with(prefix) {
+            let remainder = line.range_text(indent_end, line.len()).unwrap_or_default();
+            if !remainder.starts_with(prefix) {
                 uncomment = false;
             }
         }
@@ -65,13 +65,13 @@ impl Buffer {
         let mut changed_any = false;
 
         for current_line in line_idx..end_line {
-            let Some(line) = self.lines.get(current_line) else {
+            let Some(line) = self.line_at(current_line) else {
                 continue;
             };
-            let line = line.as_ref().to_string();
-            if line.trim().is_empty() {
+            if line.char_indices().all(|(_, ch)| ch.is_whitespace()) {
                 continue;
             }
+            let line = line.to_text();
 
             let (new_line, cursor_col) = if uncomment {
                 toggle_comment_off(
@@ -107,7 +107,7 @@ impl Buffer {
     }
 }
 
-fn leading_whitespace_end(line: &str) -> usize {
+fn leading_whitespace_end(line: &impl TextRef) -> usize {
     line.char_indices()
         .find(|(_, ch)| !ch.is_whitespace())
         .map(|(idx, _)| idx)

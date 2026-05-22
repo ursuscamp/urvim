@@ -94,7 +94,8 @@ fn test_python_multiline_fstring_closing_brace_is_punctuation() {
         .expect("multiline f-string interpolation line should exist");
     let line = buf
         .line_at(25)
-        .expect("multiline f-string interpolation line should exist");
+        .expect("multiline f-string interpolation line should exist")
+        .to_text();
     let close_brace = line
         .rfind('}')
         .expect("interpolation close brace should exist");

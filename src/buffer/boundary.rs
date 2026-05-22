@@ -1,6 +1,32 @@
 use super::*;
 
 impl Buffer {
+    fn advance_while(
+        line: &impl TextRef,
+        mut col: usize,
+        predicate: impl Fn(&str) -> bool,
+    ) -> usize {
+        while col < line.len() {
+            let Some(grapheme) = line.next_grapheme(col) else {
+                break;
+            };
+            if grapheme.byte_idx() != col || !predicate(grapheme.as_str()) {
+                break;
+            }
+            col += grapheme.len();
+        }
+        col
+    }
+
+    fn grapheme_at_matches(
+        line: &impl TextRef,
+        col: usize,
+        predicate: impl Fn(&str) -> bool,
+    ) -> bool {
+        line.next_grapheme(col)
+            .is_some_and(|grapheme| grapheme.byte_idx() == col && predicate(grapheme.as_str()))
+    }
+
     /// Check if a grapheme is a word character (alphanumeric or underscore).
     pub fn is_word_char(grapheme: &str) -> bool {
         let mut chars = grapheme.chars();
@@ -34,26 +60,26 @@ impl Buffer {
         let next_grapheme = self.next_grapheme_at_or_after_byte(line_idx, col);
 
         match boundary {
-            Boundary::Word => match current_grapheme {
-                Some(g) if Self::is_word_char(g) => match prev_grapheme {
+            Boundary::Word => match current_grapheme.as_deref() {
+                Some(g) if Self::is_word_char(g) => match prev_grapheme.as_deref() {
                     Some(pg) => !Self::is_word_char(pg),
                     None => true,
                 },
                 Some(g) if !Self::is_word_char(g) && !Self::is_whitespace_char(g) => {
-                    match prev_grapheme {
+                    match prev_grapheme.as_deref() {
                         Some(pg) => Self::is_word_char(pg),
                         None => true,
                     }
                 }
                 _ => false,
             },
-            Boundary::WordEnd => match prev_grapheme {
-                Some(pg) if Self::is_word_char(pg) => match next_grapheme {
+            Boundary::WordEnd => match prev_grapheme.as_deref() {
+                Some(pg) if Self::is_word_char(pg) => match next_grapheme.as_deref() {
                     Some(ng) => !Self::is_word_char(ng),
                     None => true,
                 },
                 Some(pg) if !Self::is_word_char(pg) && !Self::is_whitespace_char(pg) => {
-                    match next_grapheme {
+                    match next_grapheme.as_deref() {
                         Some(ng) => {
                             Self::is_word_char(ng)
                                 || (!Self::is_word_char(ng) && !Self::is_whitespace_char(ng))
@@ -63,15 +89,15 @@ impl Buffer {
                 }
                 _ => false,
             },
-            Boundary::BigWord => match current_grapheme {
-                Some(g) if Self::is_bigword_char(g) => match prev_grapheme {
+            Boundary::BigWord => match current_grapheme.as_deref() {
+                Some(g) if Self::is_bigword_char(g) => match prev_grapheme.as_deref() {
                     Some(pg) => Self::is_whitespace_char(pg),
                     None => true,
                 },
                 _ => false,
             },
-            Boundary::BigWordEnd => match prev_grapheme {
-                Some(pg) if Self::is_bigword_char(pg) => match next_grapheme {
+            Boundary::BigWordEnd => match prev_grapheme.as_deref() {
+                Some(pg) if Self::is_bigword_char(pg) => match next_grapheme.as_deref() {
                     Some(ng) => Self::is_whitespace_char(ng),
                     None => true,
                 },
@@ -110,8 +136,7 @@ impl Buffer {
                 None => break,
             };
 
-            let line_str = line.as_ref();
-            let line_len = line_str.len();
+            let line_len = line.len();
 
             // Skip empty lines
             if line_len == 0 {
@@ -125,8 +150,7 @@ impl Buffer {
                 // Wrapping to new line - first check if we're at start of a word
                 // (this handles the case where a line starts with a word without leading whitespace)
                 if col == 0 && line_len > 0 {
-                    let g = line_str.get(0..).and_then(|s| s.graphemes(true).next());
-                    if matches!(g, Some(gg) if Self::is_word_char(gg)) {
+                    if Self::grapheme_at_matches(&line, 0, Self::is_word_char) {
                         return Some(Cursor::new(line_idx, 0));
                     }
                 }
@@ -141,37 +165,21 @@ impl Buffer {
                     let mut check_col = col;
 
                     // Check if we started at a word character
-                    let started_at_word_char = if col < line_len {
-                        let g = line_str.get(col..).and_then(|s| s.graphemes(true).next());
-                        matches!(g, Some(gg) if Self::is_word_char(gg))
-                    } else {
-                        false
-                    };
+                    let started_at_word_char =
+                        col < line_len && Self::grapheme_at_matches(&line, col, Self::is_word_char);
 
                     // If we're at a word char, skip to end of it
-                    while check_col < line_len {
-                        let g = line_str
-                            .get(check_col..)
-                            .and_then(|s| s.graphemes(true).next());
-                        match g {
-                            Some(gg) if Self::is_word_char(gg) => {
-                                check_col += gg.len();
-                            }
-                            _ => break,
-                        }
-                    }
+                    check_col = Self::advance_while(&line, check_col, Self::is_word_char);
 
                     // Now we're past the current word (or at the end of line)
                     // Check if the next character is a non-word, non-whitespace character (e.g., "---")
                     // If we came FROM a word, this is a boundary - return the position
                     // If we started at a non-word, skip through and find the next boundary
                     if check_col < line_len {
-                        let g = line_str
-                            .get(check_col..)
-                            .and_then(|s| s.graphemes(true).next());
-                        if let Some(gg) = g
-                            && !Self::is_word_char(gg)
-                            && !Self::is_whitespace_char(gg)
+                        if let Some(gg) = line.next_grapheme(check_col)
+                            && gg.byte_idx() == check_col
+                            && !Self::is_word_char(gg.as_str())
+                            && !Self::is_whitespace_char(gg.as_str())
                         {
                             if started_at_word_char {
                                 // We came from a word - this non-word sequence is a separate word
@@ -179,38 +187,29 @@ impl Buffer {
                                 return Some(Cursor::new(line_idx, check_col));
                             } else {
                                 // We started at a non-word - skip through the sequence
-                                while check_col < line_len {
-                                    let g = line_str
-                                        .get(check_col..)
-                                        .and_then(|s| s.graphemes(true).next());
-                                    match g {
-                                        Some(gg)
-                                            if !Self::is_word_char(gg)
-                                                && !Self::is_whitespace_char(gg) =>
-                                        {
-                                            check_col += gg.len();
-                                        }
-                                        _ => break,
-                                    }
-                                }
+                                check_col = Self::advance_while(&line, check_col, |grapheme| {
+                                    !Self::is_word_char(grapheme)
+                                        && !Self::is_whitespace_char(grapheme)
+                                });
                             }
                         }
                     }
 
                     // Skip whitespace to find the next word
                     while check_col < line_len {
-                        let g = line_str
-                            .get(check_col..)
-                            .and_then(|s| s.graphemes(true).next());
-                        match g {
-                            Some(gg) if Self::is_word_char(gg) => {
+                        match line.next_grapheme(check_col) {
+                            Some(gg)
+                                if gg.byte_idx() == check_col
+                                    && Self::is_word_char(gg.as_str()) =>
+                            {
                                 // Found start of next word - return this position
                                 return Some(Cursor::new(line_idx, check_col));
                             }
-                            Some(gg) => {
+                            Some(gg) if gg.byte_idx() == check_col => {
                                 check_col += gg.len();
                             }
                             None => break,
+                            _ => break,
                         }
                     }
 
@@ -222,12 +221,9 @@ impl Buffer {
                     if line_idx < total_lines {
                         let next_line = self.line_at(line_idx);
                         if let Some(l) = next_line {
-                            let next_line_str = l.as_ref();
-                            if !next_line_str.is_empty() {
-                                let first_g = next_line_str.graphemes(true).next();
-                                if matches!(first_g, Some(g) if Self::is_word_char(g)) {
-                                    return Some(Cursor::new(line_idx, 0));
-                                }
+                            if !l.is_empty() && Self::grapheme_at_matches(&l, 0, Self::is_word_char)
+                            {
+                                return Some(Cursor::new(line_idx, 0));
                             }
                         }
                     }
@@ -241,41 +237,21 @@ impl Buffer {
                     let mut check_col = col;
 
                     // Check if we're on a word character
-                    let on_word_char = if check_col < line_len {
-                        let g = line_str
-                            .get(check_col..)
-                            .and_then(|s| s.graphemes(true).next());
-                        matches!(g, Some(gg) if Self::is_word_char(gg))
-                    } else {
-                        false
-                    };
+                    let on_word_char = check_col < line_len
+                        && Self::grapheme_at_matches(&line, check_col, Self::is_word_char);
 
                     // Check if we're on a non-word, non-whitespace character (e.g., "---")
-                    let on_non_word_non_ws = if check_col < line_len {
-                        let g = line_str
-                            .get(check_col..)
-                            .and_then(|s| s.graphemes(true).next());
-                        matches!(g, Some(gg) if !Self::is_word_char(gg) && !Self::is_whitespace_char(gg))
-                    } else {
-                        false
-                    };
+                    let on_non_word_non_ws = check_col < line_len
+                        && Self::grapheme_at_matches(&line, check_col, |grapheme| {
+                            !Self::is_word_char(grapheme) && !Self::is_whitespace_char(grapheme)
+                        });
 
                     if on_non_word_non_ws {
                         // We're at a non-word, non-whitespace char - find its end
                         // This is the end of this "word" (the non-word chars)
-                        while check_col < line_len {
-                            let g = line_str
-                                .get(check_col..)
-                                .and_then(|s| s.graphemes(true).next());
-                            match g {
-                                Some(gg)
-                                    if !Self::is_word_char(gg) && !Self::is_whitespace_char(gg) =>
-                                {
-                                    check_col += gg.len();
-                                }
-                                _ => break,
-                            }
-                        }
+                        check_col = Self::advance_while(&line, check_col, |grapheme| {
+                            !Self::is_word_char(grapheme) && !Self::is_whitespace_char(grapheme)
+                        });
 
                         // If we're at the end of the non-word sequence and it's different from where we started,
                         // return the end of this "word"
@@ -289,31 +265,12 @@ impl Buffer {
                         }
 
                         // Skip any whitespace and find the next word
-                        while check_col < line_len {
-                            let g = line_str
-                                .get(check_col..)
-                                .and_then(|s| s.graphemes(true).next());
-                            match g {
-                                Some(gg) if Self::is_word_char(gg) => break,
-                                Some(gg) if Self::is_whitespace_char(gg) => check_col += gg.len(),
-                                Some(gg) => check_col += gg.len(),
-                                None => break,
-                            }
-                        }
+                        check_col = Self::advance_while(&line, check_col, |grapheme| {
+                            !Self::is_word_char(grapheme)
+                        });
 
                         // Now find the end of that word
-                        let mut end_col = check_col;
-                        while end_col < line_len {
-                            let g = line_str
-                                .get(end_col..)
-                                .and_then(|s| s.graphemes(true).next());
-                            match g {
-                                Some(gg) if Self::is_word_char(gg) => {
-                                    end_col += gg.len();
-                                }
-                                _ => break,
-                            }
-                        }
+                        let end_col = Self::advance_while(&line, check_col, Self::is_word_char);
                         if end_col > check_col {
                             return Some(Cursor::new(line_idx, end_col - 1));
                         }
@@ -321,11 +278,11 @@ impl Buffer {
                         // We're in a word - find its end
                         let mut at_end_of_line = false;
                         while check_col < line_len {
-                            let g = line_str
-                                .get(check_col..)
-                                .and_then(|s| s.graphemes(true).next());
-                            match g {
-                                Some(gg) if Self::is_word_char(gg) => {
+                            match line.next_grapheme(check_col) {
+                                Some(gg)
+                                    if gg.byte_idx() == check_col
+                                        && Self::is_word_char(gg.as_str()) =>
+                                {
                                     // Check if this is the last char of the line
                                     let next_check = check_col + gg.len();
                                     if next_check >= line_len {
@@ -348,30 +305,18 @@ impl Buffer {
                             // But first, check if we're at a non-word, non-whitespace sequence
                             // If so, that's the end of the next "word" - return it
                             if check_col < line_len {
-                                let g = line_str
-                                    .get(check_col..)
-                                    .and_then(|s| s.graphemes(true).next());
-                                if let Some(gg) = g
-                                    && !Self::is_word_char(gg)
-                                    && !Self::is_whitespace_char(gg)
+                                if let Some(gg) = line.next_grapheme(check_col)
+                                    && gg.byte_idx() == check_col
+                                    && !Self::is_word_char(gg.as_str())
+                                    && !Self::is_whitespace_char(gg.as_str())
                                 {
                                     // We're at a non-word, non-whitespace sequence
                                     // Find its end and return
-                                    let mut end_col = check_col;
-                                    while end_col < line_len {
-                                        let g = line_str
-                                            .get(end_col..)
-                                            .and_then(|s| s.graphemes(true).next());
-                                        match g {
-                                            Some(gg)
-                                                if !Self::is_word_char(gg)
-                                                    && !Self::is_whitespace_char(gg) =>
-                                            {
-                                                end_col += gg.len();
-                                            }
-                                            _ => break,
-                                        }
-                                    }
+                                    let end_col =
+                                        Self::advance_while(&line, check_col, |grapheme| {
+                                            !Self::is_word_char(grapheme)
+                                                && !Self::is_whitespace_char(grapheme)
+                                        });
                                     if end_col > check_col {
                                         return Some(Cursor::new(line_idx, end_col - 1));
                                     }
@@ -379,37 +324,11 @@ impl Buffer {
                             }
 
                             // Find next word start (skip whitespace only)
-                            while check_col < line_len {
-                                let g = line_str
-                                    .get(check_col..)
-                                    .and_then(|s| s.graphemes(true).next());
-                                match g {
-                                    Some(gg) if Self::is_word_char(gg) => break,
-                                    Some(gg) if Self::is_whitespace_char(gg) => {
-                                        check_col += gg.len()
-                                    }
-                                    Some(gg) => {
-                                        // Hit a non-word, non-whitespace - we've already handled this above
-                                        // This shouldn't be reached
-                                        let _ = gg; // suppress unused warning
-                                        break;
-                                    }
-                                    None => break,
-                                }
-                            }
+                            check_col = Self::advance_while(&line, check_col, |grapheme| {
+                                Self::is_whitespace_char(grapheme)
+                            });
                             // Now find the end of that next word
-                            let mut end_col = check_col;
-                            while end_col < line_len {
-                                let g = line_str
-                                    .get(end_col..)
-                                    .and_then(|s| s.graphemes(true).next());
-                                match g {
-                                    Some(gg) if Self::is_word_char(gg) => {
-                                        end_col += gg.len();
-                                    }
-                                    _ => break,
-                                }
-                            }
+                            let end_col = Self::advance_while(&line, check_col, Self::is_word_char);
                             if end_col > check_col {
                                 return Some(Cursor::new(line_idx, end_col - 1));
                             }
@@ -427,8 +346,7 @@ impl Buffer {
                             Some(l) => l,
                             None => break,
                         };
-                        let next_line_str = next_line.as_ref();
-                        let next_line_len = next_line_str.len();
+                        let next_line_len = next_line.len();
 
                         if next_line_len == 0 {
                             line_idx += 1;
@@ -438,33 +356,27 @@ impl Buffer {
                         // Find start of word on this line
                         let mut check_col = 0;
                         while check_col < next_line_len {
-                            let g = next_line_str
-                                .get(check_col..)
-                                .and_then(|s| s.graphemes(true).next());
-                            match g {
-                                Some(gg) if Self::is_word_char(gg) => {
+                            match next_line.next_grapheme(check_col) {
+                                Some(gg)
+                                    if gg.byte_idx() == check_col
+                                        && Self::is_word_char(gg.as_str()) =>
+                                {
                                     // Found word start - find its end
-                                    let mut end_col = check_col;
-                                    while end_col < next_line_len {
-                                        let gg = next_line_str
-                                            .get(end_col..)
-                                            .and_then(|s| s.graphemes(true).next());
-                                        match gg {
-                                            Some(gc) if Self::is_word_char(gc) => {
-                                                end_col += gc.len();
-                                            }
-                                            _ => break,
-                                        }
-                                    }
+                                    let end_col = Self::advance_while(
+                                        &next_line,
+                                        check_col,
+                                        Self::is_word_char,
+                                    );
                                     // Return position at end of word (not after)
                                     if end_col > check_col {
                                         return Some(Cursor::new(line_idx, end_col - 1));
                                     }
                                 }
-                                Some(gg) => {
+                                Some(gg) if gg.byte_idx() == check_col => {
                                     check_col += gg.len();
                                 }
                                 None => break,
+                                _ => break,
                             }
                         }
 
@@ -475,31 +387,22 @@ impl Buffer {
                 Boundary::BigWord => {
                     // First, skip to end of current bigword if we're in one
                     let mut check_col = col;
-                    while check_col < line_len {
-                        let g = line_str
-                            .get(check_col..)
-                            .and_then(|s| s.graphemes(true).next());
-                        match g {
-                            Some(gg) if Self::is_bigword_char(gg) => {
-                                check_col += gg.len();
-                            }
-                            _ => break,
-                        }
-                    }
+                    check_col = Self::advance_while(&line, check_col, Self::is_bigword_char);
                     // Now skip whitespace to find next bigword
                     while check_col < line_len {
-                        let g = line_str
-                            .get(check_col..)
-                            .and_then(|s| s.graphemes(true).next());
-                        match g {
-                            Some(gg) if Self::is_bigword_char(gg) => {
+                        match line.next_grapheme(check_col) {
+                            Some(gg)
+                                if gg.byte_idx() == check_col
+                                    && Self::is_bigword_char(gg.as_str()) =>
+                            {
                                 // Found next bigword start
                                 return Some(Cursor::new(line_idx, check_col));
                             }
-                            Some(gg) => {
+                            Some(gg) if gg.byte_idx() == check_col => {
                                 check_col += gg.len();
                             }
                             None => break,
+                            _ => break,
                         }
                     }
 
@@ -514,34 +417,33 @@ impl Buffer {
                             Some(l) => l,
                             None => break,
                         };
-                        let next_line_str = next_line.as_ref();
-                        let next_line_len = next_line_str.len();
+                        let next_line_len = next_line.len();
                         if next_line_len == 0 {
                             line_idx += 1;
                             continue;
                         }
 
                         // Check if first char is a bigword char (non-whitespace)
-                        let first_g = next_line_str.graphemes(true).next();
-                        if matches!(first_g, Some(g) if Self::is_bigword_char(g)) {
+                        if Self::grapheme_at_matches(&next_line, 0, Self::is_bigword_char) {
                             // Line starts with a bigword - return position 0
                             return Some(Cursor::new(line_idx, 0));
                         } else {
                             // Line starts with whitespace - skip it and find first bigword
                             let mut check_col = 0;
                             while check_col < next_line_len {
-                                let g = next_line_str
-                                    .get(check_col..)
-                                    .and_then(|s| s.graphemes(true).next());
-                                match g {
-                                    Some(gg) if Self::is_bigword_char(gg) => {
+                                match next_line.next_grapheme(check_col) {
+                                    Some(gg)
+                                        if gg.byte_idx() == check_col
+                                            && Self::is_bigword_char(gg.as_str()) =>
+                                    {
                                         // Found first bigword on this line
                                         return Some(Cursor::new(line_idx, check_col));
                                     }
-                                    Some(gg) => {
+                                    Some(gg) if gg.byte_idx() == check_col => {
                                         check_col += gg.len();
                                     }
                                     None => break,
+                                    _ => break,
                                 }
                             }
                             // No bigword found on this line, continue to next
@@ -555,34 +457,28 @@ impl Buffer {
                     let start_col = col;
 
                     // First, skip to end of current bigword if we're in one
-                    while check_col < line_len {
-                        let g = line_str
-                            .get(check_col..)
-                            .and_then(|s| s.graphemes(true).next());
-                        match g {
-                            Some(gg) if Self::is_bigword_char(gg) => {
-                                check_col += gg.len();
-                            }
-                            _ => break,
-                        }
-                    }
+                    check_col = Self::advance_while(&line, check_col, Self::is_bigword_char);
 
                     // After first while, check_col is at end of current word or past it
                     // If we moved forward past the starting position, check what comes after
                     if check_col > start_col {
                         let after_current = if check_col < line_len {
-                            line_str
-                                .get(check_col..)
-                                .and_then(|s| s.graphemes(true).next())
+                            line.next_grapheme(check_col)
                         } else {
                             None
                         };
 
                         match after_current {
-                            Some(gg) if Self::is_bigword_char(gg) => {
+                            Some(gg)
+                                if gg.byte_idx() == check_col
+                                    && Self::is_bigword_char(gg.as_str()) =>
+                            {
                                 // Another word right after - continue to find it
                             }
-                            Some(gg) if Self::is_whitespace_char(gg) => {
+                            Some(gg)
+                                if gg.byte_idx() == check_col
+                                    && Self::is_whitespace_char(gg.as_str()) =>
+                            {
                                 // Whitespace after - if we moved to a NEW position (not same as start),
                                 // return end of current word. But if we're at same position as start
                                 // (e.g., single char), find next word instead.
@@ -603,29 +499,12 @@ impl Buffer {
                     let pre_whitespace_col = check_col;
 
                     // Skip whitespace to find next bigword
-                    while check_col < line_len {
-                        let g = line_str
-                            .get(check_col..)
-                            .and_then(|s| s.graphemes(true).next());
-                        match g {
-                            Some(gg) if Self::is_bigword_char(gg) => break,
-                            Some(gg) => check_col += gg.len(),
-                            None => break,
-                        }
-                    }
+                    check_col = Self::advance_while(&line, check_col, |grapheme| {
+                        !Self::is_bigword_char(grapheme)
+                    });
 
                     // Now at start of next bigword, find its end
-                    while check_col < line_len {
-                        let g = line_str
-                            .get(check_col..)
-                            .and_then(|s| s.graphemes(true).next());
-                        match g {
-                            Some(gg) if Self::is_bigword_char(gg) => {
-                                check_col += gg.len();
-                            }
-                            _ => break,
-                        }
-                    }
+                    check_col = Self::advance_while(&line, check_col, Self::is_bigword_char);
 
                     // Return position AT last character (not after)
                     // Only return if we found a next word (check_col advanced past pre_whitespace_col)
@@ -687,8 +566,7 @@ impl Buffer {
 
             let line = self.line_at(line_idx)?;
 
-            let line_str = line.as_ref();
-            let line_len = line_str.len();
+            let line_len = line.len();
 
             if line_len == 0 {
                 if line_idx == 0 {
@@ -708,19 +586,10 @@ impl Buffer {
             let mut check_col = col;
             while check_col > 0 {
                 // Move back one grapheme
-                let mut prev_offset = 0;
-                let mut found = false;
-                for (byte_offset, _g) in line_str.grapheme_indices(true) {
-                    if byte_offset >= check_col {
-                        break;
-                    }
-                    prev_offset = byte_offset;
-                    found = true;
-                }
-                if !found {
+                let Some(prev_grapheme) = line.previous_grapheme(check_col) else {
                     break;
-                }
-                check_col = prev_offset;
+                };
+                check_col = prev_grapheme.byte_idx();
 
                 // Check if this position is a boundary (not the starting position)
                 if check_col < col {
