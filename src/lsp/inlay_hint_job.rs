@@ -3,7 +3,7 @@
 use crate::background::{
     JobContext, JobError, JobEvent, JobPayload, LspInlayHint, LspInlayHintsChunk,
 };
-use crate::buffer::{BufferId, Cursor, LineText, TextEncoding, TextPosition, TextSnapshot};
+use crate::buffer::{BufferId, Cursor, PieceTable, TextEncoding, TextPosition, TextSnapshot};
 use crate::config::InlayHintCapability;
 use crate::globals;
 use crate::json_rpc::{ErrorResponse, Message, Response, SuccessResponse};
@@ -24,7 +24,7 @@ pub struct LspInlayHintSnapshot {
     /// Document URI.
     pub uri: String,
     /// Buffer lines at the time the job started.
-    pub lines: LineText,
+    pub lines: PieceTable,
     /// Position encoding negotiated for the server.
     pub position_encoding: PositionEncodingKind,
 }
@@ -170,7 +170,7 @@ impl LspInlayHintJob {
 
 fn inlay_hint_to_payload(
     hint: &InlayHint,
-    lines: &LineText,
+    lines: &PieceTable,
     encoding: PositionEncodingKind,
 ) -> Option<LspInlayHint> {
     let position = position_to_cursor(lines, hint.position, encoding)?;
@@ -191,7 +191,7 @@ fn inlay_hint_label_to_text(label: &InlayHintLabel) -> Option<SmolStr> {
 }
 
 fn position_to_cursor(
-    lines: &LineText,
+    lines: &PieceTable,
     position: lsp_types::Position,
     encoding: PositionEncodingKind,
 ) -> Option<Cursor> {
@@ -231,8 +231,8 @@ mod tests {
     use super::*;
     use lsp_types::{InlayHintLabel, Position};
 
-    fn line_vector(text: &str) -> LineText {
-        LineText::from_text(text)
+    fn line_vector(text: &str) -> PieceTable {
+        PieceTable::from_text(text)
     }
 
     #[test]

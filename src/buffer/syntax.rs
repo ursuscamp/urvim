@@ -3,7 +3,7 @@
 use crate::background::{JobContext, JobEvent, JobKind, JobPayload, JobToken};
 use crate::buffer::Buffer;
 use crate::buffer::BufferId;
-use crate::buffer::{LineText, TextRef, TextSnapshot};
+use crate::buffer::{PieceTable, TextRef, TextSnapshot};
 use crate::globals;
 use crate::syntax::{
     ContextControl, InjectedSyntaxFallback, InjectedSyntaxSelector, SyntaxDefinition, SyntaxRule,
@@ -128,7 +128,7 @@ impl SyntaxCache {
     pub fn spans_for_line(
         &mut self,
         syntax_name: &str,
-        line_texts: &LineText,
+        line_texts: &PieceTable,
         line: usize,
     ) -> Option<Vec<SyntaxSpan>> {
         self.set_syntax_name(syntax_name);
@@ -141,14 +141,14 @@ impl SyntaxCache {
     }
 
     /// Ensures syntax data exists through the requested line.
-    fn ensure_through(&mut self, syntax_name: &str, line_texts: &LineText, line: usize) {
+    fn ensure_through(&mut self, syntax_name: &str, line_texts: &PieceTable, line: usize) {
         self.ensure_through_with(syntax_name, line_texts, line, || true);
     }
 
     fn ensure_through_with<F>(
         &mut self,
         syntax_name: &str,
-        line_texts: &LineText,
+        line_texts: &PieceTable,
         line: usize,
         mut should_continue: F,
     ) where
@@ -394,7 +394,7 @@ impl IndentScopeCache {
 
     pub(crate) fn ensure_through(
         &mut self,
-        line_texts: &LineText,
+        line_texts: &PieceTable,
         target_line: usize,
         tab_width: usize,
     ) -> bool {
@@ -561,7 +561,7 @@ impl IndentScopeCache {
         }
     }
 
-    fn finalize_to_eof(&mut self, line_texts: &LineText) {
+    fn finalize_to_eof(&mut self, line_texts: &PieceTable) {
         if line_texts.line_count() == 0 {
             return;
         }
@@ -683,7 +683,7 @@ impl BufferCache {
     pub fn spans_for_line(
         &mut self,
         syntax_name: &str,
-        line_texts: &LineText,
+        line_texts: &PieceTable,
         line: usize,
     ) -> Option<Vec<SyntaxSpan>> {
         self.syntax_cache
@@ -691,7 +691,7 @@ impl BufferCache {
     }
 
     /// Ensures syntax and indent cache data exists through the requested line.
-    pub fn ensure_through(&mut self, syntax_name: &str, line_texts: &LineText, line: usize) {
+    pub fn ensure_through(&mut self, syntax_name: &str, line_texts: &PieceTable, line: usize) {
         self.ensure_through_with_budget(
             syntax_name,
             line_texts,
@@ -703,7 +703,7 @@ impl BufferCache {
     fn ensure_syntax_through_with_budget(
         &mut self,
         syntax_name: &str,
-        line_texts: &LineText,
+        line_texts: &PieceTable,
         line: usize,
         budget: std::time::Duration,
     ) {
@@ -714,7 +714,7 @@ impl BufferCache {
             });
     }
 
-    fn ensure_indent_through(&mut self, line_texts: &LineText, line: usize) {
+    fn ensure_indent_through(&mut self, line_texts: &PieceTable, line: usize) {
         if line_texts.line_count() == 0 {
             return;
         }
@@ -730,7 +730,7 @@ impl BufferCache {
     fn ensure_through_with_budget(
         &mut self,
         syntax_name: &str,
-        line_texts: &LineText,
+        line_texts: &PieceTable,
         line: usize,
         budget: std::time::Duration,
     ) {
@@ -768,7 +768,7 @@ pub struct SyntaxRefreshJob {
     generation: u64,
     syntax_name: SmolStr,
     cache: SyntaxCache,
-    line_texts: LineText,
+    line_texts: PieceTable,
 }
 
 impl SyntaxRefreshJob {
@@ -777,7 +777,7 @@ impl SyntaxRefreshJob {
         generation: u64,
         syntax_name: SmolStr,
         cache: SyntaxCache,
-        line_texts: LineText,
+        line_texts: PieceTable,
     ) -> Self {
         Self {
             buffer_id,
@@ -829,7 +829,7 @@ pub struct IndentScopeRefreshJob {
     buffer_id: BufferId,
     generation: u64,
     cache: IndentScopeCache,
-    line_texts: LineText,
+    line_texts: PieceTable,
 }
 
 impl IndentScopeRefreshJob {
@@ -837,7 +837,7 @@ impl IndentScopeRefreshJob {
         buffer_id: BufferId,
         generation: u64,
         cache: IndentScopeCache,
-        line_texts: LineText,
+        line_texts: PieceTable,
     ) -> Self {
         Self {
             buffer_id,
@@ -1812,7 +1812,7 @@ mod tests {
 
     #[test]
     fn budgeted_syntax_refresh_can_stop_before_eof() {
-        let lines = LineText::from_text(
+        let lines = PieceTable::from_text(
             std::iter::repeat_n("fn main() { let value = Some(\"hi\"); }", 64)
                 .collect::<Vec<_>>()
                 .join("\n")
@@ -1832,8 +1832,8 @@ mod tests {
 
     #[test]
     fn syntax_cache_stops_when_dirty_suffix_reconverges() {
-        let original = LineText::from_text("value = \"\"\"hello\nplanet\nworld\"\"\"\nafter");
-        let edited = LineText::from_text("value = \"\"\"hello\ngalaxy\nworld\"\"\"\nafter");
+        let original = PieceTable::from_text("value = \"\"\"hello\nplanet\nworld\"\"\"\nafter");
+        let edited = PieceTable::from_text("value = \"\"\"hello\ngalaxy\nworld\"\"\"\nafter");
         let mut cache = SyntaxCache::new("toml");
 
         cache.ensure_through("toml", &original, original.line_count() - 1);

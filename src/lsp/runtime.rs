@@ -1,5 +1,5 @@
 use crate::buffer::{
-    BufferId, LineText, TextEncoding, TextPosition, TextRange, TextRef, TextSnapshot,
+    BufferId, PieceTable, TextEncoding, TextPosition, TextRange, TextRef, TextSnapshot,
 };
 use crate::config::{Config, InlayHintCapability, LspServerConfig};
 use crate::globals;
@@ -73,7 +73,7 @@ fn text_encoding_from_lsp(encoding: PositionEncodingKind) -> TextEncoding {
 struct BufferAttachment {
     uri: String,
     version: i32,
-    lines: LineText,
+    generation: u64,
     language_id: String,
 }
 
@@ -238,7 +238,7 @@ impl LspRuntime {
     /// Returns true when any LSP session is attached to the given buffer.
     pub fn buffer_has_lsp(&mut self, buffer_id: BufferId) -> bool {
         self.sync();
-        self.with_session_for_buffer(buffer_id, |_, _| Ok(()))
+        self.with_session_for_buffer(buffer_id, |_, _, _| Ok(()))
             .is_ok()
     }
 
@@ -269,13 +269,15 @@ impl LspRuntime {
             let mut live_targets = BTreeSet::new();
 
             for buffer_id in &buffer_ids {
-                let Some((path, syntax_name, lines)) = globals::with_buffer(*buffer_id, |buffer| {
-                    (
-                        buffer.path().cloned(),
-                        buffer.syntax_name().to_string(),
-                        buffer.text_snapshot(),
-                    )
-                }) else {
+                let Some((path, syntax_name, generation)) =
+                    globals::with_buffer(*buffer_id, |buffer| {
+                        (
+                            buffer.path().cloned(),
+                            buffer.syntax_name().to_string(),
+                            buffer.syntax_generation(),
+                        )
+                    })
+                else {
                     continue;
                 };
 
@@ -322,7 +324,7 @@ impl LspRuntime {
                 }
 
                 if let Some(session) = server.sessions.get_mut(&root) {
-                    session.sync_buffer(*buffer_id, path.as_path(), lines, &syntax_name);
+                    session.sync_buffer(*buffer_id, path.as_path(), generation, &syntax_name);
                 }
             }
 
@@ -363,8 +365,8 @@ impl LspRuntime {
         cursor: crate::buffer::Cursor,
     ) -> Result<Option<String>, String> {
         self.sync();
-        self.with_session_for_buffer(buffer_id, |session, attachment| {
-            session.hover(attachment, cursor)
+        self.with_session_for_buffer(buffer_id, |session, attachment, lines| {
+            session.hover(attachment, lines, cursor)
         })
     }
 
@@ -375,8 +377,8 @@ impl LspRuntime {
         cursor: crate::buffer::Cursor,
     ) -> Result<Option<Vec<CompletionCandidate>>, String> {
         self.sync();
-        self.with_session_for_buffer(buffer_id, |session, attachment| {
-            session.completion(attachment, cursor)
+        self.with_session_for_buffer(buffer_id, |session, attachment, lines| {
+            session.completion(attachment, lines, cursor)
         })
     }
 
@@ -387,15 +389,15 @@ impl LspRuntime {
         item: &serde_json::Value,
     ) -> Result<Option<Vec<crate::ui::completion::CompletionTextEdit>>, String> {
         self.sync();
-        self.with_session_for_buffer(buffer_id, |session, attachment| {
-            session.resolve_completion_additional_text_edits(attachment, item)
+        self.with_session_for_buffer(buffer_id, |session, _attachment, lines| {
+            session.resolve_completion_additional_text_edits(lines, item)
         })
     }
 
     /// Returns whether the attached server for `buffer_id` supports hover.
     pub fn buffer_supports_hover(&mut self, buffer_id: BufferId) -> bool {
         self.sync();
-        self.with_session_for_buffer(buffer_id, |session, _| Ok(session.supports_hover()))
+        self.with_session_for_buffer(buffer_id, |session, _, _| Ok(session.supports_hover()))
             .unwrap_or(false)
     }
 
@@ -406,15 +408,15 @@ impl LspRuntime {
         cursor: crate::buffer::Cursor,
     ) -> Result<Option<(BufferId, crate::buffer::Cursor)>, String> {
         self.sync();
-        self.with_session_for_buffer(buffer_id, |session, attachment| {
-            session.definition(attachment, cursor)
+        self.with_session_for_buffer(buffer_id, |session, attachment, lines| {
+            session.definition(attachment, lines, cursor)
         })
     }
 
     /// Returns whether the attached server for `buffer_id` supports go to definition.
     pub fn buffer_supports_definition(&mut self, buffer_id: BufferId) -> bool {
         self.sync();
-        self.with_session_for_buffer(buffer_id, |session, _| Ok(session.supports_definition()))
+        self.with_session_for_buffer(buffer_id, |session, _, _| Ok(session.supports_definition()))
             .unwrap_or(false)
     }
 
@@ -425,15 +427,15 @@ impl LspRuntime {
         cursor: crate::buffer::Cursor,
     ) -> Result<Option<Vec<ReferenceItem>>, String> {
         self.sync();
-        self.with_session_for_buffer(buffer_id, |session, attachment| {
-            session.references(attachment, cursor)
+        self.with_session_for_buffer(buffer_id, |session, attachment, lines| {
+            session.references(attachment, lines, cursor)
         })
     }
 
     /// Returns whether the attached server for `buffer_id` supports references.
     pub fn buffer_supports_references(&mut self, buffer_id: BufferId) -> bool {
         self.sync();
-        self.with_session_for_buffer(buffer_id, |session, _| Ok(session.supports_references()))
+        self.with_session_for_buffer(buffer_id, |session, _, _| Ok(session.supports_references()))
             .unwrap_or(false)
     }
 
@@ -443,8 +445,8 @@ impl LspRuntime {
         buffer_id: BufferId,
     ) -> Result<Option<Vec<DocumentSymbolItem>>, String> {
         self.sync();
-        self.with_session_for_buffer(buffer_id, |session, attachment| {
-            session.document_symbols(attachment)
+        self.with_session_for_buffer(buffer_id, |session, attachment, lines| {
+            session.document_symbols(attachment, lines)
         })
     }
 
@@ -454,8 +456,8 @@ impl LspRuntime {
         buffer_id: BufferId,
     ) -> Result<Option<Vec<DocumentSymbolTree>>, String> {
         self.sync();
-        self.with_session_for_buffer(buffer_id, |session, attachment| {
-            session.document_symbols_tree(attachment)
+        self.with_session_for_buffer(buffer_id, |session, attachment, lines| {
+            session.document_symbols_tree(attachment, lines)
         })
     }
 
@@ -487,7 +489,7 @@ impl LspRuntime {
     /// Returns whether the attached server for `buffer_id` supports document symbols.
     pub fn buffer_supports_document_symbols(&mut self, buffer_id: BufferId) -> bool {
         self.sync();
-        self.with_session_for_buffer(buffer_id, |session, _| {
+        self.with_session_for_buffer(buffer_id, |session, _, _| {
             Ok(session.supports_document_symbols())
         })
         .unwrap_or(false)
@@ -500,8 +502,8 @@ impl LspRuntime {
         cursor: crate::buffer::Cursor,
     ) -> Option<String> {
         self.sync();
-        self.with_session_for_buffer(buffer_id, |session, attachment| {
-            Ok(session.rename_placeholder(attachment, cursor))
+        self.with_session_for_buffer(buffer_id, |session, attachment, lines| {
+            Ok(session.rename_placeholder(attachment, lines, cursor))
         })
         .ok()
         .flatten()
@@ -515,8 +517,8 @@ impl LspRuntime {
         new_name: &str,
     ) -> Result<(), String> {
         self.sync();
-        let result = self.with_session_for_buffer(buffer_id, |session, attachment| {
-            session.rename(attachment, cursor, new_name)
+        let result = self.with_session_for_buffer(buffer_id, |session, attachment, lines| {
+            session.rename(attachment, lines, cursor, new_name)
         })?;
         if result.0 {
             self.apply_workspace_file_operations(&result.1);
@@ -528,21 +530,24 @@ impl LspRuntime {
     /// Returns whether the attached server for `buffer_id` supports rename.
     pub fn buffer_supports_rename(&mut self, buffer_id: BufferId) -> bool {
         self.sync();
-        self.with_session_for_buffer(buffer_id, |session, _| Ok(session.supports_rename()))
+        self.with_session_for_buffer(buffer_id, |session, _, _| Ok(session.supports_rename()))
             .unwrap_or(false)
     }
 
     /// Returns whether the attached server for `buffer_id` supports inlay hints.
     pub fn buffer_supports_inlay_hints(&mut self, buffer_id: BufferId) -> bool {
         self.sync();
-        self.with_session_for_buffer(buffer_id, |session, _| Ok(session.supports_inlay_hints()))
-            .unwrap_or(false)
+        self.with_session_for_buffer(
+            buffer_id,
+            |session, _, _| Ok(session.supports_inlay_hints()),
+        )
+        .unwrap_or(false)
     }
 
     /// Returns whether the attached server is reporting active progress for `buffer_id`.
     pub fn buffer_has_active_progress(&mut self, buffer_id: BufferId) -> bool {
         self.sync();
-        self.with_session_for_buffer(buffer_id, |session, _| Ok(session.has_active_progress()))
+        self.with_session_for_buffer(buffer_id, |session, _, _| Ok(session.has_active_progress()))
             .unwrap_or(false)
     }
 
@@ -551,13 +556,13 @@ impl LspRuntime {
         &mut self,
         buffer_id: BufferId,
         uri: &str,
-        lines: &LineText,
+        lines: &PieceTable,
         start_line: usize,
         end_line: usize,
         encoding: PositionEncodingKind,
     ) -> Result<Option<Vec<InlayHint>>, String> {
         self.sync();
-        self.with_session_for_buffer(buffer_id, |session, attachment| {
+        self.with_session_for_buffer(buffer_id, |session, attachment, _live_lines| {
             session.request_inlay_hints_for_range(
                 attachment, uri, lines, start_line, end_line, encoding,
             )
@@ -570,8 +575,8 @@ impl LspRuntime {
         buffer_id: BufferId,
     ) -> Result<Option<LspInlayHintSnapshot>, String> {
         self.sync();
-        self.with_session_for_buffer(buffer_id, |session, attachment| {
-            session.inlay_hint_snapshot(buffer_id, attachment)
+        self.with_session_for_buffer(buffer_id, |session, attachment, lines| {
+            session.inlay_hint_snapshot(buffer_id, attachment, lines)
         })
     }
 
@@ -589,7 +594,7 @@ impl LspRuntime {
         end_line: usize,
     ) -> Result<mpsc::Receiver<Message>, String> {
         self.sync();
-        self.with_session_for_buffer(buffer_id, |session, _attachment| {
+        self.with_session_for_buffer(buffer_id, |session, _attachment, _live_lines| {
             let Some(range) = line_range_to_lsp_range(
                 &snapshot.lines,
                 start_line,
@@ -629,8 +634,10 @@ impl LspRuntime {
     /// Returns whether the attached server for `buffer_id` supports code actions.
     pub fn buffer_supports_code_actions(&mut self, buffer_id: BufferId) -> bool {
         self.sync();
-        self.with_session_for_buffer(buffer_id, |session, _| Ok(session.supports_code_actions()))
-            .unwrap_or(false)
+        self.with_session_for_buffer(buffer_id, |session, _, _| {
+            Ok(session.supports_code_actions())
+        })
+        .unwrap_or(false)
     }
 
     /// Requests code actions for the attached server owning `buffer_id`.
@@ -640,8 +647,8 @@ impl LspRuntime {
         cursor: crate::buffer::Cursor,
     ) -> Result<Option<Vec<CodeActionApplication>>, String> {
         self.sync();
-        self.with_session_for_buffer(buffer_id, |session, attachment| {
-            session.code_actions(buffer_id, attachment, cursor)
+        self.with_session_for_buffer(buffer_id, |session, attachment, lines| {
+            session.code_actions(buffer_id, attachment, lines, cursor)
         })
     }
 
@@ -652,7 +659,7 @@ impl LspRuntime {
         action: CodeActionApplication,
     ) -> Result<(), String> {
         self.sync();
-        let result = self.with_session_for_buffer(buffer_id, |session, _| {
+        let result = self.with_session_for_buffer(buffer_id, |session, _, _| {
             session.apply_code_action_edit(&action)
         })?;
 
@@ -667,7 +674,7 @@ impl LspRuntime {
                 .as_ref()
                 .and_then(|json| serde_json::from_str(json).ok())
                 .unwrap_or_default();
-            self.with_session_for_buffer(buffer_id, |session, _| {
+            self.with_session_for_buffer(buffer_id, |session, _, _| {
                 session.execute_command(command.as_str(), arguments.clone())
             })?;
         }
@@ -678,14 +685,18 @@ impl LspRuntime {
     fn with_session_for_buffer<R>(
         &mut self,
         buffer_id: BufferId,
-        f: impl FnOnce(&mut LspServerSession, &BufferAttachment) -> Result<R, String>,
+        f: impl FnOnce(&mut LspServerSession, &BufferAttachment, &PieceTable) -> Result<R, String>,
     ) -> Result<R, String> {
         for server in self.servers.values_mut() {
             if let Some(session) = server.session_for_buffer_mut(buffer_id) {
                 let Some(attachment) = session.buffer_attachment(buffer_id) else {
                     continue;
                 };
-                return f(session, &attachment);
+                let Some(lines) = globals::with_buffer(buffer_id, |buffer| buffer.text_snapshot())
+                else {
+                    continue;
+                };
+                return f(session, &attachment, &lines);
             }
         }
 
@@ -869,21 +880,19 @@ impl LspServerSession {
                                 .lock()
                                 .ok()
                                 .and_then(|map| map.get(&buffer_id).cloned());
+                            let lines =
+                                globals::with_buffer(buffer_id, |buffer| buffer.text_snapshot());
                             let encoding = position_encoding
                                 .lock()
                                 .ok()
                                 .map(|encoding| encoding.clone())
                                 .unwrap_or(PositionEncodingKind::UTF16);
-                            if let Some(attachment) = attachment {
+                            if let (Some(_attachment), Some(lines)) = (attachment, lines) {
                                 let converted = params
                                     .diagnostics
                                     .into_iter()
                                     .filter_map(|diagnostic| {
-                                        convert_diagnostic(
-                                            &attachment.lines,
-                                            diagnostic,
-                                            encoding.clone(),
-                                        )
+                                        convert_diagnostic(&lines, diagnostic, encoding.clone())
                                     })
                                     .collect();
                                 globals::with_diagnostics_store(|store| {
@@ -972,7 +981,7 @@ impl LspServerSession {
         &mut self,
         buffer_id: BufferId,
         path: &Path,
-        lines: LineText,
+        generation: u64,
         syntax_name: &str,
     ) {
         if !matches!(self.state, LspSessionState::Running) {
@@ -997,6 +1006,10 @@ impl LspServerSession {
             .is_some_and(|attachments| attachments.contains_key(&buffer_id));
 
         if !attachment_exists {
+            let Some(lines) = globals::with_buffer(buffer_id, |buffer| buffer.text_snapshot())
+            else {
+                return;
+            };
             let text = buffer_text_from_lines(&lines);
             let params = json!({
                 "textDocument": {
@@ -1013,7 +1026,7 @@ impl LspServerSession {
                     BufferAttachment {
                         uri: uri.clone(),
                         version: 1,
-                        lines,
+                        generation,
                         language_id: syntax_name.to_string(),
                     },
                 );
@@ -1026,11 +1039,15 @@ impl LspServerSession {
 
         if let Ok(mut attachments) = self.attachments.lock()
             && let Some(attachment) = attachments.get_mut(&buffer_id)
-            && attachment.lines != lines
+            && attachment.generation != generation
         {
+            let Some(lines) = globals::with_buffer(buffer_id, |buffer| buffer.text_snapshot())
+            else {
+                return;
+            };
             let text = buffer_text_from_lines(&lines);
             attachment.version = attachment.version.saturating_add(1);
-            attachment.lines = lines;
+            attachment.generation = generation;
             let params = json!({
                 "textDocument": {
                     "uri": attachment.uri,
@@ -1198,6 +1215,7 @@ impl LspServerSession {
     fn hover(
         &mut self,
         attachment: &BufferAttachment,
+        lines: &PieceTable,
         cursor: crate::buffer::Cursor,
     ) -> Result<Option<String>, String> {
         if !self.supports_hover() {
@@ -1206,7 +1224,7 @@ impl LspServerSession {
 
         let params = json!({
             "textDocument": { "uri": attachment.uri },
-            "position": position_to_lsp_json(&attachment.lines, cursor, self.negotiated.position_encoding.clone())
+            "position": position_to_lsp_json(lines, cursor, self.negotiated.position_encoding.clone())
         });
         let result = self
             .request_raw("textDocument/hover", Some(params))
@@ -1224,6 +1242,7 @@ impl LspServerSession {
     fn completion(
         &mut self,
         attachment: &BufferAttachment,
+        lines: &PieceTable,
         cursor: crate::buffer::Cursor,
     ) -> Result<Option<Vec<CompletionCandidate>>, String> {
         if !self.supports_completion() {
@@ -1239,7 +1258,7 @@ impl LspServerSession {
                         .map_err(|error| error.to_string())?,
                 },
                 position: cursor_to_lsp_position(
-                    &attachment.lines,
+                    lines,
                     cursor,
                     self.negotiated.position_encoding.clone(),
                 ),
@@ -1268,7 +1287,7 @@ impl LspServerSession {
 
         let items = completion_response_to_candidates(
             response,
-            &attachment.lines,
+            lines,
             cursor,
             self.negotiated.position_encoding.clone(),
         );
@@ -1281,7 +1300,7 @@ impl LspServerSession {
 
     fn resolve_completion_additional_text_edits(
         &mut self,
-        attachment: &BufferAttachment,
+        lines: &PieceTable,
         item: &serde_json::Value,
     ) -> Result<Option<Vec<crate::ui::completion::CompletionTextEdit>>, String> {
         let result = self
@@ -1296,7 +1315,7 @@ impl LspServerSession {
             serde_json::from_value::<CompletionItem>(value).map_err(|error| error.to_string())?;
         Ok(Some(completion_item_additional_text_edits(
             &item,
-            &attachment.lines,
+            lines,
             self.negotiated.position_encoding.clone(),
         )))
     }
@@ -1304,6 +1323,7 @@ impl LspServerSession {
     fn definition(
         &mut self,
         attachment: &BufferAttachment,
+        lines: &PieceTable,
         cursor: crate::buffer::Cursor,
     ) -> Result<Option<(BufferId, crate::buffer::Cursor)>, String> {
         if !self.supports_definition() {
@@ -1312,7 +1332,7 @@ impl LspServerSession {
 
         let params = json!({
             "textDocument": { "uri": attachment.uri },
-            "position": position_to_lsp_json(&attachment.lines, cursor, self.negotiated.position_encoding.clone())
+            "position": position_to_lsp_json(lines, cursor, self.negotiated.position_encoding.clone())
         });
         let result = self
             .request_raw("textDocument/definition", Some(params))
@@ -1346,6 +1366,7 @@ impl LspServerSession {
     fn references(
         &mut self,
         attachment: &BufferAttachment,
+        lines: &PieceTable,
         cursor: crate::buffer::Cursor,
     ) -> Result<Option<Vec<ReferenceItem>>, String> {
         if !self.supports_references() {
@@ -1354,7 +1375,7 @@ impl LspServerSession {
 
         let params = json!({
             "textDocument": { "uri": attachment.uri },
-            "position": position_to_lsp_json(&attachment.lines, cursor, self.negotiated.position_encoding.clone()),
+            "position": position_to_lsp_json(lines, cursor, self.negotiated.position_encoding.clone()),
             "context": ReferenceContext { include_declaration: true },
         });
         let result = self
@@ -1383,6 +1404,7 @@ impl LspServerSession {
     fn document_symbols(
         &mut self,
         attachment: &BufferAttachment,
+        lines: &PieceTable,
     ) -> Result<Option<Vec<DocumentSymbolItem>>, String> {
         if !self.supports_document_symbols() {
             return Err("attached server does not support document symbols".to_string());
@@ -1409,7 +1431,7 @@ impl LspServerSession {
         let items = flatten_document_symbol_response(
             response,
             path,
-            &attachment.lines,
+            lines,
             self.negotiated.position_encoding.clone(),
         );
         Ok(Some(items))
@@ -1418,6 +1440,7 @@ impl LspServerSession {
     fn document_symbols_tree(
         &mut self,
         attachment: &BufferAttachment,
+        lines: &PieceTable,
     ) -> Result<Option<Vec<DocumentSymbolTree>>, String> {
         if !self.supports_document_symbols() {
             return Err("attached server does not support document symbols".to_string());
@@ -1444,7 +1467,7 @@ impl LspServerSession {
         let nodes = build_document_symbol_nodes(
             response,
             path,
-            &attachment.lines,
+            lines,
             self.negotiated.position_encoding.clone(),
         );
         Ok(Some(nodes))
@@ -1492,6 +1515,7 @@ impl LspServerSession {
     fn rename(
         &mut self,
         attachment: &BufferAttachment,
+        lines: &PieceTable,
         cursor: crate::buffer::Cursor,
         new_name: &str,
     ) -> Result<(bool, Vec<WorkspaceResourceOperationEffect>), String> {
@@ -1499,11 +1523,8 @@ impl LspServerSession {
             return Err("attached server does not support rename".to_string());
         }
 
-        let position_json = position_to_lsp_json(
-            &attachment.lines,
-            cursor,
-            self.negotiated.position_encoding.clone(),
-        );
+        let position_json =
+            position_to_lsp_json(lines, cursor, self.negotiated.position_encoding.clone());
 
         if self.supports_prepare_rename() {
             let prepare_position_json = position_json.clone();
@@ -1551,17 +1572,15 @@ impl LspServerSession {
     fn rename_placeholder(
         &mut self,
         attachment: &BufferAttachment,
+        lines: &PieceTable,
         cursor: crate::buffer::Cursor,
     ) -> Option<String> {
         if !self.supports_rename() {
             return None;
         }
 
-        let position_json = position_to_lsp_json(
-            &attachment.lines,
-            cursor,
-            self.negotiated.position_encoding.clone(),
-        );
+        let position_json =
+            position_to_lsp_json(lines, cursor, self.negotiated.position_encoding.clone());
 
         if !self.supports_prepare_rename() {
             return None;
@@ -1579,20 +1598,14 @@ impl LspServerSession {
         match prepared {
             PrepareRenameResponse::RangeWithPlaceholder { range, placeholder } => {
                 if placeholder.trim().is_empty() {
-                    range_text(
-                        &attachment.lines,
-                        &range,
-                        self.negotiated.position_encoding.clone(),
-                    )
+                    range_text(lines, &range, self.negotiated.position_encoding.clone())
                 } else {
                     Some(placeholder)
                 }
             }
-            PrepareRenameResponse::Range(range) => range_text(
-                &attachment.lines,
-                &range,
-                self.negotiated.position_encoding.clone(),
-            ),
+            PrepareRenameResponse::Range(range) => {
+                range_text(lines, &range, self.negotiated.position_encoding.clone())
+            }
             PrepareRenameResponse::DefaultBehavior { .. } => None,
         }
     }
@@ -1601,17 +1614,15 @@ impl LspServerSession {
         &mut self,
         buffer_id: BufferId,
         attachment: &BufferAttachment,
+        lines: &PieceTable,
         cursor: crate::buffer::Cursor,
     ) -> Result<Option<Vec<CodeActionApplication>>, String> {
         if !self.supports_code_actions() {
             return Err("attached server does not support code actions".to_string());
         }
 
-        let position = cursor_to_lsp_position(
-            &attachment.lines,
-            cursor,
-            self.negotiated.position_encoding.clone(),
-        );
+        let position =
+            cursor_to_lsp_position(lines, cursor, self.negotiated.position_encoding.clone());
         let range_start = position.clone();
         let diagnostics = globals::with_diagnostics_store(|store| {
             store.diagnostics_at_buffer_cursor(buffer_id, cursor)
@@ -1707,7 +1718,7 @@ impl LspServerSession {
         &mut self,
         _attachment: &BufferAttachment,
         uri: &str,
-        lines: &LineText,
+        lines: &PieceTable,
         start_line: usize,
         end_line: usize,
         encoding: PositionEncodingKind,
@@ -1759,6 +1770,7 @@ impl LspServerSession {
         &self,
         buffer_id: BufferId,
         attachment: &BufferAttachment,
+        lines: &PieceTable,
     ) -> Result<Option<LspInlayHintSnapshot>, String> {
         if !self.config_inlay_hints_enabled() {
             return Ok(None);
@@ -1771,7 +1783,7 @@ impl LspServerSession {
         Ok(Some(LspInlayHintSnapshot {
             buffer_id,
             uri: attachment.uri.clone(),
-            lines: attachment.lines.clone(),
+            lines: lines.clone(),
             position_encoding: self.negotiated.position_encoding.clone(),
         }))
     }
@@ -1912,7 +1924,10 @@ impl LspServerSession {
             .ok();
 
         let language_id = attachment.language_id.clone();
-        let text = buffer_text_from_lines(&attachment.lines);
+        let Some(lines) = globals::with_buffer(buffer_id, |buffer| buffer.text_snapshot()) else {
+            return;
+        };
+        let text = buffer_text_from_lines(&lines);
 
         let open_params = json!({
             "textDocument": {
@@ -2158,12 +2173,12 @@ fn uri_to_file_path(uri: &str) -> Result<PathBuf, String> {
         .map_err(|()| "LSP URI is not a file path".to_string())
 }
 
-fn buffer_text_from_lines(lines: &LineText) -> String {
+fn buffer_text_from_lines(lines: &PieceTable) -> String {
     lines.text().to_text()
 }
 
 fn convert_diagnostic(
-    lines: &LineText,
+    lines: &PieceTable,
     diagnostic: Diagnostic,
     encoding: PositionEncodingKind,
 ) -> Option<Diagnostic> {
@@ -2178,7 +2193,7 @@ fn convert_diagnostic(
 }
 
 fn position_to_lsp_json(
-    lines: &LineText,
+    lines: &PieceTable,
     cursor: crate::buffer::Cursor,
     encoding: PositionEncodingKind,
 ) -> Value {
@@ -2187,7 +2202,7 @@ fn position_to_lsp_json(
 }
 
 fn line_range_to_lsp_range(
-    lines: &LineText,
+    lines: &PieceTable,
     start_line: usize,
     end_line: usize,
     encoding: PositionEncodingKind,
@@ -2198,7 +2213,7 @@ fn line_range_to_lsp_range(
 }
 
 fn cursor_to_lsp_position(
-    lines: &LineText,
+    lines: &PieceTable,
     cursor: crate::buffer::Cursor,
     encoding: PositionEncodingKind,
 ) -> lsp_types::Position {
@@ -2209,7 +2224,7 @@ fn cursor_to_lsp_position(
 }
 
 fn position_to_cursor(
-    lines: &LineText,
+    lines: &PieceTable,
     position: lsp_types::Position,
     encoding: PositionEncodingKind,
 ) -> Option<crate::buffer::Cursor> {
@@ -2217,7 +2232,7 @@ fn position_to_cursor(
 }
 
 fn range_text(
-    lines: &LineText,
+    lines: &PieceTable,
     range: &lsp_types::Range,
     encoding: PositionEncodingKind,
 ) -> Option<String> {
@@ -2229,7 +2244,7 @@ fn range_text(
 
 fn completion_response_to_candidates(
     response: CompletionResponse,
-    lines: &LineText,
+    lines: &PieceTable,
     cursor: crate::buffer::Cursor,
     encoding: PositionEncodingKind,
 ) -> Vec<CompletionCandidate> {
@@ -2295,7 +2310,7 @@ fn rank_completion_items(items: &mut Vec<CompletionItem>, query: &str) {
 
 fn completion_item_to_candidate(
     item: CompletionItem,
-    lines: &LineText,
+    lines: &PieceTable,
     cursor: crate::buffer::Cursor,
     encoding: PositionEncodingKind,
 ) -> Option<CompletionCandidate> {
@@ -2343,7 +2358,7 @@ fn completion_item_to_candidate(
 }
 
 fn lsp_range_to_cursor_range(
-    lines: &LineText,
+    lines: &PieceTable,
     range: &lsp_types::Range,
     encoding: PositionEncodingKind,
 ) -> Option<crate::buffer::TextObjectRange> {
@@ -2371,7 +2386,7 @@ fn completion_candidate_score(candidate: &CompletionCandidate) -> usize {
 
 fn completion_item_additional_text_edits(
     item: &CompletionItem,
-    lines: &LineText,
+    lines: &PieceTable,
     encoding: PositionEncodingKind,
 ) -> Vec<crate::ui::completion::CompletionTextEdit> {
     item.additional_text_edits
@@ -2389,7 +2404,7 @@ fn completion_item_additional_text_edits(
         .collect()
 }
 
-fn current_word_prefix_text(lines: &LineText, cursor: crate::buffer::Cursor) -> String {
+fn current_word_prefix_text(lines: &PieceTable, cursor: crate::buffer::Cursor) -> String {
     let Some(line) = lines.line(cursor.line) else {
         return String::new();
     };
@@ -2420,7 +2435,7 @@ fn completion_item_is_deprecated(item: &CompletionItem) -> bool {
 }
 
 fn current_word_range(
-    lines: &LineText,
+    lines: &PieceTable,
     cursor: crate::buffer::Cursor,
 ) -> crate::buffer::TextObjectRange {
     let Some(line) = lines.line(cursor.line) else {
@@ -2560,7 +2575,7 @@ fn first_definition_target(
 fn flatten_document_symbol_response(
     response: lsp_types::DocumentSymbolResponse,
     path: PathBuf,
-    lines: &LineText,
+    lines: &PieceTable,
     encoding: PositionEncodingKind,
 ) -> Vec<DocumentSymbolItem> {
     let nodes = build_document_symbol_nodes(response, path, lines, encoding);
@@ -2587,7 +2602,7 @@ pub struct ReferenceItem {
 fn build_document_symbol_nodes(
     response: lsp_types::DocumentSymbolResponse,
     path: PathBuf,
-    lines: &LineText,
+    lines: &PieceTable,
     encoding: PositionEncodingKind,
 ) -> Vec<DocumentSymbolTree> {
     match response {
@@ -2624,7 +2639,7 @@ fn build_document_symbol_nodes(
 fn build_nested_document_symbol_nodes(
     symbols: Vec<lsp_types::DocumentSymbol>,
     path: &Path,
-    lines: &LineText,
+    lines: &PieceTable,
     encoding: PositionEncodingKind,
     ancestors: &[String],
 ) -> Vec<DocumentSymbolTree> {
@@ -3256,8 +3271,8 @@ mod tests {
     use lsp_types::{CompletionItem, CompletionItemTag, WorkDoneProgressEnd};
     use std::path::PathBuf;
 
-    fn line_snapshot(text: &str) -> LineText {
-        LineText::from_text(text)
+    fn line_snapshot(text: &str) -> PieceTable {
+        PieceTable::from_text(text)
     }
 
     fn temp_dir(label: &str) -> PathBuf {
@@ -3546,7 +3561,7 @@ mod tests {
                 None,
             )]),
         )]);
-        let lines = LineText::from_text("fn outer() { fn inner() {} }");
+        let lines = PieceTable::from_text("fn outer() { fn inner() {} }");
         let nodes = build_document_symbol_nodes(
             response,
             PathBuf::from("/tmp/example.rs"),
@@ -3590,7 +3605,7 @@ mod tests {
                 None,
             )]),
         )]);
-        let lines = LineText::from_text("struct ByteBuffer { fn push(&self) {} }");
+        let lines = PieceTable::from_text("struct ByteBuffer { fn push(&self) {} }");
         let nodes = build_document_symbol_nodes(
             response,
             PathBuf::from("/tmp/example.rs"),
@@ -3647,7 +3662,7 @@ mod tests {
                 ),
             ]),
         )]);
-        let lines = LineText::from_text("struct ByteBuffer { buffer: usize, len: usize }");
+        let lines = PieceTable::from_text("struct ByteBuffer { buffer: usize, len: usize }");
         let nodes = build_document_symbol_nodes(
             response,
             PathBuf::from("/tmp/example.rs"),
@@ -3689,7 +3704,7 @@ mod tests {
                 None,
             )]),
         )]);
-        let lines = LineText::from_text("struct Container { struct Buffer {} }");
+        let lines = PieceTable::from_text("struct Container { struct Buffer {} }");
         let nodes = build_document_symbol_nodes(
             response,
             PathBuf::from("/tmp/example.rs"),
@@ -3726,7 +3741,7 @@ mod tests {
                 ),
             ),
         ]);
-        let lines = LineText::from_text("Alpha BetaBuffer");
+        let lines = PieceTable::from_text("Alpha BetaBuffer");
         let nodes = build_document_symbol_nodes(
             response,
             PathBuf::from("/tmp/example.rs"),
@@ -3851,7 +3866,7 @@ mod tests {
         let items = flatten_document_symbol_response(
             response,
             std::path::PathBuf::from("/tmp/example.rs"),
-            &LineText::from_text("fn outer() { fn inner() {} }"),
+            &PieceTable::from_text("fn outer() { fn inner() {} }"),
             PositionEncodingKind::UTF16,
         );
 

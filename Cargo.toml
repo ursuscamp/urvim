@@ -24,3 +24,10 @@ regex = "1"
 ignore = "0.4"
 lsp-types = "0.97"
 url = "2"
+
+[dev-dependencies]
+criterion = "0.5"
+
+[[bench]]
+name = "text_storage"
+harness = false

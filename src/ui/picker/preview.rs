@@ -1,5 +1,5 @@
 use crate::background::{JobContext, JobManager, JobToken};
-use crate::buffer::{Buffer, BufferCache, BufferCacheRefreshResult, BufferId, Cursor, LineText};
+use crate::buffer::{Buffer, BufferCache, BufferCacheRefreshResult, BufferId, Cursor, PieceTable};
 use crate::globals;
 use crate::screen::Screen;
 use crate::terminal::{Color, Style};
@@ -421,11 +421,11 @@ pub struct PreviewSyntaxRefreshJob {
     key: String,
     syntax_name: SmolStr,
     generation: u64,
-    line_texts: LineText,
+    line_texts: PieceTable,
 }
 
 impl PreviewSyntaxRefreshJob {
-    fn new(key: String, syntax_name: SmolStr, generation: u64, line_texts: LineText) -> Self {
+    fn new(key: String, syntax_name: SmolStr, generation: u64, line_texts: PieceTable) -> Self {
         Self {
             key,
             syntax_name,
@@ -729,7 +729,7 @@ mod tests {
                     key.clone(),
                     SmolStr::new("rust"),
                     generation,
-                    LineText::from_text("fn main() { let value = 1; }"),
+                    PieceTable::from_text("fn main() { let value = 1; }"),
                 ),
             )
             .unwrap();
@@ -807,7 +807,7 @@ mod tests {
 
     #[test]
     fn preview_syntax_refresh_job_populates_cached_spans_off_thread() {
-        let line_texts = LineText::from_text(
+        let line_texts = PieceTable::from_text(
             std::iter::repeat_n("fn main() { let value = 1; }", 250)
                 .collect::<Vec<_>>()
                 .join("\n")

@@ -5,7 +5,7 @@ use smol_str::SmolStr;
 impl Buffer {
     /// Creates a new empty buffer.
     pub fn new() -> Self {
-        let lines = LineText::new_empty();
+        let lines = PieceTable::new_empty();
         let syntax_name = SmolStr::new(crate::syntax::fallback_syntax_name());
         let saved_lines = lines.clone();
         let undo_lines = lines.clone();
@@ -32,7 +32,7 @@ impl Buffer {
 
     /// Creates a buffer from a string slice.
     pub fn new_from_str(text: &str) -> Self {
-        let lines = LineText::from_text(text);
+        let lines = PieceTable::from_text(text);
         let first_line = lines.line(0);
         let syntax_name = crate::syntax::resolve_builtin_syntax(
             None,
@@ -69,7 +69,7 @@ impl Buffer {
     }
 
     pub fn with_path(path: AbsolutePath) -> Self {
-        let lines = LineText::new_empty();
+        let lines = PieceTable::new_empty();
         let first_line = lines.line(0);
         let syntax_name = crate::syntax::resolve_builtin_syntax(
             Some(path.as_path()),

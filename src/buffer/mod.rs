@@ -65,7 +65,7 @@ pub use syntax::{
     IndentScopeRefreshResult, SyntaxRefreshJob, SyntaxRefreshResult, SyntaxSpan,
 };
 pub use text::{
-    LineText, LineTextRef, TextChange, TextEncoding, TextPosition, TextRange, TextRef,
+    PieceTable, PieceTableRef, TextChange, TextEncoding, TextPosition, TextRange, TextRef,
     TextSnapshot, TextStorage,
 };
 
@@ -131,7 +131,7 @@ pub struct TextObjectRange {
 #[derive(Debug, Clone)]
 struct Snapshot {
     /// The text content at this point in time.
-    lines: LineText,
+    lines: PieceTable,
     /// The cursor position at this point in time.
     cursor: Cursor,
     /// The buffer cache state at this point in time.
@@ -193,8 +193,8 @@ struct UndoState {
 /// ```
 #[derive(Debug)]
 pub struct Buffer {
-    lines: LineText,
-    saved_lines: LineText,
+    lines: PieceTable,
+    saved_lines: PieceTable,
     saved_disk_state: Option<DiskState>,
     path: Option<AbsolutePath>,
     syntax_generation: u64,
@@ -338,7 +338,7 @@ impl Buffer {
     /// let line = buf.line_at(0);
     /// assert!(line.is_some());
     /// ```
-    pub fn line_at(&self, line_idx: usize) -> Option<LineTextRef<'_>> {
+    pub fn line_at(&self, line_idx: usize) -> Option<PieceTableRef<'_>> {
         self.lines.line(line_idx)
     }
 
@@ -376,12 +376,12 @@ impl Buffer {
     }
 
     /// Iterates buffer lines.
-    pub fn lines(&self) -> impl Iterator<Item = LineTextRef<'_>> + '_ {
+    pub fn lines(&self) -> impl Iterator<Item = PieceTableRef<'_>> + '_ {
         self.lines.lines()
     }
 
     /// Returns a snapshot of the buffer text.
-    pub fn text_snapshot(&self) -> LineText {
+    pub fn text_snapshot(&self) -> PieceTable {
         self.lines.clone()
     }
 

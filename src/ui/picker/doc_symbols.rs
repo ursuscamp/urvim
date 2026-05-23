@@ -2,7 +2,7 @@
 
 use crate::background::JobManager;
 use crate::background::{JobContext, JobEvent, JobKind, JobPayload, JobToken};
-use crate::buffer::{BufferId, Cursor, LineText, TextEncoding, TextPosition, TextSnapshot};
+use crate::buffer::{BufferId, Cursor, PieceTable, TextEncoding, TextPosition, TextSnapshot};
 use crate::globals;
 use crate::lsp::runtime::{DocumentSymbolItem, DocumentSymbolTree};
 use crate::terminal::Style;
@@ -459,7 +459,7 @@ impl DocSymbolsPickerItem {
         let Ok(contents) = std::fs::read_to_string(self.path.as_path()) else {
             return self.cursor;
         };
-        let lines = LineText::from_text(contents.as_str());
+        let lines = PieceTable::from_text(contents.as_str());
         cursor_from_range_utf16(&lines, range).unwrap_or(self.cursor)
     }
 
@@ -529,7 +529,7 @@ impl DocSymbolsPickerItem {
     }
 }
 
-fn cursor_from_range_utf16(lines: &LineText, range: &lsp_types::Range) -> Option<Cursor> {
+fn cursor_from_range_utf16(lines: &PieceTable, range: &lsp_types::Range) -> Option<Cursor> {
     lines.cursor_for_position(
         TextPosition {
             line: range.start.line as usize,
