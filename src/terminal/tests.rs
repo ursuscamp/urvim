@@ -51,6 +51,19 @@ fn test_kitty_csi_u_escape() {
 }
 
 #[test]
+fn test_kitty_csi_u_ctrl_space() {
+    let mut terminal = create_terminal(b"\x1b[32;5u".to_vec());
+    let event = terminal.read_event().unwrap();
+    assert_eq!(
+        event,
+        Event::Key(Key::with_modifiers(KeyCode::Char(' '), Modifiers::CTRL))
+    );
+
+    let event = terminal.read_event().unwrap();
+    assert_eq!(event, Event::Key(Key::new(KeyCode::Null)));
+}
+
+#[test]
 fn test_set_style() {
     let backend = TestBackend::new(Vec::new());
     let output_backend = TestBackend::new(Vec::new());

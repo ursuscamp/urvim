@@ -251,8 +251,9 @@ pub fn try_parse_csi_u(data: &[u8]) -> Option<(usize, Event)> {
         27 => KeyCode::Esc,
         // 127 is Backspace in Kitty CSI-u format
         127 => KeyCode::Backspace,
-        // ASCII printable characters (33-126)
-        n @ 33..=126 => KeyCode::Char(n as u8 as char),
+        // ASCII printable characters (32-126). Space is important for
+        // terminals that report Ctrl+Space as CSI 32;5u.
+        n @ 32..=126 => KeyCode::Char(n as u8 as char),
         _ => return None,
     };
 
