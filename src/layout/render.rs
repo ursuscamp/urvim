@@ -374,8 +374,7 @@ impl Layout {
             return;
         }
 
-        let unicode_borders =
-            globals::with_config(|config| config.unicode_borders_enabled()).unwrap_or(false);
+        let unicode_borders = crate::icon::unicode_borders_enabled();
         let mode = self.active_window_mode_kind();
         let border_style: Style = globals::with_active_theme(|theme| {
             theme
@@ -512,52 +511,15 @@ impl Layout {
         let west = Self::border_cell_occupied(cells, size, origin, row, col.saturating_sub(1));
         let east = Self::border_cell_occupied(cells, size, origin, row, col.saturating_add(1));
 
-        if unicode {
-            let vertical = north || south || cell.vertical;
-            let horizontal = west || east || cell.horizontal;
-
-            if vertical && horizontal {
-                if north && south && west && east {
-                    "┼"
-                } else if north && south && west {
-                    "┤"
-                } else if north && south && east {
-                    "├"
-                } else if north && west && east {
-                    "┴"
-                } else if south && west && east {
-                    "┬"
-                } else if north && east {
-                    "└"
-                } else if north && west {
-                    "┘"
-                } else if south && east {
-                    "┌"
-                } else if south && west {
-                    "┐"
-                } else {
-                    "┼"
-                }
-            } else if vertical {
-                "│"
-            } else if horizontal {
-                "─"
-            } else if cell.vertical {
-                "│"
-            } else if cell.horizontal {
-                "─"
-            } else {
-                " "
-            }
-        } else if (north || south || cell.vertical) && (west || east || cell.horizontal) {
-            "+"
-        } else if north || south || cell.vertical {
-            "|"
-        } else if west || east || cell.horizontal {
-            "-"
-        } else {
-            " "
-        }
+        crate::icon::split_border_glyph(
+            unicode,
+            north,
+            south,
+            west,
+            east,
+            cell.vertical,
+            cell.horizontal,
+        )
     }
 
     fn border_cell_occupied(

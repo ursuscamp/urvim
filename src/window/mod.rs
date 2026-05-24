@@ -510,7 +510,7 @@ impl Window {
     }
 
     fn indent_guide_glyph(unicode_indent: bool) -> &'static str {
-        if unicode_indent { "│" } else { "|" }
+        crate::icon::indent_guide_glyph(unicode_indent)
     }
 }
 
@@ -526,7 +526,7 @@ pub fn diagnostic_sign_width_for_buffer(buffer_id: Option<BufferId>) -> u16 {
         return 0;
     }
 
-    if globals::with_config(|config| config.nerdfont_enabled()).unwrap_or(false) {
+    if crate::icon::nerdfont_enabled() {
         2
     } else {
         1

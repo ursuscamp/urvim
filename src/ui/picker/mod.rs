@@ -14,7 +14,6 @@ pub mod query;
 pub mod references;
 
 use crate::background::JobManager;
-use crate::config::AdvancedGlyphCapability;
 use crate::screen::Screen;
 use crate::terminal::{KeyCode, Style};
 use crate::ui::floating_window::{FloatingAnchor, FloatingWindowFrame, FloatingWindowFrameLabel};
@@ -1068,35 +1067,15 @@ fn theme_style(name: &str) -> Style {
 }
 
 pub fn picker_indicator_glyph() -> &'static str {
-    if crate::globals::with_config(|config| {
-        config
-            .advanced_glyphs
-            .contains(&AdvancedGlyphCapability::Nerdfont)
-    })
-    .unwrap_or(false)
-    {
-        ""
-    } else {
-        ">"
-    }
+    crate::icon::selection_indicator()
 }
 
 fn picker_indicator_glyph_backwards() -> &'static str {
-    if crate::globals::with_config(|config| {
-        config
-            .advanced_glyphs
-            .contains(&AdvancedGlyphCapability::Nerdfont)
-    })
-    .unwrap_or(false)
-    {
-        "‹"
-    } else {
-        "<"
-    }
+    crate::icon::backward_selection_indicator()
 }
 
 fn selection_prefix() -> String {
-    format!("{} ", picker_indicator_glyph())
+    crate::icon::selection_prefix()
 }
 
 fn render_result_line<T: PickerItem>(

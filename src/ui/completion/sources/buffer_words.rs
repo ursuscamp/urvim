@@ -44,11 +44,7 @@ pub fn buffer_words_completion_candidates(
 }
 
 fn buffer_word_symbol() -> Option<String> {
-    if crate::globals::with_config(|config| config.nerdfont_enabled()).unwrap_or(false) {
-        Some(" ".to_string())
-    } else {
-        None
-    }
+    crate::icon::buffer_word_completion_symbol()
 }
 
 fn current_word_text(buffer: &Buffer, range: crate::buffer::TextObjectRange) -> Option<String> {

@@ -10,11 +10,10 @@ This is a list, in no particular order, of things that need to be addressed whic
 - folding
 - show code action modification in preview window
 - code action hints for the current line (with ghost text)
-- icon/glyph utility, use everywhere nerdfont types icons are used
 - quick jump
 
 # Bugs
 
 # Refactors
 
-- lots of repetition in globals.rs, maybe modularize it?
+- lot of repetition in globals.rs, maybe modularize it?

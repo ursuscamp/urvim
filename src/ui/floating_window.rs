@@ -4,7 +4,7 @@
 //! multiple overlays (notification banner, command line, etc.) can share one
 //! implementation.
 
-use crate::globals;
+use crate::icon;
 use crate::screen::Screen;
 use crate::terminal::Style;
 use crate::ui::text_width::{ClipSide, clip_first_line};
@@ -216,7 +216,7 @@ impl FloatingWindowFrame {
             );
         }
 
-        let glyphs = FloatingWindowGlyphs::active();
+        let glyphs = icon::BorderGlyphs::active();
 
         let top_row = self.origin.row;
         let bottom_row = self.origin.row + self.size.rows - 1;
@@ -288,7 +288,7 @@ impl FloatingWindowFrame {
             return;
         }
 
-        let glyphs = FloatingWindowGlyphs::active();
+        let glyphs = icon::BorderGlyphs::active();
         let right_col = self.origin.col + self.size.cols - 1;
 
         screen.write_string(row, self.origin.col, style, glyphs.separator_left);
@@ -296,63 +296,6 @@ impl FloatingWindowFrame {
             screen.write_string(row, col, style, glyphs.horizontal);
         }
         screen.write_string(row, right_col, style, glyphs.separator_right);
-    }
-}
-
-/// Glyph set used to draw bordered floating windows and internal separators.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct FloatingWindowGlyphs {
-    /// Top-left corner glyph.
-    pub top_left: &'static str,
-    /// Top-right corner glyph.
-    pub top_right: &'static str,
-    /// Bottom-left corner glyph.
-    pub bottom_left: &'static str,
-    /// Bottom-right corner glyph.
-    pub bottom_right: &'static str,
-    /// Horizontal line glyph.
-    pub horizontal: &'static str,
-    /// Vertical line glyph.
-    pub vertical: &'static str,
-    /// Left separator junction glyph.
-    pub separator_left: &'static str,
-    /// Right separator junction glyph.
-    pub separator_right: &'static str,
-}
-
-impl FloatingWindowGlyphs {
-    /// Returns the floating window glyphs enabled by the active configuration.
-    pub fn active() -> Self {
-        let unicode_borders =
-            globals::with_config(|config| config.unicode_borders_enabled()).unwrap_or(false);
-        Self::for_unicode_borders(unicode_borders)
-    }
-
-    /// Returns floating window glyphs for the requested border capability.
-    pub fn for_unicode_borders(unicode_borders: bool) -> Self {
-        if unicode_borders {
-            return Self {
-                top_left: "┌",
-                top_right: "┐",
-                bottom_left: "└",
-                bottom_right: "┘",
-                horizontal: "─",
-                vertical: "│",
-                separator_left: "├",
-                separator_right: "┤",
-            };
-        }
-
-        Self {
-            top_left: "+",
-            top_right: "+",
-            bottom_left: "+",
-            bottom_right: "+",
-            horizontal: "-",
-            vertical: "|",
-            separator_left: "|",
-            separator_right: "|",
-        }
     }
 }
 
@@ -467,7 +410,7 @@ mod tests {
 
     #[test]
     fn glyphs_follow_ascii_border_capability() {
-        let glyphs = FloatingWindowGlyphs::for_unicode_borders(false);
+        let glyphs = icon::BorderGlyphs::for_unicode_borders(false);
 
         assert_eq!(glyphs.horizontal, "-");
         assert_eq!(glyphs.separator_left, "|");
@@ -476,7 +419,7 @@ mod tests {
 
     #[test]
     fn glyphs_follow_unicode_border_capability() {
-        let glyphs = FloatingWindowGlyphs::for_unicode_borders(true);
+        let glyphs = icon::BorderGlyphs::for_unicode_borders(true);
 
         assert_eq!(glyphs.horizontal, "─");
         assert_eq!(glyphs.separator_left, "├");

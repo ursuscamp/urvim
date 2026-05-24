@@ -7,9 +7,10 @@ use crate::action::ActionResult;
 use crate::buffer::{Buffer, BufferId, Cursor};
 use crate::editor::Action;
 use crate::globals;
+use crate::icon::FiletypeIcon;
 use crate::jumplist::JumpList;
 use crate::screen::Screen;
-use crate::syntax::{FiletypeGlyph, builtin_syntax_registry};
+use crate::syntax::builtin_syntax_registry;
 use crate::terminal::CursorStyle;
 use crate::terminal::Style;
 use crate::ui::text_width::{ClipSide, clip_text};
@@ -347,8 +348,7 @@ impl WindowGroup {
             return;
         }
 
-        let nerdfont_enabled =
-            globals::with_config(|config| config.nerdfont_enabled()).unwrap_or(false);
+        let nerdfont_enabled = crate::icon::nerdfont_enabled();
         self.ensure_active_visible(size.cols as usize, nerdfont_enabled);
         let active_index = self.active_tab_index();
 
@@ -635,7 +635,7 @@ impl WindowGroup {
 
         let label = self.tab_label(index);
         let metadata = self.tab_metadata(index);
-        let glyph = FiletypeGlyph::from_metadata(metadata.as_ref(), options.nerdfont_enabled);
+        let glyph = FiletypeIcon::from_metadata(metadata.as_ref(), options.nerdfont_enabled);
         let glyph_width = glyph
             .as_ref()
             .map(|glyph| UnicodeWidthStr::width(glyph.glyph.as_str()))

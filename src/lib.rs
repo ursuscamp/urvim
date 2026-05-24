@@ -6,6 +6,7 @@ pub mod config;
 pub mod diagnostics;
 pub mod editor;
 pub mod globals;
+pub mod icon;
 pub mod json_rpc;
 pub mod layout;
 pub mod logger;

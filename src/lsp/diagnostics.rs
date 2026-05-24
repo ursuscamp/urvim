@@ -1,5 +1,5 @@
-use crate::globals;
 use crate::terminal::{Color, Style, UnderlineStyle};
+use crate::{globals, icon};
 use lsp_types::{Diagnostic, DiagnosticSeverity};
 
 /// Compact diagnostic counts grouped by severity.
@@ -35,23 +35,7 @@ impl DiagnosticCounts {
 
 /// Returns the display marker for a diagnostic severity.
 pub fn diagnostic_marker(severity: DiagnosticSeverity, nerdfont_enabled: bool) -> &'static str {
-    if nerdfont_enabled {
-        match severity {
-            DiagnosticSeverity::ERROR => "",
-            DiagnosticSeverity::WARNING => "",
-            DiagnosticSeverity::INFORMATION => "",
-            DiagnosticSeverity::HINT => "",
-            _ => "",
-        }
-    } else {
-        match severity {
-            DiagnosticSeverity::ERROR => "E",
-            DiagnosticSeverity::WARNING => "W",
-            DiagnosticSeverity::INFORMATION => "I",
-            DiagnosticSeverity::HINT => "H",
-            _ => "I",
-        }
-    }
+    icon::diagnostic_marker(severity, nerdfont_enabled)
 }
 
 /// Returns a numeric rank where lower values represent higher severity.

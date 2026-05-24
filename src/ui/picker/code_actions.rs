@@ -242,7 +242,7 @@ mod tests {
         assert_eq!(segments[0].text, "Exact");
         assert_eq!(
             segments[1].text,
-            format!(" {} ", crate::ui::picker::picker_indicator_glyph())
+            format!(" {} ", crate::icon::selection_indicator())
         );
     }
 

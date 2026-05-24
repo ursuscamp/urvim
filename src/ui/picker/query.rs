@@ -2,7 +2,6 @@
 
 use crate::terminal::Style;
 use crate::ui::inputs::PromptSegment;
-use crate::ui::picker::picker_indicator_glyph;
 
 /// Search mode used by picker queries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,7 +42,7 @@ pub fn query_prompt_segments(mode: PickerQueryMode) -> Vec<PromptSegment> {
     vec![
         PromptSegment::new(mode.label(), highlight_style(mode.prompt_style_name())),
         PromptSegment::new(
-            format!(" {} ", picker_indicator_glyph()),
+            format!(" {} ", crate::icon::selection_indicator()),
             highlight_style("ui.input.prompt.separator"),
         ),
     ]

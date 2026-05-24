@@ -1,6 +1,6 @@
 //! Small helpers for building formatted picker result rows.
 
-use crate::syntax::FiletypeGlyph;
+use crate::icon::FiletypeIcon;
 use crate::terminal::Style;
 use crate::ui::line_format::{EllipsisPlacement, FormattedLineSection, LineSectionOverflow};
 use std::path::Path;
@@ -12,7 +12,7 @@ pub fn push_file_glyph(
     path: &Path,
     base_style: Style,
 ) {
-    let Some(glyph) = FiletypeGlyph::from_path(path) else {
+    let Some(glyph) = FiletypeIcon::from_path(path) else {
         return;
     };
 

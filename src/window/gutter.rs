@@ -80,8 +80,7 @@ impl Gutter {
         let gutter_style = self.style;
         let sign_width = state.diagnostic_sign_width;
         let gutter_width = self.calculate_width();
-        let nerdfont_enabled =
-            crate::globals::with_config(|config| config.nerdfont_enabled()).unwrap_or(false);
+        let nerdfont_enabled = crate::icon::nerdfont_enabled();
 
         for screen_row in 0..self.visible_rows {
             let screen_row_idx = screen_row as usize;

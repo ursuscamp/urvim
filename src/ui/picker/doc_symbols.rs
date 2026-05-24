@@ -606,32 +606,7 @@ fn symbol_kind_style_name(kind: SymbolKind) -> &'static str {
 }
 
 fn symbol_kind_glyph(kind: SymbolKind) -> Option<&'static str> {
-    if !globals::with_config(|config| config.nerdfont_enabled()).unwrap_or(false) {
-        return None;
-    }
-
-    Some(match kind {
-        SymbolKind::FILE => "",
-        SymbolKind::MODULE | SymbolKind::NAMESPACE | SymbolKind::PACKAGE => "",
-        SymbolKind::CLASS | SymbolKind::STRUCT => "",
-        SymbolKind::INTERFACE => "",
-        SymbolKind::ENUM => "",
-        SymbolKind::FUNCTION | SymbolKind::METHOD | SymbolKind::CONSTRUCTOR => "",
-        SymbolKind::PROPERTY | SymbolKind::FIELD | SymbolKind::VARIABLE | SymbolKind::CONSTANT => {
-            ""
-        }
-        SymbolKind::STRING
-        | SymbolKind::NUMBER
-        | SymbolKind::BOOLEAN
-        | SymbolKind::ARRAY
-        | SymbolKind::OBJECT
-        | SymbolKind::KEY
-        | SymbolKind::NULL
-        | SymbolKind::ENUM_MEMBER => "",
-        SymbolKind::EVENT | SymbolKind::OPERATOR => "",
-        SymbolKind::TYPE_PARAMETER => "",
-        _ => "",
-    })
+    crate::icon::symbol_kind_icon(kind)
 }
 
 #[cfg(test)]

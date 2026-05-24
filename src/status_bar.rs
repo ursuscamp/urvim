@@ -4,9 +4,10 @@
 //! editor state for the user.
 
 use crate::globals;
+use crate::icon::FiletypeIcon;
 use crate::lsp::diagnostics::{DiagnosticCounts, diagnostic_marker};
 use crate::screen::Screen;
-use crate::syntax::{FiletypeGlyph, builtin_syntax_registry};
+use crate::syntax::builtin_syntax_registry;
 use crate::terminal::{Color, Style};
 use crate::window::{Position, Size};
 use lsp_types::DiagnosticSeverity;
@@ -99,8 +100,7 @@ impl StatusBar {
                 .unwrap_or_else(|| (Default::default(), Default::default()))
         });
         let syntax_metadata = self.syntax_metadata(context.syntax_name);
-        let nerdfont_enabled =
-            globals::with_config(|config| config.nerdfont_enabled()).unwrap_or(false);
+        let nerdfont_enabled = crate::icon::nerdfont_enabled();
 
         let width = size.cols as usize;
         screen.write_string(origin.row, origin.col, style, &" ".repeat(width));
@@ -342,7 +342,7 @@ impl StatusBar {
         nerdfont_enabled: bool,
         syntax_label: &str,
     ) -> u16 {
-        if let Some(glyph) = FiletypeGlyph::from_metadata(metadata, nerdfont_enabled) {
+        if let Some(glyph) = FiletypeIcon::from_metadata(metadata, nerdfont_enabled) {
             screen.write_string(
                 origin.row,
                 origin.col,

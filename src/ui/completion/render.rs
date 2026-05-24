@@ -1,26 +1,18 @@
 //! Rendering helpers for the completion popup.
 
 use super::CompletionCandidate;
-use crate::globals;
 use crate::screen::Screen;
 use crate::terminal::Style;
 use crate::ui::line_format::{
     EllipsisPlacement, FormattedLineSection, FormattedLineSegment, FormattedLineTemplate,
     LineSectionAlignment, LineSectionOverflow,
 };
+use crate::{globals, icon};
 use lsp_types::CompletionItemKind;
 use unicode_width::UnicodeWidthStr;
 
-fn completion_indicator_glyph() -> &'static str {
-    if globals::with_config(|config| config.nerdfont_enabled()).unwrap_or(false) {
-        ""
-    } else {
-        ">"
-    }
-}
-
 pub(super) fn completion_selection_prefix() -> String {
-    format!("{} ", completion_indicator_glyph())
+    icon::selection_prefix()
 }
 
 pub(super) fn completion_item_display_width(item: &CompletionCandidate) -> usize {
@@ -141,11 +133,7 @@ pub(super) fn completion_item_right_detail_style(
 }
 
 pub(super) fn completion_item_kind_badge(kind: CompletionItemKind) -> String {
-    if globals::with_config(|config| config.nerdfont_enabled()).unwrap_or(false) {
-        format!("{} ", completion_item_kind_glyph(kind).unwrap_or(""))
-    } else {
-        completion_item_kind_abbreviation(kind).to_string()
-    }
+    icon::completion_item_kind_badge(kind)
 }
 
 fn completion_item_kind_style_for_kind(kind: CompletionItemKind) -> Style {
@@ -183,68 +171,6 @@ fn completion_item_kind_style_name(kind: CompletionItemKind) -> &'static str {
         | CompletionItemKind::SNIPPET
         | CompletionItemKind::EVENT => "syntax.variable",
         _ => "syntax.variable",
-    }
-}
-
-fn completion_item_kind_glyph(kind: CompletionItemKind) -> Option<&'static str> {
-    Some(match kind {
-        CompletionItemKind::TEXT => "",
-        CompletionItemKind::METHOD => "",
-        CompletionItemKind::FUNCTION => "󰊕",
-        CompletionItemKind::CONSTRUCTOR => "",
-        CompletionItemKind::FIELD => "",
-        CompletionItemKind::VARIABLE => "",
-        CompletionItemKind::CLASS => "",
-        CompletionItemKind::INTERFACE => "",
-        CompletionItemKind::MODULE => "",
-        CompletionItemKind::PROPERTY => "",
-        CompletionItemKind::UNIT => "",
-        CompletionItemKind::VALUE => "",
-        CompletionItemKind::ENUM => "",
-        CompletionItemKind::KEYWORD => "",
-        CompletionItemKind::SNIPPET => "",
-        CompletionItemKind::COLOR => "",
-        CompletionItemKind::FILE => "",
-        CompletionItemKind::REFERENCE => "",
-        CompletionItemKind::FOLDER => "",
-        CompletionItemKind::ENUM_MEMBER => "",
-        CompletionItemKind::CONSTANT => "",
-        CompletionItemKind::STRUCT => "",
-        CompletionItemKind::EVENT => "",
-        CompletionItemKind::OPERATOR => "",
-        CompletionItemKind::TYPE_PARAMETER => "",
-        _ => return None,
-    })
-}
-
-fn completion_item_kind_abbreviation(kind: CompletionItemKind) -> &'static str {
-    match kind {
-        CompletionItemKind::TEXT => "tx ",
-        CompletionItemKind::METHOD => "fn ",
-        CompletionItemKind::FUNCTION => "fn ",
-        CompletionItemKind::CONSTRUCTOR => "ct ",
-        CompletionItemKind::FIELD => "fd ",
-        CompletionItemKind::VARIABLE => "vr ",
-        CompletionItemKind::CLASS => "cl ",
-        CompletionItemKind::INTERFACE => "if ",
-        CompletionItemKind::MODULE => "md ",
-        CompletionItemKind::PROPERTY => "pr ",
-        CompletionItemKind::UNIT => "un ",
-        CompletionItemKind::VALUE => "vl ",
-        CompletionItemKind::ENUM => "en ",
-        CompletionItemKind::KEYWORD => "kw ",
-        CompletionItemKind::SNIPPET => "sn ",
-        CompletionItemKind::COLOR => "co ",
-        CompletionItemKind::FILE => "fi ",
-        CompletionItemKind::REFERENCE => "rf ",
-        CompletionItemKind::FOLDER => "fo ",
-        CompletionItemKind::ENUM_MEMBER => "em ",
-        CompletionItemKind::CONSTANT => "cn ",
-        CompletionItemKind::STRUCT => "st ",
-        CompletionItemKind::EVENT => "ev ",
-        CompletionItemKind::OPERATOR => "op ",
-        CompletionItemKind::TYPE_PARAMETER => "tp ",
-        _ => "?? ",
     }
 }
 
@@ -317,7 +243,6 @@ mod tests {
             ..Config::default()
         });
 
-        assert_eq!(completion_indicator_glyph(), "");
         assert_eq!(completion_selection_prefix(), " ");
     }
 
@@ -325,7 +250,6 @@ mod tests {
     fn completion_uses_ascii_selection_prefix_when_nerdfonts_are_disabled() {
         let _guard = globals::set_test_config(Config::default());
 
-        assert_eq!(completion_indicator_glyph(), ">");
         assert_eq!(completion_selection_prefix(), "> ");
     }
 

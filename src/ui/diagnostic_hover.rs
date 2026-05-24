@@ -109,10 +109,7 @@ impl DiagnosticHoverWidget {
 
     fn format_line(diagnostic: &Diagnostic) -> Option<DiagnosticLine> {
         let severity = diagnostic_severity(diagnostic);
-        let marker = diagnostic_marker(
-            severity,
-            crate::globals::with_config(|config| config.nerdfont_enabled()).unwrap_or(false),
-        );
+        let marker = diagnostic_marker(severity, crate::icon::nerdfont_enabled());
         let mut text = String::new();
         text.push_str(marker);
         text.push(' ');

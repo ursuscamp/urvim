@@ -121,15 +121,11 @@ fn collect_paths(root: &Path, display_prefix: &str) -> Option<Vec<String>> {
 }
 
 fn path_completion_symbol_for_path(path: &Path) -> Option<String> {
-    if let Some(glyph) = crate::syntax::FiletypeGlyph::from_path(path) {
+    if let Some(glyph) = crate::icon::FiletypeIcon::from_path(path) {
         return Some(format!("{} ", glyph.glyph));
     }
 
-    if crate::globals::with_config(|config| config.nerdfont_enabled()).unwrap_or(false) {
-        Some(" ".to_string())
-    } else {
-        None
-    }
+    crate::icon::fallback_path_completion_symbol()
 }
 
 #[cfg(test)]
