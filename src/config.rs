@@ -14,7 +14,6 @@ use std::path::PathBuf;
 use crate::editor::validate_key_string;
 use crate::lsp::builtin::builtin_lsp_config;
 use crate::theme::Tag;
-use imbl::Vector;
 use smol_str::SmolStr;
 use toml::Value;
 
@@ -262,7 +261,7 @@ pub struct Config {
     /// Whether to render the active indent scope guide.
     pub indent_guides: bool,
     /// The configured comment todo markers used for highlighting.
-    pub todo_markers: Vector<SmolStr>,
+    pub todo_markers: Vec<SmolStr>,
     /// How insert mode should resolve indentation for newly created lines.
     pub auto_indent: AutoIndentMode,
     /// Whether insert-mode completion may trigger automatically.
@@ -811,7 +810,7 @@ fn validate_env_map(field: &str, values: &BTreeMap<String, String>) -> Result<()
     Ok(())
 }
 
-fn default_todo_markers() -> Vector<SmolStr> {
+fn default_todo_markers() -> Vec<SmolStr> {
     DEFAULT_TODO_MARKERS
         .iter()
         .map(|marker| SmolStr::new(*marker))
@@ -1023,7 +1022,7 @@ mod tests {
         }
     }
 
-    fn resolved_todo_markers(values: &[&str]) -> Vector<SmolStr> {
+    fn resolved_todo_markers(values: &[&str]) -> Vec<SmolStr> {
         values.iter().map(|value| SmolStr::new(*value)).collect()
     }
 

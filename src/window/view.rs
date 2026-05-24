@@ -8,7 +8,6 @@ use crate::config::ScrollMargin;
 use crate::config::WrapMode;
 use crate::theme::Tag;
 use crate::window::wrap::WrappedLineSegment;
-use imbl::Vector;
 use smol_str::SmolStr;
 use std::cell::RefCell;
 use std::ops::Range;
@@ -615,10 +614,10 @@ impl BufferView {
             theme.map(|theme| theme.highlight_style_for_name("ui.selection"))
         });
         let syntax_enabled = globals::with_config(|config| config.syntax).unwrap_or(true);
-        let todo_markers: Vector<SmolStr> = if syntax_enabled {
+        let todo_markers: Vec<SmolStr> = if syntax_enabled {
             globals::with_config(|config| config.todo_markers.clone()).unwrap_or_default()
         } else {
-            Vector::new()
+            Vec::new()
         };
         let mut request_cache_refresh = false;
         let _applied = self.with_buffer_mut(|buffer| {
@@ -872,7 +871,7 @@ impl BufferView {
         visible: Range<usize>,
         visible_text: &str,
         syntax_spans: &[crate::buffer::SyntaxSpan],
-        todo_markers: &Vector<SmolStr>,
+        todo_markers: &[SmolStr],
         markers: &[Marker<MarkerPayload>],
         default_style: Style,
         inlay_hint_style: Option<Style>,
@@ -1146,7 +1145,7 @@ impl BufferView {
         line_text: &str,
         span: Range<usize>,
         visible: Range<usize>,
-        todo_markers: &Vector<SmolStr>,
+        todo_markers: &[SmolStr],
         syntax_styles: Option<&crate::theme::HighlightStyles>,
     ) -> Vec<RenderChunk> {
         let bounded_span_end = span.end.min(line_text.len());
@@ -1601,7 +1600,7 @@ mod tests {
 
     #[test]
     fn find_todo_matches_requires_standalone_case_sensitive_markers() {
-        let markers = imbl::Vector::from_iter(
+        let markers = Vec::from_iter(
             ["TODO", "FIXME", "BUG", "NOTE"]
                 .into_iter()
                 .map(SmolStr::new),
@@ -1657,7 +1656,7 @@ mod tests {
     fn build_comment_chunks_clamps_stale_spans_to_line_end() {
         let line_text = "const MAX_PROMPT_CONTENT_WIDTH: usize = 56;";
         let stale_span = 0..77;
-        let markers = imbl::Vector::from_iter([SmolStr::new("TODO")]);
+        let markers = Vec::from_iter([SmolStr::new("TODO")]);
         let chunks = BufferView::build_comment_chunks(
             line_text,
             stale_span,
