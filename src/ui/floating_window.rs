@@ -7,8 +7,8 @@
 use crate::globals;
 use crate::screen::Screen;
 use crate::terminal::Style;
+use crate::ui::text_width::{ClipSide, clip_first_line};
 use crate::window::{Position, Size};
-use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
 /// Placement anchor for floating windows.
@@ -262,7 +262,7 @@ impl FloatingWindowFrame {
             return None;
         }
 
-        let text = clipped_label_text(label.text, available_cols);
+        let text = clip_first_line(label.text, available_cols, ClipSide::Start).text;
         let label_cols = UnicodeWidthStr::width(text.as_str());
         if label_cols == 0 {
             return None;
@@ -297,23 +297,6 @@ impl FloatingWindowFrame {
         }
         screen.write_string(row, right_col, style, glyphs.separator_right);
     }
-}
-
-fn clipped_label_text(text: &str, max_cols: usize) -> String {
-    let text = text.lines().next().unwrap_or("");
-    let mut clipped = String::new();
-    let mut cols = 0usize;
-    for grapheme in text.graphemes(true) {
-        let width = UnicodeWidthStr::width(grapheme);
-        if cols.saturating_add(width) > max_cols {
-            break;
-        }
-
-        clipped.push_str(grapheme);
-        cols += width;
-    }
-
-    clipped
 }
 
 /// Glyph set used to draw bordered floating windows and internal separators.

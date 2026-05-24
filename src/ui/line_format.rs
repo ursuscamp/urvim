@@ -1,8 +1,7 @@
 //! Reusable styled line formatting.
 
 use crate::terminal::Style;
-use unicode_segmentation::UnicodeSegmentation;
-use unicode_width::UnicodeWidthStr;
+use crate::ui::text_width::{ClipSide, EllipsisSide, clip_text, display_width, ellipsize_text};
 
 /// Error returned when a line template is rendered with the wrong number of values.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -315,8 +314,10 @@ fn render_section(
 
     if text_width > width {
         return match overflow {
-            LineSectionOverflow::Clip => clip_text(text, width, alignment),
-            LineSectionOverflow::Ellipsis(placement) => ellipsize_text(text, width, placement),
+            LineSectionOverflow::Clip => clip_section_text(text, width, alignment),
+            LineSectionOverflow::Ellipsis(placement) => {
+                ellipsize_section_text(text, width, placement)
+            }
         };
     }
 
@@ -332,108 +333,22 @@ fn render_section(
     }
 }
 
-fn clip_text(text: &str, width: usize, alignment: LineSectionAlignment) -> String {
-    match alignment {
-        LineSectionAlignment::Left => prefix_by_width(text, width),
-        LineSectionAlignment::Right => suffix_by_width(text, width),
-        LineSectionAlignment::Center => center_slice_by_width(text, width),
-    }
+fn clip_section_text(text: &str, width: usize, alignment: LineSectionAlignment) -> String {
+    let side = match alignment {
+        LineSectionAlignment::Left => ClipSide::Start,
+        LineSectionAlignment::Right => ClipSide::End,
+        LineSectionAlignment::Center => ClipSide::Center,
+    };
+    clip_text(text, width, side).text
 }
 
-fn ellipsize_text(text: &str, width: usize, placement: EllipsisPlacement) -> String {
-    const ELLIPSIS: &str = "…";
-    if width == 0 {
-        return String::new();
-    }
-    if width == 1 {
-        return ELLIPSIS.to_string();
-    }
-
-    match placement {
-        EllipsisPlacement::Start => {
-            let suffix_width = width - 1;
-            format!("{}{}", ELLIPSIS, suffix_by_width(text, suffix_width))
-        }
-        EllipsisPlacement::Middle => {
-            let content_width = width - 1;
-            let left_width = content_width.div_ceil(2);
-            let right_width = content_width - left_width;
-            format!(
-                "{}{}{}",
-                prefix_by_width(text, left_width),
-                ELLIPSIS,
-                suffix_by_width(text, right_width)
-            )
-        }
-        EllipsisPlacement::End => {
-            let prefix_width = width - 1;
-            format!("{}{}", prefix_by_width(text, prefix_width), ELLIPSIS)
-        }
-    }
-}
-
-fn center_slice_by_width(text: &str, width: usize) -> String {
-    if width == 0 {
-        return String::new();
-    }
-
-    let text_width = display_width(text);
-    if text_width <= width {
-        return text.to_string();
-    }
-
-    let left_width = width.div_ceil(2);
-    let right_width = width - left_width;
-    format!(
-        "{}{}",
-        prefix_by_width(text, left_width),
-        suffix_by_width(text, right_width)
-    )
-}
-
-fn prefix_by_width(text: &str, max_width: usize) -> String {
-    if max_width == 0 || text.is_empty() {
-        return String::new();
-    }
-
-    let mut end_byte = 0usize;
-    let mut width = 0usize;
-    for (byte_idx, grapheme) in text.grapheme_indices(true) {
-        let grapheme_width = UnicodeWidthStr::width(grapheme);
-        if width.saturating_add(grapheme_width) > max_width {
-            break;
-        }
-        end_byte = byte_idx + grapheme.len();
-        width += grapheme_width;
-    }
-
-    text[..end_byte].to_string()
-}
-
-fn suffix_by_width(text: &str, max_width: usize) -> String {
-    if max_width == 0 || text.is_empty() {
-        return String::new();
-    }
-
-    let graphemes = text.graphemes(true).collect::<Vec<_>>();
-    let mut start = graphemes.len();
-    let mut width = 0usize;
-
-    while start > 0 {
-        let grapheme = graphemes[start - 1];
-        let grapheme_width = UnicodeWidthStr::width(grapheme);
-        if width.saturating_add(grapheme_width) > max_width {
-            break;
-        }
-        width += grapheme_width;
-        start -= 1;
-    }
-
-    graphemes[start..].concat()
-}
-
-fn display_width(text: &str) -> usize {
-    UnicodeWidthStr::width(text)
+fn ellipsize_section_text(text: &str, width: usize, placement: EllipsisPlacement) -> String {
+    let side = match placement {
+        EllipsisPlacement::Start => EllipsisSide::Start,
+        EllipsisPlacement::Middle => EllipsisSide::Middle,
+        EllipsisPlacement::End => EllipsisSide::End,
+    };
+    ellipsize_text(text, width, side).text
 }
 
 #[cfg(test)]

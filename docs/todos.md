@@ -18,4 +18,3 @@ This is a list, in no particular order, of things that need to be addressed whic
 # Refactors
 
 - lots of repetition in globals.rs, maybe modularize it?
-- look for places where we clip text at width, replace them with a utility method (if it exists) or a trait

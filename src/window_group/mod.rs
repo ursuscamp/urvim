@@ -12,12 +12,12 @@ use crate::screen::Screen;
 use crate::syntax::{FiletypeGlyph, builtin_syntax_registry};
 use crate::terminal::CursorStyle;
 use crate::terminal::Style;
+use crate::ui::text_width::{ClipSide, clip_text};
 use crate::window::{BufferView, Position, Size, Window};
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::time::Instant;
-use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
 mod session;
@@ -647,7 +647,7 @@ impl WindowGroup {
             usize::from(options.available).saturating_sub(2)
         };
         let rendered_label = if options.clip_label {
-            self.clip_to_width(&label, label_width_budget)
+            clip_text(&label, label_width_budget, ClipSide::Start).text
         } else {
             label.clone()
         };
@@ -684,25 +684,6 @@ impl WindowGroup {
         }
 
         prefix_width as u16 + rendered_label_width as u16 + 1
-    }
-
-    fn clip_to_width(&self, text: &str, max_width: usize) -> String {
-        if max_width == 0 {
-            return String::new();
-        }
-
-        let mut result = String::new();
-        let mut width = 0usize;
-        for grapheme in text.graphemes(true) {
-            let grapheme_width = UnicodeWidthStr::width(grapheme);
-            if width + grapheme_width > max_width {
-                break;
-            }
-            width += grapheme_width;
-            result.push_str(grapheme);
-        }
-
-        result
     }
 
     fn handle_previous_tab(&mut self, count: usize) {

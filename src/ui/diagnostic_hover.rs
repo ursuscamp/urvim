@@ -4,11 +4,12 @@ use crate::lsp::diagnostics::{diagnostic_marker, diagnostic_severity};
 use crate::screen::Screen;
 use crate::terminal::{Color, Style};
 use crate::ui::floating_window::FloatingWindowFrame;
+use crate::ui::text_width::{ClipSide, clip_text};
 use crate::ui::{FocusPolicy, UiContext, UiEvent, UiEventResult, UiRect};
 use crate::widget::Widget;
 use crate::window::Position;
 use lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString};
-use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+use unicode_width::UnicodeWidthStr;
 
 const MAX_CONTENT_COLS: u16 = 100;
 const MAX_CONTENT_ROWS: u16 = 8;
@@ -180,20 +181,6 @@ impl DiagnosticHoverWidget {
             _ => Color::ansi(75),
         }
     }
-
-    fn clip_text(text: &str, width: usize) -> String {
-        let mut clipped = String::new();
-        let mut current_width = 0usize;
-        for ch in text.chars() {
-            let ch_width = UnicodeWidthChar::width(ch).unwrap_or(0);
-            if current_width.saturating_add(ch_width) > width {
-                break;
-            }
-            clipped.push(ch);
-            current_width += ch_width;
-        }
-        clipped
-    }
 }
 
 impl Widget for DiagnosticHoverWidget {
@@ -224,7 +211,12 @@ impl Widget for DiagnosticHoverWidget {
             .take(frame.content_size.rows as usize)
             .enumerate()
         {
-            let clipped = Self::clip_text(line.text.as_str(), frame.content_size.cols as usize);
+            let clipped = clip_text(
+                line.text.as_str(),
+                frame.content_size.cols as usize,
+                ClipSide::Start,
+            )
+            .text;
             screen.write_string(
                 frame.content_origin.row + row as u16,
                 frame.content_origin.col,

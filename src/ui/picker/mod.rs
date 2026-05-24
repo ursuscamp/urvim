@@ -25,12 +25,12 @@ pub use crate::ui::line_format::{
 };
 use crate::ui::picker::preview::PickerPreviewAdapter;
 use crate::ui::picker::query::PickerQueryMode;
+use crate::ui::text_width::{ClipSide, EllipsisSide, clip_text, ellipsize_text};
 use crate::ui::{FocusPolicy, Intent, UiContext, UiEvent, UiEventResult, UiRect};
 use crate::widget::Widget;
 use crate::window::{Position, Size};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender, TryRecvError};
-use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
 const MAX_VISIBLE_RESULTS: usize = 8;
@@ -1183,91 +1183,22 @@ fn render_preview_frame(
 
 /// Returns the visible head of text within a column budget.
 pub fn visible_head_text(text: &str, max_cols: usize, ellipsize: bool) -> (String, u16) {
-    if text.is_empty() || max_cols == 0 {
-        return (String::new(), 0);
-    }
-
-    let text_width = UnicodeWidthStr::width(text);
-    if text_width <= max_cols {
-        return (text.to_string(), text.len() as u16);
-    }
-
-    let ellipsis = "…";
-    let ellipsis_width = UnicodeWidthStr::width(ellipsis);
-    let available_cols = if ellipsize && max_cols > ellipsis_width {
-        max_cols - ellipsis_width
+    let clipped = if ellipsize {
+        ellipsize_text(text, max_cols, EllipsisSide::End)
     } else {
-        max_cols
+        clip_text(text, max_cols, ClipSide::Start)
     };
-
-    let mut end_byte = 0usize;
-    let mut visible_cols = 0u16;
-    for (byte_idx, grapheme) in text.grapheme_indices(true) {
-        let width = UnicodeWidthStr::width(grapheme) as u16;
-        if visible_cols > 0 && usize::from(visible_cols.saturating_add(width)) > available_cols {
-            break;
-        }
-
-        end_byte = byte_idx + grapheme.len();
-        visible_cols = visible_cols.saturating_add(width);
-        if usize::from(visible_cols) >= available_cols {
-            break;
-        }
-    }
-
-    if ellipsize && max_cols > ellipsis_width {
-        return (
-            format!("{}{}", &text[..end_byte], ellipsis),
-            end_byte as u16,
-        );
-    }
-
-    (text[..end_byte].to_string(), end_byte as u16)
+    (clipped.text, clipped.end_byte as u16)
 }
 
 /// Returns the visible tail of text within a column budget.
 pub fn visible_tail_text(text: &str, max_cols: usize, ellipsize: bool) -> (String, u16) {
-    if text.is_empty() || max_cols == 0 {
-        return (String::new(), 0);
-    }
-
-    let text_width = UnicodeWidthStr::width(text);
-    if text_width <= max_cols {
-        return (text.to_string(), text_width as u16);
-    }
-
-    let ellipsis = "…";
-    let ellipsis_width = UnicodeWidthStr::width(ellipsis);
-    let available_cols = if ellipsize && max_cols > ellipsis_width {
-        max_cols - ellipsis_width
+    let clipped = if ellipsize {
+        ellipsize_text(text, max_cols, EllipsisSide::Start)
     } else {
-        max_cols
+        clip_text(text, max_cols, ClipSide::End)
     };
-
-    let mut start_byte = text.len();
-    let mut visible_cols = 0u16;
-
-    for (byte_idx, grapheme) in text.grapheme_indices(true).rev() {
-        let width = UnicodeWidthStr::width(grapheme) as u16;
-        if visible_cols > 0 && usize::from(visible_cols.saturating_add(width)) > available_cols {
-            break;
-        }
-
-        start_byte = byte_idx;
-        visible_cols = visible_cols.saturating_add(width);
-
-        if usize::from(visible_cols) >= available_cols {
-            break;
-        }
-    }
-
-    if ellipsize && max_cols > ellipsis_width {
-        let visible = format!("{ellipsis}{}", &text[start_byte..]);
-        let cols = visible_cols.saturating_add(ellipsis_width as u16);
-        return (visible, cols);
-    }
-
-    (text[start_byte..].to_string(), visible_cols)
+    (clipped.text, clipped.width as u16)
 }
 
 #[cfg(test)]

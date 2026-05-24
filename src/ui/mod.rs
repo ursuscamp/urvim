@@ -12,6 +12,7 @@ pub mod inputs;
 pub mod line_format;
 pub mod lsp_rename;
 pub mod picker;
+pub mod text_width;
 
 use crate::buffer::Cursor;
 use crate::editor::Action;

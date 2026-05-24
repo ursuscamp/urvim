@@ -1,7 +1,7 @@
 use super::*;
 use crate::buffer::{configured_tab_width, display_grapheme_width, display_width_at, expand_tabs};
+use crate::ui::text_width::{ClipSide, clip_text};
 use unicode_segmentation::UnicodeSegmentation;
-use unicode_width::UnicodeWidthStr;
 
 impl RenderChunk {
     pub fn new(text: &str, style: Style) -> Self {
@@ -76,7 +76,7 @@ impl RenderData {
                 let style = line_base_style.overlay(chunk.style);
                 let rendered = expand_tabs(&chunk.text, line_visual_col, tab_width);
                 let remaining_cols = usize::from(right_col.saturating_sub(col_offset));
-                let clipped = visible_prefix_by_width(rendered.as_str(), remaining_cols);
+                let clipped = clip_text(rendered.as_str(), remaining_cols, ClipSide::Start).text;
                 screen.write_string(row, col_offset, style, clipped.as_str());
                 let chunk_width = display_width_at(&chunk.text, line_visual_col, tab_width);
                 line_visual_col += chunk_width;
@@ -221,25 +221,6 @@ impl RenderData {
             line_data.chunks = selected_chunks;
         }
     }
-}
-
-fn visible_prefix_by_width(text: &str, max_cols: usize) -> String {
-    if max_cols == 0 || text.is_empty() {
-        return String::new();
-    }
-
-    let mut end_byte = 0usize;
-    let mut width = 0usize;
-    for (byte_idx, grapheme) in text.grapheme_indices(true) {
-        let grapheme_width = UnicodeWidthStr::width(grapheme);
-        if width.saturating_add(grapheme_width) > max_cols {
-            break;
-        }
-        end_byte = byte_idx + grapheme.len();
-        width += grapheme_width;
-    }
-
-    text[..end_byte].to_string()
 }
 
 fn push_split_render_chunk(
