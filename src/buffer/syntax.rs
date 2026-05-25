@@ -314,9 +314,10 @@ impl IndentScope {
 
 #[derive(Debug, Clone)]
 pub struct IndentScopeCache {
-    scopes: Vector<IndentScope>,
-    line_to_scopes: Vector<Vector<IndentScopeId>>,
-    open_scope_stack: Vector<IndentScopeId>,
+    scopes: Vec<IndentScope>,
+    line_scope_offsets: Vec<usize>,
+    line_scope_ids: Vec<IndentScopeId>,
+    open_scope_stack: Vec<IndentScopeId>,
     scanned_through_line: usize,
     stale: bool,
 }
@@ -324,9 +325,10 @@ pub struct IndentScopeCache {
 impl Default for IndentScopeCache {
     fn default() -> Self {
         Self {
-            scopes: Vector::new(),
-            line_to_scopes: Vector::new(),
-            open_scope_stack: Vector::new(),
+            scopes: Vec::new(),
+            line_scope_offsets: vec![0],
+            line_scope_ids: Vec::new(),
+            open_scope_stack: Vec::new(),
             scanned_through_line: 0,
             stale: true,
         }
@@ -344,7 +346,7 @@ impl IndentScopeCache {
     }
 
     pub(crate) fn invalidate_from(&mut self, line: usize) {
-        let boundary = line.min(self.line_to_scopes.len());
+        let boundary = line.min(self.cached_line_count());
         let mut sync_point = self.previous_sync_point(boundary);
 
         // When all lines before the boundary have no open scopes (which happens
@@ -355,15 +357,13 @@ impl IndentScopeCache {
             sync_point = boundary - 1;
         }
 
-        self.line_to_scopes.truncate(sync_point);
+        self.truncate_rows(sync_point);
         self.scanned_through_line = sync_point;
-        self.open_scope_stack = Vector::new();
+        self.open_scope_stack = Vec::new();
         self.stale = true;
 
         let prefix_len = self
             .scopes
-            .iter()
-            .collect::<Vec<_>>()
             .partition_point(|scope| scope.start_line < sync_point);
         self.scopes.truncate(prefix_len);
     }
@@ -383,7 +383,7 @@ impl IndentScopeCache {
     }
 
     fn line_has_open_scopes(&self, line_idx: usize) -> bool {
-        self.line_to_scopes.get(line_idx).is_some_and(|scope_ids| {
+        self.row_scope_ids(line_idx).is_some_and(|scope_ids| {
             scope_ids.iter().any(|scope_id| {
                 self.scopes.get(*scope_id).is_some_and(|scope| {
                     scope.end_line.map_or(true, |end_line| end_line > line_idx)
@@ -400,7 +400,8 @@ impl IndentScopeCache {
     ) -> bool {
         if line_texts.line_count() == 0 {
             self.scanned_through_line = 0;
-            self.open_scope_stack = Vector::new();
+            self.open_scope_stack = Vec::new();
+            self.truncate_rows(0);
             self.stale = false;
             return true;
         }
@@ -411,13 +412,12 @@ impl IndentScopeCache {
             return self.scanned_through_line >= line_texts.line_count();
         }
 
-        if self.line_to_scopes.len() > line_texts.line_count() {
-            self.line_to_scopes.truncate(line_texts.line_count());
+        if self.cached_line_count() > line_texts.line_count() {
+            self.truncate_rows(line_texts.line_count());
         }
 
         for line_idx in self.scanned_through_line..=target_line {
             let line_text = line_texts.line(line_idx).expect("target line exists");
-            self.ensure_row_for_line(line_idx);
             // Empty lines should not open or close scopes; they inherit the current stack.
             if line_text.is_empty() {
                 self.commit_row(line_idx, self.open_scope_stack.clone());
@@ -445,7 +445,7 @@ impl IndentScopeCache {
                 } else {
                     invalid_branch_start = Some(self.scopes[scope_id].start_line);
                 }
-                self.open_scope_stack.pop_back();
+                self.open_scope_stack.pop();
             }
 
             if let Some(branch_start) = invalid_branch_start {
@@ -457,7 +457,7 @@ impl IndentScopeCache {
 
             let mut row_members = self.open_scope_stack.clone();
             if let Some(scope_id) = closed_scope_on_line {
-                row_members.push_back(scope_id);
+                row_members.push(scope_id);
             }
 
             if !line_text.is_empty() {
@@ -472,9 +472,9 @@ impl IndentScopeCache {
 
             let new_scope_id = self.scopes.len();
             self.scopes
-                .push_back(IndentScope::open(new_scope_id, line_idx, indent_width));
-            row_members.push_back(new_scope_id);
-            self.open_scope_stack.push_back(new_scope_id);
+                .push(IndentScope::open(new_scope_id, line_idx, indent_width));
+            row_members.push(new_scope_id);
+            self.open_scope_stack.push(new_scope_id);
 
             self.commit_row(line_idx, row_members);
         }
@@ -490,20 +490,7 @@ impl IndentScopeCache {
         false
     }
 
-    fn ensure_row_for_line(&mut self, line_idx: usize) {
-        if self.line_to_scopes.len() <= line_idx {
-            while self.line_to_scopes.len() <= line_idx {
-                self.line_to_scopes.push_back(Vector::new());
-            }
-        } else {
-            if let Some(row) = self.line_to_scopes.get_mut(line_idx) {
-                *row = Vector::new();
-            }
-        }
-    }
-
-    fn commit_row(&mut self, line_idx: usize, scope_ids: Vector<IndentScopeId>) {
-        let mut scope_ids: Vec<IndentScopeId> = scope_ids.into_iter().collect();
+    fn commit_row(&mut self, line_idx: usize, mut scope_ids: Vec<IndentScopeId>) {
         scope_ids.sort_by_key(|scope_id| {
             let scope = &self.scopes[*scope_id];
             (
@@ -511,9 +498,9 @@ impl IndentScopeCache {
                 std::cmp::Reverse(scope.end_line.unwrap_or(usize::MAX)),
             )
         });
-        if let Some(row) = self.line_to_scopes.get_mut(line_idx) {
-            *row = scope_ids.into_iter().collect();
-        }
+        self.truncate_rows(line_idx);
+        self.line_scope_ids.extend(scope_ids);
+        self.line_scope_offsets.push(self.line_scope_ids.len());
     }
 
     fn close_scope_line(&mut self, scope_id: IndentScopeId, end_line: usize) -> bool {
@@ -531,34 +518,19 @@ impl IndentScopeCache {
         if let Some(scope) = self.scopes.get(scope_id) {
             self.remove_scope_memberships(scope.start_line, end_line, scope_id);
         }
-        self.open_scope_stack.pop_back();
+        self.open_scope_stack.pop();
     }
 
     fn trim_invalid_branch(&mut self, branch_start: usize, end_line: usize) {
         let prefix_len = self
             .scopes
-            .iter()
-            .collect::<Vec<_>>()
             .partition_point(|scope| scope.start_line < branch_start);
         self.scopes.truncate(prefix_len);
-        self.open_scope_stack = self
-            .open_scope_stack
-            .iter()
-            .copied()
-            .filter(|scope_id| *scope_id < prefix_len)
-            .collect();
-        for row in self
-            .line_to_scopes
-            .iter_mut()
-            .take(end_line + 1)
-            .skip(branch_start)
-        {
-            *row = row
-                .iter()
-                .copied()
-                .filter(|scope_id| *scope_id < prefix_len)
-                .collect();
-        }
+        self.open_scope_stack
+            .retain(|scope_id| *scope_id < prefix_len);
+        self.filter_row_range(branch_start, end_line.saturating_add(1), |scope_id| {
+            scope_id < prefix_len
+        });
     }
 
     fn finalize_to_eof(&mut self, line_texts: &PieceTable) {
@@ -569,7 +541,7 @@ impl IndentScopeCache {
         let last_line = line_texts.line_count() - 1;
         while let Some(&scope_id) = self.open_scope_stack.last() {
             if self.close_scope_line(scope_id, last_line) {
-                self.open_scope_stack.pop_back();
+                self.open_scope_stack.pop();
                 continue;
             }
 
@@ -585,26 +557,75 @@ impl IndentScopeCache {
         end_line: usize,
         scope_id: IndentScopeId,
     ) {
-        for row in self
-            .line_to_scopes
-            .iter_mut()
-            .take(end_line + 1)
-            .skip(start_line)
-        {
-            *row = row
-                .iter()
-                .copied()
-                .filter(|existing| *existing != scope_id)
-                .collect();
-        }
+        self.filter_row_range(start_line, end_line.saturating_add(1), |existing| {
+            existing != scope_id
+        });
     }
 
-    pub(crate) fn indent_scopes(&self) -> &Vector<IndentScope> {
+    fn cached_line_count(&self) -> usize {
+        self.line_scope_offsets.len().saturating_sub(1)
+    }
+
+    fn row_scope_ids(&self, line: usize) -> Option<&[IndentScopeId]> {
+        let start = *self.line_scope_offsets.get(line)?;
+        let end = *self.line_scope_offsets.get(line + 1)?;
+        Some(&self.line_scope_ids[start..end])
+    }
+
+    fn truncate_rows(&mut self, line_count: usize) {
+        let line_count = line_count.min(self.cached_line_count());
+        self.line_scope_offsets.truncate(line_count + 1);
+        let id_len = self.line_scope_offsets.last().copied().unwrap_or(0);
+        self.line_scope_ids.truncate(id_len);
+    }
+
+    fn filter_row_range(
+        &mut self,
+        start_line: usize,
+        end_line: usize,
+        keep: impl Fn(usize) -> bool,
+    ) {
+        let cached_line_count = self.cached_line_count();
+        let start_line = start_line.min(cached_line_count);
+        let end_line = end_line.min(cached_line_count);
+        if start_line >= end_line {
+            return;
+        }
+
+        let prefix_id_len = self.line_scope_offsets[start_line];
+        let suffix_id_start = self.line_scope_offsets[end_line];
+        let mut ids = Vec::with_capacity(self.line_scope_ids.len());
+        ids.extend_from_slice(&self.line_scope_ids[..prefix_id_len]);
+
+        let mut offsets = self.line_scope_offsets[..=start_line].to_vec();
+        for line_idx in start_line..end_line {
+            let row_start = self.line_scope_offsets[line_idx];
+            let row_end = self.line_scope_offsets[line_idx + 1];
+            ids.extend(
+                self.line_scope_ids[row_start..row_end]
+                    .iter()
+                    .copied()
+                    .filter(|scope_id| keep(*scope_id)),
+            );
+            offsets.push(ids.len());
+        }
+
+        ids.extend_from_slice(&self.line_scope_ids[suffix_id_start..]);
+        let id_delta = ids.len() as isize - self.line_scope_ids.len() as isize;
+        for offset in self.line_scope_offsets.iter().skip(end_line + 1) {
+            offsets.push(offset.saturating_add_signed(id_delta));
+        }
+
+        self.line_scope_ids = ids;
+        self.line_scope_offsets = offsets;
+    }
+
+    pub(crate) fn indent_scopes(&self) -> &[IndentScope] {
         &self.scopes
     }
 
-    pub(crate) fn line_indent_scope_ids(&self, line: usize) -> Option<&Vector<IndentScopeId>> {
-        self.line_to_scopes.get(line)
+    pub(crate) fn line_indent_scope_ids(&self, line: usize) -> Option<&[IndentScopeId]> {
+        self.row_scope_ids(line)
     }
 }
 
@@ -744,12 +765,12 @@ impl BufferCache {
     }
 
     /// Returns all cached indent scopes for this buffer snapshot.
-    pub fn indent_scopes(&self) -> &Vector<IndentScope> {
+    pub fn indent_scopes(&self) -> &[IndentScope] {
         self.indent_scope_cache.indent_scopes()
     }
 
     /// Returns cached containing indent scope ids for a line.
-    pub fn line_indent_scope_ids(&self, line: usize) -> Option<&Vector<IndentScopeId>> {
+    pub fn line_indent_scope_ids(&self, line: usize) -> Option<&[IndentScopeId]> {
         self.indent_scope_cache.line_indent_scope_ids(line)
     }
 }
@@ -1497,12 +1518,12 @@ impl Buffer {
     }
 
     /// Returns all cached indent scopes for the current buffer snapshot.
-    pub fn cached_indent_scopes(&self) -> &Vector<IndentScope> {
+    pub fn cached_indent_scopes(&self) -> &[IndentScope] {
         self.buffer_cache.indent_scopes()
     }
 
     /// Returns cached containing indent scope ids for the requested line.
-    pub fn cached_line_indent_scope_ids(&self, line: usize) -> Option<&Vector<IndentScopeId>> {
+    pub fn cached_line_indent_scope_ids(&self, line: usize) -> Option<&[IndentScopeId]> {
         self.buffer_cache.line_indent_scope_ids(line)
     }
 

@@ -31,3 +31,7 @@ criterion = "0.5"
 [[bench]]
 name = "text_storage"
 harness = false
+
+[[bench]]
+name = "indent_scope_index"
+harness = false
