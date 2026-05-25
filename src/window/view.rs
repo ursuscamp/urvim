@@ -635,7 +635,11 @@ impl BufferView {
                 if near_cached_frontier {
                     buffer.ensure_syntax_through(visible_end_line);
                 }
-                if self.buffer_id_opt().is_some() {
+                if self.buffer_id_opt().is_some()
+                    && (!buffer.syntax_cache_complete()
+                        || buffer.pending_syntax_dirty_suffix_start().is_some()
+                        || buffer.indent_scope_cache_stale())
+                {
                     request_cache_refresh = true;
                 }
             }
@@ -652,10 +656,10 @@ impl BufferView {
                     let line_text = line_text.contiguous_text_with_scratch(&mut line_scratch);
                     let syntax_spans = if syntax_enabled {
                         buffer
-                            .cached_syntax_spans_for_line(buffer_line_idx)
+                            .cached_syntax_spans_for_line_ref(buffer_line_idx)
                             .unwrap_or_default()
                     } else {
-                        Vec::new()
+                        &[]
                     };
                     if wrap_enabled {
                         let mut annotations = buffer
@@ -668,7 +672,7 @@ impl BufferView {
                             line_text,
                             0..line_text.len(),
                             line_text,
-                            &syntax_spans,
+                            syntax_spans,
                             &todo_markers,
                             &annotations,
                             default_style,
@@ -712,7 +716,7 @@ impl BufferView {
                             line_text,
                             byte_offset..line_text.len(),
                             &visible_text,
-                            &syntax_spans,
+                            syntax_spans,
                             &todo_markers,
                             &annotations,
                             default_style,

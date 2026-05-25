@@ -27,6 +27,12 @@ fn main() {
     let escaped = format!("{{literal}}");
 }
 
+fn completion_fixture() {
+    let guard = String::from("ready");
+    let result: Option<String> = Some(guard);
+    println!("{:?}", result);
+}
+
 /// Doc comment
 //! Inner doc comment
 #[inline]

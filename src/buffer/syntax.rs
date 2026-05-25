@@ -10,10 +10,11 @@ use crate::syntax::{
     builtin_syntax_registry,
 };
 use crate::theme::Tag;
-use imbl::Vector;
 use regex::Regex;
 use smol_str::SmolStr;
 use std::sync::Arc;
+
+const SYNTAX_CHUNK_SIZE: usize = 512;
 
 /// A highlighted span within one buffer line.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -38,25 +39,80 @@ impl SyntaxSpan {
 }
 
 #[derive(Debug, Clone)]
-pub struct SyntaxLine {
+struct SyntaxLineMeta {
     line: Arc<str>,
-    pub spans: Vec<SyntaxSpan>,
+    span_start: usize,
+    span_len: usize,
     state: SyntaxState,
 }
 
-impl SyntaxLine {
-    fn new(line: Arc<str>, spans: Vec<SyntaxSpan>, state: SyntaxState) -> Self {
-        Self { line, spans, state }
-    }
+#[derive(Debug, Clone)]
+struct SyntaxChunk {
+    start_line: usize,
+    lines: Arc<[SyntaxLineMeta]>,
+    spans: Arc<[SyntaxSpan]>,
+}
+
+#[derive(Debug, Clone)]
+struct SyntaxChunkBuilder {
+    start_line: usize,
+    lines: Vec<SyntaxLineMeta>,
+    spans: Vec<SyntaxSpan>,
+}
+
+struct SyntaxLineView<'a> {
+    line: &'a str,
+    spans: &'a [SyntaxSpan],
+    state: &'a SyntaxState,
 }
 
 #[derive(Debug, Clone)]
 pub struct SyntaxCache {
     syntax_name: SmolStr,
-    lines: Vector<SyntaxLine>,
-    dirty_suffix: Vector<SyntaxLine>,
+    chunks: Vec<SyntaxChunk>,
+    tail: SyntaxChunkBuilder,
+    dirty_suffix: Vec<SyntaxChunk>,
     dirty_start: Option<usize>,
     dirty_line_delta: isize,
+}
+
+impl SyntaxChunkBuilder {
+    fn new(start_line: usize) -> Self {
+        Self {
+            start_line,
+            lines: Vec::new(),
+            spans: Vec::new(),
+        }
+    }
+
+    fn append_line(&mut self, line: Arc<str>, spans: Vec<SyntaxSpan>, state: SyntaxState) {
+        let span_start = self.spans.len();
+        let span_len = spans.len();
+        self.spans.extend(spans);
+        self.lines.push(SyntaxLineMeta {
+            line,
+            span_start,
+            span_len,
+            state,
+        });
+    }
+
+    fn freeze(&mut self) -> Option<SyntaxChunk> {
+        if self.lines.is_empty() {
+            return None;
+        }
+
+        let start_line = self.start_line;
+        let line_count = self.lines.len();
+        Some(SyntaxChunk {
+            start_line,
+            lines: Arc::from(std::mem::take(&mut self.lines).into_boxed_slice()),
+            spans: Arc::from(std::mem::take(&mut self.spans).into_boxed_slice()),
+        })
+        .inspect(|_| {
+            self.start_line = start_line + line_count;
+        })
+    }
 }
 
 impl SyntaxCache {
@@ -64,8 +120,9 @@ impl SyntaxCache {
     pub fn new(syntax_name: impl Into<SmolStr>) -> Self {
         Self {
             syntax_name: syntax_name.into(),
-            lines: Vector::new(),
-            dirty_suffix: Vector::new(),
+            chunks: Vec::new(),
+            tail: SyntaxChunkBuilder::new(0),
+            dirty_suffix: Vec::new(),
             dirty_start: None,
             dirty_line_delta: 0,
         }
@@ -76,7 +133,8 @@ impl SyntaxCache {
         let syntax_name = syntax_name.into();
         if self.syntax_name != syntax_name {
             self.syntax_name = syntax_name;
-            self.lines = Vector::new();
+            self.chunks = Vec::new();
+            self.tail = SyntaxChunkBuilder::new(0);
             self.clear_dirty_suffix();
         }
     }
@@ -87,41 +145,325 @@ impl SyntaxCache {
     }
 
     fn clear_dirty_suffix(&mut self) {
-        self.dirty_suffix = Vector::new();
+        self.dirty_suffix = Vec::new();
         self.dirty_start = None;
         self.dirty_line_delta = 0;
     }
 
-    /// Invalidates cached syntax data from the provided line onward.
-    pub fn invalidate_from(&mut self, line: usize, line_delta: isize) {
-        if line >= self.lines.len() {
-            self.clear_dirty_suffix();
+    fn flush_tail(&mut self) {
+        if let Some(chunk) = self.tail.freeze() {
+            self.chunks.push(chunk);
+        }
+    }
+
+    fn frozen_line_count(&self) -> usize {
+        self.chunks
+            .last()
+            .map(|chunk| chunk.start_line + chunk.lines.len())
+            .unwrap_or(0)
+    }
+
+    fn append_line(&mut self, line: Arc<str>, spans: Vec<SyntaxSpan>, state: SyntaxState) {
+        if self.tail.lines.len() == SYNTAX_CHUNK_SIZE {
+            self.flush_tail();
+        }
+        let frozen_line_count = self.frozen_line_count();
+        if self.tail.lines.is_empty() && self.tail.start_line < frozen_line_count {
+            self.tail.start_line = frozen_line_count;
+        }
+        self.tail.append_line(line, spans, state);
+    }
+
+    fn chunk_line_view(chunk: &SyntaxChunk, line: usize) -> Option<SyntaxLineView<'_>> {
+        let line_offset = line.checked_sub(chunk.start_line)?;
+        let meta = chunk.lines.get(line_offset)?;
+        Some(SyntaxLineView {
+            line: meta.line.as_ref(),
+            spans: &chunk.spans[meta.span_start..meta.span_start + meta.span_len],
+            state: &meta.state,
+        })
+    }
+
+    fn line_view(&self, line: usize) -> Option<SyntaxLineView<'_>> {
+        let chunk_idx = self
+            .chunks
+            .partition_point(|chunk| chunk.start_line + chunk.lines.len() <= line);
+        if let Some(chunk) = self.chunks.get(chunk_idx)
+            && line >= chunk.start_line
+        {
+            return Self::chunk_line_view(chunk, line);
+        }
+
+        if line >= self.tail.start_line && line < self.tail.start_line + self.tail.lines.len() {
+            let line_offset = line - self.tail.start_line;
+            let meta = self.tail.lines.get(line_offset)?;
+            return Some(SyntaxLineView {
+                line: meta.line.as_ref(),
+                spans: &self.tail.spans[meta.span_start..meta.span_start + meta.span_len],
+                state: &meta.state,
+            });
+        }
+
+        None
+    }
+
+    fn dirty_line_view(dirty_suffix: &[SyntaxChunk], line: usize) -> Option<SyntaxLineView<'_>> {
+        let chunk_idx =
+            dirty_suffix.partition_point(|chunk| chunk.start_line + chunk.lines.len() <= line);
+        dirty_suffix
+            .get(chunk_idx)
+            .filter(|chunk| line >= chunk.start_line)
+            .and_then(|chunk| Self::chunk_line_view(chunk, line))
+    }
+
+    fn dirty_line_view_by_index(
+        dirty_suffix: &[SyntaxChunk],
+        dirty_idx: usize,
+    ) -> Option<SyntaxLineView<'_>> {
+        let first_line = dirty_suffix.first()?.start_line;
+        Self::dirty_line_view(dirty_suffix, first_line + dirty_idx)
+    }
+
+    fn split_chunk_at(chunk: &SyntaxChunk, line_offset: usize) -> (SyntaxChunk, SyntaxChunk) {
+        let span_split = chunk.lines[line_offset].span_start;
+        let prefix_lines: Vec<_> = chunk.lines[..line_offset].to_vec();
+        let suffix_lines: Vec<_> = chunk.lines[line_offset..]
+            .iter()
+            .cloned()
+            .map(|mut line| {
+                line.span_start -= span_split;
+                line
+            })
+            .collect();
+
+        (
+            SyntaxChunk {
+                start_line: chunk.start_line,
+                lines: Arc::from(prefix_lines.into_boxed_slice()),
+                spans: Arc::from(chunk.spans[..span_split].to_vec().into_boxed_slice()),
+            },
+            SyntaxChunk {
+                start_line: chunk.start_line + line_offset,
+                lines: Arc::from(suffix_lines.into_boxed_slice()),
+                spans: Arc::from(chunk.spans[span_split..].to_vec().into_boxed_slice()),
+            },
+        )
+    }
+
+    fn shift_chunk_lines(chunks: &mut [SyntaxChunk], line_delta: isize) {
+        if line_delta == 0 {
             return;
         }
 
-        self.dirty_suffix = self.lines.skip(line);
-        self.lines.truncate(line.min(self.lines.len()));
+        for chunk in chunks {
+            chunk.start_line = chunk.start_line.saturating_add_signed(line_delta);
+        }
+    }
+
+    fn append_dirty_suffix_after_index(
+        &mut self,
+        dirty_suffix: &mut Vec<SyntaxChunk>,
+        dirty_idx: usize,
+    ) {
+        self.flush_tail();
+
+        let Some(first_line) = dirty_suffix.first().map(|chunk| chunk.start_line) else {
+            return;
+        };
+        let line = first_line + dirty_idx;
+
+        let split_idx =
+            dirty_suffix.partition_point(|chunk| chunk.start_line + chunk.lines.len() <= line);
+        if split_idx >= dirty_suffix.len() {
+            return;
+        }
+
+        if dirty_suffix[split_idx].start_line < line {
+            let chunk = dirty_suffix.remove(split_idx);
+            let (_, suffix) = Self::split_chunk_at(&chunk, line - chunk.start_line);
+            self.chunks.push(suffix);
+            self.chunks.extend(dirty_suffix.drain(split_idx..));
+        } else {
+            self.chunks.extend(dirty_suffix.drain(split_idx..));
+        }
+    }
+
+    fn truncate_cached_lines(&mut self, line_count: usize) {
+        if self.cached_line_count() <= line_count {
+            return;
+        }
+
+        self.invalidate_from(line_count, 0);
+        self.clear_dirty_suffix();
+    }
+
+    fn truncate_cached_prefix(&mut self, line: usize) {
+        if self.cached_line_count() <= line {
+            return;
+        }
+
+        if line >= self.frozen_line_count() && self.truncate_tail_from(line) {
+            return;
+        }
+
+        self.truncate_tail_from(line);
+        self.flush_tail();
+        let split_idx = self
+            .chunks
+            .partition_point(|chunk| chunk.start_line + chunk.lines.len() <= line);
+        if self
+            .chunks
+            .get(split_idx)
+            .is_some_and(|chunk| chunk.start_line < line)
+        {
+            let chunk = self.chunks.remove(split_idx);
+            let (prefix, _) = Self::split_chunk_at(&chunk, line - chunk.start_line);
+            self.chunks.truncate(split_idx);
+            self.chunks.push(prefix);
+        } else {
+            self.chunks.truncate(split_idx);
+        }
+        self.tail = SyntaxChunkBuilder::new(line);
+    }
+
+    fn truncate_tail_from(&mut self, line: usize) -> bool {
+        if line < self.tail.start_line || line > self.tail.start_line + self.tail.lines.len() {
+            return false;
+        }
+
+        let line_offset = line - self.tail.start_line;
+        let span_len = self
+            .tail
+            .lines
+            .get(line_offset)
+            .map(|line| line.span_start)
+            .unwrap_or(self.tail.spans.len());
+        self.tail.lines.truncate(line_offset);
+        self.tail.spans.truncate(span_len);
+        true
+    }
+
+    #[cfg(test)]
+    fn push_cached_line_for_test(
+        &mut self,
+        line: impl Into<Arc<str>>,
+        spans: Vec<SyntaxSpan>,
+        state: SyntaxState,
+    ) {
+        self.append_line(line.into(), spans, state);
+    }
+
+    /// Invalidates cached syntax data from the provided line onward.
+    pub fn invalidate_from(&mut self, line: usize, line_delta: isize) {
+        if let Some(dirty_start) = self.dirty_start
+            && line >= dirty_start
+        {
+            self.truncate_cached_prefix(line);
+            self.dirty_suffix = Vec::new();
+            self.dirty_start = Some(line);
+            self.dirty_line_delta += line_delta;
+            return;
+        }
+
+        if line >= self.cached_line_count() {
+            if self.has_dirty_suffix() {
+                let dirty_start = self.dirty_start.unwrap_or(line).min(line);
+                self.dirty_suffix = Vec::new();
+                self.dirty_start = Some(dirty_start);
+                self.dirty_line_delta += line_delta;
+            } else {
+                self.clear_dirty_suffix();
+            }
+            return;
+        }
+
+        if line >= self.frozen_line_count() && self.truncate_tail_from(line) {
+            self.clear_dirty_suffix();
+            self.dirty_start = Some(line);
+            self.dirty_line_delta = line_delta;
+            return;
+        }
+
+        self.truncate_tail_from(line);
+
+        if line_delta != 0 {
+            self.flush_tail();
+            let split_idx = self
+                .chunks
+                .partition_point(|chunk| chunk.start_line + chunk.lines.len() <= line);
+            if self
+                .chunks
+                .get(split_idx)
+                .is_some_and(|chunk| chunk.start_line < line)
+            {
+                let chunk = self.chunks.remove(split_idx);
+                let (prefix, _) = Self::split_chunk_at(&chunk, line - chunk.start_line);
+                self.chunks.truncate(split_idx);
+                self.chunks.push(prefix);
+            } else {
+                self.chunks.truncate(split_idx);
+            }
+
+            self.tail = SyntaxChunkBuilder::new(line);
+            self.clear_dirty_suffix();
+            self.dirty_start = Some(line);
+            self.dirty_line_delta = line_delta;
+            return;
+        }
+
+        self.flush_tail();
+        let split_idx = self
+            .chunks
+            .partition_point(|chunk| chunk.start_line + chunk.lines.len() <= line);
+
+        if self.chunks[split_idx].start_line < line {
+            let chunk = self.chunks.remove(split_idx);
+            let (prefix, suffix) = Self::split_chunk_at(&chunk, line - chunk.start_line);
+            self.chunks.push(prefix);
+            self.dirty_suffix = Vec::with_capacity(self.chunks.len() - split_idx);
+            self.dirty_suffix.push(suffix);
+            self.dirty_suffix.extend(self.chunks.drain(split_idx + 1..));
+        } else {
+            self.dirty_suffix = self.chunks.split_off(split_idx);
+        }
+        Self::shift_chunk_lines(&mut self.dirty_suffix, line_delta);
+
+        self.tail = SyntaxChunkBuilder::new(line);
         self.dirty_start = Some(line);
         self.dirty_line_delta = line_delta;
     }
 
     /// Returns cached spans for a line without computing any missing prefix.
     pub fn cached_spans_for_line(&self, line: usize) -> Option<Vec<SyntaxSpan>> {
-        self.lines.get(line).map(|entry| entry.spans.clone())
+        self.cached_spans_for_line_ref(line)
+            .map(|spans| spans.to_vec())
+    }
+
+    /// Returns cached spans for a line without cloning or computing missing prefix data.
+    pub fn cached_spans_for_line_ref(&self, line: usize) -> Option<&[SyntaxSpan]> {
+        self.line_view(line).map(|entry| entry.spans)
     }
 
     /// Returns how many leading lines currently have cached syntax data.
     pub fn cached_line_count(&self) -> usize {
-        self.lines.len()
+        self.chunks
+            .last()
+            .map(|chunk| chunk.start_line + chunk.lines.len())
+            .unwrap_or(0)
+            .max(self.tail.start_line + self.tail.lines.len())
     }
 
     fn has_dirty_suffix(&self) -> bool {
         !self.dirty_suffix.is_empty()
     }
 
+    fn pending_dirty_suffix_start(&self) -> Option<usize> {
+        self.dirty_start
+    }
+
     /// Returns true when every line in the buffer has a cached syntax result.
     pub fn is_complete_for_line_count(&self, line_count: usize) -> bool {
-        self.dirty_suffix.is_empty() && self.lines.len() >= line_count
+        self.dirty_suffix.is_empty() && self.cached_line_count() >= line_count
     }
 
     /// Returns the cached spans for a line, computing any missing prefix first.
@@ -137,7 +479,7 @@ impl SyntaxCache {
         }
 
         self.ensure_through(syntax_name, line_texts, line);
-        self.lines.get(line).map(|entry| entry.spans.clone())
+        self.cached_spans_for_line(line)
     }
 
     /// Ensures syntax data exists through the requested line.
@@ -150,41 +492,83 @@ impl SyntaxCache {
         syntax_name: &str,
         line_texts: &PieceTable,
         line: usize,
-        mut should_continue: F,
+        should_continue: F,
     ) where
         F: FnMut() -> bool,
     {
         self.set_syntax_name(syntax_name);
 
         if line_texts.line_count() == 0 {
-            self.lines = Vector::new();
+            self.chunks = Vec::new();
+            self.tail = SyntaxChunkBuilder::new(0);
             self.clear_dirty_suffix();
             return;
         }
 
         let target_line = line.min(line_texts.line_count().saturating_sub(1));
-        if self.lines.len() > line_texts.line_count() {
-            self.lines.truncate(line_texts.line_count());
-        }
+        self.truncate_cached_lines(line_texts.line_count());
 
-        if target_line < self.lines.len() {
+        if target_line < self.cached_line_count() && self.dirty_start.is_none() {
             return;
         }
 
-        let dirty_start = self.dirty_start.unwrap_or(self.lines.len());
+        let dirty_start = self.dirty_start.unwrap_or(self.cached_line_count());
         let dirty_line_delta = self.dirty_line_delta;
         let dirty_suffix = std::mem::take(&mut self.dirty_suffix);
+        if self.cached_line_count() > dirty_start {
+            self.dirty_suffix = dirty_suffix;
+            self.dirty_start = Some(dirty_start);
+            self.dirty_line_delta = dirty_line_delta;
+            self.truncate_cached_lines(dirty_start);
+            let dirty_suffix = std::mem::take(&mut self.dirty_suffix);
+            self.dirty_start = Some(dirty_start);
+            self.dirty_line_delta = dirty_line_delta;
+            let mut dirty_suffix = dirty_suffix;
+            return self.ensure_through_with_rescan(
+                syntax_name,
+                line_texts,
+                target_line,
+                dirty_start,
+                dirty_line_delta,
+                &mut dirty_suffix,
+                should_continue,
+            );
+        }
+        let mut dirty_suffix = dirty_suffix;
+
+        self.ensure_through_with_rescan(
+            syntax_name,
+            line_texts,
+            target_line,
+            dirty_start,
+            dirty_line_delta,
+            &mut dirty_suffix,
+            should_continue,
+        );
+    }
+
+    fn ensure_through_with_rescan<F>(
+        &mut self,
+        syntax_name: &str,
+        line_texts: &PieceTable,
+        target_line: usize,
+        dirty_start: usize,
+        dirty_line_delta: isize,
+        dirty_suffix: &mut Vec<SyntaxChunk>,
+        mut should_continue: F,
+    ) where
+        F: FnMut() -> bool,
+    {
         let mut state = self
-            .lines
-            .last()
+            .line_view(self.cached_line_count().saturating_sub(1))
             .map(|line| line.state.clone())
             .unwrap_or_default();
-        let mut current_line = self.lines.len();
+        let mut current_line = self.cached_line_count();
         let mut scratch = String::new();
 
         while current_line <= target_line {
             if !should_continue() {
-                self.dirty_suffix = dirty_suffix;
+                self.dirty_suffix = std::mem::take(dirty_suffix);
                 self.dirty_start = Some(dirty_start);
                 self.dirty_line_delta = dirty_line_delta;
                 return;
@@ -193,21 +577,16 @@ impl SyntaxCache {
             let line_ref = line_texts.line(current_line).expect("target line exists");
             let line_text = line_ref.contiguous_text_with_scratch(&mut scratch);
             let (spans, next_state) = tokenize_line(syntax_name, line_text, state);
-            self.lines.push_back(SyntaxLine::new(
-                Arc::from(line_text),
-                spans,
-                next_state.clone(),
-            ));
+            self.append_line(Arc::from(line_text), spans, next_state.clone());
 
             let dirty_idx = current_line as isize - dirty_start as isize - dirty_line_delta;
             if dirty_idx >= 0 {
                 let dirty_idx = dirty_idx as usize;
-                if let Some(old_entry) = dirty_suffix.get(dirty_idx)
-                    && old_entry.line.as_ref() == line_text
-                    && old_entry.state == next_state
+                if let Some(old_entry) = Self::dirty_line_view_by_index(dirty_suffix, dirty_idx)
+                    && old_entry.line == line_text
+                    && *old_entry.state == next_state
                 {
-                    let reusable_suffix = dirty_suffix.skip(dirty_idx + 1);
-                    self.lines.append(reusable_suffix);
+                    self.append_dirty_suffix_after_index(dirty_suffix, dirty_idx + 1);
                     self.clear_dirty_suffix();
                     return;
                 }
@@ -220,7 +599,7 @@ impl SyntaxCache {
         if target_line == line_texts.line_count() - 1 {
             self.clear_dirty_suffix();
         } else {
-            self.dirty_suffix = dirty_suffix;
+            self.dirty_suffix = std::mem::take(dirty_suffix);
             self.dirty_start = Some(dirty_start);
             self.dirty_line_delta = dirty_line_delta;
         }
@@ -398,6 +777,19 @@ impl IndentScopeCache {
         target_line: usize,
         tab_width: usize,
     ) -> bool {
+        self.ensure_through_with(line_texts, target_line, tab_width, || true)
+    }
+
+    fn ensure_through_with<F>(
+        &mut self,
+        line_texts: &PieceTable,
+        target_line: usize,
+        tab_width: usize,
+        mut should_continue: F,
+    ) -> bool
+    where
+        F: FnMut() -> bool,
+    {
         if line_texts.line_count() == 0 {
             self.scanned_through_line = 0;
             self.open_scope_stack = Vec::new();
@@ -417,6 +809,11 @@ impl IndentScopeCache {
         }
 
         for line_idx in self.scanned_through_line..=target_line {
+            if !should_continue() {
+                self.stale = true;
+                return false;
+            }
+
             let line_text = line_texts.line(line_idx).expect("target line exists");
             // Empty lines should not open or close scopes; they inherit the current stack.
             if line_text.is_empty() {
@@ -690,6 +1087,11 @@ impl BufferCache {
         self.syntax_cache.cached_spans_for_line(line)
     }
 
+    /// Returns cached syntax spans for a line without cloning span storage.
+    pub fn cached_spans_for_line_ref(&self, line: usize) -> Option<&[SyntaxSpan]> {
+        self.syntax_cache.cached_spans_for_line_ref(line)
+    }
+
     /// Returns how many leading lines currently have cached syntax data.
     pub fn cached_line_count(&self) -> usize {
         self.syntax_cache.cached_line_count()
@@ -698,6 +1100,10 @@ impl BufferCache {
     /// Returns true when every line in the buffer has a cached syntax result.
     pub fn is_complete_for_line_count(&self, line_count: usize) -> bool {
         self.syntax_cache.is_complete_for_line_count(line_count)
+    }
+
+    fn pending_syntax_dirty_suffix_start(&self) -> Option<usize> {
+        self.syntax_cache.pending_dirty_suffix_start()
     }
 
     /// Returns the cached spans for a line, computing any missing prefix first.
@@ -713,12 +1119,18 @@ impl BufferCache {
 
     /// Ensures syntax and indent cache data exists through the requested line.
     pub fn ensure_through(&mut self, syntax_name: &str, line_texts: &PieceTable, line: usize) {
-        self.ensure_through_with_budget(
-            syntax_name,
-            line_texts,
-            line,
-            std::time::Duration::from_millis(50),
-        );
+        self.syntax_cache
+            .ensure_through(syntax_name, line_texts, line);
+        if line_texts.line_count() == 0 {
+            return;
+        }
+
+        let target_line = line.min(line_texts.line_count().saturating_sub(1));
+        let tab_width = globals::with_config(|config| config.tab_width)
+            .unwrap_or(4)
+            .max(1);
+        self.indent_scope_cache
+            .ensure_through(line_texts, target_line, tab_width);
     }
 
     fn ensure_syntax_through_with_budget(
@@ -735,28 +1147,23 @@ impl BufferCache {
             });
     }
 
-    fn ensure_indent_through(&mut self, line_texts: &PieceTable, line: usize) {
+    fn ensure_indent_through_with_budget(
+        &mut self,
+        line_texts: &PieceTable,
+        line: usize,
+        tab_width: usize,
+        budget: std::time::Duration,
+    ) {
         if line_texts.line_count() == 0 {
             return;
         }
 
         let target_line = line.min(line_texts.line_count().saturating_sub(1));
-        let tab_width = globals::with_config(|config| config.tab_width)
-            .unwrap_or(4)
-            .max(1);
+        let started_at = std::time::Instant::now();
         self.indent_scope_cache
-            .ensure_through(line_texts, target_line, tab_width);
-    }
-
-    fn ensure_through_with_budget(
-        &mut self,
-        syntax_name: &str,
-        line_texts: &PieceTable,
-        line: usize,
-        budget: std::time::Duration,
-    ) {
-        self.ensure_syntax_through_with_budget(syntax_name, line_texts, line, budget);
-        self.ensure_indent_through(line_texts, line);
+            .ensure_through_with(line_texts, target_line, tab_width, || {
+                started_at.elapsed() < budget
+            });
     }
 
     /// Returns true when the indent-scope cache needs rebuilding.
@@ -818,16 +1225,7 @@ impl SyntaxRefreshJob {
                 &self.line_texts,
                 target_line,
                 || {
-                    if context.is_current() {
-                        true
-                    } else {
-                        tracing::debug!(
-                            kind = %context.kind(),
-                            generation = context.token().generation(),
-                            "stopping stale syntax refresh job"
-                        );
-                        false
-                    }
+                    if context.is_current() { true } else { false }
                 },
             );
         }
@@ -1499,10 +1897,16 @@ impl Buffer {
                 &syntax_name,
                 &self.lines,
                 self.line_count().saturating_sub(1),
-                std::time::Duration::from_millis(50),
+                std::time::Duration::from_millis(2),
             );
-            self.buffer_cache
-                .ensure_indent_through(&self.lines, self.line_count().saturating_sub(1));
+            self.buffer_cache.ensure_indent_through_with_budget(
+                &self.lines,
+                self.line_count().saturating_sub(1),
+                globals::with_config(|config| config.tab_width)
+                    .unwrap_or(4)
+                    .max(1),
+                std::time::Duration::from_millis(2),
+            );
             self.sync_undo_snapshot_cache_if_current();
         }
     }
@@ -1510,6 +1914,11 @@ impl Buffer {
     /// Returns cached spans for a line without computing missing prefix data.
     pub fn cached_syntax_spans_for_line(&self, line: usize) -> Option<Vec<SyntaxSpan>> {
         self.buffer_cache.cached_spans_for_line(line)
+    }
+
+    /// Returns cached spans for a line without cloning span storage.
+    pub fn cached_syntax_spans_for_line_ref(&self, line: usize) -> Option<&[SyntaxSpan]> {
+        self.buffer_cache.cached_spans_for_line_ref(line)
     }
 
     /// Returns true when the indent-scope cache needs rebuilding.
@@ -1536,6 +1945,11 @@ impl Buffer {
     /// Returns how many leading lines currently have cached syntax spans.
     pub fn cached_syntax_line_count(&self) -> usize {
         self.buffer_cache.cached_line_count()
+    }
+
+    /// Returns where a pending invalidated syntax suffix starts, if one exists.
+    pub fn pending_syntax_dirty_suffix_start(&self) -> Option<usize> {
+        self.buffer_cache.pending_syntax_dirty_suffix_start()
     }
 
     /// Returns the current syntax generation used to reject stale background results.
@@ -1605,7 +2019,8 @@ impl Buffer {
 
     /// Requests background buffer cache refresh when the cache is incomplete.
     pub fn request_buffer_cache_refresh(&mut self, buffer_id: BufferId) {
-        let syntax_needed = !self.syntax_cache_complete()
+        let syntax_needed = (self.buffer_cache.syntax_cache.has_dirty_suffix()
+            || !self.syntax_cache_complete())
             && self.syntax_background_generation != Some(self.syntax_generation);
         let indent_needed = self.indent_scope_cache_stale()
             && self.indent_background_generation != Some(self.syntax_generation);
@@ -1666,6 +2081,26 @@ impl Buffer {
         let syntax_name = self.syntax_name().to_owned();
         self.buffer_cache
             .ensure_through(&syntax_name, &self.lines, line);
+        self.sync_undo_snapshot_cache_if_current();
+    }
+
+    /// Warms syntax data through a line without requiring the whole range to complete.
+    pub fn warm_syntax_through_with_budget(&mut self, line: usize, budget: std::time::Duration) {
+        let syntax_name = self.syntax_name().to_owned();
+        self.buffer_cache.ensure_syntax_through_with_budget(
+            &syntax_name,
+            &self.lines,
+            line,
+            budget,
+        );
+        self.buffer_cache.ensure_indent_through_with_budget(
+            &self.lines,
+            line,
+            globals::with_config(|config| config.tab_width)
+                .unwrap_or(4)
+                .max(1),
+            budget,
+        );
         self.sync_undo_snapshot_cache_if_current();
     }
 
@@ -1798,11 +2233,11 @@ mod tests {
         let mut cache = SyntaxCache::new("plain");
         assert_eq!(cache.cached_spans_for_line(0), None);
 
-        cache.lines.push_back(SyntaxLine::new(
+        cache.push_cached_line_for_test(
             Arc::from("abc"),
             vec![SyntaxSpan::new(0, 3, tag("text.plain"))],
             SyntaxState::default(),
-        ));
+        );
 
         let cached = cache
             .cached_spans_for_line(0)
@@ -1811,16 +2246,16 @@ mod tests {
         assert_eq!(cached[0].style, tag("text.plain"));
 
         let mut replacement = SyntaxCache::new("plain");
-        replacement.lines.push_back(SyntaxLine::new(
+        replacement.push_cached_line_for_test(
             Arc::from("abcd"),
             vec![SyntaxSpan::new(0, 4, tag("text.replaced"))],
             SyntaxState::default(),
-        ));
-        replacement.lines.push_back(SyntaxLine::new(
+        );
+        replacement.push_cached_line_for_test(
             Arc::from("abcde"),
             vec![SyntaxSpan::new(0, 5, tag("text.replaced"))],
             SyntaxState::default(),
-        ));
+        );
 
         cache = replacement;
 
@@ -1841,7 +2276,7 @@ mod tests {
         );
         let mut cache = SyntaxCache::new("rust");
 
-        cache.ensure_through("rust", &lines, lines.line_count() - 1);
+        cache.ensure_through("rust", &lines, SYNTAX_CHUNK_SIZE + 1);
         assert!(cache.is_complete_for_line_count(lines.line_count()));
 
         cache.invalidate_from(1, 0);
@@ -1865,9 +2300,60 @@ mod tests {
 
         cache.ensure_through("toml", &edited, 2);
 
-        assert!(cache.is_complete_for_line_count(edited.line_count()));
-        assert_eq!(cache.cached_line_count(), edited.line_count());
-        assert!(cache.cached_spans_for_line(3).is_some());
+        assert_eq!(cache.cached_line_count(), 3);
+        assert!(cache.cached_spans_for_line(3).is_none());
+    }
+
+    #[test]
+    fn syntax_cache_invalidates_inside_frozen_chunk() {
+        let text = (0..SYNTAX_CHUNK_SIZE * 3 + 2)
+            .map(|line| format!("value_{line} = {line}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let lines = PieceTable::from_text(&text);
+        let mut cache = SyntaxCache::new("rust");
+
+        cache.ensure_through("rust", &lines, SYNTAX_CHUNK_SIZE + 1);
+        assert!(cache.cached_spans_for_line(SYNTAX_CHUNK_SIZE + 1).is_some());
+
+        cache.invalidate_from(SYNTAX_CHUNK_SIZE + 2, 0);
+        assert_eq!(cache.cached_line_count(), SYNTAX_CHUNK_SIZE + 2);
+        assert!(cache.cached_spans_for_line(SYNTAX_CHUNK_SIZE - 2).is_some());
+        assert!(cache.cached_spans_for_line(SYNTAX_CHUNK_SIZE + 1).is_some());
+        assert!(cache.cached_spans_for_line(SYNTAX_CHUNK_SIZE + 2).is_none());
+
+        cache.ensure_through("rust", &lines, lines.line_count() - 1);
+        assert!(cache.is_complete_for_line_count(lines.line_count()));
+    }
+
+    #[test]
+    fn syntax_cache_reconverges_across_frozen_chunk_boundary() {
+        let original = (0..SYNTAX_CHUNK_SIZE * 3 + 4)
+            .map(|line| format!("value_{line} = {line}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let edited = (0..SYNTAX_CHUNK_SIZE * 3 + 4)
+            .map(|line| {
+                if line == SYNTAX_CHUNK_SIZE - 1 {
+                    "changed = 1".to_owned()
+                } else {
+                    format!("value_{line} = {line}")
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let original = PieceTable::from_text(&original);
+        let edited = PieceTable::from_text(&edited);
+        let mut cache = SyntaxCache::new("rust");
+
+        cache.ensure_through("rust", &original, SYNTAX_CHUNK_SIZE + 3);
+        cache.invalidate_from(SYNTAX_CHUNK_SIZE - 1, 0);
+        cache.ensure_through("rust", &edited, SYNTAX_CHUNK_SIZE);
+
+        assert!(cache.cached_spans_for_line(SYNTAX_CHUNK_SIZE).is_some());
+        assert!(cache.cached_spans_for_line(SYNTAX_CHUNK_SIZE + 3).is_none());
+        cache.ensure_through("rust", &edited, SYNTAX_CHUNK_SIZE + 3);
+        assert!(cache.cached_spans_for_line(SYNTAX_CHUNK_SIZE + 3).is_some());
     }
 
     #[test]
@@ -2055,7 +2541,7 @@ mod tests {
         let scope_ids = buffer
             .cached_line_indent_scope_ids(2)
             .expect("closing line should have containing scopes");
-        assert_eq!(scope_ids.iter().copied().collect::<Vec<_>>(), vec![0]);
+        assert_eq!(scope_ids.to_vec(), vec![0]);
     }
 
     #[test]
@@ -2151,7 +2637,7 @@ mod tests {
         let line_scope_ids = buffer
             .cached_line_indent_scope_ids(2)
             .expect("line after insertion should have scope ids");
-        assert_eq!(line_scope_ids.iter().copied().collect::<Vec<_>>(), vec![0]);
+        assert_eq!(line_scope_ids.to_vec(), vec![0]);
     }
 
     #[test]

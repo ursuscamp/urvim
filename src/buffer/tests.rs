@@ -79,6 +79,15 @@ fn named_fixture_buffer(name: &str, contents: &str) -> Buffer {
     Buffer::from_str_with_path(contents, path)
 }
 
+fn line_containing(buf: &Buffer, needle: &str) -> usize {
+    (0..buf.line_count())
+        .find(|line| {
+            buf.line_at(*line)
+                .is_some_and(|line_text| line_text.to_string().contains(needle))
+        })
+        .unwrap_or_else(|| panic!("fixture should contain {needle:?}"))
+}
+
 fn syntax_buffer(name: &str, ext: &str, contents: &str) -> Buffer {
     let path = AbsolutePath::from_path(temp_path_with_ext(name, ext).as_path()).unwrap();
     Buffer::from_str_with_path(contents, path)
@@ -1083,26 +1092,34 @@ fn test_rust_fixture_highlights_extended_literals() {
     let fixture = include_str!("tests/syntax/fixtures/rust.rs");
     let mut buf = fixture_buffer("syntax-rust-extended", "rs", fixture);
 
+    let doc_comment_idx = line_containing(&buf, "/// Doc comment");
+    let attribute_idx = line_containing(&buf, "#[inline]");
+    let raw_string_idx = line_containing(&buf, "raw = r#");
+    let raw_multiline_idx = line_containing(&buf, "let raw_multiline");
+    let byte_string_idx = line_containing(&buf, "bytes = b");
+    let raw_bytes_idx = line_containing(&buf, "raw_bytes");
+    let numeric_idx = line_containing(&buf, "hex = 0xff_u8");
+
     let doc_comment = buf
-        .syntax_spans_for_line(29)
+        .syntax_spans_for_line(doc_comment_idx)
         .expect("doc comment line should exist");
     let attribute = buf
-        .syntax_spans_for_line(31)
+        .syntax_spans_for_line(attribute_idx)
         .expect("attribute line should exist");
     let raw_string = buf
-        .syntax_spans_for_line(33)
+        .syntax_spans_for_line(raw_string_idx)
         .expect("raw string line should exist");
     let raw_multiline = buf
-        .syntax_spans_for_line(34)
+        .syntax_spans_for_line(raw_multiline_idx)
         .expect("raw multiline line should exist");
     let byte_string = buf
-        .syntax_spans_for_line(36)
+        .syntax_spans_for_line(byte_string_idx)
         .expect("byte string line should exist");
     let raw_bytes = buf
-        .syntax_spans_for_line(37)
+        .syntax_spans_for_line(raw_bytes_idx)
         .expect("raw byte string line should exist");
     let numeric = buf
-        .syntax_spans_for_line(39)
+        .syntax_spans_for_line(numeric_idx)
         .expect("numeric line should exist");
 
     assert_spans_include_style(&doc_comment, tag("comment.documentation"));

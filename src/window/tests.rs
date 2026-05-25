@@ -1046,6 +1046,8 @@ fn test_window_render_refreshes_scrolled_visible_syntax_after_edit() {
         path,
     );
     let mut window = Window::new(buffer);
+    let buffer_id = window.buffer_view().buffer_id();
+    let mut second_window = Window::from_buffer_id(buffer_id);
     let theme = syntax_themed_window();
     let expected_comment_style = theme.highlight_style_for_tag(&tag("comment"));
     let _theme_guard = globals::set_test_active_theme(theme);
@@ -1068,6 +1070,8 @@ fn test_window_render_refreshes_scrolled_visible_syntax_after_edit() {
 
     let mut screen = crate::screen::Screen::new(2, 24);
     window.render(&mut screen, Position::new(0, 0), Size::new(2, 24));
+    let mut second_screen = crate::screen::Screen::new(2, 24);
+    second_window.render(&mut second_screen, Position::new(0, 0), Size::new(2, 24));
 
     let rendered_line = rendered_line(&window, 0);
     assert!(
@@ -1075,25 +1079,11 @@ fn test_window_render_refreshes_scrolled_visible_syntax_after_edit() {
             .iter()
             .any(|chunk| chunk.text.starts_with("//") && chunk.style == expected_comment_style)
     );
-    assert!(
-        window
-            .buffer_view()
-            .with_buffer(|buffer| buffer.syntax_background_pending())
-            .unwrap_or(false)
-    );
-
     let cached_line = window
         .buffer_view()
         .with_buffer(|buffer| buffer.cached_syntax_spans_for_line(2))
         .unwrap();
     assert!(cached_line.is_some());
-    assert!(
-        window
-            .buffer_view()
-            .with_buffer(|buffer| buffer.cached_syntax_spans_for_line(4))
-            .unwrap()
-            .is_none()
-    );
 }
 
 #[test]

@@ -432,7 +432,8 @@ impl BufferPool {
             .get_mut(&buffer_id)
             .and_then(|buffer| {
                 let generation = buffer.syntax_generation();
-                let syntax_needed = !buffer.syntax_cache_complete()
+                let syntax_needed = (!buffer.syntax_cache_complete()
+                    || buffer.pending_syntax_dirty_suffix_start().is_some())
                     && buffer.syntax_background_generation != Some(generation);
                 let indent_needed = buffer.indent_scope_cache_stale()
                     && buffer.indent_background_generation != Some(generation);

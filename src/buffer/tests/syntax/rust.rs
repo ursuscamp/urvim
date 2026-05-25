@@ -1,9 +1,21 @@
 use super::*;
 
+fn rust_fixture_source() -> &'static str {
+    include_str!("fixtures/rust.rs")
+}
+
+fn line_containing(buf: &Buffer, needle: &str) -> usize {
+    (0..buf.line_count())
+        .find(|line| {
+            buf.line_at(*line)
+                .is_some_and(|line_text| line_text.to_string().contains(needle))
+        })
+        .unwrap_or_else(|| panic!("fixture should contain {needle:?}"))
+}
+
 #[test]
 fn test_rust_fixture_uses_grammar_rules() {
-    let fixture = include_str!("fixtures/rust.rs");
-    let mut buf = fixture_buffer("syntax-rust-fixture", "rs", fixture);
+    let mut buf = fixture_buffer("syntax-rust-fixture", "rs", rust_fixture_source());
 
     let comment = buf
         .syntax_spans_for_line(0)
@@ -50,6 +62,259 @@ fn test_rust_fixture_uses_grammar_rules() {
 }
 
 #[test]
+fn test_rust_rehighlights_after_mid_file_type_edit_and_top_insert() {
+    let mut buf = fixture_buffer("syntax-rust-main-edit", "rs", rust_fixture_source());
+
+    buf.ensure_syntax_through(buf.line_count().saturating_sub(1));
+
+    let option_line_idx = line_containing(&buf, "Option<String>");
+    let option_line = buf
+        .line_at(option_line_idx)
+        .expect("theme line should exist")
+        .to_string();
+    let string_start = option_line
+        .find("String")
+        .expect("line should contain String");
+    buf.remove(
+        Cursor::new(option_line_idx, string_start),
+        Cursor::new(option_line_idx, string_start + "String".len()),
+    );
+    buf.ensure_syntax_through(buf.line_count().saturating_sub(1));
+
+    let result_line_idx = line_containing(&buf, "Some(guard)");
+    let config_line_text = buf
+        .line_at(result_line_idx)
+        .expect("config line should exist")
+        .to_string();
+    let config_line = buf
+        .syntax_spans_for_line(result_line_idx)
+        .expect("config line should remain highlighted after edit");
+    assert_spans_include_exact_style(&config_line, &config_line_text, "Option", tag("type"));
+
+    buf.insert_text(Cursor::new(0, 0), "\n");
+    buf.ensure_syntax_through(buf.line_count().saturating_sub(1));
+
+    let later_line_idx = line_containing(&buf, "Some(guard)");
+    let later_line_text = buf
+        .line_at(later_line_idx)
+        .expect("later line should exist")
+        .to_string();
+    let later_line = buf
+        .syntax_spans_for_line(later_line_idx)
+        .expect("later line should remain highlighted after top insert");
+    assert_spans_include_exact_style(&later_line, &later_line_text, "Option", tag("type"));
+}
+
+#[test]
+fn test_rust_keeps_prefix_highlight_after_insert_inside_main() {
+    let mut buf = fixture_buffer("syntax-rust-main-inner-insert", "rs", rust_fixture_source());
+
+    buf.ensure_syntax_through(buf.line_count().saturating_sub(1));
+    let insert_line = line_containing(&buf, "let guard");
+    buf.insert_text(Cursor::new(insert_line, 0), "\n");
+    buf.ensure_syntax_through(buf.line_count().saturating_sub(1));
+
+    let use_line_idx = line_containing(&buf, "let value");
+    let use_line_text = buf
+        .line_at(use_line_idx)
+        .expect("value line should exist")
+        .to_string();
+    let use_line = buf
+        .syntax_spans_for_line(use_line_idx)
+        .expect("value line should remain highlighted");
+    assert_spans_include_exact_style(&use_line, &use_line_text, "let", tag("keyword"));
+
+    let main_line_idx = line_containing(&buf, "fn completion_fixture");
+    let main_line_text = buf
+        .line_at(main_line_idx)
+        .expect("fixture function line should exist")
+        .to_string();
+    let main_line = buf
+        .syntax_spans_for_line(main_line_idx)
+        .expect("fixture function line should remain highlighted");
+    assert_spans_include_exact_style(&main_line, &main_line_text, "fn", tag("keyword"));
+}
+
+#[test]
+fn test_rust_cache_retains_prefix_spans_after_insert_after_main_start() {
+    let mut buf = fixture_buffer("syntax-rust-main-prefix-cache", "rs", rust_fixture_source());
+
+    buf.ensure_syntax_through(buf.line_count().saturating_sub(1));
+    let insert_line = line_containing(&buf, "let guard");
+    buf.insert_text(Cursor::new(insert_line, 0), "\n");
+
+    let prefix_line_idx = line_containing(&buf, "let value");
+    let before = buf
+        .cached_syntax_spans_for_line(prefix_line_idx)
+        .expect("prefix line should stay cached");
+    assert!(!before.is_empty());
+    let after = buf
+        .cached_syntax_spans_for_line(prefix_line_idx)
+        .expect("prefix line should stay cached after insert");
+    assert!(!after.is_empty());
+
+    let main_adjacent_line = line_containing(&buf, "let guard");
+    let main_line = buf
+        .syntax_spans_for_line(main_adjacent_line)
+        .expect("new main-adjacent line should still highlight");
+    assert!(!main_line.is_empty());
+}
+
+#[test]
+fn test_rust_keeps_prefix_highlight_after_completion_then_insert_char() {
+    let mut buf = fixture_buffer(
+        "syntax-rust-completion-then-insert",
+        "rs",
+        rust_fixture_source(),
+    );
+
+    buf.ensure_syntax_through(buf.line_count().saturating_sub(1));
+    let completion_line = line_containing(&buf, "let guard");
+    let line_text = buf
+        .line_at(completion_line)
+        .expect("guard line should exist")
+        .to_string();
+    let guard_start = line_text.find("guard").expect("line should contain guard");
+    let guard_end = guard_start + "guard".len();
+    let range = TextObjectRange {
+        start: Cursor::new(completion_line, guard_start),
+        end: Cursor::new(completion_line, guard_end),
+    };
+
+    let cursor = buf
+        .apply_completion(range, "guard_handle", "guard_handle".len(), &[])
+        .expect("completion should apply");
+    buf.ensure_syntax_through(completion_line);
+    buf.insert_char(cursor, '_');
+
+    let use_line_idx = line_containing(&buf, "let value");
+    let use_line_text = buf
+        .line_at(use_line_idx)
+        .expect("value line should exist")
+        .to_string();
+    let use_line = buf
+        .cached_syntax_spans_for_line(use_line_idx)
+        .expect("prefix line should remain cached after completion and insert");
+    assert_spans_include_exact_style(&use_line, &use_line_text, "let", tag("keyword"));
+
+    let main_line_idx = line_containing(&buf, "fn completion_fixture");
+    let main_line_text = buf
+        .line_at(main_line_idx)
+        .expect("fixture function line should exist")
+        .to_string();
+    let main_line = buf
+        .cached_syntax_spans_for_line(main_line_idx)
+        .expect("main line should remain cached after completion and insert");
+    assert_spans_include_exact_style(&main_line, &main_line_text, "fn", tag("keyword"));
+}
+
+#[test]
+fn test_rust_keeps_prefix_highlight_after_lsp_completion_edits_then_insert_char() {
+    let mut buf = fixture_buffer(
+        "syntax-rust-lsp-completion-then-insert",
+        "rs",
+        rust_fixture_source(),
+    );
+
+    buf.ensure_syntax_through(buf.line_count().saturating_sub(1));
+    let completion_line = line_containing(&buf, "let guard");
+    let line_text = buf
+        .line_at(completion_line)
+        .expect("guard line should exist")
+        .to_string();
+    let guard_start = line_text.find("guard").expect("line should contain guard");
+    let guard_end = guard_start + "guard".len();
+    let range = TextObjectRange {
+        start: Cursor::new(completion_line, guard_start),
+        end: Cursor::new(completion_line, guard_end),
+    };
+    let additional_edits = vec![crate::ui::completion::CompletionTextEdit {
+        range: TextObjectRange {
+            start: Cursor::new(0, 0),
+            end: Cursor::new(0, 0),
+        },
+        text: "use std::borrow::Cow;\n".to_string(),
+    }];
+
+    let cursor = buf
+        .apply_completion(
+            range,
+            "guard_handle",
+            "guard_handle".len(),
+            &additional_edits,
+        )
+        .expect("completion should apply");
+    buf.insert_char(cursor, '_');
+
+    let inserted_use_text = buf
+        .line_at(0)
+        .expect("inserted use should exist")
+        .to_string();
+    let inserted_use_line = buf
+        .cached_syntax_spans_for_line(0)
+        .expect("inserted use line should remain cached after insert");
+    assert_spans_include_exact_style(
+        &inserted_use_line,
+        &inserted_use_text,
+        "use",
+        tag("keyword"),
+    );
+
+    let main_line_idx = line_containing(&buf, "fn completion_fixture");
+    let main_line_text = buf
+        .line_at(main_line_idx)
+        .expect("fixture function line should exist")
+        .to_string();
+    let main_line = buf
+        .syntax_spans_for_line(main_line_idx)
+        .expect("main line should highlight on demand after LSP completion and insert");
+    assert_spans_include_exact_style(&main_line, &main_line_text, "fn", tag("keyword"));
+}
+
+#[test]
+fn test_rust_lsp_completion_top_edit_does_not_force_full_cache_warm() {
+    let body = (0..1024)
+        .map(|idx| format!("fn filler_{idx}() {{ let value_{idx} = {idx}; }}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let source = format!("fn main() {{\n    let guard = String::new();\n}}\n{body}");
+    let mut buf = fixture_buffer("syntax-rust-lsp-large-completion", "rs", &source);
+
+    buf.ensure_syntax_through(buf.line_count().saturating_sub(1));
+    let completion_line = line_containing(&buf, "let guard");
+    let line_text = buf
+        .line_at(completion_line)
+        .expect("guard line should exist")
+        .to_string();
+    let guard_start = line_text.find("guard").expect("line should contain guard");
+    let range = TextObjectRange {
+        start: Cursor::new(completion_line, guard_start),
+        end: Cursor::new(completion_line, guard_start + "guard".len()),
+    };
+    let additional_edits = vec![crate::ui::completion::CompletionTextEdit {
+        range: TextObjectRange {
+            start: Cursor::new(0, 0),
+            end: Cursor::new(0, 0),
+        },
+        text: "use std::borrow::Cow;\n".to_string(),
+    }];
+
+    buf.apply_completion(
+        range,
+        "guard_handle",
+        "guard_handle".len(),
+        &additional_edits,
+    )
+    .expect("completion should apply");
+
+    assert!(!buf.syntax_cache_complete());
+    assert!(
+        buf.cached_syntax_spans_for_line(buf.line_count() - 1)
+            .is_none()
+    );
+}
+
+#[test]
 fn test_rust_character_literals_use_constant_rules() {
     let path =
         AbsolutePath::from_path(temp_path_with_ext("syntax-rust-char", "rs").as_path()).unwrap();
@@ -68,36 +333,43 @@ fn test_rust_character_literals_use_constant_rules() {
 
 #[test]
 fn test_rust_fixture_highlights_extended_literals() {
-    let fixture = include_str!("fixtures/rust.rs");
-    let mut buf = fixture_buffer("syntax-rust-extended", "rs", fixture);
+    let mut buf = fixture_buffer("syntax-rust-extended", "rs", rust_fixture_source());
 
+    let doc_comment_idx = line_containing(&buf, "/// Doc comment");
+    let attribute_idx = line_containing(&buf, "#[inline]");
+    let raw_string_idx = line_containing(&buf, "raw = r#");
+    let raw_multiline_idx = line_containing(&buf, "let raw_multiline");
+    let byte_string_idx = line_containing(&buf, "bytes = b");
+    let raw_bytes_idx = line_containing(&buf, "raw_bytes");
+    let numeric_idx = line_containing(&buf, "hex = 0xff_u8");
+    let namespace_idx = line_containing(&buf, "std::mem::drop");
     let doc_comment = buf
-        .syntax_spans_for_line(29)
+        .syntax_spans_for_line(doc_comment_idx)
         .expect("doc comment line should exist");
     let attribute = buf
-        .syntax_spans_for_line(31)
+        .syntax_spans_for_line(attribute_idx)
         .expect("attribute line should exist");
     let attribute_line = buf
-        .line_at(31)
+        .line_at(attribute_idx)
         .expect("attribute line should exist")
         .to_string();
     let raw_string = buf
-        .syntax_spans_for_line(33)
+        .syntax_spans_for_line(raw_string_idx)
         .expect("raw string line should exist");
     let raw_multiline = buf
-        .syntax_spans_for_line(34)
+        .syntax_spans_for_line(raw_multiline_idx)
         .expect("raw multiline line should exist");
     let byte_string = buf
-        .syntax_spans_for_line(36)
+        .syntax_spans_for_line(byte_string_idx)
         .expect("byte string line should exist");
     let raw_bytes = buf
-        .syntax_spans_for_line(37)
+        .syntax_spans_for_line(raw_bytes_idx)
         .expect("raw byte string line should exist");
     let numeric = buf
-        .syntax_spans_for_line(39)
+        .syntax_spans_for_line(numeric_idx)
         .expect("numeric line should exist");
     let namespace = buf
-        .syntax_spans_for_line(44)
+        .syntax_spans_for_line(namespace_idx)
         .expect("namespace line should exist");
 
     assert_spans_include_style(&doc_comment, tag("comment.documentation"));
@@ -277,21 +549,22 @@ fn test_rust_function_call_highlights_function_name() {
 
 #[test]
 fn test_rust_fixture_highlights_global_identifiers() {
-    let fixture = include_str!("fixtures/rust.rs");
-    let mut buf = fixture_buffer("syntax-rust-global", "rs", fixture);
+    let mut buf = fixture_buffer("syntax-rust-global", "rs", rust_fixture_source());
 
+    let global_line_idx = line_containing(&buf, "GLOBAL_VARIABLES");
+    let global_mut_line_idx = line_containing(&buf, "GLOBAL_STATE");
     let global_line = buf
-        .syntax_spans_for_line(48)
+        .syntax_spans_for_line(global_line_idx)
         .expect("global variable line should exist");
     let global_line_text = buf
-        .line_at(48)
+        .line_at(global_line_idx)
         .expect("global variable line should exist")
         .to_string();
     let global_mut_line = buf
-        .syntax_spans_for_line(49)
+        .syntax_spans_for_line(global_mut_line_idx)
         .expect("mutable global variable line should exist");
     let global_mut_line_text = buf
-        .line_at(49)
+        .line_at(global_mut_line_idx)
         .expect("mutable global variable line should exist")
         .to_string();
 

@@ -35,3 +35,7 @@ harness = false
 [[bench]]
 name = "indent_scope_index"
 harness = false
+
+[[bench]]
+name = "syntax_cache_compare"
+harness = false

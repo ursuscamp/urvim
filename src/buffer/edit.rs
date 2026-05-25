@@ -59,16 +59,12 @@ impl Buffer {
             return;
         }
 
-        let edit = Self::insert_shape_for_text(cursor, text);
-
-        if let Some(change) = self.lines.insert_text(cursor, text) {
+        if let Some(change) = self.insert_text_without_cache_invalidation(cursor, text) {
             self.invalidate_syntax_from_with_line_delta(
                 change.first_changed_line,
                 change.line_delta,
             );
         }
-
-        self.markers.shift_insert(edit);
     }
 
     pub fn remove(&mut self, start: Cursor, end: Cursor) {
@@ -85,16 +81,35 @@ impl Buffer {
         if start.line > end.line || (start.line == end.line && start.col >= end.col) {
             return;
         }
-        let edit = DeleteShape { start, end };
-        self.clear_inlay_hints_in_range(start, end);
-        if let Some(change) = self.lines.remove(start, end) {
+        if let Some(change) = self.remove_without_cache_invalidation(start, end) {
             self.invalidate_syntax_from_with_line_delta(
                 change.first_changed_line,
                 change.line_delta,
             );
         }
+    }
 
+    fn insert_text_without_cache_invalidation(
+        &mut self,
+        cursor: Cursor,
+        text: &str,
+    ) -> Option<TextChange> {
+        let edit = Self::insert_shape_for_text(cursor, text);
+        let change = self.lines.insert_text(cursor, text)?;
+        self.markers.shift_insert(edit);
+        Some(change)
+    }
+
+    fn remove_without_cache_invalidation(
+        &mut self,
+        start: Cursor,
+        end: Cursor,
+    ) -> Option<TextChange> {
+        let edit = DeleteShape { start, end };
+        self.clear_inlay_hints_in_range(start, end);
+        let change = self.lines.remove(start, end)?;
         self.markers.shift_delete(edit);
+        Some(change)
     }
 
     /// Applies a completion replacement and any same-buffer edits.
@@ -129,16 +144,31 @@ impl Buffer {
 
         edits.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| right.1.cmp(&left.1)));
 
+        let old_line_count = self.line_count();
+        let mut first_changed_line: Option<usize> = None;
         for (edit_start, edit_end, text) in edits {
             let start_cursor = self.lines.cursor_for_byte_offset(edit_start)?;
             let end_cursor = self.lines.cursor_for_byte_offset(edit_end)?;
-            self.remove(start_cursor, end_cursor);
-            self.insert_text(start_cursor, text);
+            first_changed_line = Some(
+                first_changed_line.map_or(start_cursor.line, |line| line.min(start_cursor.line)),
+            );
+            self.remove_without_cache_invalidation(start_cursor, end_cursor);
+            if !text.is_empty() {
+                self.insert_text_without_cache_invalidation(start_cursor, text);
+            }
+        }
+
+        if let Some(first_changed_line) = first_changed_line {
+            self.invalidate_syntax_from_with_line_delta(
+                first_changed_line,
+                self.line_count() as isize - old_line_count as isize,
+            );
         }
 
         let next_cursor = self
             .lines
             .cursor_for_byte_offset(main_start.saturating_add(cursor_offset))?;
+        self.warm_syntax_through_with_budget(next_cursor.line, std::time::Duration::from_millis(2));
         self.push_snapshot(next_cursor);
         Some(next_cursor)
     }
