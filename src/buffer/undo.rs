@@ -8,12 +8,12 @@ impl UndoState {
         markers: MarkersStore,
     ) -> Self {
         Self {
-            history: Vector::unit(Snapshot {
+            history: vec![Snapshot {
                 lines,
                 cursor,
                 buffer_cache,
                 markers,
-            }),
+            }],
             position: 0,
         }
     }
@@ -40,10 +40,10 @@ impl UndoState {
         }
 
         while self.history.len() > self.position + 1 {
-            self.history.pop_back();
+            self.history.pop();
         }
 
-        self.history.push_back(Snapshot {
+        self.history.push(Snapshot {
             lines,
             cursor,
             buffer_cache,

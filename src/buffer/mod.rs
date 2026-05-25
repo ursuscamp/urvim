@@ -75,7 +75,6 @@ pub use unicode::{
 };
 
 use crate::path::AbsolutePath;
-use imbl::Vector;
 use smol_str::SmolStr;
 use std::fs::File;
 use std::io::{Read, Write};
@@ -168,7 +167,7 @@ impl DiskState {
 #[derive(Debug, Clone)]
 struct UndoState {
     /// History of snapshots, oldest first.
-    history: Vector<Snapshot>,
+    history: Vec<Snapshot>,
     /// Current position in history.
     /// - position == 0: no snapshots yet (or at oldest)
     /// - position > 0: "active snapshot" is at position - 1
