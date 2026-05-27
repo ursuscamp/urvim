@@ -1463,6 +1463,107 @@ fn test_window_render_does_not_force_full_syntax_warmup_on_bottom_jump() {
 }
 
 #[test]
+fn test_window_render_keeps_bottom_viewport_highlighted_after_completion_top_edit() {
+    let _lock = syntax_worker_lock();
+    let theme = syntax_themed_window();
+    let expected_keyword_style = theme.highlight_style_for_tag(&tag("keyword"));
+    let _theme_guard = globals::set_test_active_theme(theme);
+    let _config_guard = globals::set_test_config(Config {
+        theme: "demo-syntax".to_string(),
+        insert_escape: None,
+        syntax: true,
+        auto_close_pairs: true,
+        auto_indent: AutoIndentMode::Off,
+        advanced_glyphs: BTreeSet::new(),
+        ..Default::default()
+    });
+
+    let body = (0..1024)
+        .map(|idx| format!("fn filler_{idx}() {{ let value_{idx} = {idx}; }}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let source = format!("fn main() {{\n    let guard = String::new();\n}}\n{body}");
+    let path = temp_path_with_ext("completion-render-fallback", "rs");
+    let buffer = Buffer::from_str_with_path(&source, path);
+    let mut window = Window::new(buffer);
+
+    window
+        .buffer_view_mut()
+        .with_buffer_mut(|buffer| {
+            buffer.ensure_syntax_through(buffer.line_count().saturating_sub(1))
+        })
+        .unwrap();
+
+    let completion_line = window
+        .buffer_view()
+        .with_buffer(|buffer| {
+            (0..buffer.line_count())
+                .find(|line| {
+                    buffer
+                        .line_at(*line)
+                        .is_some_and(|line_text| line_text.to_string().contains("let guard"))
+                })
+                .expect("guard line should exist")
+        })
+        .unwrap();
+    let line_text = window
+        .buffer_view()
+        .with_buffer(|buffer| buffer.line_at(completion_line).map(|line| line.to_string()))
+        .flatten()
+        .expect("guard line should exist");
+    let guard_start = line_text.find("guard").expect("line should contain guard");
+    let range = crate::buffer::TextObjectRange {
+        start: Cursor::new(completion_line, guard_start),
+        end: Cursor::new(completion_line, guard_start + "guard".len()),
+    };
+    let additional_edits = vec![crate::ui::completion::CompletionTextEdit {
+        range: crate::buffer::TextObjectRange {
+            start: Cursor::new(0, 0),
+            end: Cursor::new(0, 0),
+        },
+        text: "use std::borrow::Cow;\n".to_string(),
+    }];
+
+    window
+        .buffer_view_mut()
+        .with_buffer_mut(|buffer| {
+            buffer
+                .apply_completion(
+                    range,
+                    "guard_handle",
+                    "guard_handle".len(),
+                    &additional_edits,
+                )
+                .expect("completion should apply");
+        })
+        .unwrap();
+
+    let filler_line_idx = window
+        .buffer_view()
+        .with_buffer(|buffer| {
+            (0..buffer.line_count())
+                .find(|line| {
+                    buffer
+                        .line_at(*line)
+                        .is_some_and(|line_text| line_text.to_string().contains("fn filler_1023()"))
+                })
+                .expect("filler line should exist")
+        })
+        .unwrap();
+
+    window.set_cursor(Cursor::new(filler_line_idx, 0));
+    let mut screen = crate::screen::Screen::new(1, 120);
+    window.render(&mut screen, Position::new(0, 0), Size::new(1, 120));
+
+    let rendered_line = rendered_line(&window, 0);
+    assert!(
+        rendered_line
+            .iter()
+            .any(|chunk| chunk.text == "fn" && chunk.style == expected_keyword_style)
+    );
+}
+
+#[test]
 fn test_window_render_keeps_top_viewport_syntax_warmup() {
     let _lock = syntax_worker_lock();
     let theme = syntax_themed_window();

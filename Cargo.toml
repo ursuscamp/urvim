@@ -40,5 +40,9 @@ name = "syntax_cache_compare"
 harness = false
 
 [[bench]]
+name = "syntax_highlighter"
+harness = false
+
+[[bench]]
 name = "marker_store"
 harness = false

@@ -123,6 +123,41 @@ pub struct TextObjectRange {
     pub end: Cursor,
 }
 
+/// A normalized line-based edit applied to buffer-owned caches.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LineEdit {
+    /// First line affected by the edit.
+    pub start_line: usize,
+    /// Net change in line count caused by the edit.
+    pub line_delta: isize,
+}
+
+impl LineEdit {
+    /// Creates a new normalized line edit.
+    pub fn new(start_line: usize, line_delta: isize) -> Self {
+        Self {
+            start_line,
+            line_delta,
+        }
+    }
+
+    /// Returns the first line affected by the edit.
+    pub fn start_line(&self) -> usize {
+        self.start_line
+    }
+
+    /// Returns the net line-count delta caused by the edit.
+    pub fn line_delta(&self) -> isize {
+        self.line_delta
+    }
+}
+
+/// Applies a normalized line-based edit.
+pub trait ApplyEdit {
+    /// Applies one normalized edit.
+    fn apply_edit(&mut self, edit: LineEdit);
+}
+
 /// A single snapshot of buffer state (text, cursor, and syntax cache).
 ///
 /// This is used for undo/redo functionality to store the buffer state
@@ -291,6 +326,15 @@ impl Buffer {
             .and_then(|registry| registry.display_name(self.syntax_name()))
             .unwrap_or_else(|| self.syntax_name().to_owned().into())
             .to_string()
+    }
+
+    /// Converts a protocol text position into a buffer cursor.
+    pub fn cursor_for_position(
+        &self,
+        position: TextPosition,
+        encoding: TextEncoding,
+    ) -> Option<Cursor> {
+        self.lines.cursor_for_position(position, encoding)
     }
 
     /// Returns true when the current buffer contents differ from the last saved baseline.

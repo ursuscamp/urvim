@@ -8,7 +8,6 @@ use crate::json_rpc::{
     decode_message, encode_message,
 };
 use crate::lsp::inlay_hint_job::LspInlayHintSnapshot;
-use crate::lsp::position::position_to_byte_offset;
 use crate::ui::completion::{CompletionCandidate, CompletionInsertFormat};
 use lsp_types::{
     CodeActionContext, CodeActionOrCommand, CodeActionParams, CodeActionProviderCapability,
@@ -3165,14 +3164,34 @@ fn apply_text_edits(
             .then_with(|| right.range.start.character.cmp(&left.range.start.character))
     });
 
-    let current_text = crate::globals::with_buffer(buffer_id, |buffer| buffer.as_str())
-        .ok_or_else(|| "failed to read buffer for workspace edit".to_string())?;
-    let updated_text = apply_text_edits_to_string(&current_text, &sorted_edits, encoding.clone())?;
+    let text_encoding = text_encoding_from_lsp(encoding.clone());
+    let cursor_edits = crate::globals::with_buffer(buffer_id, |buffer| {
+        sorted_edits
+            .iter()
+            .map(|edit| {
+                let start = buffer.cursor_for_position(
+                    TextPosition {
+                        line: edit.range.start.line as usize,
+                        character: edit.range.start.character as usize,
+                    },
+                    text_encoding,
+                )?;
+                let end = buffer.cursor_for_position(
+                    TextPosition {
+                        line: edit.range.end.line as usize,
+                        character: edit.range.end.character as usize,
+                    },
+                    text_encoding,
+                )?;
+                Some((start, end, edit.new_text.clone()))
+            })
+            .collect::<Option<Vec<_>>>()
+    })
+    .ok_or_else(|| "failed to read buffer for workspace edit".to_string())?
+    .ok_or_else(|| "failed to convert workspace edit positions".to_string())?;
 
     let applied = crate::globals::with_buffer_mut(buffer_id, |buffer| {
-        buffer.replace_text(updated_text.as_str());
-        buffer.push_snapshot(buffer.current_cursor());
-        true
+        buffer.apply_text_edits(&cursor_edits)
     })
     .unwrap_or(false);
 
@@ -3185,30 +3204,6 @@ fn apply_text_edits(
     crate::session::mark_dirty();
     crate::globals::request_notification_redraw();
     Ok(())
-}
-
-fn apply_text_edits_to_string(
-    text: &str,
-    edits: &[lsp_types::TextEdit],
-    encoding: PositionEncodingKind,
-) -> Result<String, String> {
-    let mut current = text.to_string();
-
-    for edit in edits {
-        let Some(start) = position_to_byte_offset(&current, edit.range.start, encoding.clone())
-        else {
-            return Err("failed to convert edit start position".to_string());
-        };
-        let Some(end) = position_to_byte_offset(&current, edit.range.end, encoding.clone()) else {
-            return Err("failed to convert edit end position".to_string());
-        };
-        if start > end || end > current.len() {
-            return Err("workspace edit range is invalid".to_string());
-        }
-        current.replace_range(start..end, edit.new_text.as_str());
-    }
-
-    Ok(current)
 }
 
 fn open_lsp_log_stderr() -> Stdio {

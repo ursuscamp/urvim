@@ -3,7 +3,7 @@
 use crate::background::{JobContext, JobEvent, JobKind, JobPayload, JobToken};
 use crate::buffer::Buffer;
 use crate::buffer::BufferId;
-use crate::buffer::{PieceTable, TextRef, TextSnapshot};
+use crate::buffer::{ApplyEdit, LineEdit, PieceTable, TextRef, TextSnapshot};
 use crate::globals;
 use crate::syntax::{
     ContextControl, InjectedSyntaxFallback, InjectedSyntaxSelector, SyntaxDefinition, SyntaxRule,
@@ -67,6 +67,19 @@ struct SyntaxLineView<'a> {
 }
 
 #[derive(Debug, Clone)]
+struct RenderLineEdit {
+    line: usize,
+    line_delta: isize,
+}
+
+#[derive(Debug, Clone)]
+struct RenderSyntaxSnapshot {
+    start_line: usize,
+    spans: Vec<Arc<[SyntaxSpan]>>,
+    edits: Vec<RenderLineEdit>,
+}
+
+#[derive(Debug, Clone)]
 pub struct SyntaxCache {
     syntax_name: SmolStr,
     chunks: Vec<SyntaxChunk>,
@@ -74,6 +87,7 @@ pub struct SyntaxCache {
     dirty_suffix: Vec<SyntaxChunk>,
     dirty_start: Option<usize>,
     dirty_line_delta: isize,
+    render_snapshot: Option<RenderSyntaxSnapshot>,
 }
 
 impl SyntaxChunkBuilder {
@@ -125,6 +139,7 @@ impl SyntaxCache {
             dirty_suffix: Vec::new(),
             dirty_start: None,
             dirty_line_delta: 0,
+            render_snapshot: None,
         }
     }
 
@@ -136,6 +151,7 @@ impl SyntaxCache {
             self.chunks = Vec::new();
             self.tail = SyntaxChunkBuilder::new(0);
             self.clear_dirty_suffix();
+            self.clear_render_snapshot();
         }
     }
 
@@ -148,6 +164,97 @@ impl SyntaxCache {
         self.dirty_suffix = Vec::new();
         self.dirty_start = None;
         self.dirty_line_delta = 0;
+    }
+
+    fn clear_render_snapshot(&mut self) {
+        self.render_snapshot = None;
+    }
+
+    fn capture_cached_spans_from(&self, start_line: usize) -> Vec<Arc<[SyntaxSpan]>> {
+        let mut spans = Vec::new();
+        let mut line = start_line;
+        while let Some(line_spans) = self.cached_spans_for_line_ref(line) {
+            spans.push(Arc::from(line_spans.to_vec().into_boxed_slice()));
+            line += 1;
+        }
+        spans
+    }
+
+    fn translate_render_snapshot_line(&self, line: usize) -> Option<usize> {
+        let snapshot = self.render_snapshot.as_ref()?;
+        let mut translated = line;
+        for edit in &snapshot.edits {
+            if translated < edit.line {
+                break;
+            }
+
+            if edit.line_delta > 0 {
+                let inserted_lines = edit.line_delta as usize;
+                let inserted_end = edit.line.saturating_add(inserted_lines);
+                if translated < inserted_end {
+                    return None;
+                }
+                translated = translated.saturating_sub(inserted_lines);
+            } else if edit.line_delta < 0 {
+                translated = translated.saturating_add(edit.line_delta.unsigned_abs());
+            }
+        }
+
+        Some(translated)
+    }
+
+    fn update_render_snapshot(&mut self, edits: &[(usize, isize)]) {
+        let mut edits = edits
+            .iter()
+            .copied()
+            .filter(|(_, line_delta)| *line_delta != 0)
+            .map(|(line, line_delta)| RenderLineEdit { line, line_delta })
+            .collect::<Vec<_>>();
+
+        if edits.is_empty() {
+            return;
+        }
+
+        edits.sort_by_key(|edit| edit.line);
+        let start_line = edits[0].line;
+        let spans = self.capture_cached_spans_from(start_line);
+        if spans.is_empty() {
+            self.clear_render_snapshot();
+            return;
+        }
+
+        self.render_snapshot = Some(RenderSyntaxSnapshot {
+            start_line,
+            spans,
+            edits,
+        });
+    }
+
+    /// Applies one normalized edit to the cache.
+    pub fn apply_edit(&mut self, edit: LineEdit) {
+        self.apply_edits(&[edit]);
+    }
+
+    /// Applies a batch of normalized edits to the cache.
+    pub fn apply_edits(&mut self, edits: &[LineEdit]) {
+        if edits.is_empty() {
+            return;
+        }
+
+        let line_edits: Vec<_> = edits
+            .iter()
+            .map(|edit| (edit.start_line, edit.line_delta))
+            .collect();
+        self.update_render_snapshot(&line_edits);
+
+        let first_line = edits.iter().map(|edit| edit.start_line).min().unwrap();
+        let line_delta: isize = edits.iter().map(|edit| edit.line_delta).sum();
+        self.invalidate_from(first_line, line_delta);
+    }
+
+    /// Records the line edits that should preserve stale render spans.
+    pub fn record_render_snapshot(&mut self, edits: &[(usize, isize)]) {
+        self.update_render_snapshot(edits);
     }
 
     fn flush_tail(&mut self) {
@@ -444,6 +551,18 @@ impl SyntaxCache {
         self.line_view(line).map(|entry| entry.spans)
     }
 
+    /// Returns cached spans for rendering, falling back to the last stale snapshot.
+    pub fn render_spans_for_line_ref(&self, line: usize) -> Option<&[SyntaxSpan]> {
+        if let Some(spans) = self.cached_spans_for_line_ref(line) {
+            return Some(spans);
+        }
+
+        let snapshot = self.render_snapshot.as_ref()?;
+        let old_line = self.translate_render_snapshot_line(line)?;
+        let snapshot_line = old_line.checked_sub(snapshot.start_line)?;
+        snapshot.spans.get(snapshot_line).map(AsRef::as_ref)
+    }
+
     /// Returns how many leading lines currently have cached syntax data.
     pub fn cached_line_count(&self) -> usize {
         self.chunks
@@ -473,20 +592,19 @@ impl SyntaxCache {
         line_texts: &PieceTable,
         line: usize,
     ) -> Option<Vec<SyntaxSpan>> {
-        self.set_syntax_name(syntax_name);
-        if line >= line_texts.line_count() {
-            return None;
-        }
-
-        self.ensure_through(syntax_name, line_texts, line);
-        self.cached_spans_for_line(line)
+        let syntax_definition = syntax_definition(syntax_name)?;
+        self.spans_for_line_with_definition(syntax_definition.as_ref(), line_texts, line)
     }
 
     /// Ensures syntax data exists through the requested line.
     fn ensure_through(&mut self, syntax_name: &str, line_texts: &PieceTable, line: usize) {
-        self.ensure_through_with(syntax_name, line_texts, line, || true);
+        let Some(syntax_definition) = syntax_definition(syntax_name) else {
+            return;
+        };
+        self.ensure_through_with_definition(syntax_definition.as_ref(), line_texts, line, || true);
     }
 
+    #[cfg(test)]
     fn ensure_through_with<F>(
         &mut self,
         syntax_name: &str,
@@ -496,7 +614,43 @@ impl SyntaxCache {
     ) where
         F: FnMut() -> bool,
     {
-        self.set_syntax_name(syntax_name);
+        let Some(syntax_definition) = syntax_definition(syntax_name) else {
+            return;
+        };
+
+        self.ensure_through_with_definition(
+            syntax_definition.as_ref(),
+            line_texts,
+            line,
+            should_continue,
+        );
+    }
+
+    fn spans_for_line_with_definition(
+        &mut self,
+        syntax_definition: &SyntaxDefinition,
+        line_texts: &PieceTable,
+        line: usize,
+    ) -> Option<Vec<SyntaxSpan>> {
+        self.set_syntax_name(syntax_definition.name());
+        if line >= line_texts.line_count() {
+            return None;
+        }
+
+        self.ensure_through_with_definition(syntax_definition, line_texts, line, || true);
+        self.cached_spans_for_line(line)
+    }
+
+    fn ensure_through_with_definition<F>(
+        &mut self,
+        syntax_definition: &SyntaxDefinition,
+        line_texts: &PieceTable,
+        line: usize,
+        should_continue: F,
+    ) where
+        F: FnMut() -> bool,
+    {
+        self.set_syntax_name(syntax_definition.name());
 
         if line_texts.line_count() == 0 {
             self.chunks = Vec::new();
@@ -525,7 +679,7 @@ impl SyntaxCache {
             self.dirty_line_delta = dirty_line_delta;
             let mut dirty_suffix = dirty_suffix;
             return self.ensure_through_with_rescan(
-                syntax_name,
+                syntax_definition,
                 line_texts,
                 target_line,
                 dirty_start,
@@ -537,7 +691,7 @@ impl SyntaxCache {
         let mut dirty_suffix = dirty_suffix;
 
         self.ensure_through_with_rescan(
-            syntax_name,
+            syntax_definition,
             line_texts,
             target_line,
             dirty_start,
@@ -549,7 +703,7 @@ impl SyntaxCache {
 
     fn ensure_through_with_rescan<F>(
         &mut self,
-        syntax_name: &str,
+        syntax_definition: &SyntaxDefinition,
         line_texts: &PieceTable,
         target_line: usize,
         dirty_start: usize,
@@ -576,7 +730,7 @@ impl SyntaxCache {
 
             let line_ref = line_texts.line(current_line).expect("target line exists");
             let line_text = line_ref.contiguous_text_with_scratch(&mut scratch);
-            let (spans, next_state) = tokenize_line(syntax_name, line_text, state);
+            let (spans, next_state) = tokenize_line_definition(syntax_definition, line_text, state);
             self.append_line(Arc::from(line_text), spans, next_state.clone());
 
             let dirty_idx = current_line as isize - dirty_start as isize - dirty_line_delta;
@@ -603,6 +757,12 @@ impl SyntaxCache {
             self.dirty_start = Some(dirty_start);
             self.dirty_line_delta = dirty_line_delta;
         }
+    }
+}
+
+impl ApplyEdit for SyntaxCache {
+    fn apply_edit(&mut self, edit: LineEdit) {
+        SyntaxCache::apply_edit(self, edit);
     }
 }
 
@@ -722,6 +882,21 @@ impl IndentScopeCache {
     /// Returns true when the cache data may be incomplete.
     pub fn is_stale(&self) -> bool {
         self.stale
+    }
+
+    /// Applies one normalized edit to the indent scope cache.
+    pub fn apply_edit(&mut self, edit: LineEdit) {
+        self.apply_edits(&[edit]);
+    }
+
+    /// Applies a batch of normalized edits to the indent scope cache.
+    pub fn apply_edits(&mut self, edits: &[LineEdit]) {
+        if edits.is_empty() {
+            return;
+        }
+
+        let line = edits.iter().map(|edit| edit.start_line).min().unwrap();
+        self.invalidate_from(line);
     }
 
     pub(crate) fn invalidate_from(&mut self, line: usize) {
@@ -1026,6 +1201,12 @@ impl IndentScopeCache {
     }
 }
 
+impl ApplyEdit for IndentScopeCache {
+    fn apply_edit(&mut self, edit: LineEdit) {
+        IndentScopeCache::apply_edit(self, edit);
+    }
+}
+
 /// Buffer-owned cache state derived from the current text.
 #[derive(Debug, Clone)]
 pub struct BufferCache {
@@ -1066,6 +1247,21 @@ impl BufferCache {
         self.syntax_cache = syntax_cache;
     }
 
+    /// Applies one normalized edit to the buffer cache.
+    pub fn apply_edit(&mut self, edit: LineEdit) {
+        self.apply_edits(&[edit]);
+    }
+
+    /// Applies a batch of normalized edits to the buffer cache.
+    pub fn apply_edits(&mut self, edits: &[LineEdit]) {
+        if edits.is_empty() {
+            return;
+        }
+
+        self.syntax_cache.apply_edits(edits);
+        self.indent_scope_cache.apply_edits(edits);
+    }
+
     /// Replaces only the indent scope cache portion.
     pub fn replace_indent_scope_cache(&mut self, indent_scope_cache: IndentScopeCache) {
         self.indent_scope_cache = indent_scope_cache;
@@ -1073,13 +1269,7 @@ impl BufferCache {
 
     /// Invalidates cached data from the provided line onward.
     pub fn invalidate_from(&mut self, line: usize, line_delta: isize) {
-        if line >= self.syntax_cache.cached_line_count() && !self.syntax_cache.has_dirty_suffix() {
-            self.indent_scope_cache.invalidate_from(line);
-            return;
-        }
-
-        self.syntax_cache.invalidate_from(line, line_delta);
-        self.indent_scope_cache.invalidate_from(line);
+        self.apply_edit(LineEdit::new(line, line_delta));
     }
 
     /// Returns cached spans for a line without computing any missing prefix.
@@ -1090,6 +1280,11 @@ impl BufferCache {
     /// Returns cached syntax spans for a line without cloning span storage.
     pub fn cached_spans_for_line_ref(&self, line: usize) -> Option<&[SyntaxSpan]> {
         self.syntax_cache.cached_spans_for_line_ref(line)
+    }
+
+    /// Returns syntax spans for rendering, falling back to stale cached spans.
+    pub fn render_spans_for_line_ref(&self, line: usize) -> Option<&[SyntaxSpan]> {
+        self.syntax_cache.render_spans_for_line_ref(line)
     }
 
     /// Returns how many leading lines currently have cached syntax data.
@@ -1140,11 +1335,16 @@ impl BufferCache {
         line: usize,
         budget: std::time::Duration,
     ) {
+        let Some(syntax_definition) = syntax_definition(syntax_name) else {
+            return;
+        };
         let syntax_started_at = std::time::Instant::now();
-        self.syntax_cache
-            .ensure_through_with(syntax_name, line_texts, line, || {
-                syntax_started_at.elapsed() < budget
-            });
+        self.syntax_cache.ensure_through_with_definition(
+            syntax_definition.as_ref(),
+            line_texts,
+            line,
+            || syntax_started_at.elapsed() < budget,
+        );
     }
 
     fn ensure_indent_through_with_budget(
@@ -1179,6 +1379,12 @@ impl BufferCache {
     /// Returns cached containing indent scope ids for a line.
     pub fn line_indent_scope_ids(&self, line: usize) -> Option<&[IndentScopeId]> {
         self.indent_scope_cache.line_indent_scope_ids(line)
+    }
+}
+
+impl ApplyEdit for BufferCache {
+    fn apply_edit(&mut self, edit: LineEdit) {
+        BufferCache::apply_edit(self, edit);
     }
 }
 
@@ -1220,14 +1426,14 @@ impl SyntaxRefreshJob {
     pub fn run(mut self, context: &JobContext, event_tx: &std::sync::mpsc::Sender<JobEvent>) {
         if !self.line_texts.is_empty() {
             let target_line = self.line_texts.line_count() - 1;
-            self.cache.ensure_through_with(
-                &self.syntax_name,
-                &self.line_texts,
-                target_line,
-                || {
-                    if context.is_current() { true } else { false }
-                },
-            );
+            if let Some(syntax_definition) = syntax_definition(&self.syntax_name) {
+                self.cache.ensure_through_with_definition(
+                    syntax_definition.as_ref(),
+                    &self.line_texts,
+                    target_line,
+                    || context.is_current(),
+                );
+            }
         }
 
         let _ = event_tx.send(JobEvent::Completed {
@@ -1315,13 +1521,32 @@ struct RuleListInjectionState {
     parent_style: Option<Tag>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 enum NestedState {
     Syntax {
-        syntax_name: SmolStr,
+        syntax_definition: Arc<SyntaxDefinition>,
         state: Box<SyntaxState>,
     },
 }
+
+impl PartialEq for NestedState {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (
+                Self::Syntax {
+                    syntax_definition: left_definition,
+                    state: left_state,
+                },
+                Self::Syntax {
+                    syntax_definition: right_definition,
+                    state: right_state,
+                },
+            ) => left_definition.name() == right_definition.name() && left_state == right_state,
+        }
+    }
+}
+
+impl Eq for NestedState {}
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct ContextStack {
@@ -1421,22 +1646,16 @@ fn syntax_definition(syntax_name: &str) -> Option<std::sync::Arc<SyntaxDefinitio
     builtin_syntax_registry().ok()?.promote(syntax_name).ok()
 }
 
-fn tokenize_line(
-    syntax_name: &str,
+fn tokenize_line_definition(
+    definition: &SyntaxDefinition,
     line: &str,
     state: SyntaxState,
 ) -> (Vec<SyntaxSpan>, SyntaxState) {
-    syntax_definition(syntax_name)
-        .map(|definition| {
-            let use_rule_list = !definition.rules().is_empty();
-
-            if use_rule_list {
-                tokenize_rule_list_line(definition.as_ref(), line, state)
-            } else {
-                tokenize_code_line(definition.as_ref(), line, state)
-            }
-        })
-        .unwrap_or((Vec::new(), SyntaxState::Plain))
+    if !definition.rules().is_empty() {
+        tokenize_rule_list_line(definition, line, state)
+    } else {
+        tokenize_code_line(definition, line, state)
+    }
 }
 
 fn tokenize_rule_list_line(
@@ -1446,6 +1665,8 @@ fn tokenize_rule_list_line(
 ) -> (Vec<SyntaxSpan>, SyntaxState) {
     let mut spans = Vec::new();
     let mut index = 0;
+    let regex_rule_indexes = definition.regex_rule_indexes();
+    let injection_rule_indexes = definition.injection_rule_indexes();
     let mut state = match state {
         SyntaxState::Code(CodeState::RuleList {
             contexts,
@@ -1459,14 +1680,18 @@ fn tokenize_rule_list_line(
     while index < line.len() {
         let (contexts, injection, parent_style) = &mut state;
 
-        if injection.is_some() && !has_active_injection(definition.rules(), contexts) {
+        if injection.is_some() && !has_active_injection(definition, contexts) {
             *injection = None;
         }
 
         if let Some(injection_state) = injection.as_mut() {
-            if let Some(regex_match) =
-                find_next_rule_list_regex_match(definition.rules(), line, index, contexts)
-            {
+            if let Some(regex_match) = find_next_rule_list_regex_match(
+                definition,
+                regex_rule_indexes,
+                line,
+                index,
+                contexts,
+            ) {
                 if regex_match.0 > index {
                     let body = &line[index..regex_match.0];
                     let mut body_spans = tokenize_injection_body(injection_state, body, index);
@@ -1484,29 +1709,27 @@ fn tokenize_rule_list_line(
         }
 
         let mut chosen = None;
-        for rule in definition.rules() {
+        for rule_idx in regex_rule_indexes {
             if let SyntaxRule::Regex {
                 regex,
                 lookahead,
                 tag,
                 context,
-            } = rule
+            } = &definition.rules[*rule_idx]
             {
                 if let Some(context) = context.as_ref()
                     && !contexts.contains_all(&context.requires)
                 {
                     continue;
                 }
-                if let Some((start, end, captures)) =
-                    regex_match_at_with_captures(regex, lookahead.as_ref(), line, index)
-                {
-                    let matched_text = line.get(start..end).unwrap_or("");
+                if let Some(hit) = regex_match_at(regex, lookahead.as_ref(), line, index, true) {
+                    let matched_text = line.get(hit.start..hit.end).unwrap_or("");
                     if let Some(context) = context.as_ref()
                         && !context_payload_matches(
                             contexts,
                             context,
                             matched_text,
-                            Some(&captures),
+                            hit.captures.as_ref(),
                         )
                     {
                         continue;
@@ -1527,9 +1750,9 @@ fn tokenize_rule_list_line(
                     );
                     if should_replace {
                         chosen = Some((
-                            start,
-                            end,
-                            captures,
+                            hit.start,
+                            hit.end,
+                            hit.captures.expect("captures requested"),
                             is_closing,
                             tag.clone(),
                             context.clone(),
@@ -1555,12 +1778,12 @@ fn tokenize_rule_list_line(
         }
 
         let mut matched = false;
-        for rule in definition.rules() {
+        for rule_idx in injection_rule_indexes {
             if let SyntaxRule::Injection {
                 selector,
                 fallback,
                 context,
-            } = rule
+            } = &definition.rules[*rule_idx]
             {
                 if injection.is_some() {
                     continue;
@@ -1602,30 +1825,34 @@ fn tokenize_rule_list_line(
     )
 }
 
-fn has_active_injection(rules: &[SyntaxRule], contexts: &ContextStack) -> bool {
-    rules.iter().any(|rule| match rule {
-        SyntaxRule::Injection { context, .. } => context
-            .as_ref()
-            .is_some_and(|context| contexts.contains_all(&context.requires)),
-        SyntaxRule::Regex { .. } => false,
+fn has_active_injection(definition: &SyntaxDefinition, contexts: &ContextStack) -> bool {
+    definition.injection_rule_indexes().iter().any(|rule_idx| {
+        matches!(
+            &definition.rules[*rule_idx],
+            SyntaxRule::Injection { context, .. }
+                if context
+                    .as_ref()
+                    .is_some_and(|context| contexts.contains_all(&context.requires))
+        )
     })
 }
 
 fn find_next_rule_list_regex_match(
-    rules: &[SyntaxRule],
+    definition: &SyntaxDefinition,
+    regex_rule_indexes: &[usize],
     line: &str,
     start: usize,
     contexts: &ContextStack,
 ) -> Option<(usize, usize)> {
     let mut index = start;
     while index < line.len() {
-        for rule in rules {
+        for rule_idx in regex_rule_indexes {
             if let SyntaxRule::Regex {
                 regex,
                 lookahead,
                 context,
                 ..
-            } = rule
+            } = &definition.rules[*rule_idx]
             {
                 if let Some(context) = context.as_ref()
                     && !contexts.contains_all(&context.requires)
@@ -1635,13 +1862,8 @@ fn find_next_rule_list_regex_match(
                 if contexts.contains("markdown_code_fence_body") && context.is_none() {
                     continue;
                 }
-                let match_result = if let Some(lookahead) = lookahead.as_ref() {
-                    regex_match_at_with_lookahead(regex, Some(lookahead), line, index)
-                } else {
-                    regex_match_at(regex, line, index)
-                };
-                if let Some((start, end)) = match_result {
-                    return Some((start, end));
+                if let Some(hit) = regex_match_at(regex, lookahead.as_ref(), line, index, false) {
+                    return Some((hit.start, hit.end));
                 }
             }
         }
@@ -1670,9 +1892,10 @@ fn resolve_rule_list_injection(
     let registry = builtin_syntax_registry().ok()?;
     let canonical = registry.resolve_label(label)?;
     let definition = registry.promote(canonical.as_str()).ok()?;
+    let state = initial_state_for_definition(definition.as_ref());
     Some(NestedState::Syntax {
-        syntax_name: SmolStr::new(definition.name()),
-        state: Box::new(initial_state_for_definition(definition.as_ref())),
+        syntax_definition: definition,
+        state: Box::new(state),
     })
 }
 
@@ -1681,67 +1904,63 @@ fn tokenize_code_line(
     line: &str,
     state: SyntaxState,
 ) -> (Vec<SyntaxSpan>, SyntaxState) {
-    let mut spans = Vec::new();
-    let mut index = 0;
-    let mut state = match state {
+    let state = match state {
         SyntaxState::Code(code_state) => code_state,
         _ => CodeState::Normal {
             contexts: ContextStack::default(),
         },
     };
 
-    while index < line.len() {
-        match state.clone() {
-            CodeState::RuleList {
-                contexts,
-                injection,
-                parent_style,
-            } => {
-                let (rule_list_spans, next_state) = tokenize_rule_list_line(
-                    definition,
-                    line.get(index..).unwrap_or(""),
-                    SyntaxState::Code(CodeState::RuleList {
-                        contexts,
-                        injection,
-                        parent_style,
-                    }),
-                );
-                spans.extend(offset_spans(rule_list_spans, index));
-                state = match next_state {
-                    SyntaxState::Code(CodeState::RuleList {
-                        contexts,
-                        injection,
-                        parent_style,
-                    }) => CodeState::RuleList {
-                        contexts,
-                        injection,
-                        parent_style,
-                    },
-                    SyntaxState::Code(CodeState::Normal { contexts }) => {
-                        CodeState::Normal { contexts }
-                    }
-                    SyntaxState::Plain => CodeState::Normal {
-                        contexts: ContextStack::default(),
-                    },
-                };
-                break;
-            }
-            CodeState::Normal { .. } => {
-                let Some((byte_len, _ch)) = next_char(line, index) else {
-                    break;
-                };
-                index += byte_len;
-            }
+    match state {
+        CodeState::RuleList {
+            contexts,
+            injection,
+            parent_style,
+        } => {
+            let (spans, next_state) = tokenize_rule_list_line(
+                definition,
+                line,
+                SyntaxState::Code(CodeState::RuleList {
+                    contexts,
+                    injection,
+                    parent_style,
+                }),
+            );
+            let state = match next_state {
+                SyntaxState::Code(CodeState::RuleList {
+                    contexts,
+                    injection,
+                    parent_style,
+                }) => CodeState::RuleList {
+                    contexts,
+                    injection,
+                    parent_style,
+                },
+                SyntaxState::Code(CodeState::Normal { contexts }) => CodeState::Normal { contexts },
+                SyntaxState::Plain => CodeState::Normal {
+                    contexts: ContextStack::default(),
+                },
+            };
+            (spans, SyntaxState::Code(state))
+        }
+        CodeState::Normal { contexts } => {
+            let _ = line;
+            (
+                Vec::new(),
+                SyntaxState::Code(CodeState::Normal { contexts }),
+            )
         }
     }
-
-    (spans, SyntaxState::Code(state))
 }
 
 fn tokenize_nested_body(nested: &mut NestedState, body: &str, offset: usize) -> Vec<SyntaxSpan> {
     match nested {
-        NestedState::Syntax { syntax_name, state } => {
-            let (spans, next_state) = tokenize_line(syntax_name, body, state.as_ref().clone());
+        NestedState::Syntax {
+            syntax_definition,
+            state,
+        } => {
+            let (spans, next_state) =
+                tokenize_line_definition(syntax_definition.as_ref(), body, state.as_ref().clone());
             **state = next_state;
             offset_spans(spans, offset)
         }
@@ -1796,65 +2015,51 @@ fn next_char(line: &str, index: usize) -> Option<(usize, char)> {
     Some((ch.len_utf8(), ch))
 }
 
-fn regex_match_at(regex: &Regex, line: &str, index: usize) -> Option<(usize, usize)> {
-    regex_match_at_with_lookahead(regex, None, line, index)
+struct RegexMatch<'a> {
+    start: usize,
+    end: usize,
+    captures: Option<regex::Captures<'a>>,
 }
 
-fn regex_match_at_with_captures<'a>(
+fn regex_match_at<'a>(
     regex: &'a Regex,
     lookahead: Option<&'a Regex>,
     line: &'a str,
     index: usize,
-) -> Option<(usize, usize, regex::Captures<'a>)> {
+    want_captures: bool,
+) -> Option<RegexMatch<'a>> {
     let pattern = regex.as_str();
-    let (start, end, captures) = if pattern.starts_with('^') || pattern.starts_with("\\A") {
-        let tail = line.get(index..)?;
-        let captures = regex.captures(tail)?;
-        let matched = captures.get(0)?;
-        if matched.start() != 0 {
-            return None;
+    let (start, end, captures) = if want_captures {
+        if pattern.starts_with('^') || pattern.starts_with("\\A") {
+            let tail = line.get(index..)?;
+            let captures = regex.captures(tail)?;
+            let matched = captures.get(0)?;
+            if matched.start() != 0 {
+                return None;
+            }
+            (index, index + matched.end(), Some(captures))
+        } else {
+            let captures = regex.captures_at(line, index)?;
+            let matched = captures.get(0)?;
+            if matched.start() != index {
+                return None;
+            }
+            (matched.start(), matched.end(), Some(captures))
         }
-        (index, index + matched.end(), captures)
-    } else {
-        let captures = regex.captures_at(line, index)?;
-        let matched = captures.get(0)?;
-        if matched.start() != index {
-            return None;
-        }
-        (matched.start(), matched.end(), captures)
-    };
-
-    if let Some(lookahead) = lookahead {
-        let tail = line.get(end..)?;
-        let matched = lookahead.find(tail)?;
-        if matched.start() != 0 {
-            return None;
-        }
-    }
-
-    Some((start, end, captures))
-}
-
-fn regex_match_at_with_lookahead(
-    regex: &Regex,
-    lookahead: Option<&Regex>,
-    line: &str,
-    index: usize,
-) -> Option<(usize, usize)> {
-    let pattern = regex.as_str();
-    let (start, end) = if pattern.starts_with('^') || pattern.starts_with("\\A") {
+    } else if pattern.starts_with('^') || pattern.starts_with("\\A") {
         let tail = line.get(index..)?;
         let matched = regex.find(tail)?;
         if matched.start() != 0 {
             return None;
         }
-        (index, index + matched.end())
-    } else {
-        let matched = regex.find_at(line, index)?;
+        (index, index + matched.end(), None)
+    } else if let Some(matched) = regex.find_at(line, index) {
         if matched.start() != index {
             return None;
         }
-        (matched.start(), matched.end())
+        (matched.start(), matched.end(), None)
+    } else {
+        return None;
     };
 
     if let Some(lookahead) = lookahead {
@@ -1865,7 +2070,11 @@ fn regex_match_at_with_lookahead(
         }
     }
 
-    Some((start, end))
+    Some(RegexMatch {
+        start,
+        end,
+        captures,
+    })
 }
 
 impl Buffer {
@@ -1883,11 +2092,20 @@ impl Buffer {
 
     /// Invalidates buffer-owned cache data from the given line onward and records the line-count delta.
     pub fn invalidate_syntax_from_with_line_delta(&mut self, line: usize, line_delta: isize) {
-        self.buffer_cache.invalidate_from(line, line_delta);
+        self.apply_cache_edits(&[LineEdit::new(line, line_delta)]);
+    }
+
+    /// Applies normalized cache edits and refreshes the visible cache state.
+    pub fn apply_cache_edits(&mut self, edits: &[LineEdit]) {
+        if edits.is_empty() {
+            return;
+        }
+
+        self.buffer_cache.apply_edits(edits);
         self.syntax_generation = self.syntax_generation.wrapping_add(1);
         self.syntax_background_generation = None;
         self.indent_background_generation = None;
-        if line == 0 {
+        if edits.iter().any(|edit| edit.start_line == 0) {
             self.refresh_syntax();
         }
 
@@ -1919,6 +2137,11 @@ impl Buffer {
     /// Returns cached spans for a line without cloning span storage.
     pub fn cached_syntax_spans_for_line_ref(&self, line: usize) -> Option<&[SyntaxSpan]> {
         self.buffer_cache.cached_spans_for_line_ref(line)
+    }
+
+    /// Returns syntax spans for rendering, falling back to stale cached spans.
+    pub fn render_syntax_spans_for_line_ref(&self, line: usize) -> Option<&[SyntaxSpan]> {
+        self.buffer_cache.render_spans_for_line_ref(line)
     }
 
     /// Returns true when the indent-scope cache needs rebuilding.
@@ -2159,8 +2382,8 @@ mod tests {
 
     #[test]
     fn parent_style_fallback_uses_the_injection_opener_tag() {
-        let definition = SyntaxDefinition {
-            metadata: crate::syntax::SyntaxMetadata {
+        let definition = SyntaxDefinition::new(
+            crate::syntax::SyntaxMetadata {
                 name: SmolStr::new("example"),
                 display_name: SmolStr::new("Example"),
                 alias: Vec::new(),
@@ -2170,7 +2393,7 @@ mod tests {
                 filename: Vec::new(),
                 shebang: Vec::new(),
             },
-            rules: vec![
+            vec![
                 SyntaxRule::Regex {
                     regex: Regex::new(r"^```[A-Za-z]+$").expect("valid opener regex"),
                     lookahead: None,
@@ -2209,7 +2432,9 @@ mod tests {
                     }),
                 },
             ],
-        };
+            vec![0, 2],
+            vec![1],
+        );
 
         let (opener_spans, state) =
             tokenize_rule_list_line(&definition, "```example", SyntaxState::default());

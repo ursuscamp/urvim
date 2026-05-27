@@ -78,6 +78,8 @@ pub struct SyntaxDefinition {
     pub metadata: SyntaxMetadata,
     /// Ordered rules used by the context-driven tokenizer.
     pub rules: Vec<SyntaxRule>,
+    pub(super) regex_rule_indexes: Vec<usize>,
+    pub(super) injection_rule_indexes: Vec<usize>,
 }
 
 /// A compiled syntax rule in the context-driven rule list.
@@ -106,6 +108,21 @@ pub enum SyntaxRule {
 }
 
 impl SyntaxDefinition {
+    /// Creates a compiled syntax definition with precomputed rule buckets.
+    pub fn new(
+        metadata: SyntaxMetadata,
+        rules: Vec<SyntaxRule>,
+        regex_rule_indexes: Vec<usize>,
+        injection_rule_indexes: Vec<usize>,
+    ) -> Self {
+        Self {
+            metadata,
+            rules,
+            regex_rule_indexes,
+            injection_rule_indexes,
+        }
+    }
+
     /// Returns the canonical syntax name.
     pub fn name(&self) -> &str {
         &self.metadata.name
@@ -119,6 +136,16 @@ impl SyntaxDefinition {
     /// Returns the ordered rules list, if the syntax uses the new context-driven model.
     pub fn rules(&self) -> &[SyntaxRule] {
         &self.rules
+    }
+
+    /// Returns the rule indexes for regex-driven matches.
+    pub fn regex_rule_indexes(&self) -> &[usize] {
+        &self.regex_rule_indexes
+    }
+
+    /// Returns the rule indexes for injection-driven matches.
+    pub fn injection_rule_indexes(&self) -> &[usize] {
+        &self.injection_rule_indexes
     }
 
     /// Returns the syntax glyph, if one is configured.

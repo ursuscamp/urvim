@@ -129,14 +129,24 @@ pub(super) fn resolve_syntax(
     let metadata = resolve_metadata(&raw.metadata)?;
     let name = metadata.name.clone();
     let mut compiled_rules = Vec::with_capacity(raw.rules.len());
+    let mut regex_rule_indexes = Vec::new();
+    let mut injection_rule_indexes = Vec::new();
     for rule in raw.rules {
-        compiled_rules.push(compile_rule(&name, rule)?);
+        let rule_index = compiled_rules.len();
+        let compiled_rule = compile_rule(&name, rule)?;
+        match compiled_rule {
+            SyntaxRule::Regex { .. } => regex_rule_indexes.push(rule_index),
+            SyntaxRule::Injection { .. } => injection_rule_indexes.push(rule_index),
+        }
+        compiled_rules.push(compiled_rule);
     }
 
-    Ok(SyntaxDefinition {
+    Ok(SyntaxDefinition::new(
         metadata,
-        rules: compiled_rules,
-    })
+        compiled_rules,
+        regex_rule_indexes,
+        injection_rule_indexes,
+    ))
 }
 
 fn compile_rule(syntax: &str, rule: RawRule) -> Result<SyntaxRule, SyntaxLoadError> {

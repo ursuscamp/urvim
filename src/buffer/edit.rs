@@ -40,10 +40,7 @@ impl Buffer {
         );
         let edit = Self::insert_shape_for_char(cursor, ch);
         if let Some(change) = self.lines.insert_char(cursor, ch) {
-            self.invalidate_syntax_from_with_line_delta(
-                change.first_changed_line,
-                change.line_delta,
-            );
+            self.apply_cache_edits(&[LineEdit::new(change.first_changed_line, change.line_delta)]);
         }
 
         self.markers.shift_insert(edit);
@@ -60,10 +57,7 @@ impl Buffer {
         }
 
         if let Some(change) = self.insert_text_without_cache_invalidation(cursor, text) {
-            self.invalidate_syntax_from_with_line_delta(
-                change.first_changed_line,
-                change.line_delta,
-            );
+            self.apply_cache_edits(&[LineEdit::new(change.first_changed_line, change.line_delta)]);
         }
     }
 
@@ -82,10 +76,7 @@ impl Buffer {
             return;
         }
         if let Some(change) = self.remove_without_cache_invalidation(start, end) {
-            self.invalidate_syntax_from_with_line_delta(
-                change.first_changed_line,
-                change.line_delta,
-            );
+            self.apply_cache_edits(&[LineEdit::new(change.first_changed_line, change.line_delta)]);
         }
     }
 
@@ -123,13 +114,22 @@ impl Buffer {
         let mut main_start = self.lines.byte_offset_for_cursor(range.start)?;
         let mut main_end = self.lines.byte_offset_for_cursor(range.end)?;
 
-        let mut edits: Vec<(usize, usize, &str)> =
+        let mut edits: Vec<(usize, usize, usize, isize, &str)> =
             Vec::with_capacity(additional_text_edits.len() + 1);
-        edits.push((main_start, main_end, replacement));
+        let main_line_delta = replacement.split('\n').count().saturating_sub(1) as isize;
+        edits.push((
+            main_start,
+            main_end,
+            range.start.line,
+            main_line_delta - (range.end.line as isize - range.start.line as isize),
+            replacement,
+        ));
 
         for edit in additional_text_edits {
             let edit_start = self.lines.byte_offset_for_cursor(edit.range.start)?;
             let edit_end = self.lines.byte_offset_for_cursor(edit.range.end)?;
+            let edit_line_delta = edit.text.split('\n').count().saturating_sub(1) as isize
+                - (edit.range.end.line as isize - edit.range.start.line as isize);
 
             if edit_end <= main_start {
                 let delta = edit.text.len() as isize - (edit_end as isize - edit_start as isize);
@@ -139,31 +139,31 @@ impl Buffer {
                 return self.apply_completion_main_only(range, replacement, cursor_offset);
             }
 
-            edits.push((edit_start, edit_end, edit.text.as_str()));
+            edits.push((
+                edit_start,
+                edit_end,
+                edit.range.start.line,
+                edit_line_delta,
+                edit.text.as_str(),
+            ));
         }
 
         edits.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| right.1.cmp(&left.1)));
+        let cache_edits: Vec<LineEdit> = edits
+            .iter()
+            .map(|(_, _, line, line_delta, _)| LineEdit::new(*line, *line_delta))
+            .collect();
 
-        let old_line_count = self.line_count();
-        let mut first_changed_line: Option<usize> = None;
-        for (edit_start, edit_end, text) in edits {
+        for (edit_start, edit_end, _, _, text) in edits {
             let start_cursor = self.lines.cursor_for_byte_offset(edit_start)?;
             let end_cursor = self.lines.cursor_for_byte_offset(edit_end)?;
-            first_changed_line = Some(
-                first_changed_line.map_or(start_cursor.line, |line| line.min(start_cursor.line)),
-            );
             self.remove_without_cache_invalidation(start_cursor, end_cursor);
             if !text.is_empty() {
                 self.insert_text_without_cache_invalidation(start_cursor, text);
             }
         }
 
-        if let Some(first_changed_line) = first_changed_line {
-            self.invalidate_syntax_from_with_line_delta(
-                first_changed_line,
-                self.line_count() as isize - old_line_count as isize,
-            );
-        }
+        self.apply_cache_edits(&cache_edits);
 
         let next_cursor = self
             .lines
@@ -171,6 +171,36 @@ impl Buffer {
         self.warm_syntax_through_with_budget(next_cursor.line, std::time::Duration::from_millis(2));
         self.push_snapshot(next_cursor);
         Some(next_cursor)
+    }
+
+    /// Applies a batch of text edits and updates cache state incrementally.
+    pub fn apply_text_edits(&mut self, edits: &[(Cursor, Cursor, String)]) -> bool {
+        if edits.is_empty() {
+            return true;
+        }
+
+        let mut edits = edits.to_vec();
+        edits.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| right.1.cmp(&left.1)));
+
+        let cache_edits: Vec<LineEdit> = edits
+            .iter()
+            .map(|(start, end, text)| {
+                let line_delta = text.split('\n').count().saturating_sub(1) as isize
+                    - (end.line as isize - start.line as isize);
+                LineEdit::new(start.line, line_delta)
+            })
+            .collect();
+
+        for (start, end, text) in &edits {
+            self.remove_without_cache_invalidation(*start, *end);
+            if !text.is_empty() {
+                self.insert_text_without_cache_invalidation(*start, text.as_str());
+            }
+        }
+
+        self.apply_cache_edits(&cache_edits);
+        self.push_snapshot(self.current_cursor());
+        true
     }
 
     fn apply_completion_main_only(

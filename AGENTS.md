@@ -29,3 +29,4 @@ urvim is a terminal based text editor.
 - format project code after edits
 - instead of module_name.rs and module_name/sub_mod.rs pattern, use module_name/mod.rs and module_name/sub_mod.rs pattern
 - backward compatibility isnt import because this is not a publicly release project yet
+- use prettier to format doc files after modification: `npx prettier -w doc_file.md`
