@@ -12,7 +12,6 @@ tracing-appender = "0.2"
 signal-hook = "0.3"
 terminal_size = "0.2"
 base64 = "0.22"
-imbl = "7.0.0"
 smol_str = "0.3"
 unicode-segmentation = "1.11"
 unicode-width = "0.2"
@@ -38,4 +37,8 @@ harness = false
 
 [[bench]]
 name = "syntax_cache_compare"
+harness = false
+
+[[bench]]
+name = "marker_store"
 harness = false

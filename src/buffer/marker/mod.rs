@@ -1,9 +1,11 @@
 use super::{Buffer, Cursor, MarkersStore};
 use crate::terminal::Style;
 use crate::theme::StyleOverlay;
-use imbl::Vector;
 use smol_str::SmolStr;
 use std::sync::Arc;
+
+const CHUNK_SIZE: usize = 128;
+const ID_CHUNK_SIZE: usize = 512;
 
 /// Marker payload kind.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -201,7 +203,9 @@ impl<T> LineBucket<T> {
 /// Generic marker store organized by line buckets.
 #[derive(Debug, Clone)]
 pub struct MarkerStore<T> {
-    lines: Vector<LineBucket<T>>,
+    chunks: Vec<Arc<Vec<LineBucket<T>>>>,
+    id_line_chunks: Vec<Arc<Vec<Option<usize>>>>,
+    line_count: usize,
     next_id: MarkerId,
 }
 
@@ -219,57 +223,78 @@ impl<T: Clone> MarkerStore<T> {
 
     /// Creates an empty marker store with the requested line count.
     pub fn with_line_count(line_count: usize) -> Self {
+        let line_count = line_count.max(1);
         Self {
-            lines: blank_lines(line_count.max(1)),
+            chunks: chunk_vec_lines(line_count),
+            id_line_chunks: Vec::new(),
+            line_count,
             next_id: 0,
         }
     }
 
     /// Returns the number of markers in the store.
     pub fn len(&self) -> usize {
-        self.lines.iter().map(LineBucket::len).sum()
+        self.iter().count()
     }
 
     /// Returns true when the store contains no markers.
     pub fn is_empty(&self) -> bool {
-        self.lines.iter().all(LineBucket::is_empty)
+        self.chunks
+            .iter()
+            .flat_map(|chunk| chunk.iter())
+            .all(LineBucket::is_empty)
     }
 
     /// Removes all markers and resets the line count to one.
     pub fn clear(&mut self) {
-        self.lines = blank_lines(1);
+        self.chunks = chunk_vec_lines(1);
+        self.id_line_chunks.clear();
+        self.line_count = 1;
         self.next_id = 0;
     }
 
     /// Removes all markers and resets the line count.
     pub fn clear_to_line_count(&mut self, line_count: usize) {
-        self.lines = blank_lines(line_count.max(1));
+        self.line_count = line_count.max(1);
+        self.chunks = chunk_vec_lines(self.line_count);
+        self.id_line_chunks.clear();
         self.next_id = 0;
     }
 
     /// Returns an immutable marker by id.
     pub fn get(&self, id: MarkerId) -> Option<&Marker<T>> {
-        self.lines.iter().find_map(|bucket| bucket.get(id))
+        let line = self.index_line(id)?;
+        self.bucket(line)?.get(id)
     }
 
     /// Returns a mutable marker by id.
     pub fn get_mut(&mut self, id: MarkerId) -> Option<&mut Marker<T>> {
-        self.lines.iter_mut().find_map(|bucket| bucket.get_mut(id))
+        let line = self.index_line(id)?;
+        self.bucket_mut(line)?.get_mut(id)
     }
 
     /// Removes a marker by id.
     pub fn remove(&mut self, id: MarkerId) -> Option<Marker<T>> {
-        self.lines.iter_mut().find_map(|bucket| bucket.remove(id))
+        let line = self.index_line(id)?;
+        let removed = self.bucket_mut(line)?.remove(id);
+        if removed.is_some() {
+            self.clear_index(id);
+        }
+        removed
     }
 
     /// Returns all markers in line and position order.
     pub fn iter(&self) -> impl Iterator<Item = &Marker<T>> {
-        self.lines.iter().flat_map(LineBucket::iter)
+        (0..self.line_count)
+            .flat_map(|line| self.bucket(line).into_iter().flat_map(LineBucket::iter))
     }
 
     /// Returns the markers stored on a specific line.
     pub fn markers_for_line(&self, line: usize) -> Option<&[Marker<T>]> {
-        self.lines.get(line).map(|bucket| bucket.markers.as_ref())
+        if line >= self.line_count {
+            return None;
+        }
+        self.bucket(line).map(|bucket| bucket.markers.as_ref())
     }
 
     /// Inserts a point marker.
@@ -281,6 +306,7 @@ impl<T: Clone> MarkerStore<T> {
             payload,
         };
         self.insert_marker(marker);
+        self.set_index(id, pos.line);
         id
     }
 
@@ -307,6 +333,7 @@ impl<T: Clone> MarkerStore<T> {
             payload,
         };
         self.insert_marker(marker);
+        self.set_index(id, start.line);
         id
     }
 
@@ -321,7 +348,7 @@ impl<T: Clone> MarkerStore<T> {
 
     fn shift_insert_single_line(&mut self, edit: InsertShape) {
         let line = edit.at.line;
-        let Some(bucket) = self.lines.get(line) else {
+        let Some(bucket) = self.bucket(line) else {
             return;
         };
         if bucket.is_empty() {
@@ -333,27 +360,30 @@ impl<T: Clone> MarkerStore<T> {
             new_markers.push(shift_marker_insert(marker, edit));
         }
         new_markers.sort_by_key(|m| m.anchor());
-        let new_bucket = LineBucket {
-            markers: Arc::from(new_markers.into_boxed_slice()),
-        };
-        self.lines = self.lines.update(line, new_bucket);
+        let index_updates: Vec<_> = new_markers
+            .iter()
+            .map(|marker| (marker.id, marker.anchor().line))
+            .collect();
+        if let Some(bucket) = self.bucket_mut(line) {
+            bucket.markers = Arc::from(new_markers.into_boxed_slice());
+        }
+        for (id, line) in index_updates {
+            self.set_index(id, line);
+        }
     }
 
     fn shift_insert_multi_line(&mut self, edit: InsertShape) {
-        let boundary = edit.at.line;
-        let after = self.lines.skip(boundary);
-        let before = self.lines.take(boundary);
-
-        let new_line_count = after.len().saturating_add(edit.line_delta).max(1);
-        let mut new_after = blank_lines(new_line_count);
+        let boundary = edit.at.line.min(self.line_count);
+        let after = self.suffix_from(boundary);
+        let mut new_after = blank_vec_lines(after.len().saturating_add(edit.line_delta));
 
         for marker in after.iter().flat_map(LineBucket::iter).cloned() {
             let marker = shift_marker_insert(marker, edit);
-            insert_marker_into_lines_offset(&mut new_after, marker, boundary);
+            insert_marker_into_vec_lines_offset(&mut new_after, marker, boundary);
         }
 
-        self.lines = before;
-        self.lines.append(new_after);
+        self.replace_suffix(boundary, new_after);
+        self.rebuild_index();
     }
 
     /// Inserts whole lines at a given line index.
@@ -362,19 +392,17 @@ impl<T: Clone> MarkerStore<T> {
             return;
         }
 
-        let after = self.lines.skip(start_line);
-        let before = self.lines.take(start_line);
-
-        let new_line_count = after.len().saturating_add(count).max(1);
-        let mut new_after = blank_lines(new_line_count);
+        let boundary = start_line.min(self.line_count);
+        let after = self.suffix_from(boundary);
+        let mut new_after = blank_vec_lines(after.len().saturating_add(count));
 
         for marker in after.iter().flat_map(LineBucket::iter).cloned() {
             let marker = insert_marker_shift_lines(marker, start_line, count);
-            insert_marker_into_lines_offset(&mut new_after, marker, start_line);
+            insert_marker_into_vec_lines_offset(&mut new_after, marker, start_line);
         }
 
-        self.lines = before;
-        self.lines.append(new_after);
+        self.replace_suffix(boundary, new_after);
+        self.rebuild_index();
     }
 
     /// Shifts markers for a deletion.
@@ -392,7 +420,7 @@ impl<T: Clone> MarkerStore<T> {
 
     fn shift_delete_single_line(&mut self, edit: DeleteShape) {
         let line = edit.start.line;
-        let Some(bucket) = self.lines.get(line) else {
+        let Some(bucket) = self.bucket(line) else {
             return;
         };
         if bucket.is_empty() {
@@ -404,28 +432,32 @@ impl<T: Clone> MarkerStore<T> {
             new_markers.push(shift_marker_delete(marker, edit));
         }
         new_markers.sort_by_key(|m| m.anchor());
-        let new_bucket = LineBucket {
-            markers: Arc::from(new_markers.into_boxed_slice()),
-        };
-        self.lines = self.lines.update(line, new_bucket);
+        let index_updates: Vec<_> = new_markers
+            .iter()
+            .map(|marker| (marker.id, marker.anchor().line))
+            .collect();
+        if let Some(bucket) = self.bucket_mut(line) {
+            bucket.markers = Arc::from(new_markers.into_boxed_slice());
+        }
+        for (id, line) in index_updates {
+            self.set_index(id, line);
+        }
     }
 
     fn shift_delete_multi_line(&mut self, edit: DeleteShape) {
-        let boundary = edit.start.line;
-        let after = self.lines.skip(boundary);
-        let before = self.lines.take(boundary);
+        let boundary = edit.start.line.min(self.line_count);
+        let after = self.suffix_from(boundary);
 
         let deleted_lines = edit.end.line.saturating_sub(edit.start.line);
-        let new_line_count = after.len().saturating_sub(deleted_lines).max(1);
-        let mut new_after = blank_lines(new_line_count);
+        let mut new_after = blank_vec_lines(after.len().saturating_sub(deleted_lines));
 
         for marker in after.iter().flat_map(LineBucket::iter).cloned() {
             let marker = shift_marker_delete(marker, edit);
-            insert_marker_into_lines_offset(&mut new_after, marker, boundary);
+            insert_marker_into_vec_lines_offset(&mut new_after, marker, boundary);
         }
 
-        self.lines = before;
-        self.lines.append(new_after);
+        self.replace_suffix(boundary, new_after);
+        self.rebuild_index();
     }
 
     /// Clears markers on the specified half-open line range.
@@ -434,27 +466,110 @@ impl<T: Clone> MarkerStore<T> {
             return;
         }
 
-        let num_lines = self.lines.len();
+        let num_lines = self.line_count;
         if start_line >= num_lines {
             return;
         }
         let end_line = end_line.min(num_lines);
 
-        let before = self.lines.take(start_line);
-        let middle_len = end_line - start_line;
-        let after = self.lines.skip(end_line);
-
-        let mut result = before;
-        for _ in 0..middle_len {
-            result.push_back(LineBucket::new());
+        for line in start_line..end_line {
+            let ids: Vec<_> = self
+                .bucket(line)
+                .into_iter()
+                .flat_map(LineBucket::iter)
+                .map(|marker| marker.id)
+                .collect();
+            if let Some(bucket) = self.bucket_mut(line) {
+                bucket.markers = Arc::from(Vec::<Marker<T>>::new());
+            }
+            for id in ids {
+                self.clear_index(id);
+            }
         }
-        result.append(after);
-        self.lines = result;
+    }
+
+    /// Retains markers in the specified half-open line range matching `keep`.
+    pub fn retain_in_line_range(
+        &mut self,
+        start_line: usize,
+        end_line: usize,
+        keep: impl Fn(&Marker<T>) -> bool,
+    ) {
+        let num_lines = self.line_count;
+        if start_line >= num_lines || start_line >= end_line {
+            return;
+        }
+        let end_line = end_line.min(num_lines);
+
+        for line in start_line..end_line {
+            let Some(bucket) = self.bucket(line) else {
+                continue;
+            };
+            let removed: Vec<_> = bucket
+                .iter()
+                .filter(|marker| !keep(marker))
+                .map(|marker| marker.id)
+                .collect();
+            if removed.is_empty() {
+                continue;
+            }
+            if let Some(bucket) = self.bucket_mut(line) {
+                let retained: Vec<_> = bucket
+                    .iter()
+                    .filter(|marker| keep(marker))
+                    .cloned()
+                    .collect();
+                bucket.markers = Arc::from(retained.into_boxed_slice());
+            }
+            for id in removed {
+                self.clear_index(id);
+            }
+        }
+    }
+
+    /// Retains markers anchored in the cursor range matching `keep`.
+    pub fn retain_in_cursor_range(
+        &mut self,
+        start: Cursor,
+        end: Cursor,
+        keep: impl Fn(&Marker<T>) -> bool,
+    ) {
+        if start >= end {
+            return;
+        }
+        let end_line = end.line.min(self.line_count.saturating_sub(1));
+        if start.line > end_line {
+            return;
+        }
+        for line in start.line..=end_line {
+            let Some(bucket) = self.bucket(line) else {
+                continue;
+            };
+            let removed: Vec<_> = bucket
+                .iter()
+                .filter(|marker| !keep(marker))
+                .map(|marker| marker.id)
+                .collect();
+            if removed.is_empty() {
+                continue;
+            }
+            if let Some(bucket) = self.bucket_mut(line) {
+                let retained: Vec<_> = bucket
+                    .iter()
+                    .filter(|marker| keep(marker))
+                    .cloned()
+                    .collect();
+                bucket.markers = Arc::from(retained.into_boxed_slice());
+            }
+            for id in removed {
+                self.clear_index(id);
+            }
+        }
     }
 
     /// Deletes complete lines and removes markers anchored to the deleted range.
     pub fn delete_lines(&mut self, start_line: usize, count: usize) {
-        let total_lines = self.lines.len();
+        let total_lines = self.line_count;
         if total_lines == 0 || start_line >= total_lines || count == 0 {
             return;
         }
@@ -463,15 +578,14 @@ impl<T: Clone> MarkerStore<T> {
         let deleted_end = start_line + actual_count;
 
         if start_line == 0 && deleted_end >= total_lines {
-            self.lines = blank_lines(1);
+            self.chunks = chunk_vec_lines(1);
+            self.id_line_chunks.clear();
+            self.line_count = 1;
             return;
         }
 
-        let after = self.lines.skip(start_line);
-        let before = self.lines.take(start_line);
-
-        let new_line_count = after.len().saturating_sub(actual_count).max(1);
-        let mut new_after = blank_lines(new_line_count);
+        let after = self.suffix_from(start_line);
+        let mut new_after = blank_vec_lines(after.len().saturating_sub(actual_count));
 
         for marker in after.iter().flat_map(LineBucket::iter).cloned() {
             let line = marker.anchor().line;
@@ -484,12 +598,12 @@ impl<T: Clone> MarkerStore<T> {
                         range.end.line -= actual_count;
                     }
                 }
-                insert_marker_into_lines_offset(&mut new_after, marker, start_line);
+                insert_marker_into_vec_lines_offset(&mut new_after, marker, start_line);
             }
         }
 
-        self.lines = before;
-        self.lines.append(new_after);
+        self.replace_suffix(start_line, new_after);
+        self.rebuild_index();
     }
 
     fn next_marker_id(&mut self) -> MarkerId {
@@ -499,7 +613,121 @@ impl<T: Clone> MarkerStore<T> {
     }
 
     fn insert_marker(&mut self, marker: Marker<T>) {
-        insert_marker_into_lines(&mut self.lines, marker);
+        let line_idx = marker.anchor().line;
+        self.ensure_line(line_idx);
+        if let Some(bucket) = self.bucket_mut(line_idx) {
+            bucket.insert_sorted(marker);
+        }
+    }
+
+    fn set_index(&mut self, id: MarkerId, line: usize) {
+        let idx = id as usize;
+        let chunk_idx = idx / ID_CHUNK_SIZE;
+        let slot_idx = idx % ID_CHUNK_SIZE;
+        while self.id_line_chunks.len() <= chunk_idx {
+            self.id_line_chunks
+                .push(Arc::new(vec![None; ID_CHUNK_SIZE]));
+        }
+        Arc::make_mut(&mut self.id_line_chunks[chunk_idx])[slot_idx] = Some(line);
+    }
+
+    fn clear_index(&mut self, id: MarkerId) {
+        let idx = id as usize;
+        let chunk_idx = idx / ID_CHUNK_SIZE;
+        let slot_idx = idx % ID_CHUNK_SIZE;
+        if let Some(chunk) = self.id_line_chunks.get_mut(chunk_idx) {
+            Arc::make_mut(chunk)[slot_idx] = None;
+        }
+    }
+
+    fn index_line(&self, id: MarkerId) -> Option<usize> {
+        let idx = id as usize;
+        self.id_line_chunks
+            .get(idx / ID_CHUNK_SIZE)?
+            .get(idx % ID_CHUNK_SIZE)
+            .copied()
+            .flatten()
+    }
+
+    fn rebuild_index(&mut self) {
+        self.id_line_chunks.clear();
+        let mut entries = Vec::new();
+        for line in 0..self.line_count {
+            if let Some(bucket) = self.bucket(line) {
+                entries.extend(bucket.iter().map(|marker| (marker.id, line)));
+            }
+        }
+        for (id, line) in entries {
+            self.set_index(id, line);
+        }
+    }
+
+    fn bucket(&self, line: usize) -> Option<&LineBucket<T>> {
+        let chunk_idx = line / CHUNK_SIZE;
+        let line_idx = line % CHUNK_SIZE;
+        self.chunks.get(chunk_idx)?.get(line_idx)
+    }
+
+    fn bucket_mut(&mut self, line: usize) -> Option<&mut LineBucket<T>> {
+        let chunk_idx = line / CHUNK_SIZE;
+        let line_idx = line % CHUNK_SIZE;
+        Arc::make_mut(self.chunks.get_mut(chunk_idx)?).get_mut(line_idx)
+    }
+
+    fn ensure_line(&mut self, line: usize) {
+        if line < self.line_count {
+            return;
+        }
+        self.line_count = line + 1;
+        while self.chunks.len() * CHUNK_SIZE < self.line_count {
+            self.chunks.push(Arc::new(blank_vec_lines(CHUNK_SIZE)));
+        }
+    }
+
+    fn suffix_from(&self, start_line: usize) -> Vec<LineBucket<T>> {
+        let start_line = start_line.min(self.line_count);
+        let chunk_idx = start_line / CHUNK_SIZE;
+        let line_idx = start_line % CHUNK_SIZE;
+        let mut suffix = Vec::with_capacity(self.line_count.saturating_sub(start_line));
+
+        if let Some(chunk) = self.chunks.get(chunk_idx) {
+            let chunk_end = chunk
+                .len()
+                .min(self.line_count.saturating_sub(chunk_idx * CHUNK_SIZE));
+            suffix.extend(chunk[line_idx..chunk_end].iter().cloned());
+        }
+
+        for chunk in self.chunks.iter().skip(chunk_idx + 1) {
+            suffix.extend(chunk.iter().cloned());
+        }
+
+        suffix.truncate(self.line_count.saturating_sub(start_line));
+        suffix
+    }
+
+    fn replace_suffix(&mut self, start_line: usize, suffix: Vec<LineBucket<T>>) {
+        let start_line = start_line.min(self.line_count);
+        let full_prefix_chunks = start_line / CHUNK_SIZE;
+        let prefix_remainder = start_line % CHUNK_SIZE;
+        let mut chunks: Vec<_> = self
+            .chunks
+            .iter()
+            .take(full_prefix_chunks)
+            .cloned()
+            .collect();
+        let mut rebuilt_tail = Vec::with_capacity(prefix_remainder + suffix.len());
+
+        if prefix_remainder > 0
+            && let Some(chunk) = self.chunks.get(full_prefix_chunks)
+        {
+            rebuilt_tail.extend(chunk[..prefix_remainder].iter().cloned());
+        }
+        rebuilt_tail.extend(suffix);
+
+        let suffix_len = rebuilt_tail.len().saturating_sub(prefix_remainder);
+        chunks.extend(chunk_buckets(rebuilt_tail));
+        self.line_count = start_line.saturating_add(suffix_len).max(1);
+        self.chunks = chunks;
     }
 }
 
@@ -629,42 +857,9 @@ impl Buffer {
         if start >= end {
             return;
         }
-
-        let num_lines = self.markers.lines.len();
-        let start_line = start.line;
-        let end_line = end.line.min(num_lines.saturating_sub(1));
-
-        // Lines before start_line: keep all markers as-is
-        let before = self.markers.lines.take(start_line);
-
-        // Lines after end_line: keep all markers as-is (anchor >= end)
-        let after = if end_line.saturating_add(1) < num_lines {
-            self.markers.lines.skip(end_line + 1)
-        } else {
-            Vector::new()
-        };
-
-        // Lines start_line..=end_line: scan and filter
-        let affected_start = self.markers.lines.skip(start_line);
-        let affected_len = end_line
-            .saturating_sub(start_line)
-            .saturating_add(1)
-            .min(affected_start.len());
-        let affected = affected_start.take(affected_len);
-
-        let mut new_affected = blank_lines(affected.len());
-        for marker in affected.iter().flat_map(LineBucket::iter).cloned() {
-            let anchor = marker.anchor();
-            let stale_inlay_hint = marker.payload.kind.is_some() && anchor >= start && anchor < end;
-            if !stale_inlay_hint {
-                insert_marker_into_lines_offset(&mut new_affected, marker, start_line);
-            }
-        }
-
-        let mut result = before;
-        result.append(new_affected);
-        result.append(after);
-        self.markers.lines = result;
+        self.markers.retain_in_cursor_range(start, end, |marker| {
+            marker.payload.kind.is_none() || marker.anchor() < start || marker.anchor() >= end
+        });
         self.bump_visual_generation();
         self.update_markers();
     }
@@ -686,46 +881,30 @@ impl Buffer {
         end_line: usize,
         keep: impl Fn(&MarkerPayload) -> bool,
     ) {
-        let num_lines = self.markers.lines.len();
-        if start_line >= num_lines || start_line >= end_line {
-            return;
-        }
-        let end_line = end_line.min(num_lines);
-
-        // Three-way split: keep markers in [0, start_line) and [end_line, num_lines) as-is
-        // Only process markers in [start_line, end_line)
-        let before = self.markers.lines.take(start_line);
-        let middle = self
-            .markers
-            .lines
-            .skip(start_line)
-            .take(end_line - start_line);
-        let after = self.markers.lines.skip(end_line);
-
-        let mut new_middle = blank_lines(middle.len());
-        for marker in middle.iter().flat_map(LineBucket::iter).cloned() {
-            if !keep(&marker.payload) {
-                // Within the range and doesn't satisfy keep — drop it
-                continue;
-            }
-            insert_marker_into_lines_offset(&mut new_middle, marker, start_line);
-        }
-
-        let mut result = before;
-        result.append(new_middle);
-        result.append(after);
-        self.markers.lines = result;
+        self.markers
+            .retain_in_line_range(start_line, end_line, |marker| keep(&marker.payload));
         self.bump_visual_generation();
         self.update_markers();
     }
 }
 
-fn blank_lines<T: Clone>(line_count: usize) -> Vector<LineBucket<T>> {
-    let mut lines: Vector<LineBucket<T>> = Vector::new();
-    for _ in 0..line_count.max(1) {
-        lines.push_back(LineBucket::new());
+fn blank_vec_lines<T: Clone>(line_count: usize) -> Vec<LineBucket<T>> {
+    (0..line_count).map(|_| LineBucket::new()).collect()
+}
+
+fn chunk_vec_lines<T: Clone>(line_count: usize) -> Vec<Arc<Vec<LineBucket<T>>>> {
+    chunk_buckets(blank_vec_lines(line_count))
+}
+
+fn chunk_buckets<T: Clone>(mut lines: Vec<LineBucket<T>>) -> Vec<Arc<Vec<LineBucket<T>>>> {
+    if lines.is_empty() {
+        lines.push(LineBucket::new());
     }
-    lines
+    let mut chunks = Vec::with_capacity(lines.len().div_ceil(CHUNK_SIZE));
+    for chunk in lines.chunks(CHUNK_SIZE) {
+        chunks.push(Arc::new(chunk.to_vec()));
+    }
+    chunks
 }
 
 fn insertion_index<T>(markers: &[Marker<T>], anchor: Cursor) -> usize {
@@ -744,19 +923,8 @@ fn insertion_index<T>(markers: &[Marker<T>], anchor: Cursor) -> usize {
     low
 }
 
-fn insert_marker_into_lines<T: Clone>(lines: &mut Vector<LineBucket<T>>, marker: Marker<T>) {
-    let line_idx = marker.anchor().line;
-    while lines.len() <= line_idx {
-        lines.push_back(LineBucket::new());
-    }
-
-    if let Some(bucket) = lines.get_mut(line_idx) {
-        bucket.insert_sorted(marker);
-    }
-}
-
-fn insert_marker_into_lines_offset<T: Clone>(
-    lines: &mut Vector<LineBucket<T>>,
+fn insert_marker_into_vec_lines_offset<T: Clone>(
+    lines: &mut [LineBucket<T>],
     marker: Marker<T>,
     offset_line: usize,
 ) {
