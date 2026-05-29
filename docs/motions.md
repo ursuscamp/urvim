@@ -6,96 +6,108 @@ Register behavior is documented separately in [docs/registers.md](docs/registers
 
 ## Supported Motions Cheat Sheet
 
-| Motion | Description |
-|--------|-------------|
-| `h` | Move left |
-| `j` | Move down |
-| `k` | Move up |
-| `l` | Move right |
-| `w` | Word forward |
-| `b` | Word backward |
-| `e` | Word end |
-| `W` | BigWord forward |
-| `B` | BigWord backward |
-| `E` | BigWord end |
-| `0` | Line start (column 0) |
-| `^` | Line content start (first non-whitespace) |
-| `$` | Line end (last non-whitespace) |
-| `gg` | Go to first line (or line N with count) |
-| `G` | Go to last line (or line N with count) |
-| `H` | Move to top of viewport |
-| `M` | Move to middle of viewport |
-| `L` | Move to bottom of viewport |
-| `PageUp` | Move up one page |
-| `PageDown` | Move down one page |
-| `Ctrl-U` | Move up half a page |
-| `Ctrl-D` | Move down half a page |
-| `[d` / `]d` | Move to previous / next diagnostic |
-| `[e` / `]e` | Move to previous / next error diagnostic |
-| `Ctrl-O` | Jump backward through the current window group's jumplist |
-| `Ctrl-I` | Jump forward through the current window group's jumplist |
-| `Ctrl-W v` | Split the current pane vertically |
-| `Ctrl-W s` | Split the current pane horizontally |
-| `Ctrl-W h` | Move focus to the pane on the left |
-| `Ctrl-W j` | Move focus to the pane below |
-| `Ctrl-W k` | Move focus to the pane above |
-| `Ctrl-W l` | Move focus to the pane on the right |
-| `Ctrl-W w` | Toggle visual wrapping in the focused pane |
-| `Ctrl-W r` | Enter resize mode |
-| `Ctrl-W q` | Close the current pane |
-| `Ctrl-Q` | Attempt to quit the editor; prompts for confirmation when modified buffers exist |
-| `Ctrl-W =` | Equalize all splits |
-| `{` | Move to blank line before the previous paragraph, or clamp to BOF when there is no previous paragraph |
-| `}` | Move to blank line before the next paragraph, or clamp to EOF when there is no next paragraph |
-| `a` | Append after cursor (enter insert mode) |
-| `A` | Append to line end (enter insert mode) |
-| `I` | Insert at line start (enter insert mode) |
-| `J` | Join lines with space |
-| `gJ` | Join lines without space |
-| `gO` | Open the active buffer's document symbol picker |
-| `grr` | Open references for the symbol under the cursor |
-| `gsa{text object}{pair}` | Add surrounding pair around a text object |
-| `gsr{from}{to}` | Replace nearest surrounding pair of `{from}` family with `{to}` family |
-| `gsd{pair}` | Delete nearest surrounding pair of `{pair}` family |
-| `gcc` | Toggle line comment on the current line (or N consecutive lines with a count) |
-| `<<` | Decrease indentation on the current line (or N consecutive lines with a count) |
-| `\>>` | Increase indentation on the current line (or N consecutive lines with a count) |
-| `dd` | Delete line (or N lines with count) |
-| `cc` | Change line: delete line(s) and enter insert mode, leaving one blank line |
-| `C` | Change to end of line: delete from cursor to EOL and enter insert mode |
-| `o` | Open line below: create new empty line below and enter insert mode |
-| `O` | Open line above: create new empty line above and enter insert mode |
-| `%` | Jump to matching bracket (parentheses, square brackets, curly braces) |
-| `f` | Find forward: move to next occurrence of character |
-| `F` | Find backward: move to previous occurrence of character |
-| `t` | Till forward: move to position before next occurrence of character |
-| `T` | Till backward: move to position after previous occurrence of character |
-| `diw` | Delete inner word (word under cursor) |
-| `daw` | Delete around word (word plus trailing whitespace) |
-| `dw` | Delete through next `w` boundary |
-| `de` | Delete through next `e` boundary |
-| `db` | Delete back to previous `b` boundary |
-| `d$` | Delete from the cursor through the end of the line |
-| `d0` | Delete from the start of the line through the cursor |
-| `d^` | Delete from the first non-whitespace character through the cursor |
-| `dgg` | Delete linewise from the current line to line 1 (or to line N with a count) |
-| `dG` | Delete linewise from the current line to the last line (or to line N with a count) |
-| `dW` | Delete through next `W` boundary |
-| `dE` | Delete through next `E` boundary |
-| `dB` | Delete back to previous `B` boundary |
-| `ciw` | Change inner word (delete inner word and enter insert mode) |
-| `caw` | Change around word (delete around word and enter insert mode) |
-| `cw` | Change through next `w` boundary and enter insert mode |
-| `ce` | Change through next `e` boundary and enter insert mode |
-| `cb` | Change back to previous `b` boundary and enter insert mode |
-| `cW` | Change through next `W` boundary and enter insert mode |
-| `cE` | Change through next `E` boundary and enter insert mode |
-| `cB` | Change back to previous `B` boundary and enter insert mode |
-| `c$` | Change from the cursor through the end of the line |
-| `c0` | Change from the start of the line through the cursor |
-| `c^` | Change from the first non-whitespace character through the cursor |
-| `cgg` | Change linewise from the current line to line 1 (or to line N with a count) |
-| `cG` | Change linewise from the current line to the last line (or to line N with a count) |
+| Motion      | Description                                                                                           |
+| ----------- | ----------------------------------------------------------------------------------------------------- |
+| `h`         | Move left                                                                                             |
+| `j`         | Move down                                                                                             |
+| `k`         | Move up                                                                                               |
+| `l`         | Move right                                                                                            |
+| `w`         | Word forward                                                                                          |
+| `b`         | Word backward                                                                                         |
+| `e`         | Word end                                                                                              |
+| `W`         | BigWord forward                                                                                       |
+| `B`         | BigWord backward                                                                                      |
+| `E`         | BigWord end                                                                                           |
+| `0`         | Line start (column 0)                                                                                 |
+| `^`         | Line content start (first non-whitespace)                                                             |
+| `$`         | Line end (last non-whitespace)                                                                        |
+| `gg`        | Go to first line (or line N with count)                                                               |
+| `G`         | Go to last line (or line N with count)                                                                |
+| `H`         | Move to top of viewport                                                                               |
+| `M`         | Move to middle of viewport                                                                            |
+| `L`         | Move to bottom of viewport                                                                            |
+| `PageUp`    | Move up one page                                                                                      |
+| `PageDown`  | Move down one page                                                                                    |
+| `Ctrl-U`    | Move up half a page                                                                                   |
+| `Ctrl-D`    | Move down half a page                                                                                 |
+| `[d` / `]d` | Move to previous / next diagnostic                                                                    |
+| `[e` / `]e` | Move to previous / next error diagnostic                                                              |
+| `[h` / `]h` | Move to previous / next diff hunk start                                                               |
+| `[H` / `]H` | Move to previous / next diff hunk end                                                                 |
+| `Ctrl-O`    | Jump backward through the current window group's jumplist                                             |
+| `Ctrl-I`    | Jump forward through the current window group's jumplist                                              |
+| `Ctrl-W v`  | Split the current pane vertically                                                                     |
+| `Ctrl-W s`  | Split the current pane horizontally                                                                   |
+| `Ctrl-W h`  | Move focus to the pane on the left                                                                    |
+| `Ctrl-W j`  | Move focus to the pane below                                                                          |
+| `Ctrl-W k`  | Move focus to the pane above                                                                          |
+| `Ctrl-W l`  | Move focus to the pane on the right                                                                   |
+| `Ctrl-W w`  | Toggle visual wrapping in the focused pane                                                            |
+| `Ctrl-W r`  | Enter resize mode                                                                                     |
+| `Ctrl-W q`  | Close the current pane                                                                                |
+| `Ctrl-Q`    | Attempt to quit the editor; prompts for confirmation when modified buffers exist                      |
+| `Ctrl-W =`  | Equalize all splits                                                                                   |
+| `{`         | Move to blank line before the previous paragraph, or clamp to BOF when there is no previous paragraph |
+| `}`         | Move to blank line before the next paragraph, or clamp to EOF when there is no next paragraph         |
+
+## Diff Hunk Motions
+
+Diff hunk motions hop across the current buffer's unstaged Git hunks.
+
+- `[h` moves to the start of the current hunk when not already on its first line, otherwise to the previous hunk start.
+- `]h` moves to the start of the current hunk when not already on its first line, otherwise to the next hunk start.
+- `[H` moves to the end of the current hunk when not already on its last line, otherwise to the previous hunk end.
+- `]H` moves to the end of the current hunk when not already on its last line, otherwise to the next hunk end.
+- These motions do not take a count.
+  | `a` | Append after cursor (enter insert mode) |
+  | `A` | Append to line end (enter insert mode) |
+  | `I` | Insert at line start (enter insert mode) |
+  | `J` | Join lines with space |
+  | `gJ` | Join lines without space |
+  | `gO` | Open the active buffer's document symbol picker |
+  | `grr` | Open references for the symbol under the cursor |
+  | `gsa{text object}{pair}` | Add surrounding pair around a text object |
+  | `gsr{from}{to}` | Replace nearest surrounding pair of `{from}` family with `{to}` family |
+  | `gsd{pair}` | Delete nearest surrounding pair of `{pair}` family |
+  | `gcc` | Toggle line comment on the current line (or N consecutive lines with a count) |
+  | `<<` | Decrease indentation on the current line (or N consecutive lines with a count) |
+  | `\>>` | Increase indentation on the current line (or N consecutive lines with a count) |
+  | `dd` | Delete line (or N lines with count) |
+  | `cc` | Change line: delete line(s) and enter insert mode, leaving one blank line |
+  | `C` | Change to end of line: delete from cursor to EOL and enter insert mode |
+  | `o` | Open line below: create new empty line below and enter insert mode |
+  | `O` | Open line above: create new empty line above and enter insert mode |
+  | `%` | Jump to matching bracket (parentheses, square brackets, curly braces) |
+  | `f` | Find forward: move to next occurrence of character |
+  | `F` | Find backward: move to previous occurrence of character |
+  | `t` | Till forward: move to position before next occurrence of character |
+  | `T` | Till backward: move to position after previous occurrence of character |
+  | `diw` | Delete inner word (word under cursor) |
+  | `daw` | Delete around word (word plus trailing whitespace) |
+  | `dw` | Delete through next `w` boundary |
+  | `de` | Delete through next `e` boundary |
+  | `db` | Delete back to previous `b` boundary |
+  | `d$` | Delete from the cursor through the end of the line |
+  | `d0` | Delete from the start of the line through the cursor |
+  | `d^` | Delete from the first non-whitespace character through the cursor |
+  | `dgg` | Delete linewise from the current line to line 1 (or to line N with a count) |
+  | `dG` | Delete linewise from the current line to the last line (or to line N with a count) |
+  | `dW` | Delete through next `W` boundary |
+  | `dE` | Delete through next `E` boundary |
+  | `dB` | Delete back to previous `B` boundary |
+  | `ciw` | Change inner word (delete inner word and enter insert mode) |
+  | `caw` | Change around word (delete around word and enter insert mode) |
+  | `cw` | Change through next `w` boundary and enter insert mode |
+  | `ce` | Change through next `e` boundary and enter insert mode |
+  | `cb` | Change back to previous `b` boundary and enter insert mode |
+  | `cW` | Change through next `W` boundary and enter insert mode |
+  | `cE` | Change through next `E` boundary and enter insert mode |
+  | `cB` | Change back to previous `B` boundary and enter insert mode |
+  | `c$` | Change from the cursor through the end of the line |
+  | `c0` | Change from the start of the line through the cursor |
+  | `c^` | Change from the first non-whitespace character through the cursor |
+  | `cgg` | Change linewise from the current line to line 1 (or to line N with a count) |
+  | `cG` | Change linewise from the current line to the last line (or to line N with a count) |
 
 ## Visual Mode
 
@@ -269,6 +281,7 @@ Moves to the start of the next word.
 - **Vim difference**: In urvim, non-word characters (like `---`) are treated as separate words. In Vim, `w` on `hello---world` from 'h' would go to 'w'; in urvim, it goes to the first `-`.
 
 Example: `hello---world` at 'h':
+
 - Vim: `w` -> 'w' (start of "world")
 - urvim: `w` -> first '-' (each '-' is a separate word)
 
@@ -287,6 +300,7 @@ Moves to the end of the current word or next word.
 - **Vim difference**: Same non-word handling as `w`.
 
 Example: `hello---world` at first '-' (position 5):
+
 - Vim: `e` -> last '-' (position 7)
 - urvim: `e` -> last '-' (position 7) - same behavior
 
@@ -325,10 +339,12 @@ Moves the cursor to the last non-whitespace character of the current line.
 - **Vim difference**: In urvim, if already at the end of the current line, it wraps to the end of the next line. In Vim, `$` stays at the end of the current line.
 
 Example: On "hello" (cursor at 'e'):
+
 - Vim: `$` -> after 'o' (stays on same line)
 - urvim: `$` -> after 'o' (same)
 
 Example: On "hello" (cursor at or past 'o'):
+
 - Vim: `$` -> stays at end of line
 - urvim: `$` -> wraps to end of next line (if available)
 
@@ -360,6 +376,7 @@ Moves the cursor to absolute column 0 (the start of the line).
 - **Vim difference**: In urvim, if already at column 0, it wraps to the previous line's column 0. In Vim, pressing `0` at column 0 does nothing.
 
 Example: At column 0:
+
 - Vim: `0` -> stays at column 0
 - urvim: `0` -> wraps to previous line (if available)
 
@@ -371,6 +388,7 @@ Moves the cursor to the first non-whitespace character of the current line.
 - **Vim difference**: In urvim, if already at the first non-whitespace, it wraps to the previous line's first non-whitespace. In Vim, `^` at the first non-whitespace does nothing.
 
 Example: At first non-whitespace of line 1:
+
 - Vim: `^` -> stays at current position
 - urvim: `^` -> wraps to previous line's first non-whitespace
 
@@ -382,6 +400,7 @@ Moves the cursor to the first line of the file.
 - **Vim difference**: Same behavior as Vim
 
 Examples:
+
 - `gg` -> goes to line 1
 - `5gg` -> goes to line 5
 
@@ -393,12 +412,14 @@ Moves the cursor to the last line of the file, or to the specified line with a c
 - **Vim difference**: Same behavior as Vim
 
 Examples:
+
 - `G` -> goes to last line
 - `5G` -> goes to line 5
 
 ### Column Preservation
 
 Both `gg` and `G` behave like vertical motions (`j`/`k`) for the purposes of column preservation:
+
 - They use the remembered column when moving (like j/k)
 - They update the remembered column after moving (so subsequent j/k movements use this column)
 
@@ -414,6 +435,7 @@ Moves the cursor one character to the right and enters insert mode.
 - **Vim difference**: urvim is grapheme-aware (handles multi-byte characters like emoji properly)
 
 Example: On "hel|lo" (cursor before 'l'):
+
 - `a` -> "hell|o" (enters insert mode after the second 'l')
 
 ### A - Append to Line End
@@ -424,6 +446,7 @@ Moves the cursor to the end of the current line and enters insert mode.
 - **Vim difference**: urvim is grapheme-aware
 
 Examples:
+
 - `A` -> moves to end of current line, enters insert mode
 - `3A` -> goes to line 3, moves to its end, enters insert mode
 
@@ -435,6 +458,7 @@ Moves the cursor to the first non-whitespace character of the current line and e
 - **Vim difference**: urvim is grapheme-aware
 
 Examples:
+
 - `I` -> moves to first non-whitespace of current line, enters insert mode
 - `3I` -> goes to line 3, moves to its first non-whitespace, enters insert mode
 
@@ -450,6 +474,7 @@ Moves the cursor to the first visible line of the viewport (top of screen).
 - **Vim difference**: urvim uses capital H (lowercase h is move left)
 
 Examples:
+
 - `H` -> moves to the first visible line
 - `3H` -> moves to the 3rd line from the top of the viewport
 
@@ -468,12 +493,14 @@ Moves the cursor to the last visible line of the viewport (bottom of screen).
 - **Vim difference**: urvim uses capital L (lowercase l is move right)
 
 Examples:
+
 - `L` -> moves to the last visible line
 - `3L` -> moves to the 3rd line from the bottom of the viewport
 
 ### Column Preservation
 
 H, M, and L behave like vertical motions (`j`/`k`) for column preservation:
+
 - They use the remembered column when moving (like j/k)
 - They update the remembered column after moving
 
@@ -551,6 +578,7 @@ Joins the current line with the next line(s), inserting a single space between j
 - **Vim difference**: Same behavior as Vim
 
 Examples:
+
 - `J` on "hello\nworld" -> "hello world" (cursor at end)
 - `2J` on "a\nb\nc\nd" -> "a b c" (joins 4 lines: a, b, c, d with spaces)
 
@@ -563,6 +591,7 @@ Joins the current line with the next line(s) without inserting any space between
 - **Vim difference**: Same behavior as Vim
 
 Examples:
+
 - `gJ` on "hello\nworld" -> "helloworld" (cursor at end)
 - `2gJ` on "a\nb\nc\nd" -> "abcd" (joins 4 lines without spaces)
 
@@ -591,6 +620,7 @@ Adds a surrounding delimiter pair around a text object or active visual selectio
 In Visual Line mode, the selected lines are placed between delimiter lines. When `auto_indent` is enabled, only the originally selected lines are indented by one existing indentation step; the delimiter lines stay at the surrounding level.
 
 Examples:
+
 - `gsaiw"` transforms `hello world` into `"hello" world` when the cursor is inside `hello`
 - `gsaiw)` transforms `hello world` into `(hello) world` when the cursor is inside `hello`
 - Visual `gsa]` transforms selected `bar` in `foo bar baz` into `foo [bar] baz`
@@ -607,6 +637,7 @@ Replaces the nearest resolved surrounding pair around the cursor.
 - **No-op behavior**: unsupported selectors, unresolved pairs, or same-family replacement leave the buffer unchanged
 
 Examples:
+
 - `gsr{[` transforms `foo{bar}baz` into `foo[bar]baz`
 - `gsr)"` transforms `foo(bar)baz` into `foo"bar"baz`
 
@@ -621,6 +652,7 @@ Deletes the nearest resolved surrounding pair around the cursor.
 - **No-op behavior**: unsupported selectors or unresolved pairs leave the buffer unchanged
 
 Examples:
+
 - `gsd"` transforms `foo"bar"baz` into `foobarbaz`
 - `gsd}` on `foo{bar}baz` transforms text into `foobarbaz`
 
@@ -637,6 +669,7 @@ Deletes the current line (or N lines starting from the cursor position).
 - **Vim difference**: Same behavior as Vim
 
 Examples:
+
 - `dd` on line 2 in "a\nb\nc" -> "a\nc" (cursor at line 2, now "c")
 - `2dd` on line 1 in "a\nb\nc\nd" -> "c\nd" (deletes lines 1 and 2)
 - `dd` on last line "a\nb" -> "a" (cursor at line 1, now "a")
@@ -660,6 +693,7 @@ Changes the current line (or N lines starting from the cursor position) by delet
 - **Vim difference**: Same behavior as Vim
 
 Examples:
+
 - `cc` on line 2 in "a\nb\nc" -> "a\n\nc" (cursor in insert mode on empty line 2)
 - `2cc` on line 1 in "a\nb\nc\nd" -> "\nd" (lines 1 and 2 replaced with 1 blank line)
 - `cc` on last line "a\nb" -> "a\n" (cursor in insert mode on empty line 2)
@@ -679,6 +713,7 @@ Changes text from the cursor position to the end of the current line (or N lines
 - **Vim difference**: Same behavior as Vim's `c$`
 
 Examples:
+
 - `C` on "hell|o world" -> "hell" (cursor in insert mode after "hell")
 - `C` on "|hello" -> "" (cursor in insert mode at beginning of empty line)
 - `2C` on "hello| world\nsecond line\nthird" -> "hello" (deletes cursor to end of line 0 plus all of line 1)
@@ -702,6 +737,7 @@ Creates a new empty line below the current line and enters insert mode at the st
 - **Vim difference**: Same as Vim.
 
 Examples:
+
 - `o` on line 2 in "a\nb\nc" -> "a\nb\n\nc" (cursor in insert mode on empty line 3)
 - `3o` on line 1 in "a\nb\nc" -> "a\n\n\n\nb\nc" (creates 3 empty lines below)
 
@@ -714,6 +750,7 @@ Creates a new empty line above the current line and enters insert mode at the st
 - **Vim difference**: Same as Vim.
 
 Examples:
+
 - `O` on line 2 in "a\nb\nc" -> "a\n\nb\nc" (cursor in insert mode on empty line 2)
 - `3O` on line 2 in "a\nb\nc" -> "a\n\n\nb\nc" (creates 3 empty lines above)
 
@@ -725,17 +762,17 @@ Examples:
 
 ## Operator Motion Differences Summary
 
-| Motion | urvim Behavior | Vim Behavior |
-|--------|---------------|---------------|
-| h/l    | Grapheme-aware | Byte-aware |
-| w/b/e  | Non-word chars = separate words | Non-word chars treated as delimiters |
-| $      | Wraps to next line when at EOL | Stays at EOL |
-| 0      | Wraps to previous line at column 0 | Stays at column 0 |
-| ^      | Wraps to previous line when at first non-ws | Stays at current position |
-| gg     | Goes to line 1 (or line N with count) | Same |
-| G      | Goes to last line (or line N with count) | Same |
-| o      | Same as Vim | Same as Vim |
-| O      | Same as Vim | Same as Vim |
+| Motion | urvim Behavior                              | Vim Behavior                         |
+| ------ | ------------------------------------------- | ------------------------------------ |
+| h/l    | Grapheme-aware                              | Byte-aware                           |
+| w/b/e  | Non-word chars = separate words             | Non-word chars treated as delimiters |
+| $      | Wraps to next line when at EOL              | Stays at EOL                         |
+| 0      | Wraps to previous line at column 0          | Stays at column 0                    |
+| ^      | Wraps to previous line when at first non-ws | Stays at current position            |
+| gg     | Goes to line 1 (or line N with count)       | Same                                 |
+| G      | Goes to last line (or line N with count)    | Same                                 |
+| o      | Same as Vim                                 | Same as Vim                          |
+| O      | Same as Vim                                 | Same as Vim                          |
 
 ## Bracket Matching
 
@@ -748,6 +785,7 @@ Moves the cursor to the matching opening or closing bracket.
 - **Vim difference**: urvim matches Vim behavior for basic bracket matching
 
 Examples:
+
 - On `(` in `function(foo)` -> jumps to the matching `)`
 - On `)` in `function(foo)` -> jumps back to `(`
 - On `[` in `[1, 2, 3]` -> jumps to `]`
@@ -772,6 +810,7 @@ Moves the cursor to the next occurrence of the specified character.
 - **Cursor position**: Lands ON the found character
 
 Examples:
+
 - `f o` on "hello| world" -> "hello w|orld" (cursor on 'o' in "world")
 - `2f x` on "xxx" -> lands on third 'x'
 - `f z` on "hello" (no 'z') -> cursor stays in place (no movement)
@@ -785,6 +824,7 @@ Moves the cursor to the previous occurrence of the specified character.
 - **Cursor position**: Lands ON the found character
 
 Examples:
+
 - `F h` on "|hello" -> cursor on 'h' (stays in place since already at 'h')
 - `F e` on "he|llo" -> cursor on 'e' (searches backward, finds first 'e')
 - `F z` on "hello" (no 'z') -> cursor stays in place (no movement)
@@ -798,6 +838,7 @@ Moves the cursor to the position just before the next occurrence of the specifie
 - **Cursor position**: Lands one position BEFORE the found character
 
 Examples:
+
 - `t o` on "hel|lo world" -> "hel l|o world" (cursor on 'l' before 'o')
 - `2t x` on "x x x" -> cursor on first 'x' (position before second 'x')
 
@@ -810,6 +851,7 @@ Moves the cursor to the position just after the previous occurrence of the speci
 - **Cursor position**: Lands one position AFTER the found character
 
 Examples:
+
 - `T h` on "he|llo" -> "h|ello" (cursor on 'e', which is after 'h')
 - `T e` on "|hello" -> cursor stays (no character before to land after)
 
@@ -855,6 +897,7 @@ Repeats the last character search motion in the same direction.
 - **State persistence**: The last search state persists across mode switches
 
 Examples:
+
 - `f x` then `;` → finds next 'x' forward
 - `F x` then `;` → finds previous 'x' backward
 - `t x` then `;` → till before next 'x' forward
@@ -869,6 +912,7 @@ Repeats the last character search motion in the opposite direction.
 - **State persistence**: The last search state persists across mode switches
 
 Examples:
+
 - `f x` then `,` → finds previous 'x' backward (opposite direction)
 - `F x` then `,` → finds next 'x' forward (opposite direction)
 - `t x` then `,` → till after previous 'x' backward
@@ -877,10 +921,12 @@ Examples:
 ### State Persistence
 
 The last character search state is stored globally and persists when:
+
 - Switching to insert mode and back to normal mode
 - Using multiple windows (future feature)
 
 This allows you to:
+
 1. Press `f x` to find 'x'
 2. Press `i` to enter insert mode
 3. Type some text
@@ -911,6 +957,7 @@ Moves the cursor to the blank line before the previous paragraph.
   - If on a blank line, moves to the blank line **before** the previous paragraph (skips any non-blank lines above)
 
 Example buffer:
+
 ```
 Para 1 line 1
 Para 1 line 2
@@ -931,6 +978,7 @@ Moves the cursor to the blank line after the next paragraph.
   - If on a blank line, moves to the next blank line (or blank line after next paragraph if non-blank lines follow)
 
 Example buffer:
+
 ```
 Para 1 line 1
 Para 1 line 2
@@ -944,6 +992,7 @@ Para 2 line 1
 ### Column Preservation
 
 Paragraph motions behave like vertical motions (`j`/`k`) for column preservation:
+
 - They use the remembered column when moving
 - They update the remembered column after moving
 
@@ -960,35 +1009,35 @@ Text objects allow targeted text selection combined with operators. They are tri
 
 ### Supported Text Objects
 
-| Text Object | Description |
-|------------|-------------|
-| `iw` | Inner word: word under cursor (excludes whitespace boundaries) |
-| `aw` | Around word: word under cursor plus trailing whitespace |
-| `iW` | Inner BigWord: whitespace-delimited run under cursor (excludes trailing whitespace) |
-| `aW` | Around BigWord: whitespace-delimited run under cursor plus trailing whitespace |
-| `i(`/`i)` | Inner bracket text object for parentheses |
-| `a(`/`a)` | Around bracket text object for parentheses |
-| `i[`/`i]` | Inner bracket text object for square brackets |
-| `a[`/`a]` | Around bracket text object for square brackets |
-| `i{`/`i}` | Inner bracket text object for curly braces |
-| `a{`/`a}` | Around bracket text object for curly braces |
-| `i<`/`i>` | Inner bracket text object for angle brackets |
-| `a<`/`a>` | Around bracket text object for angle brackets |
-| `i'` | Inner quote text object for single quotes |
-| `a'` | Around quote text object for single quotes |
-| `i"` | Inner quote text object for double quotes |
-| `a"` | Around quote text object for double quotes |
-| `i&#96;` | Inner quote text object for backticks |
-| `a&#96;` | Around quote text object for backticks |
+| Text Object | Description                                                                         |
+| ----------- | ----------------------------------------------------------------------------------- |
+| `iw`        | Inner word: word under cursor (excludes whitespace boundaries)                      |
+| `aw`        | Around word: word under cursor plus trailing whitespace                             |
+| `iW`        | Inner BigWord: whitespace-delimited run under cursor (excludes trailing whitespace) |
+| `aW`        | Around BigWord: whitespace-delimited run under cursor plus trailing whitespace      |
+| `i(`/`i)`   | Inner bracket text object for parentheses                                           |
+| `a(`/`a)`   | Around bracket text object for parentheses                                          |
+| `i[`/`i]`   | Inner bracket text object for square brackets                                       |
+| `a[`/`a]`   | Around bracket text object for square brackets                                      |
+| `i{`/`i}`   | Inner bracket text object for curly braces                                          |
+| `a{`/`a}`   | Around bracket text object for curly braces                                         |
+| `i<`/`i>`   | Inner bracket text object for angle brackets                                        |
+| `a<`/`a>`   | Around bracket text object for angle brackets                                       |
+| `i'`        | Inner quote text object for single quotes                                           |
+| `a'`        | Around quote text object for single quotes                                          |
+| `i"`        | Inner quote text object for double quotes                                           |
+| `a"`        | Around quote text object for double quotes                                          |
+| `i&#96;`    | Inner quote text object for backticks                                               |
+| `a&#96;`    | Around quote text object for backticks                                              |
 
 ### Supported Operators
 
-| Operator | Action |
-|----------|--------|
-| `d` | Delete |
-| `gu` | Lowercase the target text |
-| `gU` | Uppercase the target text |
-| `g~` | Toggle the target text's case |
+| Operator | Action                        |
+| -------- | ----------------------------- |
+| `d`      | Delete                        |
+| `gu`     | Lowercase the target text     |
+| `gU`     | Uppercase the target text     |
+| `g~`     | Toggle the target text's case |
 
 ### How Text Objects Work
 
@@ -1001,6 +1050,7 @@ In character-wise visual mode, text objects can also be used directly to retarge
 ### Count Support with Text Objects
 
 Counts multiply when used with text objects:
+
 - `3diw` - delete 3 inner words (leading count: 3)
 - `d3iw` - delete 3 inner words (sub-count after operator: 3)
 - `3d3iw` - delete 9 inner words (combined: 3 × 3 = 9)
@@ -1014,13 +1064,13 @@ Selects the word under the cursor without surrounding whitespace:
 - **Cursor inside a word**: Selects that word
 - **Cursor inside whitespace**: Selects the entire whitespace region
 
-Examples on "  hello world  " with cursor positions:
+Examples on " hello world " with cursor positions:
 
-| Cursor Position | `diw` deletes | Result |
-|----------------|---------------|--------|
-| on 'h' in "hello" | "hello" | "  world  " |
-| inside "  " (before "hello") | "  " | "hello world  " |
-| inside "  " (between words) | "  " | "helloworld  " |
+| Cursor Position             | `diw` deletes | Result         |
+| --------------------------- | ------------- | -------------- |
+| on 'h' in "hello"           | "hello"       | " world "      |
+| inside " " (before "hello") | " "           | "hello world " |
+| inside " " (between words)  | " "           | "helloworld "  |
 
 ### Around Word (aw)
 
@@ -1029,13 +1079,13 @@ Selects the word under the cursor plus trailing whitespace:
 - **Cursor inside a word**: Selects word plus all trailing whitespace
 - **Cursor inside whitespace**: Selects whitespace plus the trailing word after it
 
-Examples on "  hello world  " with cursor positions:
+Examples on " hello world " with cursor positions:
 
-| Cursor Position | `daw` deletes | Result |
-|----------------|---------------|--------|
-| on 'h' in "hello" | "hello " | "  world  " |
-| on 'w' in "world" | "world  " | "  hello " |
-| inside "  " (between words) | "  world" | "  hello  " |
+| Cursor Position            | `daw` deletes | Result    |
+| -------------------------- | ------------- | --------- |
+| on 'h' in "hello"          | "hello "      | " world " |
+| on 'w' in "world"          | "world "      | " hello " |
+| inside " " (between words) | " world"      | " hello " |
 
 ### Inner BigWord (iW)
 
@@ -1046,10 +1096,10 @@ Selects the whitespace-delimited run under the cursor without surrounding whites
 
 Examples on `"foo-bar baz"` with cursor positions:
 
-| Cursor Position | `diW` deletes | Result |
-| --- | --- | --- |
-| on `f` in `"foo-bar"` | `"foo-bar"` | `" baz"` |
-| inside `" "` between words | `" "` | `"foo-barbaz"` |
+| Cursor Position            | `diW` deletes | Result         |
+| -------------------------- | ------------- | -------------- |
+| on `f` in `"foo-bar"`      | `"foo-bar"`   | `" baz"`       |
+| inside `" "` between words | `" "`         | `"foo-barbaz"` |
 
 ### Around BigWord (aW)
 
@@ -1060,10 +1110,10 @@ Selects the whitespace-delimited run under the cursor plus trailing whitespace:
 
 Examples on `"foo-bar   baz"` with cursor positions:
 
-| Cursor Position | `daW` deletes | Result |
-| --- | --- | --- |
-| on `f` in `"foo-bar"` | `"foo-bar   "` | `"baz"` |
-| inside `"   "` between words | `"   baz"` | `"foo-bar"` |
+| Cursor Position              | `daW` deletes  | Result      |
+| ---------------------------- | -------------- | ----------- |
+| on `f` in `"foo-bar"`        | `"foo-bar   "` | `"baz"`     |
+| inside `"   "` between words | `"   baz"`     | `"foo-bar"` |
 
 ### Bracket Text Objects
 
@@ -1077,10 +1127,10 @@ Bracket text objects select text inside or around matching delimiter pairs. They
 
 Examples:
 
-| Cursor Position | `di(` deletes | `da(` deletes |
-|----------------|---------------|---------------|
-| inside `(bar)` in `foo(bar)baz` | `bar` | `(bar)` |
-| on `b` in `foo(bar)baz` | `bar` | `(bar)` |
+| Cursor Position                       | `di(` deletes                                           | `da(` deletes                                             |
+| ------------------------------------- | ------------------------------------------------------- | --------------------------------------------------------- |
+| inside `(bar)` in `foo(bar)baz`       | `bar`                                                   | `(bar)`                                                   |
+| on `b` in `foo(bar)baz`               | `bar`                                                   | `(bar)`                                                   |
 | before the first `(` on the same line | `bar` from the next valid pair on that line, if present | `(bar)` from the next valid pair on that line, if present |
 
 If the cursor is not inside a pair and the current line has no later valid pair, the operation does nothing.
@@ -1097,10 +1147,10 @@ Quote text objects select text inside or around matching quote delimiters. They 
 
 Examples:
 
-| Cursor Position | `di"` deletes | `da"` deletes |
-|----------------|---------------|---------------|
-| inside `"bar"` in `foo "bar" baz` | `bar` | `"bar"` |
-| on `b` in `foo "bar" baz` | `bar` | `"bar"` |
+| Cursor Position                       | `di"` deletes                                           | `da"` deletes                                             |
+| ------------------------------------- | ------------------------------------------------------- | --------------------------------------------------------- |
+| inside `"bar"` in `foo "bar" baz`     | `bar`                                                   | `"bar"`                                                   |
+| on `b` in `foo "bar" baz`             | `bar`                                                   | `"bar"`                                                   |
 | before the first `"` on the same line | `bar` from the next valid pair on that line, if present | `"bar"` from the next valid pair on that line, if present |
 
 If the cursor is not inside a pair and the current line has no later valid pair, the operation does nothing.

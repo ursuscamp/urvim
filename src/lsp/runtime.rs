@@ -3190,10 +3190,9 @@ fn apply_text_edits(
     .ok_or_else(|| "failed to read buffer for workspace edit".to_string())?
     .ok_or_else(|| "failed to convert workspace edit positions".to_string())?;
 
-    let applied = crate::globals::with_buffer_mut(buffer_id, |buffer| {
-        buffer.apply_text_edits(&cursor_edits)
-    })
-    .unwrap_or(false);
+    let applied =
+        crate::globals::with_buffer_mut(buffer_id, |buffer| buffer.apply_text_edits(&cursor_edits))
+            .unwrap_or(false);
 
     if !applied {
         return Err("failed to apply workspace edit".to_string());

@@ -17,7 +17,7 @@ mod widget;
 mod wrap;
 
 use crate::action::ActionResult;
-use crate::buffer::{Boundary, Buffer, BufferId, Cursor};
+use crate::buffer::{Boundary, Buffer, BufferId, Cursor, DiffMarkerKind};
 use crate::editor::{
     Action, InsertMode, LinewiseMotion, Mode, ModeKind, NormalMode, Operator, ResizingMode,
     VisualLineMode, VisualMode,
@@ -64,6 +64,8 @@ pub struct Gutter {
     total_buffer_lines: usize,
     /// Width reserved for diagnostic signs.
     diagnostic_sign_width: u16,
+    /// Width reserved for diff markers.
+    diff_sign_width: u16,
     /// Resolved style for the gutter.
     style: Style,
 }
@@ -83,6 +85,16 @@ pub struct GutterRenderState {
     pub diagnostic_severities: Vec<Option<DiagnosticSeverity>>,
     /// Width reserved for the diagnostic sign column.
     pub diagnostic_sign_width: u16,
+    /// Diff marker for each visible screen row.
+    pub diff_markers: Vec<Option<DiffMarkerKind>>,
+    /// Width reserved for the diff sign column.
+    pub diff_sign_width: u16,
+    /// Style used for added diff markers.
+    pub diff_added_sign_style: Style,
+    /// Style used for deleted diff markers.
+    pub diff_deleted_sign_style: Style,
+    /// Style used for modified diff markers.
+    pub diff_modified_sign_style: Style,
 }
 
 #[derive(Debug, Clone)]
@@ -327,26 +339,39 @@ impl Window {
 
     pub fn render(&mut self, screen: &mut Screen, origin: Position, size: Size) {
         self.size = size;
-        let (gutter_style, default_style, active_gutter_style, active_line_style) =
-            globals::with_active_theme(|theme| {
-                theme
-                    .map(|theme| {
-                        (
-                            theme.resolve_name_with_default("ui.window.gutter"),
-                            theme.default_style(),
-                            theme.highlight_style_for_name("ui.window.gutter.active_line"),
-                            theme.resolve_name_with_default("ui.window.active_line"),
-                        )
-                    })
-                    .unwrap_or_else(|| {
-                        (
-                            Style::new().bg(Color::ansi(236)).fg(Color::ansi(245)),
-                            Style::default(),
-                            Style::default(),
-                            Style::default(),
-                        )
-                    })
-            });
+        let (
+            gutter_style,
+            default_style,
+            active_gutter_style,
+            active_line_style,
+            diff_added_gutter_style,
+            diff_deleted_gutter_style,
+            diff_modified_gutter_style,
+        ) = globals::with_active_theme(|theme| {
+            theme
+                .map(|theme| {
+                    (
+                        theme.resolve_name_with_default("ui.window.gutter"),
+                        theme.default_style(),
+                        theme.highlight_style_for_name("ui.window.gutter.active_line"),
+                        theme.resolve_name_with_default("ui.window.active_line"),
+                        theme.resolve_name_with_default("ui.window.gutter.diff.added"),
+                        theme.resolve_name_with_default("ui.window.gutter.diff.deleted"),
+                        theme.resolve_name_with_default("ui.window.gutter.diff.modified"),
+                    )
+                })
+                .unwrap_or_else(|| {
+                    (
+                        Style::new().bg(Color::ansi(236)).fg(Color::ansi(245)),
+                        Style::default(),
+                        Style::default(),
+                        Style::default(),
+                        Style::new().fg(Color::ansi(114)),
+                        Style::new().fg(Color::ansi(203)),
+                        Style::new().fg(Color::ansi(214)),
+                    )
+                })
+        });
         let wrap_mode = globals::with_config(|config| config.wrap_mode).unwrap_or_default();
         let relative_number =
             globals::with_config(|config| config.relative_number).unwrap_or(false);
@@ -357,8 +382,10 @@ impl Window {
         let total_lines = self.buffer_view.line_count();
         let diagnostic_sign_width =
             diagnostic_sign_width_for_buffer(self.buffer_view.buffer_id_opt());
+        let diff_sign_width = diff_sign_width_for_buffer(self.buffer_view.buffer_id_opt());
         let gutter_width = Gutter::new_with_style(0, size.rows, total_lines, gutter_style)
             .with_diagnostic_sign_width(diagnostic_sign_width)
+            .with_diff_sign_width(diff_sign_width)
             .calculate_width();
         let mut render_state = renderer::BufferRenderState {
             cursor: self.buffer_view.cursor(),
@@ -392,6 +419,9 @@ impl Window {
                 } else {
                     None
                 },
+                diff_added_gutter_style,
+                diff_deleted_gutter_style,
+                diff_modified_gutter_style,
             },
             &mut render_state,
         );
@@ -421,6 +451,7 @@ impl Window {
             .with_diagnostic_sign_width(diagnostic_sign_width_for_buffer(
                 self.buffer_view.buffer_id_opt(),
             ))
+            .with_diff_sign_width(diff_sign_width_for_buffer(self.buffer_view.buffer_id_opt()))
             .calculate_width();
 
         self.buffer_view
@@ -531,6 +562,15 @@ pub fn diagnostic_sign_width_for_buffer(buffer_id: Option<BufferId>) -> u16 {
     } else {
         1
     }
+}
+
+/// Returns the reserved gutter width used for diff markers in a buffer.
+pub fn diff_sign_width_for_buffer(buffer_id: Option<BufferId>) -> u16 {
+    let Some(buffer_id) = buffer_id else {
+        return 0;
+    };
+
+    globals::with_buffer(buffer_id, |buffer| buffer.diff_sign_width()).unwrap_or(0)
 }
 
 fn visible_diagnostic_severities(

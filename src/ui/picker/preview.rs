@@ -222,8 +222,15 @@ impl PreviewPane {
         cursor_line: usize,
         active_line: bool,
     ) {
-        let (gutter_style, default_style, active_gutter_style, active_line_style) =
-            resolve_window_styles();
+        let (
+            gutter_style,
+            default_style,
+            active_gutter_style,
+            active_line_style,
+            diff_added_gutter_style,
+            diff_deleted_gutter_style,
+            diff_modified_gutter_style,
+        ) = resolve_window_styles();
         let wrap_mode = globals::with_config(|config| config.wrap_mode).unwrap_or_default();
 
         self.last_viewport_rows = size.rows;
@@ -265,6 +272,9 @@ impl PreviewPane {
                 } else {
                     None
                 },
+                diff_added_gutter_style,
+                diff_deleted_gutter_style,
+                diff_modified_gutter_style,
             },
             &mut render_state,
         );
@@ -508,7 +518,7 @@ impl PreviewSyntaxRefreshJob {
     }
 }
 
-fn resolve_window_styles() -> (Style, Style, Style, Style) {
+fn resolve_window_styles() -> (Style, Style, Style, Style, Style, Style, Style) {
     globals::with_active_theme(|theme| {
         theme
             .map(|theme| {
@@ -517,6 +527,9 @@ fn resolve_window_styles() -> (Style, Style, Style, Style) {
                     theme.default_style(),
                     theme.highlight_style_for_name("ui.window.gutter.active_line"),
                     theme.resolve_name_with_default("ui.window.active_line"),
+                    theme.resolve_name_with_default("ui.window.gutter.diff.added"),
+                    theme.resolve_name_with_default("ui.window.gutter.diff.deleted"),
+                    theme.resolve_name_with_default("ui.window.gutter.diff.modified"),
                 )
             })
             .unwrap_or_else(|| {
@@ -525,6 +538,9 @@ fn resolve_window_styles() -> (Style, Style, Style, Style) {
                     Style::default(),
                     Style::default(),
                     Style::default(),
+                    Style::new().fg(Color::ansi(114)),
+                    Style::new().fg(Color::ansi(203)),
+                    Style::new().fg(Color::ansi(214)),
                 )
             })
     })

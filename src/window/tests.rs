@@ -1,7 +1,7 @@
 use super::*;
 use crate::action::ActionResult;
 use crate::background::{BackgroundJob, JobKind, JobToken};
-use crate::buffer::{BufferId, Cursor, TextRef};
+use crate::buffer::{BufferId, Cursor, DiffHunk, DiffMarkerKind, DiffRefreshResult, TextRef};
 use crate::config::{
     AdvancedGlyphCapability, AutoIndentMode, Config, DefaultRegisters, ScrollMargin, WrapMode,
 };
@@ -2427,6 +2427,12 @@ fn test_gutter_width_calculation_includes_diagnostic_sign_column() {
 }
 
 #[test]
+fn test_gutter_width_calculation_includes_diff_sign_column() {
+    let gutter = Gutter::new(0, 10, 9).with_diff_sign_width(1);
+    assert_eq!(gutter.calculate_width(), 4);
+}
+
+#[test]
 fn test_gutter_render_for_render_data_uses_diagnostic_signs() {
     let buffer = Buffer::from_str("one\ntwo");
     let view = BufferView::new(buffer);
@@ -2443,6 +2449,11 @@ fn test_gutter_render_for_render_data_uses_diagnostic_signs() {
             relative_number: false,
             active_screen_row: None,
             active_line_style: None,
+            diff_markers: vec![None, None],
+            diff_sign_width: 0,
+            diff_added_sign_style: Style::default(),
+            diff_deleted_sign_style: Style::default(),
+            diff_modified_sign_style: Style::default(),
             diagnostic_severities: vec![
                 Some(DiagnosticSeverity::ERROR),
                 Some(DiagnosticSeverity::HINT),
@@ -2462,6 +2473,183 @@ fn test_gutter_render_for_render_data_uses_diagnostic_signs() {
         screen.get_cell_mut(1, 0).unwrap().style,
         diagnostic_style_for(DiagnosticSeverity::HINT, gutter_style)
     );
+}
+
+#[test]
+fn test_gutter_render_for_render_data_uses_distinct_diff_signs() {
+    let buffer = Buffer::from_str("one\ntwo\nthree");
+    let view = BufferView::new(buffer);
+    let render_data = view.build_render_data(Size::new(3, 20));
+    let mut gutter = Gutter::new(0, 3, 3).with_diff_sign_width(1);
+    let mut screen = crate::screen::Screen::new(3, 20);
+
+    gutter.render_for_render_data(
+        &mut screen,
+        Position::new(0, 0),
+        &render_data,
+        GutterRenderState {
+            cursor_line: 0,
+            relative_number: false,
+            active_screen_row: None,
+            active_line_style: None,
+            diff_markers: vec![
+                Some(DiffMarkerKind::Added),
+                Some(DiffMarkerKind::Deleted),
+                Some(DiffMarkerKind::Modified),
+            ],
+            diff_sign_width: 1,
+            diff_added_sign_style: Style::new().fg(Color::ansi(10)),
+            diff_deleted_sign_style: Style::new().fg(Color::ansi(9)),
+            diff_modified_sign_style: Style::new().fg(Color::ansi(11)),
+            diagnostic_severities: vec![None, None, None],
+            diagnostic_sign_width: 0,
+        },
+    );
+
+    assert_eq!(screen.get_cell_mut(0, 0).unwrap().text, "+");
+    assert_eq!(screen.get_cell_mut(1, 0).unwrap().text, "-");
+    assert_eq!(screen.get_cell_mut(2, 0).unwrap().text, "~");
+    let gutter_style = Style::new().bg(Color::ansi(236)).fg(Color::ansi(245));
+    assert_eq!(
+        screen.get_cell_mut(0, 0).unwrap().style,
+        gutter_style.overlay(Style::new().fg(Color::ansi(10)))
+    );
+    assert_eq!(
+        screen.get_cell_mut(1, 0).unwrap().style,
+        gutter_style.overlay(Style::new().fg(Color::ansi(9)))
+    );
+    assert_eq!(
+        screen.get_cell_mut(2, 0).unwrap().style,
+        gutter_style.overlay(Style::new().fg(Color::ansi(11)))
+    );
+}
+
+#[test]
+fn test_gutter_render_for_render_data_uses_nerdfont_diff_signs_when_enabled() {
+    let _config_guard = globals::set_test_config(Config {
+        advanced_glyphs: BTreeSet::from([AdvancedGlyphCapability::Nerdfont]),
+        ..Default::default()
+    });
+    let buffer = Buffer::from_str("one\ntwo\nthree");
+    let view = BufferView::new(buffer);
+    let render_data = view.build_render_data(Size::new(3, 20));
+    let mut gutter = Gutter::new(0, 3, 3).with_diff_sign_width(1);
+    let mut screen = crate::screen::Screen::new(3, 20);
+
+    gutter.render_for_render_data(
+        &mut screen,
+        Position::new(0, 0),
+        &render_data,
+        GutterRenderState {
+            cursor_line: 0,
+            relative_number: false,
+            active_screen_row: None,
+            active_line_style: None,
+            diff_markers: vec![
+                Some(DiffMarkerKind::Added),
+                Some(DiffMarkerKind::Deleted),
+                Some(DiffMarkerKind::Modified),
+            ],
+            diff_sign_width: 1,
+            diff_added_sign_style: Style::default(),
+            diff_deleted_sign_style: Style::default(),
+            diff_modified_sign_style: Style::default(),
+            diagnostic_severities: vec![None, None, None],
+            diagnostic_sign_width: 0,
+        },
+    );
+
+    assert_eq!(screen.get_cell_mut(0, 0).unwrap().text, "");
+    assert_eq!(screen.get_cell_mut(1, 0).unwrap().text, "");
+    assert_eq!(screen.get_cell_mut(2, 0).unwrap().text, "");
+}
+
+#[test]
+fn test_window_render_applies_diff_markers_to_full_gutter_row() {
+    let path = temp_path_with_ext("diff-gutter", "txt");
+    let buffer = Buffer::from_str_with_path("one\ntwo\nthree", path);
+    let mut window = Window::new(buffer);
+    let buffer_id = window.buffer_view().buffer_id();
+    window
+        .buffer_view_mut()
+        .with_buffer_mut(|buffer| {
+            buffer.apply_diff_refresh_result(DiffRefreshResult {
+                buffer_id,
+                generation: 0,
+                tracked: true,
+                hunks: vec![DiffHunk::new(1, 2)],
+            });
+        })
+        .unwrap_or(());
+
+    let mut screen = crate::screen::Screen::new(3, 20);
+    window.render(&mut screen, Position::new(0, 0), Size::new(3, 20));
+
+    assert_eq!(screen.get_cell_mut(1, 0).unwrap().text, "~");
+}
+
+#[test]
+fn test_window_diff_hunk_navigation_moves_between_hunks() {
+    let path = temp_path_with_ext("diff-hunks", "txt");
+    let buffer = Buffer::from_str_with_path("one\ntwo\nthree\nfour\nfive", path);
+    let mut window = Window::new(buffer);
+    let buffer_id = window.buffer_view().buffer_id();
+    window
+        .buffer_view_mut()
+        .with_buffer_mut(|buffer| {
+            buffer.apply_diff_refresh_result(DiffRefreshResult {
+                buffer_id,
+                generation: 0,
+                tracked: true,
+                hunks: vec![DiffHunk::new(1, 3), DiffHunk::new(4, 5)],
+            });
+        })
+        .unwrap_or(());
+
+    window.set_cursor(Cursor::new(0, 0));
+    assert_eq!(
+        window.dispatch_action(&Action::new(ActionKind::MoveToNextDiffHunk)),
+        ActionResult::Handled
+    );
+    assert_eq!(window.buffer_view().cursor().line, 1);
+    assert_eq!(window.buffer_view().cursor().col, 0);
+
+    assert_eq!(
+        window.dispatch_action(&Action::new(ActionKind::MoveToNextDiffHunk)),
+        ActionResult::Handled
+    );
+    assert_eq!(window.buffer_view().cursor().line, 4);
+    assert_eq!(window.buffer_view().cursor().col, 0);
+
+    assert_eq!(
+        window.dispatch_action(&Action::new(ActionKind::MoveToPreviousDiffHunk)),
+        ActionResult::Handled
+    );
+    assert_eq!(window.buffer_view().cursor().line, 1);
+    assert_eq!(window.buffer_view().cursor().col, 0);
+
+    window.set_cursor(Cursor::new(2, 0));
+    assert_eq!(
+        window.dispatch_action(&Action::new(ActionKind::MoveToNextDiffHunk)),
+        ActionResult::Handled
+    );
+    assert_eq!(window.buffer_view().cursor().line, 1);
+    assert_eq!(window.buffer_view().cursor().col, 0);
+
+    assert_eq!(
+        window.dispatch_action(&Action::new(ActionKind::MoveToNextDiffHunkEnd)),
+        ActionResult::Handled
+    );
+    assert_eq!(window.buffer_view().cursor().line, 2);
+    assert_eq!(window.buffer_view().cursor().col, 0);
+
+    window.set_cursor(Cursor::new(1, 0));
+    assert_eq!(
+        window.dispatch_action(&Action::new(ActionKind::MoveToPreviousDiffHunkEnd)),
+        ActionResult::Handled
+    );
+    assert_eq!(window.buffer_view().cursor().line, 2);
+    assert_eq!(window.buffer_view().cursor().col, 0);
 }
 
 #[test]

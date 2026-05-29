@@ -266,6 +266,50 @@ impl Window {
         }
     }
 
+    pub fn move_cursor_to_previous_diff_hunk(&mut self) {
+        let cursor = self.buffer_view.cursor();
+        if let Some(new_cursor) = self
+            .buffer_view
+            .with_buffer(|buffer| buffer.previous_diff_hunk_cursor(cursor))
+            .flatten()
+        {
+            self.buffer_view.set_cursor(new_cursor);
+        }
+    }
+
+    pub fn move_cursor_to_next_diff_hunk(&mut self) {
+        let cursor = self.buffer_view.cursor();
+        if let Some(new_cursor) = self
+            .buffer_view
+            .with_buffer(|buffer| buffer.next_diff_hunk_cursor(cursor))
+            .flatten()
+        {
+            self.buffer_view.set_cursor(new_cursor);
+        }
+    }
+
+    pub fn move_cursor_to_previous_diff_hunk_end(&mut self) {
+        let cursor = self.buffer_view.cursor();
+        if let Some(new_cursor) = self
+            .buffer_view
+            .with_buffer(|buffer| buffer.previous_diff_hunk_end_cursor(cursor))
+            .flatten()
+        {
+            self.buffer_view.set_cursor(new_cursor);
+        }
+    }
+
+    pub fn move_cursor_to_next_diff_hunk_end(&mut self) {
+        let cursor = self.buffer_view.cursor();
+        if let Some(new_cursor) = self
+            .buffer_view
+            .with_buffer(|buffer| buffer.next_diff_hunk_end_cursor(cursor))
+            .flatten()
+        {
+            self.buffer_view.set_cursor(new_cursor);
+        }
+    }
+
     pub fn visual_cursor(&self) -> Option<Position> {
         if let Some(mut pos) = self
             .render_data
@@ -279,7 +323,8 @@ impl Window {
                 self.render_data.visible_rows(),
                 total_lines,
             )
-            .with_diagnostic_sign_width(diagnostic_sign_width);
+            .with_diagnostic_sign_width(diagnostic_sign_width)
+            .with_diff_sign_width(diff_sign_width_for_buffer(self.buffer_view.buffer_id_opt()));
             pos.col += gutter.calculate_width();
             Some(pos)
         } else {

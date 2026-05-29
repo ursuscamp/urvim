@@ -642,6 +642,10 @@ impl BufferView {
                 {
                     request_cache_refresh = true;
                 }
+
+                if buffer.diff_cache_stale() {
+                    request_cache_refresh = true;
+                }
             }
 
             let mut buffer_line_idx = if wrap_enabled { 0 } else { start_line };

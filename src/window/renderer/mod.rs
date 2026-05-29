@@ -39,6 +39,12 @@ pub struct WindowRenderTheme {
     pub active_gutter_style: Option<Style>,
     /// Optional style for the active content row.
     pub active_line_style: Option<Style>,
+    /// Style used for added diff markers in the gutter.
+    pub diff_added_gutter_style: Style,
+    /// Style used for deleted diff markers in the gutter.
+    pub diff_deleted_gutter_style: Style,
+    /// Style used for modified diff markers in the gutter.
+    pub diff_modified_gutter_style: Style,
 }
 
 /// Renders a buffer view into the supplied screen region.
@@ -62,6 +68,7 @@ pub fn render_buffer_view(
     let diagnostic_sign_width = diagnostic_sign_width_for_buffer(buffer_view.buffer_id_opt());
     let gutter_width = Gutter::new_with_style(0, state.size.rows, total_lines, theme.gutter_style)
         .with_diagnostic_sign_width(diagnostic_sign_width)
+        .with_diff_sign_width(diff_sign_width_for_buffer(buffer_view.buffer_id_opt()))
         .calculate_width();
 
     // Resolve scrolling before building the gutter so line numbers and
@@ -82,7 +89,8 @@ pub fn render_buffer_view(
     // Create gutter with the finalized viewport state.
     let mut gutter =
         Gutter::new_with_style(start_line, state.size.rows, total_lines, theme.gutter_style)
-            .with_diagnostic_sign_width(diagnostic_sign_width);
+            .with_diagnostic_sign_width(diagnostic_sign_width)
+            .with_diff_sign_width(diff_sign_width_for_buffer(buffer_view.buffer_id_opt()));
 
     // Render buffer content offset by gutter width.
     let content_origin = Position::new(origin.row, origin.col + gutter_width);
@@ -123,6 +131,15 @@ pub fn render_buffer_view(
             relative_number: state.relative_number,
             active_screen_row: active_cursor_row,
             active_line_style: theme.active_gutter_style,
+            diff_markers: buffer_view
+                .with_buffer(|buffer| {
+                    buffer.diff_markers_for_visible_rows(start_line, state.size.rows as usize)
+                })
+                .unwrap_or_else(|| vec![None; state.size.rows as usize]),
+            diff_sign_width: diff_sign_width_for_buffer(buffer_view.buffer_id_opt()),
+            diff_added_sign_style: theme.diff_added_gutter_style,
+            diff_deleted_sign_style: theme.diff_deleted_gutter_style,
+            diff_modified_sign_style: theme.diff_modified_gutter_style,
             diagnostic_severities: visible_diagnostic_severities(
                 buffer_view.buffer_id_opt(),
                 start_line,

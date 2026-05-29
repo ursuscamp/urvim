@@ -336,6 +336,14 @@ pub enum ActionKind {
     MoveToPreviousParagraph,
     /// Move to the next paragraph.
     MoveToNextParagraph,
+    /// Move to the previous diff hunk.
+    MoveToPreviousDiffHunk,
+    /// Move to the next diff hunk.
+    MoveToNextDiffHunk,
+    /// Move to the previous diff hunk end.
+    MoveToPreviousDiffHunkEnd,
+    /// Move to the next diff hunk end.
+    MoveToNextDiffHunkEnd,
     /// Move to the next occurrence of the given character.
     FindForward(char),
     /// Move to the previous occurrence of the given character.
@@ -622,6 +630,10 @@ impl Action {
                 | Some(ActionKind::MoveToScreenBottom)
                 | Some(ActionKind::MoveToPreviousParagraph)
                 | Some(ActionKind::MoveToNextParagraph)
+                | Some(ActionKind::MoveToPreviousDiffHunk)
+                | Some(ActionKind::MoveToNextDiffHunk)
+                | Some(ActionKind::MoveToPreviousDiffHunkEnd)
+                | Some(ActionKind::MoveToNextDiffHunkEnd)
         )
     }
 

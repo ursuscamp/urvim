@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::buffer::{IndentScopeRefreshResult, SyntaxRefreshResult};
+use crate::buffer::{DiffRefreshResult, IndentScopeRefreshResult, SyntaxRefreshResult};
 use crate::ui::completion::{CompletionCandidate, CompletionSourceKind};
 use crate::ui::picker::doc_symbols::DocSymbolsPickerItem;
 use crate::ui::picker::file::FilePickerItem;
@@ -27,6 +27,8 @@ pub enum JobPayload {
     SyntaxRefresh(SyntaxRefreshResult),
     /// Indent scope cache refresh result.
     IndentScopeRefresh(IndentScopeRefreshResult),
+    /// Diff cache refresh result.
+    DiffRefresh(DiffRefreshResult),
     /// File picker ranked snapshot.
     FileSearchSnapshot(Vec<FilePickerItem>),
     /// Live grep ranked snapshot.

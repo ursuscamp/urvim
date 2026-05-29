@@ -38,6 +38,7 @@ mod boundary;
 mod bracket_text_object;
 mod comment;
 mod cursor;
+mod diff;
 mod edit;
 mod indent;
 mod io;
@@ -54,6 +55,10 @@ mod text_object;
 mod undo;
 mod unicode;
 
+pub use diff::{
+    DiffCache, DiffHunk, DiffInput, DiffMarkerKind, DiffProvider, DiffRefreshJob,
+    DiffRefreshResult, DiffSnapshot,
+};
 pub use indent::IndentDirection;
 pub use marker::{
     DeleteShape, Gravity, InsertShape, Marker, MarkerId, MarkerKind, MarkerPayload, MarkerShape,
@@ -234,9 +239,14 @@ pub struct Buffer {
     syntax_generation: u64,
     syntax_background_generation: Option<u64>,
     indent_background_generation: Option<u64>,
+    diff_generation: u64,
+    diff_background_generation: Option<u64>,
+    diff_cache_generation: Option<u64>,
+    diff_tracked: Option<bool>,
     visual_generation: u64,
     undo_state: UndoState,
     buffer_cache: BufferCache,
+    diff_cache: DiffCache,
     markers: MarkersStore,
 }
 
@@ -253,9 +263,14 @@ impl Clone for Buffer {
             syntax_generation: self.syntax_generation,
             syntax_background_generation: self.syntax_background_generation,
             indent_background_generation: self.indent_background_generation,
+            diff_generation: self.diff_generation,
+            diff_background_generation: self.diff_background_generation,
+            diff_cache_generation: self.diff_cache_generation,
+            diff_tracked: self.diff_tracked,
             visual_generation: self.visual_generation,
             undo_state: self.undo_state.clone(),
             buffer_cache: self.buffer_cache.clone(),
+            diff_cache: self.diff_cache.clone(),
             markers: self.markers.clone(),
         }
     }
@@ -306,12 +321,95 @@ impl Buffer {
     /// Sets the resolved path for this buffer and refreshes syntax detection.
     pub fn set_path(&mut self, path: AbsolutePath) {
         self.path = Some(path);
+        self.diff_cache.clear();
+        self.diff_cache_generation = None;
+        self.diff_background_generation = None;
+        self.diff_tracked = None;
         self.refresh_syntax();
     }
 
     /// Returns the buffer file name, if a path has been resolved.
     pub fn file_name(&self) -> Option<&std::ffi::OsStr> {
         self.path.as_ref().and_then(|p| p.file_name())
+    }
+
+    /// Returns the buffer lines as owned strings without trailing newlines.
+    pub fn line_texts(&self) -> Vec<String> {
+        self.lines.iter().map(|line| line.to_text()).collect()
+    }
+
+    /// Returns the cached diff hunks for this buffer.
+    pub fn diff_hunks(&self) -> &[DiffHunk] {
+        self.diff_cache.hunks()
+    }
+
+    /// Returns true when the diff cache is stale or still waiting on a refresh.
+    pub fn diff_cache_stale(&self) -> bool {
+        if self.path.is_none() || self.diff_tracked == Some(false) {
+            return false;
+        }
+
+        self.diff_cache_generation != Some(self.diff_generation)
+            || self.diff_background_generation == Some(self.diff_generation)
+    }
+
+    /// Returns the reserved gutter width for diff markers.
+    pub fn diff_sign_width(&self) -> u16 {
+        if self.path.is_none() || self.diff_tracked == Some(false) {
+            return 0;
+        }
+
+        if self.diff_cache.is_empty() && self.diff_cache_generation == Some(self.diff_generation) {
+            0
+        } else {
+            1
+        }
+    }
+
+    /// Returns the diff markers for visible rows starting at the given line.
+    pub fn diff_markers_for_visible_rows(
+        &self,
+        start_line: usize,
+        visible_rows: usize,
+    ) -> Vec<Option<DiffMarkerKind>> {
+        if self.path.is_none() || self.diff_tracked == Some(false) {
+            return vec![None; visible_rows];
+        }
+
+        self.diff_cache
+            .markers_for_visible_rows(start_line, visible_rows)
+    }
+
+    /// Returns the next diff hunk cursor after the current cursor.
+    pub fn next_diff_hunk_cursor(&self, cursor: Cursor) -> Option<Cursor> {
+        let line = self
+            .diff_cache
+            .next_hunk_start_line_including_current(cursor.line)?;
+        Some(Cursor::new(line, 0))
+    }
+
+    /// Returns the previous diff hunk cursor before the current cursor.
+    pub fn previous_diff_hunk_cursor(&self, cursor: Cursor) -> Option<Cursor> {
+        let line = self
+            .diff_cache
+            .previous_hunk_start_line_including_current(cursor.line)?;
+        Some(Cursor::new(line, 0))
+    }
+
+    /// Returns the next diff hunk end cursor after the current cursor.
+    pub fn next_diff_hunk_end_cursor(&self, cursor: Cursor) -> Option<Cursor> {
+        let line = self
+            .diff_cache
+            .next_hunk_end_line_including_current(cursor.line)?;
+        Some(Cursor::new(line, 0))
+    }
+
+    /// Returns the previous diff hunk end cursor before the current cursor.
+    pub fn previous_diff_hunk_end_cursor(&self, cursor: Cursor) -> Option<Cursor> {
+        let line = self
+            .diff_cache
+            .previous_hunk_end_line_including_current(cursor.line)?;
+        Some(Cursor::new(line, 0))
     }
 
     /// Returns the resolved canonical syntax name for this buffer.

@@ -156,6 +156,9 @@ impl Widget for HoverWidget {
         let gutter_style = theme_style("ui.window.gutter");
         let active_gutter_style = theme_style("ui.window.gutter.active_line");
         let active_line_style = theme_style("ui.window.active_line");
+        let diff_added_gutter_style = theme_style("ui.window.gutter.diff.added");
+        let diff_deleted_gutter_style = theme_style("ui.window.gutter.diff.deleted");
+        let diff_modified_gutter_style = theme_style("ui.window.gutter.diff.modified");
         let mut render_state = BufferRenderState {
             cursor: self.buffer_view.cursor(),
             scroll_offset: self.buffer_view.scroll_offset(),
@@ -180,6 +183,9 @@ impl Widget for HoverWidget {
                 default_style: body_style,
                 active_gutter_style: Some(active_gutter_style),
                 active_line_style: Some(active_line_style),
+                diff_added_gutter_style,
+                diff_deleted_gutter_style,
+                diff_modified_gutter_style,
             },
             &mut render_state,
         );

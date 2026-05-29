@@ -85,6 +85,10 @@ fn register_motion_bindings(trie_keymap: &mut TrieKeymap) {
     trie_keymap.insert_str("zb", Action::new(ActionKind::ViewportCursorBottom));
     trie_keymap.insert_str("{", Action::new(ActionKind::MoveToPreviousParagraph));
     trie_keymap.insert_str("}", Action::new(ActionKind::MoveToNextParagraph));
+    trie_keymap.insert_str("[h", Action::new(ActionKind::MoveToPreviousDiffHunk));
+    trie_keymap.insert_str("]h", Action::new(ActionKind::MoveToNextDiffHunk));
+    trie_keymap.insert_str("[H", Action::new(ActionKind::MoveToPreviousDiffHunkEnd));
+    trie_keymap.insert_str("]H", Action::new(ActionKind::MoveToNextDiffHunkEnd));
     trie_keymap.insert_str("J", Action::new(ActionKind::JoinWithSpace));
     trie_keymap.insert_str("gJ", Action::new(ActionKind::JoinWithoutSpace));
     trie_keymap.insert_str("gO", Command::OpenDocumentSymbolsPicker);

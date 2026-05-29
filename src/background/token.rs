@@ -27,6 +27,8 @@ pub enum JobKind {
     SyntaxRefresh(BufferId),
     /// Indent scope cache refresh for a specific buffer.
     IndentScopeRefresh(BufferId),
+    /// Diff cache refresh for a specific buffer.
+    DiffRefresh(BufferId),
     /// File picker search.
     FilePickerSearch,
     /// Live grep picker search.
@@ -60,6 +62,7 @@ impl fmt::Display for JobKind {
             Self::IndentScopeRefresh(buffer_id) => {
                 write!(f, "indent-scope-refresh:{}", buffer_id.get())
             }
+            Self::DiffRefresh(buffer_id) => write!(f, "diff-refresh:{}", buffer_id.get()),
             Self::FilePickerSearch => f.write_str("file-picker-search"),
             Self::GrepPickerSearch => f.write_str("grep-picker-search"),
             Self::DocSymbolsPickerSearch => f.write_str("doc-symbols-picker-search"),

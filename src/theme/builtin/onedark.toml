@@ -33,6 +33,9 @@ bg = "bg"
 "ui.tab.scroll_indicator" = { fg = "light_grey", bg = "bg" }
 "ui.window.gutter" = { fg = "grey", bg = "bg" }
 "ui.window.gutter.active_line" = { fg = "fg" }
+"ui.window.gutter.diff.added" = { fg = "green" }
+"ui.window.gutter.diff.deleted" = { fg = "red" }
+"ui.window.gutter.diff.modified" = { fg = "yellow" }
 "ui.window" = { fg = "fg", bg = "bg" }
 "ui.window.lines" = { fg = "grey" }
 "ui.window.lines.resize" = { fg = "blue", bold = true }

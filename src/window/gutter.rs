@@ -1,5 +1,9 @@
 use super::*;
 
+const DIFF_ADD_SIGN: &str = "+";
+const DIFF_DELETE_SIGN: &str = "-";
+const DIFF_MODIFY_SIGN: &str = "~";
+
 impl Gutter {
     pub fn new(start_line: usize, visible_rows: u16, total_buffer_lines: usize) -> Self {
         Self {
@@ -7,6 +11,7 @@ impl Gutter {
             visible_rows,
             total_buffer_lines,
             diagnostic_sign_width: 0,
+            diff_sign_width: 0,
             style: Style::new().bg(Color::ansi(236)).fg(Color::ansi(245)),
         }
     }
@@ -23,6 +28,7 @@ impl Gutter {
             visible_rows,
             total_buffer_lines,
             diagnostic_sign_width: 0,
+            diff_sign_width: 0,
             style,
         }
     }
@@ -33,6 +39,12 @@ impl Gutter {
         self
     }
 
+    /// Sets the reserved width for the diff sign column.
+    pub fn with_diff_sign_width(mut self, width: u16) -> Self {
+        self.diff_sign_width = width;
+        self
+    }
+
     pub fn calculate_width(&self) -> u16 {
         let digits = Self::digit_count(self.total_buffer_lines);
         let min_width = if self.total_buffer_lines == 0 {
@@ -40,7 +52,7 @@ impl Gutter {
         } else {
             digits + 2
         };
-        min_width as u16 + self.diagnostic_sign_width
+        min_width as u16 + self.diagnostic_sign_width + self.diff_sign_width
     }
 
     pub(super) fn digit_count(n: usize) -> usize {
@@ -79,6 +91,7 @@ impl Gutter {
         let total_buffer_lines = self.total_buffer_lines;
         let gutter_style = self.style;
         let sign_width = state.diagnostic_sign_width;
+        let diff_sign_width = state.diff_sign_width;
         let gutter_width = self.calculate_width();
         let nerdfont_enabled = crate::icon::nerdfont_enabled();
 
@@ -113,6 +126,15 @@ impl Gutter {
             };
 
             let mut gutter_line = String::new();
+            let diff_kind = state.diff_markers.get(screen_row_idx).copied().flatten();
+            let diff_sign = if diff_sign_width == 0 {
+                String::new()
+            } else if let Some(kind) = diff_kind {
+                Self::diff_sign_text(kind, diff_sign_width, nerdfont_enabled)
+            } else {
+                " ".repeat(diff_sign_width as usize)
+            };
+            gutter_line.push_str(diff_sign.as_str());
             let sign = if sign_width == 0 {
                 String::new()
             } else {
@@ -128,7 +150,7 @@ impl Gutter {
             };
             gutter_line.push_str(sign.as_str());
             if line_data.show_gutter_line_number {
-                let number_width = gutter_width.saturating_sub(sign_width);
+                let number_width = gutter_width.saturating_sub(sign_width + diff_sign_width);
                 let number = if state.relative_number && line_data.buffer_line != state.cursor_line
                 {
                     Self::format_line_number(
@@ -140,7 +162,9 @@ impl Gutter {
                 };
                 gutter_line.push_str(number.as_str());
             } else {
-                gutter_line.push_str(&" ".repeat(gutter_width.saturating_sub(sign_width) as usize));
+                gutter_line.push_str(
+                    &" ".repeat(gutter_width.saturating_sub(sign_width + diff_sign_width) as usize),
+                );
             }
 
             self.write_gutter_row(screen, origin, screen_row, row_style, gutter_line);
@@ -157,6 +181,21 @@ impl Gutter {
                         screen.get_cell_mut(origin.row + screen_row, origin.col + offset)
                     {
                         cell.style = sign_style;
+                    }
+                }
+            }
+
+            if let Some(kind) = diff_kind {
+                let diff_style = row_style.overlay(match kind {
+                    DiffMarkerKind::Added => state.diff_added_sign_style,
+                    DiffMarkerKind::Deleted => state.diff_deleted_sign_style,
+                    DiffMarkerKind::Modified => state.diff_modified_sign_style,
+                });
+                for offset in 0..diff_sign_width {
+                    if let Some(cell) =
+                        screen.get_cell_mut(origin.row + screen_row, origin.col + offset)
+                    {
+                        cell.style = diff_style;
                     }
                 }
             }
@@ -211,5 +250,27 @@ impl Gutter {
         gutter_line: String,
     ) {
         screen.write_string(origin.row + row, origin.col, style, gutter_line.as_str());
+    }
+
+    fn diff_sign_text(kind: DiffMarkerKind, width: u16, nerdfont_enabled: bool) -> String {
+        let sign = if nerdfont_enabled {
+            match kind {
+                DiffMarkerKind::Added => "",
+                DiffMarkerKind::Deleted => "",
+                DiffMarkerKind::Modified => "",
+            }
+        } else {
+            match kind {
+                DiffMarkerKind::Added => DIFF_ADD_SIGN,
+                DiffMarkerKind::Deleted => DIFF_DELETE_SIGN,
+                DiffMarkerKind::Modified => DIFF_MODIFY_SIGN,
+            }
+        };
+
+        if width <= 1 {
+            return sign.to_string();
+        }
+
+        format!("{}{}", sign, " ".repeat(width as usize - 1))
     }
 }

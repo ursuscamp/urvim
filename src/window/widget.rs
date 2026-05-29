@@ -472,6 +472,22 @@ impl Window {
                     self.move_cursor_to_next_paragraph();
                     ActionResult::Handled
                 }
+                Some(ActionKind::MoveToPreviousDiffHunk) => {
+                    self.move_cursor_to_previous_diff_hunk();
+                    ActionResult::Handled
+                }
+                Some(ActionKind::MoveToNextDiffHunk) => {
+                    self.move_cursor_to_next_diff_hunk();
+                    ActionResult::Handled
+                }
+                Some(ActionKind::MoveToPreviousDiffHunkEnd) => {
+                    self.move_cursor_to_previous_diff_hunk_end();
+                    ActionResult::Handled
+                }
+                Some(ActionKind::MoveToNextDiffHunkEnd) => {
+                    self.move_cursor_to_next_diff_hunk_end();
+                    ActionResult::Handled
+                }
                 Some(ActionKind::FindForward(target)) => {
                     globals::set_last_find(globals::FindState {
                         target_char: *target,

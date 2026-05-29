@@ -447,6 +447,9 @@ bold = true
 "ui.tab.scroll_indicator" = { fg = "base" }
 "ui.window.gutter" = { fg = "base" }
 "ui.window.gutter.active_line" = { fg = "accent" }
+"ui.window.gutter.diff.added" = { fg = "base" }
+"ui.window.gutter.diff.deleted" = { fg = "base" }
+"ui.window.gutter.diff.modified" = { fg = "base" }
 "ui.window" = { fg = "base" }
 "ui.window.lines" = { fg = "base" }
 "ui.window.lines.resize" = { fg = "accent", bold = true }
@@ -494,6 +497,10 @@ bold = true
             theme.highlight_style_for_name("ui.window.lines.resize"),
             Style::new().fg(Color::Rgb(Rgb::new(17, 34, 51))).bold()
         );
+        assert_eq!(
+            theme.highlight_style_for_name("ui.window.gutter.diff.added"),
+            Style::new().fg(Color::ansi(0))
+        );
     }
 
     #[test]
@@ -529,6 +536,9 @@ fg = "base"
 "ui.tab.scroll_indicator" = { fg = "base" }
 "ui.window.gutter" = { fg = "base" }
 "ui.window.gutter.active_line" = { fg = "accent" }
+"ui.window.gutter.diff.added" = { fg = "base" }
+"ui.window.gutter.diff.deleted" = { fg = "base" }
+"ui.window.gutter.diff.modified" = { fg = "base" }
 "ui.window" = { fg = "base" }
 "syntax.comment" = { fg = "base" }
 "syntax.constant" = { fg = "base" }
@@ -569,6 +579,9 @@ fg = "base"
 "ui.tab.scroll_indicator" = { fg = "base" }
 "ui.window.gutter" = { fg = "base" }
 "ui.window.gutter.active_line" = { fg = "accent" }
+"ui.window.gutter.diff.added" = { fg = "base" }
+"ui.window.gutter.diff.deleted" = { fg = "base" }
+"ui.window.gutter.diff.modified" = { fg = "base" }
 "ui.window" = { fg = "base" }
 "ui.Extra" = { fg = "base" }
 "syntax.comment" = { fg = "base" }

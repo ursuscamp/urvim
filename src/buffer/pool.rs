@@ -7,6 +7,7 @@
 //! synchronized across threads.
 
 use super::Buffer;
+use super::diff::DiffRefreshJob;
 use super::syntax::{IndentScopeRefreshJob, SyntaxRefreshJob};
 use crate::background::JobPayload;
 use crate::background::{BackgroundJob, JobEvent, JobKind, JobManager, JobSubmitError, JobToken};
@@ -239,6 +240,19 @@ impl BufferPool {
                         accepted_redraw = true;
                     }
                 }
+                JobEvent::Completed {
+                    payload: Some(JobPayload::DiffRefresh(result)),
+                    ..
+                } => {
+                    if self
+                        .with_buffer_mut(result.buffer_id, |buffer| {
+                            buffer.apply_diff_refresh_result(result)
+                        })
+                        .unwrap_or(false)
+                    {
+                        accepted_redraw = true;
+                    }
+                }
                 JobEvent::Completed { payload: None, .. } => {}
                 JobEvent::Completed {
                     payload: Some(payload),
@@ -246,7 +260,14 @@ impl BufferPool {
                 } => {
                     tracing::error!(?payload, "unexpected buffer-pool job payload");
                 }
-                JobEvent::Failed { error, .. } => {
+                JobEvent::Failed { kind, error, .. } => {
+                    if let JobKind::DiffRefresh(buffer_id) = kind
+                        && let Some(buffer) = self.buffers.get_mut(&buffer_id)
+                    {
+                        if buffer.diff_background_generation == Some(buffer.diff_generation) {
+                            buffer.diff_background_generation = None;
+                        }
+                    }
                     tracing::warn!(?error, "buffer-pool job failed");
                 }
                 _ => {}
@@ -427,7 +448,7 @@ impl BufferPool {
 
     /// Requests buffer cache refresh for a buffer using the pool-owned job engine.
     pub fn request_buffer_cache_refresh(&mut self, buffer_id: BufferId) {
-        let (syntax_job, indent_job, generation) = self
+        let (syntax_job, indent_job, diff_job, generation, diff_generation) = self
             .buffers
             .get_mut(&buffer_id)
             .and_then(|buffer| {
@@ -437,8 +458,11 @@ impl BufferPool {
                     && buffer.syntax_background_generation != Some(generation);
                 let indent_needed = buffer.indent_scope_cache_stale()
                     && buffer.indent_background_generation != Some(generation);
+                let diff_generation = buffer.diff_generation;
+                let diff_needed = buffer.diff_cache_stale()
+                    && buffer.diff_background_generation != Some(diff_generation);
 
-                if !syntax_needed && !indent_needed {
+                if !syntax_needed && !indent_needed && !diff_needed {
                     return None;
                 }
 
@@ -460,9 +484,23 @@ impl BufferPool {
                     )
                 });
 
-                Some((syntax_job, indent_job, generation))
+                let diff_job = if diff_needed {
+                    buffer.path().cloned().map(|path| {
+                        DiffRefreshJob::new(buffer_id, diff_generation, path, buffer.line_texts())
+                    })
+                } else {
+                    None
+                };
+
+                Some((
+                    syntax_job,
+                    indent_job,
+                    diff_job,
+                    generation,
+                    diff_generation,
+                ))
             })
-            .unwrap_or((None, None, 0));
+            .unwrap_or((None, None, None, 0, 0));
 
         if let Some(job) = syntax_job {
             let kind = JobKind::SyntaxRefresh(buffer_id);
@@ -481,6 +519,16 @@ impl BufferPool {
                 && let Some(buffer) = self.buffers.get_mut(&buffer_id)
             {
                 buffer.indent_background_generation = Some(generation);
+            }
+        }
+
+        if let Some(job) = diff_job {
+            let kind = JobKind::DiffRefresh(buffer_id);
+            let token = JobToken::new(diff_generation);
+            if self.submit_background_job(kind, token, job).is_ok()
+                && let Some(buffer) = self.buffers.get_mut(&buffer_id)
+            {
+                buffer.diff_background_generation = Some(diff_generation);
             }
         }
     }

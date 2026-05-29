@@ -380,6 +380,18 @@ mod tests {
             tag("ui.window.gutter.active_line"),
             Style::new().fg(Color::ansi(23)),
         );
+        highlights.insert(
+            tag("ui.window.gutter.diff.added"),
+            Style::new().fg(Color::ansi(24)),
+        );
+        highlights.insert(
+            tag("ui.window.gutter.diff.deleted"),
+            Style::new().fg(Color::ansi(25)),
+        );
+        highlights.insert(
+            tag("ui.window.gutter.diff.modified"),
+            Style::new().fg(Color::ansi(26)),
+        );
         highlights.insert(tag("ui.window"), Style::new().fg(Color::ansi(7)));
         highlights.insert(tag("ui.window.lines"), Style::new().fg(Color::ansi(8)));
         highlights.insert(
@@ -462,6 +474,18 @@ mod tests {
         assert_eq!(
             theme.highlight_style_for_name("ui.window.gutter.active_line"),
             Style::new().fg(Color::ansi(23))
+        );
+        assert_eq!(
+            theme.highlight_style_for_name("ui.window.gutter.diff.added"),
+            Style::new().fg(Color::ansi(24))
+        );
+        assert_eq!(
+            theme.highlight_style_for_name("ui.window.gutter.diff.deleted"),
+            Style::new().fg(Color::ansi(25))
+        );
+        assert_eq!(
+            theme.highlight_style_for_name("ui.window.gutter.diff.modified"),
+            Style::new().fg(Color::ansi(26))
         );
         assert_eq!(
             theme.highlight_style_for_name("ui.window"),

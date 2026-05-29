@@ -3,7 +3,7 @@
 use crate::background::{JobContext, JobEvent, JobKind, JobPayload, JobToken};
 use crate::buffer::Buffer;
 use crate::buffer::BufferId;
-use crate::buffer::{ApplyEdit, LineEdit, PieceTable, TextRef, TextSnapshot};
+use crate::buffer::{ApplyEdit, DiffRefreshJob, LineEdit, PieceTable, TextRef, TextSnapshot};
 use crate::globals;
 use crate::syntax::{
     ContextControl, InjectedSyntaxFallback, InjectedSyntaxSelector, SyntaxDefinition, SyntaxRule,
@@ -2105,6 +2105,8 @@ impl Buffer {
         self.syntax_generation = self.syntax_generation.wrapping_add(1);
         self.syntax_background_generation = None;
         self.indent_background_generation = None;
+        self.diff_generation = self.diff_generation.wrapping_add(1);
+        self.diff_background_generation = None;
         if edits.iter().any(|edit| edit.start_line == 0) {
             self.refresh_syntax();
         }
@@ -2240,6 +2242,21 @@ impl Buffer {
         true
     }
 
+    /// Applies a background diff refresh result when it still matches this buffer.
+    pub fn apply_diff_refresh_result(&mut self, result: crate::buffer::DiffRefreshResult) -> bool {
+        if result.generation != self.diff_generation {
+            return false;
+        }
+
+        self.diff_cache.replace_hunks(result.hunks);
+        self.diff_cache_generation = Some(result.generation);
+        self.diff_tracked = Some(result.tracked);
+        if self.diff_background_generation == Some(result.generation) {
+            self.diff_background_generation = None;
+        }
+        true
+    }
+
     /// Requests background buffer cache refresh when the cache is incomplete.
     pub fn request_buffer_cache_refresh(&mut self, buffer_id: BufferId) {
         let syntax_needed = (self.buffer_cache.syntax_cache.has_dirty_suffix()
@@ -2247,8 +2264,10 @@ impl Buffer {
             && self.syntax_background_generation != Some(self.syntax_generation);
         let indent_needed = self.indent_scope_cache_stale()
             && self.indent_background_generation != Some(self.syntax_generation);
+        let diff_needed = self.diff_cache_stale()
+            && self.diff_background_generation != Some(self.diff_generation);
 
-        if !syntax_needed && !indent_needed {
+        if !syntax_needed && !indent_needed && !diff_needed {
             return;
         }
 
@@ -2290,6 +2309,24 @@ impl Buffer {
 
             if submitted {
                 self.indent_background_generation = Some(generation);
+            }
+        }
+
+        if diff_needed {
+            let Some(path) = self.path().cloned() else {
+                return;
+            };
+
+            let job = DiffRefreshJob::new(buffer_id, self.diff_generation, path, self.line_texts());
+            let kind = JobKind::DiffRefresh(buffer_id);
+            let token = JobToken::new(self.diff_generation);
+
+            let submitted = globals::with_buffer_pool(|buffer_pool| {
+                buffer_pool.submit_background_job(kind, token, job).is_ok()
+            });
+
+            if submitted {
+                self.diff_background_generation = Some(self.diff_generation);
             }
         }
     }

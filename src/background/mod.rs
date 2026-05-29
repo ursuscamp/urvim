@@ -25,7 +25,8 @@ pub use token::{JobKind, JobToken};
 use std::sync::mpsc::Sender;
 
 use crate::buffer::{
-    IndentScopeRefreshJob, IndentScopeRefreshResult, SyntaxRefreshJob, SyntaxRefreshResult,
+    DiffRefreshJob, DiffRefreshResult, IndentScopeRefreshJob, IndentScopeRefreshResult,
+    SyntaxRefreshJob, SyntaxRefreshResult,
 };
 use crate::lsp::inlay_hint_job::LspInlayHintJob;
 use crate::lsp::rename_job::LspRenameJob;
@@ -42,6 +43,8 @@ pub enum BackgroundJob {
     SyntaxRefresh(SyntaxRefreshJob),
     /// Refreshes the indent scope cache for a buffer.
     IndentScopeRefresh(IndentScopeRefreshJob),
+    /// Refreshes the diff cache for a buffer.
+    DiffRefresh(DiffRefreshJob),
     /// Streams file picker matches.
     FilePickerSearch(PickerSearchJob),
     /// Streams live grep matches.
@@ -69,6 +72,7 @@ impl BackgroundJob {
         match self {
             Self::SyntaxRefresh(job) => job.run(context, event_tx),
             Self::IndentScopeRefresh(job) => job.run(context, event_tx),
+            Self::DiffRefresh(job) => job.run(context, event_tx),
             Self::FilePickerSearch(job) => job.run(context, event_tx),
             Self::GrepPickerSearch(job) => job.run(context, event_tx),
             Self::DocSymbolsPickerSearch(job) => job.run(context, event_tx),
@@ -103,6 +107,12 @@ impl From<SyntaxRefreshJob> for BackgroundJob {
 impl From<IndentScopeRefreshJob> for BackgroundJob {
     fn from(value: IndentScopeRefreshJob) -> Self {
         Self::IndentScopeRefresh(value)
+    }
+}
+
+impl From<DiffRefreshJob> for BackgroundJob {
+    fn from(value: DiffRefreshJob) -> Self {
+        Self::DiffRefresh(value)
     }
 }
 
@@ -157,6 +167,12 @@ impl From<SyntaxRefreshResult> for JobPayload {
 impl From<IndentScopeRefreshResult> for JobPayload {
     fn from(value: IndentScopeRefreshResult) -> Self {
         Self::IndentScopeRefresh(value)
+    }
+}
+
+impl From<DiffRefreshResult> for JobPayload {
+    fn from(value: DiffRefreshResult) -> Self {
+        Self::DiffRefresh(value)
     }
 }
 
