@@ -197,15 +197,17 @@ impl PickerSource for DocSymbolsPickerSource {
         }
 
         let token = JobToken::new(generation);
-        let _ = self.jobs.submit_latest_only(
-            self.job_kind(),
-            token,
-            DocSymbolsPickerSearchJob {
-                scope: self.scope,
-                query: query.to_string(),
-                query_mode: self.query_mode(),
-            },
-        );
+        self.jobs
+            .submit_latest_only(
+                self.job_kind(),
+                token,
+                DocSymbolsPickerSearchJob {
+                    scope: self.scope,
+                    query: query.to_string(),
+                    query_mode: self.query_mode(),
+                },
+            )
+            .ok();
     }
 
     fn preview_key(&self, item: &Self::Item) -> Option<String> {
@@ -256,10 +258,12 @@ impl DocSymbolsPickerSearchJob {
 
     /// Runs the document symbol picker search job on the worker thread.
     pub fn run(self, context: &JobContext, event_tx: &std::sync::mpsc::Sender<JobEvent>) {
-        let _ = event_tx.send(JobEvent::Started {
-            kind: context.kind().clone(),
-            token: context.token(),
-        });
+        event_tx
+            .send(JobEvent::Started {
+                kind: context.kind().clone(),
+                token: context.token(),
+            })
+            .ok();
 
         let mut completed_payload = None;
 
@@ -327,11 +331,13 @@ impl DocSymbolsPickerSearchJob {
             }
         }
 
-        let _ = event_tx.send(JobEvent::Completed {
-            kind: context.kind().clone(),
-            token: context.token(),
-            payload: completed_payload,
-        });
+        event_tx
+            .send(JobEvent::Completed {
+                kind: context.kind().clone(),
+                token: context.token(),
+                payload: completed_payload,
+            })
+            .ok();
     }
 }
 
@@ -542,7 +548,7 @@ fn cursor_from_range_utf16(lines: &PieceTable, range: &lsp_types::Range) -> Opti
 fn build_document_symbol_preview(item: &DocSymbolsPickerItem) -> std::io::Result<PickerPreview> {
     let (line, _) = item.display_position();
     let start_line = line.saturating_sub(DOC_SYMBOL_PREVIEW_CONTEXT_LINES);
-    let _ = std::fs::metadata(item.path.as_path())?;
+    std::fs::metadata(item.path.as_path())?;
 
     Ok(PickerPreview::new(
         item.path.to_string_lossy(),
@@ -727,7 +733,7 @@ mod tests {
         );
         assert_eq!(preview.highlighted_line, Some(10));
 
-        let _ = fs::remove_dir_all(temp_root);
+        fs::remove_dir_all(temp_root).ok();
     }
 
     #[test]

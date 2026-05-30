@@ -157,7 +157,9 @@ impl PickerSource for GrepPickerSource {
         }
 
         if query.is_empty() {
-            let _ = _sender.send(PickerSearchEvent::PickerSearchComplete { generation });
+            _sender
+                .send(PickerSearchEvent::PickerSearchComplete { generation })
+                .ok();
             return;
         }
 
@@ -167,15 +169,17 @@ impl PickerSource for GrepPickerSource {
             QueryMode::Fuzzy => QueryStyle::Fuzzy(query.to_string()),
         };
         let token = JobToken::new(generation);
-        let _ = self.jobs.submit(
-            JobKind::GrepPickerSearch,
-            token,
-            GrepPickerSearchJob {
-                root,
-                query,
-                chunk_size: PICKER_CHUNK_SIZE,
-            },
-        );
+        self.jobs
+            .submit(
+                JobKind::GrepPickerSearch,
+                token,
+                GrepPickerSearchJob {
+                    root,
+                    query,
+                    chunk_size: PICKER_CHUNK_SIZE,
+                },
+            )
+            .ok();
     }
 
     fn preview_key(&self, item: &Self::Item) -> Option<String> {
@@ -241,7 +245,7 @@ impl PickerItem for GrepPickerItem {
 
 fn build_grep_preview(item: &GrepPickerItem) -> std::io::Result<PickerPreview> {
     let start_line = item.line.saturating_sub(GREP_PREVIEW_CONTEXT_LINES);
-    let _ = std::fs::metadata(item.path.as_path())?;
+    std::fs::metadata(item.path.as_path())?;
 
     Ok(PickerPreview::new(
         item.path.to_string_lossy(),
@@ -439,11 +443,13 @@ impl GrepPickerSearchJob {
             }
         }
 
-        let _ = event_tx.send(crate::background::JobEvent::Completed {
-            kind: context.kind().clone(),
-            token: context.token(),
-            payload: None,
-        });
+        event_tx
+            .send(crate::background::JobEvent::Completed {
+                kind: context.kind().clone(),
+                token: context.token(),
+                payload: None,
+            })
+            .ok();
     }
 }
 
@@ -459,11 +465,13 @@ fn flush_ranked_grep_snapshot(
 
     ranked.sort_by(|left, right| left.score.cmp(&right.score));
     let results = ranked.iter().map(|entry| entry.item.clone()).collect();
-    let _ = event_tx.send(crate::background::JobEvent::Chunk {
-        kind: context.kind().clone(),
-        token: context.token(),
-        payload: JobPayload::GrepSearchSnapshot(results),
-    });
+    event_tx
+        .send(crate::background::JobEvent::Chunk {
+            kind: context.kind().clone(),
+            token: context.token(),
+            payload: JobPayload::GrepSearchSnapshot(results),
+        })
+        .ok();
     *last_sent_count = ranked.len();
 }
 
@@ -472,11 +480,13 @@ fn flush_grep_snapshot(
     context: &JobContext,
     results: &[GrepPickerItem],
 ) {
-    let _ = event_tx.send(crate::background::JobEvent::Chunk {
-        kind: context.kind().clone(),
-        token: context.token(),
-        payload: JobPayload::GrepSearchSnapshot(results.to_vec()),
-    });
+    event_tx
+        .send(crate::background::JobEvent::Chunk {
+            kind: context.kind().clone(),
+            token: context.token(),
+            payload: JobPayload::GrepSearchSnapshot(results.to_vec()),
+        })
+        .ok();
 }
 
 #[cfg(test)]
@@ -612,8 +622,8 @@ mod tests {
         assert_eq!(matches[1].line, 2);
         assert_eq!(matches[1].column, 6);
 
-        let _ = fs::remove_file(file_path);
-        let _ = fs::remove_dir_all(temp_root);
+        fs::remove_file(file_path).ok();
+        fs::remove_dir_all(temp_root).ok();
         handle.shutdown();
     }
 
@@ -743,8 +753,8 @@ mod tests {
             }
         }
 
-        let _ = fs::remove_file(file_path);
-        let _ = fs::remove_dir_all(temp_root);
+        fs::remove_file(file_path).ok();
+        fs::remove_dir_all(temp_root).ok();
         manager.shutdown();
     }
 

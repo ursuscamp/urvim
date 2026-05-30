@@ -94,7 +94,7 @@ pub fn load_session_for_cwd(cwd: &Path) -> std::io::Result<Option<SessionFile>> 
 /// Saves a session for the given cwd.
 pub fn save_session_for_cwd(cwd: &Path, session: &SessionFile) -> std::io::Result<()> {
     let path = path::session_path_for_cwd(cwd)?;
-    let _ = path::ensure_session_dir()?;
+    path::ensure_session_dir()?;
 
     let text = toml::to_string_pretty(session)
         .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;

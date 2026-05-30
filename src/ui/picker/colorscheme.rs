@@ -55,10 +55,12 @@ impl PickerSource for ColorschemePickerSource {
         generation: u64,
         sender: Sender<PickerSearchEvent<Self::Item>>,
     ) {
-        let _ = sender.send(PickerSearchEvent::PickerSearchStarted {
-            generation,
-            query: query.to_string(),
-        });
+        sender
+            .send(PickerSearchEvent::PickerSearchStarted {
+                generation,
+                query: query.to_string(),
+            })
+            .ok();
 
         let filtered: Vec<String> = if query.is_empty() {
             self.names.to_vec()
@@ -72,13 +74,17 @@ impl PickerSource for ColorschemePickerSource {
         };
 
         if !filtered.is_empty() {
-            let _ = sender.send(PickerSearchEvent::PickerChunk {
-                generation,
-                chunk: filtered,
-            });
+            sender
+                .send(PickerSearchEvent::PickerChunk {
+                    generation,
+                    chunk: filtered,
+                })
+                .ok();
         }
 
-        let _ = sender.send(PickerSearchEvent::PickerSearchComplete { generation });
+        sender
+            .send(PickerSearchEvent::PickerSearchComplete { generation })
+            .ok();
     }
 
     fn preview_key(&self, _item: &Self::Item) -> Option<String> {

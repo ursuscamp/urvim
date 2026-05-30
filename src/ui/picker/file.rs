@@ -145,7 +145,9 @@ impl PickerSource for FilePickerSource {
         }
 
         if query.is_empty() {
-            let _ = _sender.send(PickerSearchEvent::PickerSearchComplete { generation });
+            _sender
+                .send(PickerSearchEvent::PickerSearchComplete { generation })
+                .ok();
             return;
         }
 
@@ -155,15 +157,17 @@ impl PickerSource for FilePickerSource {
             QueryMode::Fuzzy => QueryStyle::Fuzzy(query.to_string()),
         };
         let token = JobToken::new(generation);
-        let _ = self.jobs.submit(
-            crate::background::JobKind::FilePickerSearch,
-            token,
-            PickerSearchJob {
-                root,
-                query,
-                chunk_size: PICKER_CHUNK_SIZE,
-            },
-        );
+        self.jobs
+            .submit(
+                crate::background::JobKind::FilePickerSearch,
+                token,
+                PickerSearchJob {
+                    root,
+                    query,
+                    chunk_size: PICKER_CHUNK_SIZE,
+                },
+            )
+            .ok();
     }
 
     fn preview_key(&self, item: &Self::Item) -> Option<String> {
@@ -219,7 +223,7 @@ impl PickerItem for FilePickerItem {
 }
 
 fn build_file_preview(path: &Path) -> std::io::Result<PickerPreview> {
-    let _ = std::fs::metadata(path)?;
+    std::fs::metadata(path)?;
 
     Ok(PickerPreview::new(path.to_string_lossy(), 1, None))
 }
@@ -349,11 +353,13 @@ impl PickerSearchJob {
             }
         }
 
-        let _ = event_tx.send(crate::background::JobEvent::Completed {
-            kind: context.kind().clone(),
-            token: context.token(),
-            payload: None,
-        });
+        event_tx
+            .send(crate::background::JobEvent::Completed {
+                kind: context.kind().clone(),
+                token: context.token(),
+                payload: None,
+            })
+            .ok();
     }
 }
 
@@ -379,11 +385,13 @@ fn flush_ranked_file_snapshot(
 
     ranked.sort_by(|left, right| left.score.cmp(&right.score));
     let results = ranked.iter().map(|entry| entry.item.clone()).collect();
-    let _ = event_tx.send(crate::background::JobEvent::Chunk {
-        kind: context.kind().clone(),
-        token: context.token(),
-        payload: JobPayload::FileSearchSnapshot(results),
-    });
+    event_tx
+        .send(crate::background::JobEvent::Chunk {
+            kind: context.kind().clone(),
+            token: context.token(),
+            payload: JobPayload::FileSearchSnapshot(results),
+        })
+        .ok();
     *last_sent_count = ranked.len();
 }
 
@@ -392,11 +400,13 @@ fn flush_file_snapshot(
     context: &JobContext,
     results: &[FilePickerItem],
 ) {
-    let _ = event_tx.send(crate::background::JobEvent::Chunk {
-        kind: context.kind().clone(),
-        token: context.token(),
-        payload: JobPayload::FileSearchSnapshot(results.to_vec()),
-    });
+    event_tx
+        .send(crate::background::JobEvent::Chunk {
+            kind: context.kind().clone(),
+            token: context.token(),
+            payload: JobPayload::FileSearchSnapshot(results.to_vec()),
+        })
+        .ok();
 }
 
 #[cfg(test)]
@@ -512,8 +522,8 @@ mod tests {
         }
 
         assert!(saw_match);
-        let _ = fs::remove_file(file_path);
-        let _ = fs::remove_dir_all(temp_root);
+        fs::remove_file(file_path).ok();
+        fs::remove_dir_all(temp_root).ok();
 
         handle.shutdown();
     }
@@ -561,8 +571,8 @@ mod tests {
         }
 
         assert!(saw_match);
-        let _ = fs::remove_file(file_path);
-        let _ = fs::remove_dir_all(temp_root);
+        fs::remove_file(file_path).ok();
+        fs::remove_dir_all(temp_root).ok();
 
         handle.shutdown();
     }
@@ -691,8 +701,8 @@ mod tests {
         }
 
         assert!(saw_match);
-        let _ = fs::remove_file(file_path);
-        let _ = fs::remove_dir_all(temp_root);
+        fs::remove_file(file_path).ok();
+        fs::remove_dir_all(temp_root).ok();
 
         handle.shutdown();
     }
@@ -752,8 +762,8 @@ mod tests {
         assert_eq!(picker.highlighted_index(), None);
 
         manager.shutdown();
-        let _ = fs::remove_file(file_path);
-        let _ = fs::remove_dir_all(temp_root);
+        fs::remove_file(file_path).ok();
+        fs::remove_dir_all(temp_root).ok();
     }
 
     fn unique_temp_dir() -> PathBuf {

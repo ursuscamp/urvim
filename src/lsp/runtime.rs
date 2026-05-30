@@ -335,7 +335,7 @@ impl LspRuntime {
     pub fn shutdown(&mut self) {
         for server in self.servers.values_mut() {
             for session in server.sessions.values_mut() {
-                let _ = session.shutdown();
+                session.shutdown().ok();
             }
             server.sessions.clear();
             server.failed_sessions.clear();
@@ -829,8 +829,8 @@ impl LspServerSession {
                         if let Ok(bytes) = encode_message(&response)
                             && let Ok(mut stdin) = stdin.lock()
                         {
-                            let _ = stdin.write_all(&bytes);
-                            let _ = stdin.flush();
+                            stdin.write_all(&bytes).ok();
+                            stdin.flush().ok();
                         }
                     }
                     Message::Response(Response::Success(SuccessResponse {
@@ -841,13 +841,13 @@ impl LspServerSession {
                             .ok()
                             .and_then(|mut pending| pending.remove(&id))
                         {
-                            let _ = sender.send(Message::Response(Response::Success(
-                                SuccessResponse {
+                            sender
+                                .send(Message::Response(Response::Success(SuccessResponse {
                                     id,
                                     result,
                                     jsonrpc: "2.0".to_string(),
-                                },
-                            )));
+                                })))
+                                .ok();
                         }
                     }
                     Message::Response(Response::Error(ErrorResponse { id, error, .. })) => {
@@ -1860,14 +1860,11 @@ impl LspServerSession {
 
     fn apply_workspace_file_operation(&mut self, effect: &WorkspaceResourceOperationEffect) {
         match effect {
-            WorkspaceResourceOperationEffect::Create { path } => {
-                let _ = path;
-            }
+            WorkspaceResourceOperationEffect::Create { path: _ } => {}
             WorkspaceResourceOperationEffect::Rename { old_path, new_path } => {
                 self.rename_buffer_attachment(old_path, new_path);
             }
-            WorkspaceResourceOperationEffect::Delete { path, buffer_id } => {
-                let _ = path;
+            WorkspaceResourceOperationEffect::Delete { path: _, buffer_id } => {
                 if let Some(buffer_id) = buffer_id {
                     self.close_buffer_attachment(*buffer_id);
                 }

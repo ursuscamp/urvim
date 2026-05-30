@@ -34,10 +34,12 @@ impl LspRenameJob {
 
     /// Runs the rename against the global LSP runtime.
     pub fn run(self, context: &JobContext, event_tx: &Sender<JobEvent>) {
-        let _ = event_tx.send(JobEvent::Started {
-            kind: context.kind().clone(),
-            token: context.token(),
-        });
+        event_tx
+            .send(JobEvent::Started {
+                kind: context.kind().clone(),
+                token: context.token(),
+            })
+            .ok();
 
         let result = globals::with_lsp_runtime_mut(|runtime| {
             runtime.rename_buffer(self.buffer_id, self.cursor, self.new_name.as_str())
@@ -45,10 +47,12 @@ impl LspRenameJob {
         .ok_or_else(|| "LSP runtime is not available".to_string())
         .and_then(|result| result);
 
-        let _ = event_tx.send(JobEvent::Completed {
-            kind: context.kind().clone(),
-            token: context.token(),
-            payload: Some(JobPayload::LspRename(result)),
-        });
+        event_tx
+            .send(JobEvent::Completed {
+                kind: context.kind().clone(),
+                token: context.token(),
+                payload: Some(JobPayload::LspRename(result)),
+            })
+            .ok();
     }
 }

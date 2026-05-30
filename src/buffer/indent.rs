@@ -48,7 +48,7 @@ impl Buffer {
         line_idx: usize,
         direction: IndentDirection,
     ) -> Option<usize> {
-        let _ = self.line_at(line_idx)?;
+        self.line_at(line_idx)?;
         match direction {
             IndentDirection::Increase => self.increase_line_indentation(line_idx),
             IndentDirection::Decrease => self.decrease_line_indentation(line_idx),

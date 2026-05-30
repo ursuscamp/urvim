@@ -470,8 +470,8 @@ fn test_layout_doc_symbols_picker_binding_opens_for_file_backed_buffer() {
     assert!(layout.dispatch_intent(&Intent::Command(Command::OpenDocumentSymbolsPicker)));
     assert!(layout.doc_symbols_picker_is_open());
 
-    let _ = std::fs::remove_file(path);
-    let _ = std::fs::remove_dir_all(temp_dir);
+    std::fs::remove_file(path).ok();
+    std::fs::remove_dir_all(temp_dir).ok();
 }
 
 #[test]
@@ -705,8 +705,8 @@ fn test_layout_open_file_at_cursor_sets_cursor_position() {
         crate::buffer::Cursor::new(0, 6)
     );
 
-    let _ = std::fs::remove_file(path);
-    let _ = std::fs::remove_dir_all(temp_dir);
+    std::fs::remove_file(path).ok();
+    std::fs::remove_dir_all(temp_dir).ok();
 }
 
 #[test]
@@ -772,7 +772,7 @@ fn test_layout_try_quit_counts_hidden_modified_buffers() {
 
     globals::with_buffer_pool(|pool| pool.save_buffer(hidden_buffer_id)).unwrap();
 
-    let _ = std::fs::remove_file(hidden_path);
+    std::fs::remove_file(hidden_path).ok();
     globals::with_buffer_pool(|pool| *pool = crate::buffer::BufferPool::new());
 }
 
@@ -815,8 +815,8 @@ fn test_layout_write_all_saves_hidden_modified_buffers() {
     assert_eq!(fs::read_to_string(&visible_path).unwrap(), "alpha-dirty");
     assert_eq!(fs::read_to_string(&hidden_path).unwrap(), "gamma-dirty");
 
-    let _ = fs::remove_file(visible_path);
-    let _ = fs::remove_file(hidden_path);
+    fs::remove_file(visible_path).ok();
+    fs::remove_file(hidden_path).ok();
     globals::with_buffer_pool(|pool| *pool = crate::buffer::BufferPool::new());
 }
 
@@ -846,7 +846,7 @@ fn test_layout_write_all_prompts_when_disk_changed() {
     assert!(layout.confirmation_box_is_open());
     assert_eq!(fs::read_to_string(&path).unwrap(), "alpha-external");
 
-    let _ = fs::remove_file(path);
+    fs::remove_file(path).ok();
     globals::with_buffer_pool(|pool| *pool = crate::buffer::BufferPool::new());
 }
 

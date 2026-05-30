@@ -222,7 +222,7 @@ fn build_references_preview(item: &ReferencesPickerItem) -> std::io::Result<Pick
         .cursor
         .line
         .saturating_sub(REFERENCES_PREVIEW_CONTEXT_LINES);
-    let _ = std::fs::metadata(item.path.as_path())?;
+    std::fs::metadata(item.path.as_path())?;
 
     Ok(PickerPreview::new(
         item.path.to_string_lossy(),

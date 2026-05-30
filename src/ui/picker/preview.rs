@@ -485,36 +485,42 @@ impl PreviewSyntaxRefreshJob {
                     });
 
                 if chunk_end < last_line {
-                    let _ = event_tx.send(crate::background::JobEvent::Chunk {
-                        kind: context.kind().clone(),
-                        token: context.token(),
-                        payload,
-                    });
+                    event_tx
+                        .send(crate::background::JobEvent::Chunk {
+                            kind: context.kind().clone(),
+                            token: context.token(),
+                            payload,
+                        })
+                        .ok();
                 } else {
-                    let _ = event_tx.send(crate::background::JobEvent::Completed {
-                        kind: context.kind().clone(),
-                        token: context.token(),
-                        payload: Some(payload),
-                    });
+                    event_tx
+                        .send(crate::background::JobEvent::Completed {
+                            kind: context.kind().clone(),
+                            token: context.token(),
+                            payload: Some(payload),
+                        })
+                        .ok();
                     return;
                 }
             }
         }
 
-        let _ = event_tx.send(crate::background::JobEvent::Completed {
-            kind: context.kind().clone(),
-            token: context.token(),
-            payload: Some(crate::background::JobPayload::PreviewSyntax(
-                PreviewSyntaxRefreshResult {
-                    key: self.key,
-                    result: BufferCacheRefreshResult {
-                        buffer_id: BufferId::new(0),
-                        generation: self.generation,
-                        cache,
+        event_tx
+            .send(crate::background::JobEvent::Completed {
+                kind: context.kind().clone(),
+                token: context.token(),
+                payload: Some(crate::background::JobPayload::PreviewSyntax(
+                    PreviewSyntaxRefreshResult {
+                        key: self.key,
+                        result: BufferCacheRefreshResult {
+                            buffer_id: BufferId::new(0),
+                            generation: self.generation,
+                            cache,
+                        },
                     },
-                },
-            )),
-        });
+                )),
+            })
+            .ok();
     }
 }
 
@@ -631,8 +637,8 @@ mod tests {
             3
         );
 
-        let _ = fs::remove_file(file_path);
-        let _ = fs::remove_dir_all(temp_root);
+        fs::remove_file(file_path).ok();
+        fs::remove_dir_all(temp_root).ok();
     }
 
     #[test]
@@ -662,8 +668,8 @@ mod tests {
         let after = buffer_count_for_path(file_path.as_path());
         assert_eq!(before, after);
 
-        let _ = fs::remove_file(file_path);
-        let _ = fs::remove_dir_all(temp_root);
+        fs::remove_file(file_path).ok();
+        fs::remove_dir_all(temp_root).ok();
     }
 
     #[test]
@@ -708,7 +714,7 @@ mod tests {
 
         assert_screen_eq(&mut preview_screen, &mut plain_screen);
 
-        let _ = fs::remove_file(file_path);
+        fs::remove_file(file_path).ok();
     }
 
     #[test]
@@ -769,8 +775,8 @@ mod tests {
                 .syntax_refresh_pending()
         );
 
-        let _ = fs::remove_file(file_path);
-        let _ = fs::remove_dir_all(temp_root);
+        fs::remove_file(file_path).ok();
+        fs::remove_dir_all(temp_root).ok();
     }
 
     #[test]
@@ -806,8 +812,8 @@ mod tests {
                 .syntax_refresh_pending()
         );
 
-        let _ = fs::remove_file(file_path);
-        let _ = fs::remove_dir_all(temp_root);
+        fs::remove_file(file_path).ok();
+        fs::remove_dir_all(temp_root).ok();
     }
 
     #[test]
@@ -948,7 +954,7 @@ mod tests {
 
         assert_screen_eq(&mut preview_screen, &mut window_screen);
 
-        let _ = fs::remove_file(file_path);
+        fs::remove_file(file_path).ok();
     }
 
     #[test]
@@ -1018,8 +1024,8 @@ mod tests {
 
         assert_eq!(first, second);
 
-        let _ = fs::remove_file(file_path);
-        let _ = fs::remove_dir_all(temp_root);
+        fs::remove_file(file_path).ok();
+        fs::remove_dir_all(temp_root).ok();
     }
 
     fn buffer_count_for_path(path: &Path) -> usize {
@@ -1186,7 +1192,7 @@ mod tests {
 
         assert_screen_eq(&mut preview_screen, &mut window_screen);
 
-        let _ = fs::remove_file(file_path);
+        fs::remove_file(file_path).ok();
     }
 
     #[test]

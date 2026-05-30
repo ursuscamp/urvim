@@ -197,6 +197,6 @@ pub struct Terminal<I: Read + AsFd, O: Write + AsFd> {
 
 impl<I: Read + AsFd, O: Write + AsFd> Drop for Terminal<I, O> {
     fn drop(&mut self) {
-        let _ = self.restore();
+        self.restore().ok();
     }
 }

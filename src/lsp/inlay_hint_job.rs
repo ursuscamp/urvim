@@ -60,10 +60,12 @@ impl LspInlayHintJob {
     /// releases it before waiting for the LSP response so the UI thread is never
     /// blocked during a slow inlay-hint round trip.
     pub fn run(self, context: &JobContext, event_tx: &Sender<JobEvent>) {
-        let _ = event_tx.send(JobEvent::Started {
-            kind: context.kind().clone(),
-            token: context.token(),
-        });
+        event_tx
+            .send(JobEvent::Started {
+                kind: context.kind().clone(),
+                token: context.token(),
+            })
+            .ok();
 
         let line = self.start_line.min(self.snapshot.lines.line_count());
         if context.is_stopping() || !context.is_current() || context.is_aborted() {
@@ -83,19 +85,23 @@ impl LspInlayHintJob {
         }) {
             Some(Ok(rx)) => rx,
             Some(Err(error)) => {
-                let _ = event_tx.send(JobEvent::Failed {
-                    kind: context.kind().clone(),
-                    token: context.token(),
-                    error: JobError::Message(error),
-                });
+                event_tx
+                    .send(JobEvent::Failed {
+                        kind: context.kind().clone(),
+                        token: context.token(),
+                        error: JobError::Message(error),
+                    })
+                    .ok();
                 return;
             }
             None => {
-                let _ = event_tx.send(JobEvent::Failed {
-                    kind: context.kind().clone(),
-                    token: context.token(),
-                    error: JobError::Message("LSP runtime is not available".to_string()),
-                });
+                event_tx
+                    .send(JobEvent::Failed {
+                        kind: context.kind().clone(),
+                        token: context.token(),
+                        error: JobError::Message("LSP runtime is not available".to_string()),
+                    })
+                    .ok();
                 return;
             }
         };
@@ -110,22 +116,26 @@ impl LspInlayHintJob {
                     .unwrap_or_default()
             }
             Ok(Message::Response(Response::Error(ErrorResponse { error, .. }))) => {
-                let _ = event_tx.send(JobEvent::Failed {
-                    kind: context.kind().clone(),
-                    token: context.token(),
-                    error: JobError::Message(error.message),
-                });
+                event_tx
+                    .send(JobEvent::Failed {
+                        kind: context.kind().clone(),
+                        token: context.token(),
+                        error: JobError::Message(error.message),
+                    })
+                    .ok();
                 return;
             }
             Ok(_) => Vec::new(),
             Err(_) => {
-                let _ = event_tx.send(JobEvent::Failed {
-                    kind: context.kind().clone(),
-                    token: context.token(),
-                    error: JobError::Message(
-                        "timed out waiting for inlay hint response".to_string(),
-                    ),
-                });
+                event_tx
+                    .send(JobEvent::Failed {
+                        kind: context.kind().clone(),
+                        token: context.token(),
+                        error: JobError::Message(
+                            "timed out waiting for inlay hint response".to_string(),
+                        ),
+                    })
+                    .ok();
                 return;
             }
         };
@@ -160,11 +170,13 @@ impl LspInlayHintJob {
             return;
         }
 
-        let _ = event_tx.send(JobEvent::Completed {
-            kind: context.kind().clone(),
-            token: context.token(),
-            payload: None,
-        });
+        event_tx
+            .send(JobEvent::Completed {
+                kind: context.kind().clone(),
+                token: context.token(),
+                payload: None,
+            })
+            .ok();
     }
 }
 

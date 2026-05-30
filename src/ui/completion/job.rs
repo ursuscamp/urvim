@@ -67,14 +67,16 @@ impl CompletionJob {
             return;
         }
 
-        let _ = event_tx.send(JobEvent::Completed {
-            kind: context.kind().clone(),
-            token: context.token(),
-            payload: Some(JobPayload::CompletionResults {
-                source,
-                items: results,
-            }),
-        });
+        event_tx
+            .send(JobEvent::Completed {
+                kind: context.kind().clone(),
+                token: context.token(),
+                payload: Some(JobPayload::CompletionResults {
+                    source,
+                    items: results,
+                }),
+            })
+            .ok();
     }
 }
 

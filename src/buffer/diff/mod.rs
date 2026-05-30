@@ -223,8 +223,8 @@ impl GitDiffProvider {
             .arg(&current_path)
             .output();
 
-        let _ = fs::remove_file(&base_path);
-        let _ = fs::remove_file(&current_path);
+        fs::remove_file(&base_path).ok();
+        fs::remove_file(&current_path).ok();
 
         let output = output?;
         if !output.status.success() && output.status.code() != Some(1) {
@@ -582,18 +582,20 @@ impl DiffRefreshJob {
         let snapshot = provider
             .collect(&input)
             .unwrap_or_else(|_| DiffSnapshot::untracked());
-        let _ = event_tx.send(crate::background::JobEvent::Completed {
-            kind: context.kind().clone(),
-            token: context.token(),
-            payload: Some(crate::background::JobPayload::DiffRefresh(
-                DiffRefreshResult {
-                    buffer_id: self.buffer_id,
-                    generation: self.generation,
-                    tracked: snapshot.tracked,
-                    hunks: snapshot.hunks,
-                },
-            )),
-        });
+        event_tx
+            .send(crate::background::JobEvent::Completed {
+                kind: context.kind().clone(),
+                token: context.token(),
+                payload: Some(crate::background::JobPayload::DiffRefresh(
+                    DiffRefreshResult {
+                        buffer_id: self.buffer_id,
+                        generation: self.generation,
+                        tracked: snapshot.tracked,
+                        hunks: snapshot.hunks,
+                    },
+                )),
+            })
+            .ok();
     }
 }
 

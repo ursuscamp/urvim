@@ -744,9 +744,9 @@ impl<S: PickerSource> PickerWidget<S> {
         self.preview_highlighted = Some(index);
         self.preview_state = PickerPreviewState::Loading;
 
-        let _ = self
-            .preview_adapter
-            .request_syntax_refresh_for_path(std::path::Path::new(key.as_str()));
+        self.preview_adapter
+            .request_syntax_refresh_for_path(std::path::Path::new(key.as_str()))
+            .ok();
 
         self.source
             .start_preview(item, self.preview_generation, self.preview_sender.clone());
@@ -1247,15 +1247,21 @@ mod tests {
             generation: u64,
             sender: Sender<PickerSearchEvent<Self::Item>>,
         ) {
-            let _ = sender.send(PickerSearchEvent::PickerSearchStarted {
-                generation,
-                query: query.to_string(),
-            });
-            let _ = sender.send(PickerSearchEvent::PickerChunk {
-                generation,
-                chunk: vec![format!("{query}-one"), format!("{query}-two")],
-            });
-            let _ = sender.send(PickerSearchEvent::PickerSearchComplete { generation });
+            sender
+                .send(PickerSearchEvent::PickerSearchStarted {
+                    generation,
+                    query: query.to_string(),
+                })
+                .ok();
+            sender
+                .send(PickerSearchEvent::PickerChunk {
+                    generation,
+                    chunk: vec![format!("{query}-one"), format!("{query}-two")],
+                })
+                .ok();
+            sender
+                .send(PickerSearchEvent::PickerSearchComplete { generation })
+                .ok();
         }
 
         fn job_manager(&self) -> std::sync::Arc<JobManager> {
@@ -1289,15 +1295,21 @@ mod tests {
             generation: u64,
             sender: Sender<PickerSearchEvent<Self::Item>>,
         ) {
-            let _ = sender.send(PickerSearchEvent::PickerSearchStarted {
-                generation,
-                query: query.to_string(),
-            });
-            let _ = sender.send(PickerSearchEvent::PickerChunk {
-                generation,
-                chunk: vec![format!("{query}-one")],
-            });
-            let _ = sender.send(PickerSearchEvent::PickerSearchComplete { generation });
+            sender
+                .send(PickerSearchEvent::PickerSearchStarted {
+                    generation,
+                    query: query.to_string(),
+                })
+                .ok();
+            sender
+                .send(PickerSearchEvent::PickerChunk {
+                    generation,
+                    chunk: vec![format!("{query}-one")],
+                })
+                .ok();
+            sender
+                .send(PickerSearchEvent::PickerSearchComplete { generation })
+                .ok();
         }
 
         fn job_manager(&self) -> std::sync::Arc<JobManager> {
@@ -1989,8 +2001,8 @@ mod tests {
             row_text(&mut window_screen, 2, 0).trim_end()
         );
 
-        let _ = std::fs::remove_file(file_path);
-        let _ = std::fs::remove_dir_all(temp_root);
+        std::fs::remove_file(file_path).ok();
+        std::fs::remove_dir_all(temp_root).ok();
     }
 
     #[test]

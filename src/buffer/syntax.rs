@@ -1436,15 +1436,17 @@ impl SyntaxRefreshJob {
             }
         }
 
-        let _ = event_tx.send(JobEvent::Completed {
-            kind: context.kind().clone(),
-            token: context.token(),
-            payload: Some(JobPayload::SyntaxRefresh(SyntaxRefreshResult {
-                buffer_id: self.buffer_id,
-                generation: self.generation,
-                syntax_cache: self.cache,
-            })),
-        });
+        event_tx
+            .send(JobEvent::Completed {
+                kind: context.kind().clone(),
+                token: context.token(),
+                payload: Some(JobPayload::SyntaxRefresh(SyntaxRefreshResult {
+                    buffer_id: self.buffer_id,
+                    generation: self.generation,
+                    syntax_cache: self.cache,
+                })),
+            })
+            .ok();
     }
 }
 
@@ -1483,15 +1485,17 @@ impl IndentScopeRefreshJob {
                 .ensure_through(&self.line_texts, target_line, tab_width);
         }
 
-        let _ = event_tx.send(JobEvent::Completed {
-            kind: context.kind().clone(),
-            token: context.token(),
-            payload: Some(JobPayload::IndentScopeRefresh(IndentScopeRefreshResult {
-                buffer_id: self.buffer_id,
-                generation: self.generation,
-                indent_scope_cache: self.cache,
-            })),
-        });
+        event_tx
+            .send(JobEvent::Completed {
+                kind: context.kind().clone(),
+                token: context.token(),
+                payload: Some(JobPayload::IndentScopeRefresh(IndentScopeRefreshResult {
+                    buffer_id: self.buffer_id,
+                    generation: self.generation,
+                    indent_scope_cache: self.cache,
+                })),
+            })
+            .ok();
     }
 }
 
@@ -1943,13 +1947,10 @@ fn tokenize_code_line(
             };
             (spans, SyntaxState::Code(state))
         }
-        CodeState::Normal { contexts } => {
-            let _ = line;
-            (
-                Vec::new(),
-                SyntaxState::Code(CodeState::Normal { contexts }),
-            )
-        }
+        CodeState::Normal { contexts } => (
+            Vec::new(),
+            SyntaxState::Code(CodeState::Normal { contexts }),
+        ),
     }
 }
 

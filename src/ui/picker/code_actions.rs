@@ -101,10 +101,12 @@ impl PickerSource for CodeActionsPickerSource {
         let current_generation = self.current_generation.load(Ordering::SeqCst);
         debug_assert_eq!(current_generation, generation);
 
-        let _ = sender.send(PickerSearchEvent::PickerSearchStarted {
-            generation,
-            query: query.to_string(),
-        });
+        sender
+            .send(PickerSearchEvent::PickerSearchStarted {
+                generation,
+                query: query.to_string(),
+            })
+            .ok();
 
         let query = query.trim().to_lowercase();
         let chunk = if query.is_empty() {
@@ -117,8 +119,12 @@ impl PickerSource for CodeActionsPickerSource {
                 .collect::<Vec<_>>()
         };
 
-        let _ = sender.send(PickerSearchEvent::PickerChunk { generation, chunk });
-        let _ = sender.send(PickerSearchEvent::PickerSearchComplete { generation });
+        sender
+            .send(PickerSearchEvent::PickerChunk { generation, chunk })
+            .ok();
+        sender
+            .send(PickerSearchEvent::PickerSearchComplete { generation })
+            .ok();
     }
 
     fn select(&self, item: &Self::Item) -> Intent {

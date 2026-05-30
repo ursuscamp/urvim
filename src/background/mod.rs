@@ -88,11 +88,13 @@ impl BackgroundJob {
                     open = cvar.wait(open).unwrap();
                 }
 
-                let _ = event_tx.send(JobEvent::Completed {
-                    kind: context.kind().clone(),
-                    token: context.token(),
-                    payload: None,
-                });
+                event_tx
+                    .send(JobEvent::Completed {
+                        kind: context.kind().clone(),
+                        token: context.token(),
+                        payload: None,
+                    })
+                    .ok();
             }
         }
     }
