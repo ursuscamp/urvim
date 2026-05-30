@@ -71,7 +71,7 @@ impl ReferencesPickerSource {
                 NEXT_REFERENCES_PICKER_GENERATION.fetch_add(1, Ordering::SeqCst),
             )),
             preview_generation: Arc::new(AtomicU64::new(0)),
-            query_fuzzy: Arc::new(AtomicBool::new(false)),
+            query_fuzzy: Arc::new(AtomicBool::new(true)),
             jobs,
         }
     }

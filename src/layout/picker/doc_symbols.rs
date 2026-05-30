@@ -35,7 +35,7 @@ impl Layout {
             }
         });
         picker.set_query_prompt_segments(DocSymbolsPickerSource::query_prompt_segments(
-            crate::ui::picker::doc_symbols::QueryMode::Exact,
+            crate::ui::picker::doc_symbols::QueryMode::Fuzzy,
         ));
         picker.set_label(match scope {
             DocSymbolsPickerScope::Document(_) => "Document Symbols",

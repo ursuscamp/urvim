@@ -75,7 +75,7 @@ impl FilePickerSource {
                 NEXT_FILE_PICKER_GENERATION.fetch_add(1, Ordering::SeqCst),
             )),
             preview_generation: Arc::new(AtomicU64::new(0)),
-            fuzzy_mode: Arc::new(AtomicBool::new(false)),
+            fuzzy_mode: Arc::new(AtomicBool::new(true)),
             jobs,
         }
     }

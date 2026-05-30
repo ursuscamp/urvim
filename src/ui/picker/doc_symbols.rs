@@ -118,7 +118,7 @@ impl DocSymbolsPickerSource {
     fn with_scope(scope: DocSymbolsPickerScope, jobs: Arc<JobManager>) -> Self {
         Self {
             scope,
-            query_fuzzy: Arc::new(AtomicBool::new(false)),
+            query_fuzzy: Arc::new(AtomicBool::new(true)),
             current_generation: Arc::new(AtomicU64::new(
                 NEXT_DOC_SYMBOLS_PICKER_GENERATION.fetch_add(1, Ordering::SeqCst),
             )),

@@ -34,7 +34,7 @@ impl Layout {
             ReferencesPickerWidget::new(ReferencesPickerSource::new(references, self.jobs.clone()));
         picker.set_label("References");
         picker.set_query_prompt_segments(ReferencesPickerSource::query_prompt_segments(
-            crate::ui::picker::references::QueryMode::Exact,
+            crate::ui::picker::references::QueryMode::Fuzzy,
         ));
         picker.restart_search();
         self.dialogs.references_picker = Some(picker);
