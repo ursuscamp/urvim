@@ -44,6 +44,11 @@ impl Modifiers {
     /// Meta key modifier (bit 5).
     pub const META: Self = Self(0b100000);
 
+    /// Returns `true` when no modifiers are active.
+    pub fn is_empty(self) -> bool {
+        self.0 == 0
+    }
+
     /// Returns `true` if the Shift modifier is active.
     pub fn has_shift(self) -> bool {
         self.0 & 1 != 0

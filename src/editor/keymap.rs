@@ -14,35 +14,6 @@ pub trait Keymap {
 
 pub(super) const MAX_COUNT: usize = 9999;
 
-pub(super) fn extract_leading_count(keys: &[String]) -> (usize, Vec<String>) {
-    let mut count_str = String::new();
-    let mut remaining = Vec::new();
-    let mut found_non_digit = false;
-
-    for key in keys {
-        let is_digit = key.len() == 1
-            && key
-                .chars()
-                .next()
-                .map(|c| c.is_ascii_digit())
-                .unwrap_or(false);
-
-        if !found_non_digit && is_digit {
-            count_str.push_str(key);
-        } else {
-            found_non_digit = true;
-            remaining.push(key.clone());
-        }
-    }
-
-    if count_str.is_empty() || !CountParser::is_valid_count(&count_str) {
-        return (0, keys.to_vec());
-    }
-
-    let count: usize = count_str.parse().unwrap_or(0);
-    (count, remaining)
-}
-
 struct TrieNode {
     children: BTreeMap<String, TrieNode>,
     intent: Option<Intent>,

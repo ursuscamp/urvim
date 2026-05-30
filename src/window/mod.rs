@@ -19,8 +19,8 @@ mod wrap;
 use crate::action::ActionResult;
 use crate::buffer::{Boundary, Buffer, BufferId, Cursor, DiffMarkerKind};
 use crate::editor::{
-    Action, InsertMode, LinewiseMotion, Mode, ModeKind, NormalMode, Operator, ResizingMode,
-    VisualLineMode, VisualMode,
+    Action, InsertMode, LinewiseMotion, Mode, ModeKind, NormalMode, Operator, ReplaceMode,
+    ResizingMode, VisualLineMode, VisualMode,
 };
 use crate::globals;
 use crate::lsp::diagnostics::{diagnostic_severity, diagnostic_severity_rank};
@@ -177,7 +177,15 @@ pub struct Window {
     size: Size,
     wrap_enabled: bool,
     pending_repeat_suffix: Option<String>,
+    replace_history: Vec<ReplaceEdit>,
     mode: Box<dyn Mode>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ReplaceEdit {
+    cursor: Cursor,
+    replaced: Option<char>,
+    inserted: char,
 }
 
 impl fmt::Debug for Window {
@@ -188,6 +196,7 @@ impl fmt::Debug for Window {
             .field("size", &self.size)
             .field("wrap_enabled", &self.wrap_enabled)
             .field("pending_repeat_suffix", &self.pending_repeat_suffix)
+            .field("replace_history", &self.replace_history)
             .field("mode_kind", &self.mode.kind())
             .finish()
     }
@@ -204,6 +213,7 @@ impl Window {
             size: Size::default(),
             wrap_enabled: false,
             pending_repeat_suffix: None,
+            replace_history: Vec::new(),
             mode: Box::new(NormalMode::new()),
         }
     }
@@ -216,6 +226,7 @@ impl Window {
             size: Size::default(),
             wrap_enabled: false,
             pending_repeat_suffix: None,
+            replace_history: Vec::new(),
             mode: Box::new(NormalMode::new()),
         }
     }
@@ -228,6 +239,7 @@ impl Window {
             size: Size::default(),
             wrap_enabled: false,
             pending_repeat_suffix: None,
+            replace_history: Vec::new(),
             mode: Box::new(NormalMode::new()),
         }
     }
@@ -313,9 +325,14 @@ impl Window {
             self.buffer_view.clear_visual_selection();
         }
 
+        if to_mode == ModeKind::Replace {
+            self.replace_history.clear();
+        }
+
         self.mode = match to_mode {
             ModeKind::Normal => Box::new(NormalMode::new()),
             ModeKind::Insert => Box::new(InsertMode::new()),
+            ModeKind::Replace => Box::new(ReplaceMode::new()),
             ModeKind::Resizing => Box::new(ResizingMode::new()),
             ModeKind::Visual => {
                 self.buffer_view

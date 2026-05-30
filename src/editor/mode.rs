@@ -8,6 +8,8 @@ pub enum ModeKind {
     Normal,
     /// Insert mode.
     Insert,
+    /// Replace mode.
+    Replace,
     /// Visual mode.
     Visual,
     /// Linewise visual mode.
@@ -22,6 +24,7 @@ impl ModeKind {
         match self {
             Self::Normal => "NORMAL",
             Self::Insert => "INSERT",
+            Self::Replace => "REPLACE",
             Self::Visual => "VISUAL",
             Self::VisualLine => "V-LINE",
             Self::Resizing => "RESIZE",

@@ -1,4 +1,4 @@
-use crate::buffer::{Boundary, BufferId};
+use crate::buffer::{Boundary, BufferId, Cursor};
 use crate::editor::ModeKind;
 use crate::globals;
 use crate::register::RegisterName;
@@ -383,6 +383,16 @@ pub enum ActionKind {
     },
     /// Add a surrounding delimiter pair around the active visual selection.
     SurroundAddSelection { delimiter: DelimiterFamily },
+    /// Replace a single character under the cursor with the given character.
+    ReplaceChar(char),
+    /// Restore the previous character replaced in the current replace-mode session.
+    ReplaceBackspaceLast,
+    /// Undo the last character inserted while in replace mode.
+    ReplaceBackspace {
+        cursor: Cursor,
+        replaced: Option<char>,
+        inserted: char,
+    },
 }
 
 impl Action {
@@ -610,6 +620,8 @@ impl Action {
                 | Some(ActionKind::SurroundDelete { .. })
                 | Some(ActionKind::SurroundAdd { .. })
                 | Some(ActionKind::SurroundAddSelection { .. })
+                | Some(ActionKind::ReplaceChar(_))
+                | Some(ActionKind::ReplaceBackspace { .. })
         )
     }
 
@@ -677,6 +689,7 @@ impl Action {
                 | Some(ActionKind::RepeatLastFindReverse)
                 | Some(ActionKind::MoveToPreviousParagraph)
                 | Some(ActionKind::MoveToNextParagraph)
+                | Some(ActionKind::ReplaceChar(_))
         )
     }
 
@@ -736,6 +749,8 @@ impl Action {
             Some(ActionKind::Operation(Operator::Delete, _)) => true,
             Some(ActionKind::Operation(Operator::Change, _)) => false,
             Some(ActionKind::Operation(Operator::Yank, _)) => false,
+            Some(ActionKind::ReplaceChar(_)) => self.from_mode != Some(ModeKind::Replace),
+            Some(ActionKind::ReplaceBackspaceLast | ActionKind::ReplaceBackspace { .. }) => false,
             Some(ActionKind::SurroundReplace { .. })
             | Some(ActionKind::SurroundDelete { .. })
             | Some(ActionKind::SurroundAdd { .. })
@@ -819,6 +834,9 @@ impl Action {
             | Some(ActionKind::Operation(Operator::Lowercase, _))
             | Some(ActionKind::Operation(Operator::Uppercase, _))
             | Some(ActionKind::Operation(Operator::ToggleCase, _))
+            | Some(ActionKind::ReplaceChar(_))
+            | Some(ActionKind::ReplaceBackspaceLast)
+            | Some(ActionKind::ReplaceBackspace { .. })
             | Some(ActionKind::SurroundReplace { .. })
             | Some(ActionKind::SurroundDelete { .. })
             | Some(ActionKind::SurroundAdd { .. })

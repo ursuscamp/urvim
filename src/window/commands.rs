@@ -280,6 +280,16 @@ impl Window {
         prefix
     }
 
+    pub(super) fn replace_newline_at_cursor(&mut self) -> Option<String> {
+        let cursor = self.buffer_view.cursor();
+        self.replace_history.push(ReplaceEdit {
+            cursor,
+            replaced: None,
+            inserted: '\n',
+        });
+        self.insert_newline()
+    }
+
     pub(super) fn current_line_indentation(&self) -> Option<String> {
         let cursor = self.buffer_view.cursor();
         self.buffer_view
@@ -501,6 +511,68 @@ impl Window {
         } else {
             ActionResult::NotHandled
         }
+    }
+
+    pub fn replace_char_at_cursor(&mut self, c: char) {
+        let cursor = self.buffer_view.cursor();
+        let replaced = self
+            .buffer_view
+            .with_buffer(|buffer| buffer.char_at_cursor(cursor))
+            .flatten();
+        self.replace_history.push(ReplaceEdit {
+            cursor,
+            replaced,
+            inserted: c,
+        });
+        let has_char = self
+            .buffer_view
+            .with_buffer(|buffer| {
+                let line_len = buffer.line_len(cursor.line);
+                cursor.col < line_len
+            })
+            .unwrap_or(false);
+
+        if has_char {
+            self.buffer_view
+                .with_buffer_mut(|buffer| {
+                    buffer.delete_char_at_cursor(cursor);
+                })
+                .unwrap_or(());
+            self.buffer_view.set_cursor(cursor);
+        }
+        self.insert_char(c);
+    }
+
+    pub fn restore_last_replace_char(&mut self) -> ActionResult {
+        let Some(edit) = self.replace_history.pop() else {
+            return ActionResult::NotHandled;
+        };
+
+        self.restore_replace_char(edit.cursor, edit.replaced, edit.inserted);
+        ActionResult::Handled
+    }
+
+    pub fn restore_replace_char(&mut self, cursor: Cursor, replaced: Option<char>, inserted: char) {
+        if inserted == '\n' {
+            let newline_cursor = Cursor::new(cursor.line + 1, 0);
+            self.buffer_view.set_cursor(newline_cursor);
+            self.delete_char_before_cursor();
+            self.buffer_view.set_cursor(cursor);
+            return;
+        }
+
+        self.buffer_view.set_cursor(cursor);
+        self.buffer_view
+            .with_buffer_mut(|buffer| {
+                if buffer.char_at_cursor(cursor) == Some(inserted) {
+                    buffer.delete_char_at_cursor(cursor);
+                }
+                if let Some(replaced) = replaced {
+                    buffer.insert_char(cursor, replaced);
+                }
+            })
+            .unwrap_or(());
+        self.buffer_view.set_cursor(cursor);
     }
 
     pub(super) fn delete_surround(&mut self, target: DelimiterFamily) -> ActionResult {

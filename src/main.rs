@@ -338,7 +338,9 @@ fn main() -> io::Result<()> {
                                         }
 
                                         if handled {
-                                            if dispatch_action.from_mode == Some(ModeKind::Insert)
+                                            if (dispatch_action.from_mode == Some(ModeKind::Insert)
+                                                || dispatch_action.from_mode
+                                                    == Some(ModeKind::Replace))
                                                 && dispatch_action.to_mode == Some(ModeKind::Normal)
                                             {
                                                 commit_insert_exit_snapshot(&mut layout);
@@ -680,7 +682,7 @@ fn handle_ui_result(layout: &mut Layout, result: urvim::ui::UiEventResult) -> bo
 
 fn raw_paste_action_for_mode(mode: ModeKind, text: String) -> Option<Action> {
     match mode {
-        ModeKind::Insert | ModeKind::Normal => {
+        ModeKind::Insert | ModeKind::Replace | ModeKind::Normal => {
             Some(Action::insert_raw_paste(text).with_from_mode(mode))
         }
         ModeKind::Visual | ModeKind::VisualLine => Some(

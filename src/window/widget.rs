@@ -126,7 +126,11 @@ impl Window {
                     }
                 }
                 Some(ActionKind::InsertNewline) => {
-                    self.pending_repeat_suffix = self.insert_newline();
+                    self.pending_repeat_suffix = if action.from_mode == Some(ModeKind::Replace) {
+                        self.replace_newline_at_cursor()
+                    } else {
+                        self.insert_newline()
+                    };
                     ActionResult::Handled
                 }
                 Some(ActionKind::ForwardTo(boundary)) => {
@@ -577,6 +581,19 @@ impl Window {
                     target,
                     replacement,
                 }) => self.replace_surround(*target, *replacement),
+                Some(ActionKind::ReplaceChar(c)) => {
+                    self.replace_char_at_cursor(*c);
+                    ActionResult::Handled
+                }
+                Some(ActionKind::ReplaceBackspaceLast) => self.restore_last_replace_char(),
+                Some(ActionKind::ReplaceBackspace {
+                    cursor,
+                    replaced,
+                    inserted,
+                }) => {
+                    self.restore_replace_char(*cursor, *replaced, *inserted);
+                    ActionResult::Handled
+                }
                 Some(ActionKind::SurroundDelete { target }) => self.delete_surround(*target),
                 Some(ActionKind::SurroundAdd { target, delimiter }) => {
                     self.add_surround(*target, *delimiter)

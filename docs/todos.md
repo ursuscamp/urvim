@@ -19,3 +19,4 @@ This is a list, in no particular order, of things that need to be addressed whic
 
 - should markerstore be in the buffercache?
 - lot of repetition in globals.rs, maybe modularize it?
+- colorscheme picker should duplicate the other pickers

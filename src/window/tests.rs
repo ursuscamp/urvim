@@ -35,6 +35,18 @@ fn process_action_and_snapshot(window: &mut Window, action: &Action) {
     }
 }
 
+fn dispatch_with_main_loop_snapshot(window: &mut Window, action: &Action) {
+    assert_eq!(window.dispatch_action(action), ActionResult::Handled);
+
+    if action.is_snapshottable() {
+        let cursor = window.buffer_view.cursor();
+        window
+            .buffer_view
+            .with_buffer_mut(|buffer| buffer.push_snapshot(cursor))
+            .unwrap_or(());
+    }
+}
+
 #[test]
 fn test_surround_replace_updates_nearest_enclosing_pair() {
     let mut window = Window::new(Buffer::from_str("one {two {three} four} five"));
@@ -112,6 +124,139 @@ fn test_surround_replace_is_single_undoable_edit() {
 
     apply_undo_synced(&mut window);
     assert_eq!(buffer_text(window.buffer_view()), "foo(bar)baz");
+}
+
+#[test]
+fn test_replace_mode_edits_undo_as_single_snapshot() {
+    let mut window = Window::new(Buffer::from_str("hello"));
+    window.set_cursor(Cursor::new(0, 1));
+
+    dispatch_with_main_loop_snapshot(
+        &mut window,
+        &Action::new(ActionKind::ReplaceChar('a')).with_from_mode(ModeKind::Replace),
+    );
+    dispatch_with_main_loop_snapshot(
+        &mut window,
+        &Action::new(ActionKind::ReplaceChar('b')).with_from_mode(ModeKind::Replace),
+    );
+    commit_insert_exit_snapshot(&mut window);
+
+    assert_eq!(buffer_text(window.buffer_view()), "hablo");
+    apply_undo_synced(&mut window);
+    assert_eq!(buffer_text(window.buffer_view()), "hello");
+}
+
+#[test]
+fn test_replace_backspace_restores_overwritten_character() {
+    let mut window = Window::new(Buffer::from_str("hello"));
+    window.set_cursor(Cursor::new(0, 1));
+
+    assert_eq!(
+        window.dispatch_action(
+            &Action::new(ActionKind::ReplaceChar('a')).with_from_mode(ModeKind::Replace)
+        ),
+        ActionResult::Handled
+    );
+    assert_eq!(buffer_text(window.buffer_view()), "hallo");
+    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 2));
+
+    assert_eq!(
+        window.dispatch_action(
+            &Action::new(ActionKind::ReplaceBackspace {
+                cursor: Cursor::new(0, 1),
+                replaced: Some('e'),
+                inserted: 'a',
+            })
+            .with_from_mode(ModeKind::Replace)
+        ),
+        ActionResult::Handled
+    );
+    assert_eq!(buffer_text(window.buffer_view()), "hello");
+    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 1));
+}
+
+#[test]
+fn test_replace_backspace_restores_successive_live_replace_positions() {
+    let mut window = Window::new(Buffer::from_str("hello"));
+    window.set_cursor(Cursor::new(0, 1));
+
+    dispatch_with_main_loop_snapshot(
+        &mut window,
+        &Action::new(ActionKind::ReplaceChar('a')).with_from_mode(ModeKind::Replace),
+    );
+    dispatch_with_main_loop_snapshot(
+        &mut window,
+        &Action::new(ActionKind::ReplaceChar('b')).with_from_mode(ModeKind::Replace),
+    );
+    dispatch_with_main_loop_snapshot(
+        &mut window,
+        &Action::new(ActionKind::ReplaceChar('c')).with_from_mode(ModeKind::Replace),
+    );
+    assert_eq!(buffer_text(window.buffer_view()), "habco");
+    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 4));
+
+    dispatch_with_main_loop_snapshot(
+        &mut window,
+        &Action::new(ActionKind::ReplaceBackspaceLast).with_from_mode(ModeKind::Replace),
+    );
+    assert_eq!(buffer_text(window.buffer_view()), "hablo");
+    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 3));
+
+    dispatch_with_main_loop_snapshot(
+        &mut window,
+        &Action::new(ActionKind::ReplaceBackspaceLast).with_from_mode(ModeKind::Replace),
+    );
+    assert_eq!(buffer_text(window.buffer_view()), "hallo");
+    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 2));
+}
+
+#[test]
+fn test_replace_backspace_removes_inserted_character_past_line_end() {
+    let mut window = Window::new(Buffer::from_str("hi"));
+    window.set_cursor(Cursor::new(0, 2));
+
+    assert_eq!(
+        window.dispatch_action(
+            &Action::new(ActionKind::ReplaceChar('x')).with_from_mode(ModeKind::Replace)
+        ),
+        ActionResult::Handled
+    );
+    assert_eq!(buffer_text(window.buffer_view()), "hix");
+    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 3));
+
+    assert_eq!(
+        window.dispatch_action(
+            &Action::new(ActionKind::ReplaceBackspace {
+                cursor: Cursor::new(0, 2),
+                replaced: None,
+                inserted: 'x',
+            })
+            .with_from_mode(ModeKind::Replace)
+        ),
+        ActionResult::Handled
+    );
+    assert_eq!(buffer_text(window.buffer_view()), "hi");
+    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 2));
+}
+
+#[test]
+fn test_replace_backspace_rejoins_line_split_by_replace_newline() {
+    let mut window = Window::new(Buffer::from_str("hello"));
+    window.set_cursor(Cursor::new(0, 2));
+
+    dispatch_with_main_loop_snapshot(
+        &mut window,
+        &Action::insert_newline().with_from_mode(ModeKind::Replace),
+    );
+    assert_eq!(buffer_text(window.buffer_view()), "he\nllo");
+    assert_eq!(window.buffer_view().cursor(), Cursor::new(1, 0));
+
+    dispatch_with_main_loop_snapshot(
+        &mut window,
+        &Action::new(ActionKind::ReplaceBackspaceLast).with_from_mode(ModeKind::Replace),
+    );
+    assert_eq!(buffer_text(window.buffer_view()), "hello");
+    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 2));
 }
 
 #[test]
@@ -4350,6 +4495,170 @@ fn test_cw_changes_through_next_word_start() {
         .with_to_mode(ModeKind::Insert)
         .switches_to_insert_mode()
     );
+}
+
+#[test]
+fn test_ciw_keeps_syntax_styled_above_changed_line() {
+    let _lock = syntax_worker_lock();
+    let _theme_guard = globals::set_test_active_theme(syntax_themed_window());
+    let _config_guard = globals::set_test_config(Config {
+        theme: "demo-syntax".to_string(),
+        insert_escape: None,
+        syntax: true,
+        auto_close_pairs: true,
+        auto_indent: AutoIndentMode::Off,
+        advanced_glyphs: BTreeSet::new(),
+        ..Default::default()
+    });
+
+    let body = (0..1024)
+        .map(|idx| format!("fn filler_{idx}() {{ let value_{idx} = {idx}; }}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let source = format!("fn main() {{\n    let value = String::new();\n}}\n{body}");
+    let path = temp_path_with_ext("cw-render-fallback", "rs");
+    let buffer = Buffer::from_str_with_path(&source, path);
+    let mut window = Window::new(buffer);
+
+    window
+        .buffer_view_mut()
+        .with_buffer_mut(|buffer| {
+            buffer.ensure_syntax_through(buffer.line_count().saturating_sub(1))
+        })
+        .unwrap();
+
+    let edit_line = window
+        .buffer_view()
+        .with_buffer(|buffer| {
+            (0..buffer.line_count())
+                .find(|line| {
+                    buffer
+                        .line_at(*line)
+                        .is_some_and(|line_text| line_text.to_string().contains("let value"))
+                })
+                .expect("value line should exist")
+        })
+        .unwrap();
+    let line_text = window
+        .buffer_view()
+        .with_buffer(|buffer| buffer.line_at(edit_line).map(|line| line.to_string()))
+        .flatten()
+        .expect("value line should exist");
+    let value_start = line_text.find("value").expect("line should contain value");
+
+    window
+        .buffer_view_mut()
+        .set_cursor(Cursor::new(edit_line, value_start));
+    assert_eq!(
+        window.dispatch_action(&Action::operation(
+            Operator::Change,
+            OperatorTarget::TextObject(TextObject::InnerWord),
+        )),
+        ActionResult::Handled
+    );
+    assert_eq!(
+        window.dispatch_action(
+            &Action::insert_text("foo".to_string()).with_from_mode(ModeKind::Insert)
+        ),
+        ActionResult::Handled
+    );
+
+    window
+        .buffer_view_mut()
+        .set_scroll_offset(Position::new(edit_line.saturating_sub(1) as u16, 0));
+
+    let mut screen = crate::screen::Screen::new(4, 120);
+    window.render(&mut screen, Position::new(0, 0), Size::new(4, 120));
+
+    let expected_keyword_style = Style::new().fg(Color::ansi(23));
+    let line_above = rendered_line(&window, 0);
+    assert!(line_above.iter().any(|chunk| chunk.text == "fn"));
+
+    let edited_line = rendered_line(&window, 1);
+    assert!(
+        edited_line
+            .iter()
+            .any(|chunk| chunk.text == "let" && chunk.style == expected_keyword_style)
+    );
+    assert!(
+        edited_line
+            .iter()
+            .any(|chunk| chunk.text == "foo" && chunk.style == Style::new().fg(Color::ansi(29)))
+    );
+    assert!(
+        edited_line
+            .iter()
+            .any(|chunk| chunk.text == "String" && chunk.style == Style::new().fg(Color::ansi(28)))
+    );
+}
+
+#[test]
+fn test_open_line_after_ciw_keeps_prefix_styled() {
+    let _lock = syntax_worker_lock();
+    let _theme_guard = globals::set_test_active_theme(syntax_themed_window());
+    let _config_guard = globals::set_test_config(Config {
+        theme: "demo-syntax".to_string(),
+        insert_escape: None,
+        syntax: true,
+        auto_close_pairs: true,
+        auto_indent: AutoIndentMode::Off,
+        advanced_glyphs: BTreeSet::new(),
+        ..Default::default()
+    });
+
+    let source = "fn main() {\n    let value = String::new();\n}\nfn helper() {}";
+    let path = temp_path_with_ext("open-line-after-ciw", "rs");
+    let buffer = Buffer::from_str_with_path(source, path);
+    let mut window = Window::new(buffer);
+
+    window
+        .buffer_view_mut()
+        .with_buffer_mut(|buffer| {
+            buffer.ensure_syntax_through(buffer.line_count().saturating_sub(1))
+        })
+        .unwrap();
+
+    let edit_line = 1;
+    let line_text = window
+        .buffer_view()
+        .with_buffer(|buffer| buffer.line_at(edit_line).map(|line| line.to_string()))
+        .flatten()
+        .expect("value line should exist");
+    let value_start = line_text.find("value").expect("line should contain value");
+
+    window
+        .buffer_view_mut()
+        .set_cursor(Cursor::new(edit_line, value_start));
+    assert_eq!(
+        window.dispatch_action(&Action::operation(
+            Operator::Change,
+            OperatorTarget::TextObject(TextObject::InnerWord),
+        )),
+        ActionResult::Handled
+    );
+    assert_eq!(
+        window.dispatch_action(
+            &Action::insert_text("foo".to_string()).with_from_mode(ModeKind::Insert)
+        ),
+        ActionResult::Handled
+    );
+    assert_eq!(
+        window.dispatch_action(
+            &Action::new(ActionKind::OpenLineBelow).with_to_mode(ModeKind::Insert)
+        ),
+        ActionResult::Handled
+    );
+
+    window
+        .buffer_view_mut()
+        .set_scroll_offset(Position::new(0, 0));
+    let mut screen = crate::screen::Screen::new(4, 120);
+    window.render(&mut screen, Position::new(0, 0), Size::new(4, 120));
+
+    let first = rendered_line(&window, 0);
+    assert!(first.iter().any(|chunk| chunk.text == "fn"));
+    let second = rendered_line(&window, 1);
+    assert!(second.iter().any(|chunk| chunk.text == "let"));
 }
 
 #[test]

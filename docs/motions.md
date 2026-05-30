@@ -59,55 +59,62 @@ Diff hunk motions hop across the current buffer's unstaged Git hunks.
 - `[H` moves to the end of the current hunk when not already on its last line, otherwise to the previous hunk end.
 - `]H` moves to the end of the current hunk when not already on its last line, otherwise to the next hunk end.
 - These motions do not take a count.
-  | `a` | Append after cursor (enter insert mode) |
-  | `A` | Append to line end (enter insert mode) |
-  | `I` | Insert at line start (enter insert mode) |
-  | `J` | Join lines with space |
-  | `gJ` | Join lines without space |
-  | `gO` | Open the active buffer's document symbol picker |
-  | `grr` | Open references for the symbol under the cursor |
-  | `gsa{text object}{pair}` | Add surrounding pair around a text object |
-  | `gsr{from}{to}` | Replace nearest surrounding pair of `{from}` family with `{to}` family |
-  | `gsd{pair}` | Delete nearest surrounding pair of `{pair}` family |
-  | `gcc` | Toggle line comment on the current line (or N consecutive lines with a count) |
-  | `<<` | Decrease indentation on the current line (or N consecutive lines with a count) |
-  | `\>>` | Increase indentation on the current line (or N consecutive lines with a count) |
-  | `dd` | Delete line (or N lines with count) |
-  | `cc` | Change line: delete line(s) and enter insert mode, leaving one blank line |
-  | `C` | Change to end of line: delete from cursor to EOL and enter insert mode |
-  | `o` | Open line below: create new empty line below and enter insert mode |
-  | `O` | Open line above: create new empty line above and enter insert mode |
-  | `%` | Jump to matching bracket (parentheses, square brackets, curly braces) |
-  | `f` | Find forward: move to next occurrence of character |
-  | `F` | Find backward: move to previous occurrence of character |
-  | `t` | Till forward: move to position before next occurrence of character |
-  | `T` | Till backward: move to position after previous occurrence of character |
-  | `diw` | Delete inner word (word under cursor) |
-  | `daw` | Delete around word (word plus trailing whitespace) |
-  | `dw` | Delete through next `w` boundary |
-  | `de` | Delete through next `e` boundary |
-  | `db` | Delete back to previous `b` boundary |
-  | `d$` | Delete from the cursor through the end of the line |
-  | `d0` | Delete from the start of the line through the cursor |
-  | `d^` | Delete from the first non-whitespace character through the cursor |
-  | `dgg` | Delete linewise from the current line to line 1 (or to line N with a count) |
-  | `dG` | Delete linewise from the current line to the last line (or to line N with a count) |
-  | `dW` | Delete through next `W` boundary |
-  | `dE` | Delete through next `E` boundary |
-  | `dB` | Delete back to previous `B` boundary |
-  | `ciw` | Change inner word (delete inner word and enter insert mode) |
-  | `caw` | Change around word (delete around word and enter insert mode) |
-  | `cw` | Change through next `w` boundary and enter insert mode |
-  | `ce` | Change through next `e` boundary and enter insert mode |
-  | `cb` | Change back to previous `b` boundary and enter insert mode |
-  | `cW` | Change through next `W` boundary and enter insert mode |
-  | `cE` | Change through next `E` boundary and enter insert mode |
-  | `cB` | Change back to previous `B` boundary and enter insert mode |
-  | `c$` | Change from the cursor through the end of the line |
-  | `c0` | Change from the start of the line through the cursor |
-  | `c^` | Change from the first non-whitespace character through the cursor |
-  | `cgg` | Change linewise from the current line to line 1 (or to line N with a count) |
-  | `cG` | Change linewise from the current line to the last line (or to line N with a count) |
+
+## Mode Change and Edit Operations
+
+| Motion                   | Description                                                                        |
+| ------------------------ | ---------------------------------------------------------------------------------- |
+| `a`                      | Append after cursor (enter insert mode)                                            |
+| `A`                      | Append to line end (enter insert mode)                                             |
+| `I`                      | Insert at line start (enter insert mode)                                           |
+| `J`                      | Join lines with space                                                              |
+| `gJ`                     | Join lines without space                                                           |
+| `gO`                     | Open the active buffer's document symbol picker                                    |
+| `grr`                    | Open references for the symbol under the cursor                                    |
+| `gsa{text object}{pair}` | Add surrounding pair around a text object                                          |
+| `gsr{from}{to}`          | Replace nearest surrounding pair of `{from}` family with `{to}` family             |
+| `gsd{pair}`              | Delete nearest surrounding pair of `{pair}` family                                 |
+| `r`                      | Replace single character under cursor with the next typed character                |
+| `R`                      | Enter replace mode (overwrite characters instead of inserting)                     |
+| `gcc`                    | Toggle line comment on the current line (or N consecutive lines with a count)      |
+| `<<`                     | Decrease indentation on the current line (or N consecutive lines with a count)     |
+| `>>`                     | Increase indentation on the current line (or N consecutive lines with a count)     |
+| `dd`                     | Delete line (or N lines with count)                                                |
+| `cc`                     | Change line: delete line(s) and enter insert mode, leaving one blank line          |
+| `C`                      | Change to end of line: delete from cursor to EOL and enter insert mode             |
+| `o`                      | Open line below: create new empty line below and enter insert mode                 |
+| `O`                      | Open line above: create new empty line above and enter insert mode                 |
+| `%`                      | Jump to matching bracket (parentheses, square brackets, curly braces)              |
+| `f`                      | Find forward: move to next occurrence of character                                 |
+| `F`                      | Find backward: move to previous occurrence of character                            |
+| `t`                      | Till forward: move to position before next occurrence of character                 |
+| `T`                      | Till backward: move to position after previous occurrence of character             |
+| `diw`                    | Delete inner word (word under cursor)                                              |
+| `daw`                    | Delete around word (word plus trailing whitespace)                                 |
+| `dw`                     | Delete through next `w` boundary                                                   |
+| `de`                     | Delete through next `e` boundary                                                   |
+| `db`                     | Delete back to previous `b` boundary                                               |
+| `d$`                     | Delete from the cursor through the end of the line                                 |
+| `d0`                     | Delete from the start of the line through the cursor                               |
+| `d^`                     | Delete from the first non-whitespace character through the cursor                  |
+| `dgg`                    | Delete linewise from the current line to line 1 (or to line N with a count)        |
+| `dG`                     | Delete linewise from the current line to the last line (or to line N with a count) |
+| `dW`                     | Delete through next `W` boundary                                                   |
+| `dE`                     | Delete through next `E` boundary                                                   |
+| `dB`                     | Delete back to previous `B` boundary                                               |
+| `ciw`                    | Change inner word (delete inner word and enter insert mode)                        |
+| `caw`                    | Change around word (delete around word and enter insert mode)                      |
+| `cw`                     | Change through next `w` boundary and enter insert mode                             |
+| `ce`                     | Change through next `e` boundary and enter insert mode                             |
+| `cb`                     | Change back to previous `b` boundary and enter insert mode                         |
+| `cW`                     | Change through next `W` boundary and enter insert mode                             |
+| `cE`                     | Change through next `E` boundary and enter insert mode                             |
+| `cB`                     | Change back to previous `B` boundary and enter insert mode                         |
+| `c$`                     | Change from the cursor through the end of the line                                 |
+| `c0`                     | Change from the start of the line through the cursor                               |
+| `c^`                     | Change from the first non-whitespace character through the cursor                  |
+| `cgg`                    | Change linewise from the current line to line 1 (or to line N with a count)        |
+| `cG`                     | Change linewise from the current line to the last line (or to line N with a count) |
 
 ## Visual Mode
 
@@ -461,6 +468,39 @@ Examples:
 
 - `I` -> moves to first non-whitespace of current line, enters insert mode
 - `3I` -> goes to line 3, moves to its first non-whitespace, enters insert mode
+
+## Replace Operations
+
+### r - Replace Single Character
+
+Replaces the character under the cursor with the next typed character, then returns to normal mode.
+
+- **Count**: Yes - replaces `count` characters (e.g., `3ra` replaces three characters with `a`)
+- **Cursor position**: Lands after the last replaced character
+- **End of line**: If the cursor is at the end of the line, appends the character instead
+- **Vim difference**: Same behavior as Vim
+
+Examples:
+
+- `r a` on "hel|lo" -> "hela|o" (replaces 'l' with 'a')
+- `r x` on "|hello" -> "|xello" (replaces 'h' with 'x')
+- `3r z` on "ab|cdef" -> "abzzz|f" (replaces three chars with 'z')
+
+### R - Enter Replace Mode
+
+Enters replace mode, where each typed character overwrites the character under the cursor instead of inserting.
+
+- **Count**: No count support
+- **Cursor style**: Underline cursor (compared to bar cursor for insert mode)
+- **Mode exit**: Press `Esc` to return to normal mode
+- **Navigation**: Arrow keys, PageUp, PageDown, Ctrl-U, and Ctrl-D work the same as in insert mode
+- **Vim difference**: Same behavior as Vim
+
+Examples:
+
+- `R` then `x` on "hel|lo" -> "hel|x o" (overwrites 'l' with 'x')
+- `R` then `xyz` on "hell|o world" -> "hell|xyz world" (overwrites three chars)
+- `R` at end of line: acts like insert mode (appends characters)
 
 ## Screen-Relative Motions
 

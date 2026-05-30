@@ -1,8 +1,7 @@
 use crate::buffer::Boundary;
-use crate::editor::surround;
 use crate::editor::{
-    Action, ActionKind, BoundaryMotion, BracketKind, LinewiseMotion, ModeKind, Operator,
-    OperatorTarget, QuoteKind, TextObject, TrieKeymap,
+    Action, ActionKind, BoundaryMotion, LinewiseMotion, ModeKind, Operator, OperatorTarget,
+    TrieKeymap,
 };
 use crate::ui::Command;
 
@@ -107,6 +106,7 @@ fn register_mode_bindings(trie_keymap: &mut TrieKeymap) {
     trie_keymap.insert_str("i", Action::mode_transition(ModeKind::Insert));
     trie_keymap.insert_str("v", Action::mode_transition(ModeKind::Visual));
     trie_keymap.insert_str("V", Action::mode_transition(ModeKind::VisualLine));
+    trie_keymap.insert_str("R", Action::mode_transition(ModeKind::Replace));
     trie_keymap.insert_str("<C-s>", Action::save_buffer(None));
     trie_keymap.insert_str(
         "a",
@@ -175,49 +175,12 @@ fn register_edit_bindings(trie_keymap: &mut TrieKeymap) {
         "C",
         Action::new(ActionKind::ChangeToLineEnd).with_to_mode(ModeKind::Insert),
     );
-    register_surround_bindings(trie_keymap);
-}
-
-fn register_surround_bindings(trie_keymap: &mut TrieKeymap) {
-    let selectors = surround::delimiter_selectors();
-
-    for (selector, target) in selectors {
-        trie_keymap.insert_str(
-            &format!("gsd{selector}"),
-            Action::new(ActionKind::SurroundDelete { target: *target }),
-        );
-    }
-
-    for (target_selector, target) in selectors {
-        for (replacement_selector, replacement) in selectors {
-            trie_keymap.insert_str(
-                &format!("gsr{target_selector}{replacement_selector}"),
-                Action::new(ActionKind::SurroundReplace {
-                    target: *target,
-                    replacement: *replacement,
-                }),
-            );
-        }
-    }
-
-    for (target_sequence, target) in surround::text_object_sequences() {
-        for (delimiter_selector, delimiter) in selectors {
-            trie_keymap.insert_str(
-                &format!("gsa{target_sequence}{delimiter_selector}"),
-                Action::new(ActionKind::SurroundAdd {
-                    target: *target,
-                    delimiter: *delimiter,
-                }),
-            );
-        }
-    }
 }
 
 fn register_operator_bindings(trie_keymap: &mut TrieKeymap) {
     register_operator_family_bindings(trie_keymap, "d", Operator::Delete, None);
     register_operator_family_bindings(trie_keymap, "y", Operator::Yank, None);
     register_operator_family_bindings(trie_keymap, "c", Operator::Change, Some(ModeKind::Insert));
-    register_text_object_operator_bindings(trie_keymap);
     register_case_operator_bindings(trie_keymap);
 }
 
@@ -228,164 +191,6 @@ fn register_operator_family_bindings(
     to_mode: Option<ModeKind>,
 ) {
     insert_operator_sequences(trie_keymap, prefix, operator, &operator_sequences(to_mode));
-}
-
-fn register_text_object_operator_bindings(trie_keymap: &mut TrieKeymap) {
-    register_quote_operator_bindings(trie_keymap);
-    register_bracket_operator_bindings(trie_keymap);
-}
-
-fn register_quote_operator_bindings(trie_keymap: &mut TrieKeymap) {
-    for (kind, key) in [
-        (QuoteKind::Single, "'"),
-        (QuoteKind::Double, "\""),
-        (QuoteKind::Backtick, "`"),
-    ] {
-        insert_operator_sequence(
-            trie_keymap,
-            format!("di{key}"),
-            Operator::Delete,
-            OperatorTarget::TextObject(TextObject::InnerQuote(kind)),
-            None,
-        );
-        insert_operator_sequence(
-            trie_keymap,
-            format!("da{key}"),
-            Operator::Delete,
-            OperatorTarget::TextObject(TextObject::AroundQuote(kind)),
-            None,
-        );
-        insert_operator_sequence(
-            trie_keymap,
-            format!("ci{key}"),
-            Operator::Change,
-            OperatorTarget::TextObject(TextObject::InnerQuote(kind)),
-            Some(ModeKind::Insert),
-        );
-        insert_operator_sequence(
-            trie_keymap,
-            format!("ca{key}"),
-            Operator::Change,
-            OperatorTarget::TextObject(TextObject::AroundQuote(kind)),
-            Some(ModeKind::Insert),
-        );
-        insert_operator_sequence(
-            trie_keymap,
-            format!("yi{key}"),
-            Operator::Yank,
-            OperatorTarget::TextObject(TextObject::InnerQuote(kind)),
-            None,
-        );
-        insert_operator_sequence(
-            trie_keymap,
-            format!("ya{key}"),
-            Operator::Yank,
-            OperatorTarget::TextObject(TextObject::AroundQuote(kind)),
-            None,
-        );
-    }
-}
-
-fn register_bracket_operator_bindings(trie_keymap: &mut TrieKeymap) {
-    for (kind, open, close) in [
-        (BracketKind::Paren, '(', ')'),
-        (BracketKind::Square, '[', ']'),
-        (BracketKind::Curly, '{', '}'),
-        (BracketKind::Angle, '<', '>'),
-    ] {
-        let open_key = match open {
-            '<' => "<LessThan>".to_string(),
-            _ => open.to_string(),
-        };
-        let close_key = match close {
-            '>' => "<GreaterThan>".to_string(),
-            _ => close.to_string(),
-        };
-        insert_operator_sequence(
-            trie_keymap,
-            format!("di{open_key}"),
-            Operator::Delete,
-            OperatorTarget::TextObject(TextObject::InnerBracket(kind)),
-            None,
-        );
-        insert_operator_sequence(
-            trie_keymap,
-            format!("di{close_key}"),
-            Operator::Delete,
-            OperatorTarget::TextObject(TextObject::InnerBracket(kind)),
-            None,
-        );
-        insert_operator_sequence(
-            trie_keymap,
-            format!("da{open_key}"),
-            Operator::Delete,
-            OperatorTarget::TextObject(TextObject::AroundBracket(kind)),
-            None,
-        );
-        insert_operator_sequence(
-            trie_keymap,
-            format!("da{close_key}"),
-            Operator::Delete,
-            OperatorTarget::TextObject(TextObject::AroundBracket(kind)),
-            None,
-        );
-        insert_operator_sequence(
-            trie_keymap,
-            format!("ci{open_key}"),
-            Operator::Change,
-            OperatorTarget::TextObject(TextObject::InnerBracket(kind)),
-            Some(ModeKind::Insert),
-        );
-        insert_operator_sequence(
-            trie_keymap,
-            format!("ci{close_key}"),
-            Operator::Change,
-            OperatorTarget::TextObject(TextObject::InnerBracket(kind)),
-            Some(ModeKind::Insert),
-        );
-        insert_operator_sequence(
-            trie_keymap,
-            format!("ca{open_key}"),
-            Operator::Change,
-            OperatorTarget::TextObject(TextObject::AroundBracket(kind)),
-            Some(ModeKind::Insert),
-        );
-        insert_operator_sequence(
-            trie_keymap,
-            format!("ca{close_key}"),
-            Operator::Change,
-            OperatorTarget::TextObject(TextObject::AroundBracket(kind)),
-            Some(ModeKind::Insert),
-        );
-        insert_operator_sequence(
-            trie_keymap,
-            format!("yi{open_key}"),
-            Operator::Yank,
-            OperatorTarget::TextObject(TextObject::InnerBracket(kind)),
-            None,
-        );
-        insert_operator_sequence(
-            trie_keymap,
-            format!("yi{close_key}"),
-            Operator::Yank,
-            OperatorTarget::TextObject(TextObject::InnerBracket(kind)),
-            None,
-        );
-        insert_operator_sequence(
-            trie_keymap,
-            format!("ya{open_key}"),
-            Operator::Yank,
-            OperatorTarget::TextObject(TextObject::AroundBracket(kind)),
-            None,
-        );
-        insert_operator_sequence(
-            trie_keymap,
-            format!("ya{close_key}"),
-            Operator::Yank,
-            OperatorTarget::TextObject(TextObject::AroundBracket(kind)),
-            None,
-        );
-    }
 }
 
 fn register_case_operator_bindings(trie_keymap: &mut TrieKeymap) {
@@ -421,7 +226,7 @@ fn register_misc_bindings(trie_keymap: &mut TrieKeymap) {
     trie_keymap.insert_str("<C-d>", Action::new(ActionKind::MoveHalfPageDown));
 }
 
-fn operator_sequences(to_mode: Option<ModeKind>) -> [OperatorSequenceSpec; 15] {
+fn operator_sequences(to_mode: Option<ModeKind>) -> [OperatorSequenceSpec; 11] {
     [
         OperatorSequenceSpec {
             suffix: "w",
@@ -476,26 +281,6 @@ fn operator_sequences(to_mode: Option<ModeKind>) -> [OperatorSequenceSpec; 15] {
         OperatorSequenceSpec {
             suffix: "G",
             target: OperatorTarget::LinewiseMotion(LinewiseMotion::LastLine),
-            to_mode,
-        },
-        OperatorSequenceSpec {
-            suffix: "iw",
-            target: OperatorTarget::TextObject(TextObject::InnerWord),
-            to_mode,
-        },
-        OperatorSequenceSpec {
-            suffix: "aw",
-            target: OperatorTarget::TextObject(TextObject::AroundWord),
-            to_mode,
-        },
-        OperatorSequenceSpec {
-            suffix: "iW",
-            target: OperatorTarget::TextObject(TextObject::InnerBigWord),
-            to_mode,
-        },
-        OperatorSequenceSpec {
-            suffix: "aW",
-            target: OperatorTarget::TextObject(TextObject::AroundBigWord),
             to_mode,
         },
     ]

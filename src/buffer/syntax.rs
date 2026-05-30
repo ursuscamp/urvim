@@ -207,7 +207,6 @@ impl SyntaxCache {
         let mut edits = edits
             .iter()
             .copied()
-            .filter(|(_, line_delta)| *line_delta != 0)
             .map(|(line, line_delta)| RenderLineEdit { line, line_delta })
             .collect::<Vec<_>>();
 
@@ -215,8 +214,19 @@ impl SyntaxCache {
             return;
         }
 
+        // Preserve the existing stale render snapshot across zero-delta follow-up
+        // edits so multi-step changes like `cw` keep the pre-edit styling visible
+        // until syntax highlighting catches up.
+        if edits.iter().all(|edit| edit.line_delta == 0) && self.render_snapshot.is_some() {
+            return;
+        }
+
+        if self.render_snapshot.is_some() && edits.iter().any(|edit| edit.line_delta != 0) {
+            return;
+        }
+
         edits.sort_by_key(|edit| edit.line);
-        let start_line = edits[0].line;
+        let start_line = 0;
         let spans = self.capture_cached_spans_from(start_line);
         if spans.is_empty() {
             self.clear_render_snapshot();
@@ -555,6 +565,13 @@ impl SyntaxCache {
     pub fn render_spans_for_line_ref(&self, line: usize) -> Option<&[SyntaxSpan]> {
         if let Some(spans) = self.cached_spans_for_line_ref(line) {
             return Some(spans);
+        }
+
+        if self
+            .dirty_start
+            .is_some_and(|dirty_start| line == dirty_start)
+        {
+            return None;
         }
 
         let snapshot = self.render_snapshot.as_ref()?;

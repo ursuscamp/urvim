@@ -1,5 +1,5 @@
 use super::*;
-use crate::buffer::Buffer;
+use crate::buffer::{Buffer, Cursor};
 use crate::config::{AutoIndentMode, TabBehavior, TabInsertion};
 use crate::config::{Config, DefaultRegisters};
 use crate::editor::{ActionKind, DelimiterFamily};
@@ -606,6 +606,21 @@ fn test_insert_mode_escape_switches_to_normal() {
     assert_eq!(
         handle_and_unwrap(&mut mode, &Key::new(crate::terminal::KeyCode::Esc)),
         Action::mode_transition(ModeKind::Normal)
+    );
+}
+
+#[test]
+fn test_replace_mode_backspace_restores_last_replace() {
+    let mut mode = ReplaceMode::new();
+
+    assert_eq!(
+        complete_action_kind(mode.handle_key(&key('a'))),
+        ActionKind::ReplaceChar('a')
+    );
+
+    assert_eq!(
+        complete_action_kind(mode.handle_key(&Key::new(KeyCode::Backspace))),
+        ActionKind::ReplaceBackspaceLast
     );
 }
 
@@ -2049,6 +2064,34 @@ fn test_indent_action_traits() {
     });
     assert!(surround_selection.resets_remembered_column());
     assert!(surround_selection.is_snapshottable());
+}
+
+#[test]
+fn test_replace_mode_character_actions_are_not_individually_snapshottable() {
+    assert!(
+        Action::new(ActionKind::ReplaceChar('x'))
+            .with_from_mode(ModeKind::Normal)
+            .is_snapshottable()
+    );
+    assert!(
+        !Action::new(ActionKind::ReplaceChar('x'))
+            .with_from_mode(ModeKind::Replace)
+            .is_snapshottable()
+    );
+    assert!(
+        !Action::new(ActionKind::ReplaceBackspaceLast)
+            .with_from_mode(ModeKind::Replace)
+            .is_snapshottable()
+    );
+    assert!(
+        !Action::new(ActionKind::ReplaceBackspace {
+            cursor: Cursor::new(0, 0),
+            replaced: Some('a'),
+            inserted: 'x',
+        })
+        .with_from_mode(ModeKind::Replace)
+        .is_snapshottable()
+    );
 }
 
 #[test]
