@@ -36,6 +36,7 @@ impl BufferView {
             remembered_visual_col: None,
             visual_selection: None,
             yank_flash: None,
+            folded_lines: BTreeSet::new(),
             rendered_visual_generation: 0,
         }
     }
@@ -50,6 +51,7 @@ impl BufferView {
             remembered_visual_col: None,
             visual_selection: None,
             yank_flash: None,
+            folded_lines: BTreeSet::new(),
             rendered_visual_generation: 0,
         }
     }
@@ -219,6 +221,7 @@ impl BufferView {
 
     pub fn set_cursor(&mut self, cursor: Cursor) {
         self.cursor = cursor;
+        self.open_folds_containing_hidden_line(cursor.line);
         crate::session::mark_dirty();
     }
 
@@ -305,6 +308,7 @@ impl BufferView {
             .with_buffer(|buffer| buffer.sync_cursor(cursor))
             .unwrap_or(cursor);
         self.cursor = synced_cursor;
+        self.open_folds_containing_hidden_line(synced_cursor.line);
         self.remembered_visual_col = Some(self.current_visual_col());
         crate::session::mark_dirty();
     }
@@ -387,13 +391,16 @@ impl BufferView {
         let visible_cols = viewport_size.cols.saturating_sub(gutter_width) as usize;
         let (effective_vertical_margin, effective_horizontal_margin) =
             Self::effective_scroll_margins(visible_rows, visible_cols);
-        self.scroll_offset.row = Self::offset_to_keep_target_visible(
-            self.scroll_offset.row as usize,
-            cursor.line,
+        let current_visible_row = self.visible_row_for_line(self.scroll_offset.row as usize);
+        let cursor_visible_row = self.visible_row_for_line(cursor.line);
+        let next_visible_row = Self::offset_to_keep_target_visible(
+            current_visible_row,
+            cursor_visible_row,
             visible_rows,
             effective_vertical_margin,
-            buffer_line_count,
-        ) as u16;
+            self.visible_line_count(),
+        );
+        self.scroll_offset.row = self.line_for_visible_row(next_visible_row) as u16;
 
         if wrap_enabled {
             self.scroll_to_cursor_wrapped(viewport_size, gutter_width, wrap_mode);
@@ -620,6 +627,7 @@ impl BufferView {
             Vec::new()
         };
         let mut request_cache_refresh = false;
+        let folded_ranges = self.folded_render_ranges();
         let _applied = self.with_buffer_mut(|buffer| {
             let start_line = self.scroll_offset.row as usize;
             let row_limit = size.rows as usize + 32;
@@ -698,6 +706,8 @@ impl BufferView {
                                 width_offset: 0,
                                 show_gutter_line_number: !segment.is_continuation,
                                 base_style: Style::default(),
+                                fold_glyph: None,
+                                folded_line_count: None,
                                 chunks: segment.chunks,
                             };
                             render_data.line_data.push(line_data);
@@ -727,6 +737,23 @@ impl BufferView {
                             inlay_hint_style,
                             syntax_styles.as_ref(),
                         );
+                        let folded_line_count = folded_ranges
+                            .iter()
+                            .find(|range| range.start_line == buffer_line_idx)
+                            .map(|range| range.end_line.saturating_sub(range.start_line));
+                        let fold_glyph = folded_line_count
+                            .map(|_| FoldGutterGlyph::Closed)
+                            .or_else(|| {
+                                fold::fold_range_starting_at(buffer, buffer_line_idx)
+                                    .map(|_| FoldGutterGlyph::Open)
+                            });
+                        let mut chunks = chunks;
+                        if let Some(count) = folded_line_count {
+                            chunks.push(RenderChunk::ghost_text(
+                                &format!(" ... {count} lines folded"),
+                                default_style.faint().italic(),
+                            ));
+                        }
                         let line_data = LineData {
                             buffer_line: buffer_line_idx,
                             byte_offset,
@@ -734,6 +761,8 @@ impl BufferView {
                             width_offset,
                             show_gutter_line_number: true,
                             base_style: Style::default(),
+                            fold_glyph,
+                            folded_line_count,
                             chunks,
                         };
                         render_data.line_data.push(line_data);
@@ -745,7 +774,15 @@ impl BufferView {
                 if rendered_rows >= row_limit {
                     break;
                 }
-                buffer_line_idx += 1;
+                buffer_line_idx = if wrap_enabled {
+                    buffer_line_idx + 1
+                } else {
+                    folded_ranges
+                        .iter()
+                        .find(|range| range.start_line == buffer_line_idx)
+                        .map(|range| range.end_line.saturating_add(1))
+                        .unwrap_or_else(|| buffer_line_idx + 1)
+                };
             }
         });
 
@@ -1458,8 +1495,6 @@ mod tests {
     use crate::path::AbsolutePath;
     use crate::terminal::{Color, Style};
     use crate::theme::{HighlightStyles, Theme, ThemeKind};
-    use std::collections::BTreeSet;
-
     fn temp_path_with_ext(name: &str, ext: &str) -> AbsolutePath {
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)

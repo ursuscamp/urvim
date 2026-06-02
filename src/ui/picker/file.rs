@@ -581,11 +581,11 @@ mod tests {
     fn file_picker_source_toggles_query_mode() {
         let source = FilePickerSource::new(PathBuf::from("/tmp"));
 
-        assert_eq!(source.query_mode(), QueryMode::Exact);
-        assert_eq!(source.toggle_query_mode(), QueryMode::Fuzzy);
         assert_eq!(source.query_mode(), QueryMode::Fuzzy);
-        source.set_query_mode(QueryMode::Exact);
+        assert_eq!(source.toggle_query_mode(), QueryMode::Exact);
         assert_eq!(source.query_mode(), QueryMode::Exact);
+        source.set_query_mode(QueryMode::Fuzzy);
+        assert_eq!(source.query_mode(), QueryMode::Fuzzy);
     }
 
     #[test]

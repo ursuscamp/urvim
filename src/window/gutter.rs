@@ -12,6 +12,7 @@ impl Gutter {
             total_buffer_lines,
             diagnostic_sign_width: 0,
             diff_sign_width: 0,
+            fold_sign_width: 0,
             style: Style::new().bg(Color::ansi(236)).fg(Color::ansi(245)),
         }
     }
@@ -29,6 +30,7 @@ impl Gutter {
             total_buffer_lines,
             diagnostic_sign_width: 0,
             diff_sign_width: 0,
+            fold_sign_width: 0,
             style,
         }
     }
@@ -45,6 +47,12 @@ impl Gutter {
         self
     }
 
+    /// Sets the reserved width for the fold sign column.
+    pub fn with_fold_sign_width(mut self, width: u16) -> Self {
+        self.fold_sign_width = width;
+        self
+    }
+
     pub fn calculate_width(&self) -> u16 {
         let digits = Self::digit_count(self.total_buffer_lines);
         let min_width = if self.total_buffer_lines == 0 {
@@ -52,7 +60,7 @@ impl Gutter {
         } else {
             digits + 2
         };
-        min_width as u16 + self.diagnostic_sign_width + self.diff_sign_width
+        min_width as u16 + self.diagnostic_sign_width + self.diff_sign_width + self.fold_sign_width
     }
 
     pub(super) fn digit_count(n: usize) -> usize {
@@ -92,8 +100,10 @@ impl Gutter {
         let gutter_style = self.style;
         let sign_width = state.diagnostic_sign_width;
         let diff_sign_width = state.diff_sign_width;
+        let fold_sign_width = state.fold_sign_width;
         let gutter_width = self.calculate_width();
         let nerdfont_enabled = crate::icon::nerdfont_enabled();
+        let unicode_folds_enabled = crate::icon::unicode_folds_enabled();
 
         for screen_row in 0..self.visible_rows {
             let screen_row_idx = screen_row as usize;
@@ -150,7 +160,8 @@ impl Gutter {
             };
             gutter_line.push_str(sign.as_str());
             if line_data.show_gutter_line_number {
-                let number_width = gutter_width.saturating_sub(sign_width + diff_sign_width);
+                let number_width =
+                    gutter_width.saturating_sub(sign_width + diff_sign_width + fold_sign_width);
                 let number = if state.relative_number && line_data.buffer_line != state.cursor_line
                 {
                     Self::format_line_number(
@@ -162,10 +173,19 @@ impl Gutter {
                 };
                 gutter_line.push_str(number.as_str());
             } else {
-                gutter_line.push_str(
-                    &" ".repeat(gutter_width.saturating_sub(sign_width + diff_sign_width) as usize),
-                );
+                gutter_line.push_str(&" ".repeat(
+                    gutter_width.saturating_sub(sign_width + diff_sign_width + fold_sign_width)
+                        as usize,
+                ));
             }
+            let fold_sign = if fold_sign_width == 0 {
+                String::new()
+            } else if let Some(glyph) = line_data.fold_glyph {
+                Self::fold_sign_text(glyph, fold_sign_width, unicode_folds_enabled)
+            } else {
+                " ".repeat(fold_sign_width as usize)
+            };
+            gutter_line.push_str(fold_sign.as_str());
 
             self.write_gutter_row(screen, origin, screen_row, row_style, gutter_line);
 
@@ -267,6 +287,15 @@ impl Gutter {
             }
         };
 
+        if width <= 1 {
+            return sign.to_string();
+        }
+
+        format!("{}{}", sign, " ".repeat(width as usize - 1))
+    }
+
+    fn fold_sign_text(glyph: FoldGutterGlyph, width: u16, unicode_enabled: bool) -> String {
+        let sign = crate::icon::fold_gutter_glyph(glyph, unicode_enabled);
         if width <= 1 {
             return sign.to_string();
         }

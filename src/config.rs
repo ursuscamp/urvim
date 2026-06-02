@@ -34,6 +34,8 @@ pub enum AdvancedGlyphCapability {
     UnicodeBorders,
     /// Enable Unicode line-drawing indent guides.
     UnicodeIndent,
+    /// Enable Unicode fold gutter glyphs.
+    UnicodeFolds,
 }
 
 /// Enabled inlay-hint kinds that can be configured through startup config.
@@ -464,6 +466,12 @@ impl Config {
             .contains(&AdvancedGlyphCapability::Nerdfont)
     }
 
+    /// Returns whether general Unicode glyph rendering is enabled.
+    pub fn unicode_enabled(&self) -> bool {
+        self.advanced_glyphs
+            .contains(&AdvancedGlyphCapability::Unicode)
+    }
+
     /// Returns whether Unicode split borders are enabled.
     pub fn unicode_borders_enabled(&self) -> bool {
         self.advanced_glyphs
@@ -474,6 +482,12 @@ impl Config {
     pub fn unicode_indent_enabled(&self) -> bool {
         self.advanced_glyphs
             .contains(&AdvancedGlyphCapability::UnicodeIndent)
+    }
+
+    /// Returns whether Unicode fold gutter glyph rendering is enabled.
+    pub fn unicode_folds_enabled(&self) -> bool {
+        self.advanced_glyphs
+            .contains(&AdvancedGlyphCapability::UnicodeFolds)
     }
 
     /// Returns whether any inlay hints are enabled.
@@ -949,10 +963,11 @@ fn default_inlay_hint_kinds() -> BTreeSet<InlayHintCapability> {
         .collect()
 }
 
-fn all_unicode_advanced_glyph_capabilities() -> [AdvancedGlyphCapability; 2] {
+fn all_unicode_advanced_glyph_capabilities() -> [AdvancedGlyphCapability; 3] {
     [
         AdvancedGlyphCapability::UnicodeBorders,
         AdvancedGlyphCapability::UnicodeIndent,
+        AdvancedGlyphCapability::UnicodeFolds,
     ]
 }
 
@@ -1123,6 +1138,7 @@ mod tests {
                 AdvancedGlyphCapability::Unicode,
                 AdvancedGlyphCapability::UnicodeBorders,
                 AdvancedGlyphCapability::UnicodeIndent,
+                AdvancedGlyphCapability::UnicodeFolds,
             ]),
             scroll_margin: Some(PartialScrollMargin {
                 vertical: Some(8),
@@ -1260,7 +1276,8 @@ mod tests {
             glyph_caps(&[
                 AdvancedGlyphCapability::Nerdfont,
                 AdvancedGlyphCapability::UnicodeBorders,
-                AdvancedGlyphCapability::UnicodeIndent
+                AdvancedGlyphCapability::UnicodeIndent,
+                AdvancedGlyphCapability::UnicodeFolds
             ])
         );
         assert!(!lsp_server(&Config::resolve(Some(&file), None, None), "rust_analyzer").enabled);
@@ -1374,7 +1391,8 @@ mod tests {
             Config::resolve(Some(&file), None, None).advanced_glyphs,
             glyph_caps(&[
                 AdvancedGlyphCapability::UnicodeBorders,
-                AdvancedGlyphCapability::UnicodeIndent
+                AdvancedGlyphCapability::UnicodeIndent,
+                AdvancedGlyphCapability::UnicodeFolds
             ])
         );
     }
@@ -1446,6 +1464,18 @@ mod tests {
         };
 
         assert!(Config::resolve(Some(&file), None, None).unicode_indent_enabled());
+    }
+
+    #[test]
+    fn unicode_folds_enabled_checks_resolved_advanced_glyphs() {
+        assert!(!Config::resolve(None, None, None).unicode_folds_enabled());
+
+        let file = PartialConfig {
+            advanced_glyphs: Some(vec![AdvancedGlyphCapability::UnicodeFolds]),
+            ..Default::default()
+        };
+
+        assert!(Config::resolve(Some(&file), None, None).unicode_folds_enabled());
     }
 
     #[test]
@@ -2055,7 +2085,7 @@ enabled = true
         let home = unique_temp_dir("glyph-home");
         write_config(
             &home,
-            "advanced_glyphs = [\"nerdfont\", \"unicode\", \"unicode_borders\", \"unicode_indent\", \"nerdfont\"]",
+            "advanced_glyphs = [\"nerdfont\", \"unicode\", \"unicode_borders\", \"unicode_indent\", \"unicode_folds\", \"nerdfont\"]",
         );
 
         let config = Config::load_from_locations(home, vec![], None, None).expect("should load");
@@ -2065,7 +2095,8 @@ enabled = true
             glyph_caps(&[
                 AdvancedGlyphCapability::Nerdfont,
                 AdvancedGlyphCapability::UnicodeBorders,
-                AdvancedGlyphCapability::UnicodeIndent
+                AdvancedGlyphCapability::UnicodeIndent,
+                AdvancedGlyphCapability::UnicodeFolds
             ])
         );
     }

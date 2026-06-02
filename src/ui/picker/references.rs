@@ -294,9 +294,9 @@ mod tests {
     #[test]
     fn references_picker_supports_fuzzy_query_mode() {
         let source = ReferencesPickerSource::new(Vec::new(), Arc::new(JobManager::new()));
-        assert_eq!(source.query_mode(), QueryMode::Exact);
-        assert_eq!(source.toggle_query_mode(), QueryMode::Fuzzy);
         assert_eq!(source.query_mode(), QueryMode::Fuzzy);
+        assert_eq!(source.toggle_query_mode(), QueryMode::Exact);
+        assert_eq!(source.query_mode(), QueryMode::Exact);
 
         assert!(reference_matches(&test_item(), "lvex", true));
         assert!(!reference_matches(&test_item(), "zzz", true));

@@ -218,6 +218,18 @@ impl Window {
                     self.align_viewport_cursor_bottom(self.size.rows as usize);
                     ActionResult::Handled
                 }
+                Some(ActionKind::ToggleFold) => {
+                    self.buffer_view.toggle_fold_at_cursor();
+                    ActionResult::Handled
+                }
+                Some(ActionKind::OpenFold) => {
+                    self.buffer_view.open_fold_at_cursor();
+                    ActionResult::Handled
+                }
+                Some(ActionKind::CloseFold) => {
+                    self.buffer_view.close_fold_at_cursor();
+                    ActionResult::Handled
+                }
                 Some(ActionKind::DeleteBackward) => {
                     if insert_mode {
                         if !self.delete_insert_indent_before_cursor() {
@@ -438,8 +450,14 @@ impl Window {
                 Some(ActionKind::OpenLineBelow) => {
                     let cursor = self.buffer_view.cursor();
                     let prefix = self.inferred_newline_prefix(cursor);
+                    let insert_after_line = self
+                        .buffer_view
+                        .folded_range_at_visible_start(cursor.line)
+                        .map(|range| range.start_line)
+                        .unwrap_or(cursor.line);
+                    self.buffer_view.open_fold_starting_at(insert_after_line);
                     if let Some(new_cursor) =
-                        self.insert_auto_indented_lines_after(cursor.line, 1, prefix)
+                        self.insert_auto_indented_lines_after(insert_after_line, 1, prefix)
                     {
                         self.buffer_view.set_cursor(new_cursor);
                     }
@@ -448,8 +466,15 @@ impl Window {
                 Some(ActionKind::OpenLineAbove) => {
                     let cursor = self.buffer_view.cursor();
                     let prefix = self.inferred_newline_prefix(cursor);
+                    let folded_boundary = self
+                        .buffer_view
+                        .folded_range_before_visible_line(cursor.line);
+                    let insert_before_line = cursor.line;
+                    if let Some(range) = folded_boundary {
+                        self.buffer_view.open_fold_starting_at(range.start_line);
+                    }
                     if let Some(new_cursor) =
-                        self.insert_auto_indented_lines_before(cursor.line, 1, prefix)
+                        self.insert_auto_indented_lines_before(insert_before_line, 1, prefix)
                     {
                         self.buffer_view.set_cursor(new_cursor);
                     }

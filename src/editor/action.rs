@@ -282,6 +282,12 @@ pub enum ActionKind {
     ViewportCursorCenter,
     /// Scroll the viewport so the cursor line appears at the bottom.
     ViewportCursorBottom,
+    /// Toggle the fold containing the cursor.
+    ToggleFold,
+    /// Open the fold containing the cursor.
+    OpenFold,
+    /// Close the fold containing the cursor.
+    CloseFold,
     /// Delete the character before the cursor.
     DeleteBackward,
     /// Delete the character under the cursor.
@@ -616,6 +622,9 @@ impl Action {
                 | Some(ActionKind::TillBackward(_))
                 | Some(ActionKind::RepeatLastFind)
                 | Some(ActionKind::RepeatLastFindReverse)
+                | Some(ActionKind::ToggleFold)
+                | Some(ActionKind::OpenFold)
+                | Some(ActionKind::CloseFold)
                 | Some(ActionKind::SurroundReplace { .. })
                 | Some(ActionKind::SurroundDelete { .. })
                 | Some(ActionKind::SurroundAdd { .. })

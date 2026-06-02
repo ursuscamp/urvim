@@ -3,6 +3,7 @@
 use crate::globals;
 use crate::syntax::{SyntaxMetadata, builtin_syntax_registry};
 use crate::terminal::Style;
+use crate::window::FoldGutterGlyph;
 use lsp_types::{CompletionItemKind, DiagnosticSeverity, SymbolKind};
 use smol_str::SmolStr;
 use std::path::Path;
@@ -113,6 +114,21 @@ pub fn nerdfont_enabled() -> bool {
 /// Returns whether Unicode borders are enabled.
 pub fn unicode_borders_enabled() -> bool {
     globals::with_config(|config| config.unicode_borders_enabled()).unwrap_or(false)
+}
+
+/// Returns whether Unicode fold gutter glyph rendering is enabled.
+pub fn unicode_folds_enabled() -> bool {
+    globals::with_config(|config| config.unicode_folds_enabled()).unwrap_or(false)
+}
+
+/// Returns the fold gutter glyph for the active Unicode capability.
+pub fn fold_gutter_glyph(glyph: FoldGutterGlyph, unicode_enabled: bool) -> &'static str {
+    match (glyph, unicode_enabled) {
+        (FoldGutterGlyph::Open, true) => "▼",
+        (FoldGutterGlyph::Closed, true) => "▶",
+        (FoldGutterGlyph::Open, false) => "v",
+        (FoldGutterGlyph::Closed, false) => ">",
+    }
 }
 
 /// Returns the picker or completion forward selection indicator.

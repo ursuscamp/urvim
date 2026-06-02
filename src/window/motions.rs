@@ -30,11 +30,16 @@ impl Window {
 
         let cursor = self.buffer_view.cursor();
         let current_line = cursor.line.min(line_count - 1);
-        let target_line = if upwards {
-            current_line.saturating_sub(line_delta)
-        } else {
-            current_line.saturating_add(line_delta).min(line_count - 1)
-        };
+        let mut target_line = current_line;
+        for _ in 0..line_delta {
+            target_line = if upwards {
+                self.buffer_view.previous_visible_line_before(target_line)
+            } else {
+                self.buffer_view
+                    .next_visible_line_after(target_line)
+                    .min(line_count - 1)
+            };
+        }
         let target_col = self.buffer_view.get_or_compute_target_col();
         self.set_cursor_to_visual_col_on_line(target_line, target_col);
     }
@@ -72,13 +77,19 @@ impl Window {
         }
 
         let cursor_line = self.buffer_view.cursor().line.min(line_count - 1);
-        let unclamped_top_line = match anchor {
-            ViewportAnchor::Top => cursor_line,
-            ViewportAnchor::Center => cursor_line.saturating_sub(viewport_rows / 2),
-            ViewportAnchor::Bottom => cursor_line.saturating_add(1).saturating_sub(viewport_rows),
+        let cursor_row = self.buffer_view.visible_row_for_line(cursor_line);
+        let unclamped_top_row = match anchor {
+            ViewportAnchor::Top => cursor_row,
+            ViewportAnchor::Center => cursor_row.saturating_sub(viewport_rows / 2),
+            ViewportAnchor::Bottom => cursor_row.saturating_add(1).saturating_sub(viewport_rows),
         };
-        let max_top_line = line_count.saturating_sub(viewport_rows);
-        let clamped_top_line = unclamped_top_line.min(max_top_line);
+        let max_top_row = self
+            .buffer_view
+            .visible_line_count()
+            .saturating_sub(viewport_rows);
+        let clamped_top_line = self
+            .buffer_view
+            .line_for_visible_row(unclamped_top_row.min(max_top_row));
         let row = u16::try_from(clamped_top_line).unwrap_or(u16::MAX);
         self.buffer_view
             .set_scroll_offset(Position::new(row, self.buffer_view.scroll_offset().col));
@@ -128,7 +139,13 @@ impl Window {
             .with_buffer(|buffer| buffer.cursor_up(cursor, target_col))
             .flatten()
         {
-            self.buffer_view.set_cursor(new_cursor);
+            let line = if self.buffer_view.is_line_hidden_by_fold(new_cursor.line) {
+                self.buffer_view
+                    .previous_visible_line_before(new_cursor.line)
+            } else {
+                new_cursor.line
+            };
+            self.set_cursor_to_visual_col_on_line(line, target_col);
         }
     }
 
@@ -139,7 +156,14 @@ impl Window {
             .with_buffer(|buffer| buffer.cursor_down(cursor, target_col))
             .flatten()
         {
-            self.buffer_view.set_cursor(new_cursor);
+            let line = if self.buffer_view.is_line_hidden_by_fold(new_cursor.line) {
+                self.buffer_view
+                    .next_visible_line_from_hidden(new_cursor.line)
+            } else {
+                new_cursor.line
+            }
+            .min(self.buffer_view.line_count().saturating_sub(1));
+            self.set_cursor_to_visual_col_on_line(line, target_col);
         }
     }
 
@@ -324,7 +348,8 @@ impl Window {
                 total_lines,
             )
             .with_diagnostic_sign_width(diagnostic_sign_width)
-            .with_diff_sign_width(diff_sign_width_for_buffer(self.buffer_view.buffer_id_opt()));
+            .with_diff_sign_width(diff_sign_width_for_buffer(self.buffer_view.buffer_id_opt()))
+            .with_fold_sign_width(FOLD_SIGN_WIDTH);
             pos.col += gutter.calculate_width();
             Some(pos)
         } else {

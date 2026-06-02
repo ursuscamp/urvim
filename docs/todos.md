@@ -7,7 +7,6 @@ This is a list, in no particular order, of things that need to be addressed whic
 - should panes hold dynamic widgets?
 - build-time compiled themes and syntax grammar
 - buffer selector
-- folding
 - show code action modification in preview window
 - code action hints for the current line (with ghost text)
 - quick jump
@@ -20,3 +19,5 @@ This is a list, in no particular order, of things that need to be addressed whic
 - should markerstore be in the buffercache?
 - lot of repetition in globals.rs, maybe modularize it?
 - colorscheme picker should duplicate the other pickers
+- in normal mode, cursor should not move to newline
+- bufferview should probably have its own submodule of window at this point

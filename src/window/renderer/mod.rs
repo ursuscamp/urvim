@@ -69,6 +69,7 @@ pub fn render_buffer_view(
     let gutter_width = Gutter::new_with_style(0, state.size.rows, total_lines, theme.gutter_style)
         .with_diagnostic_sign_width(diagnostic_sign_width)
         .with_diff_sign_width(diff_sign_width_for_buffer(buffer_view.buffer_id_opt()))
+        .with_fold_sign_width(FOLD_SIGN_WIDTH)
         .calculate_width();
 
     // Resolve scrolling before building the gutter so line numbers and
@@ -90,7 +91,8 @@ pub fn render_buffer_view(
     let mut gutter =
         Gutter::new_with_style(start_line, state.size.rows, total_lines, theme.gutter_style)
             .with_diagnostic_sign_width(diagnostic_sign_width)
-            .with_diff_sign_width(diff_sign_width_for_buffer(buffer_view.buffer_id_opt()));
+            .with_diff_sign_width(diff_sign_width_for_buffer(buffer_view.buffer_id_opt()))
+            .with_fold_sign_width(FOLD_SIGN_WIDTH);
 
     // Render buffer content offset by gutter width.
     let content_origin = Position::new(origin.row, origin.col + gutter_width);
@@ -137,6 +139,7 @@ pub fn render_buffer_view(
                 })
                 .unwrap_or_else(|| vec![None; state.size.rows as usize]),
             diff_sign_width: diff_sign_width_for_buffer(buffer_view.buffer_id_opt()),
+            fold_sign_width: FOLD_SIGN_WIDTH,
             diff_added_sign_style: theme.diff_added_gutter_style,
             diff_deleted_sign_style: theme.diff_deleted_gutter_style,
             diff_modified_sign_style: theme.diff_modified_gutter_style,

@@ -23,6 +23,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 use tracing_subscriber::layer::SubscriberExt;
 
+const CONTENT_COL: u16 = 5;
+
 fn process_action_and_snapshot(window: &mut Window, action: &Action) {
     assert_eq!(window.dispatch_action(action), ActionResult::Handled);
 
@@ -901,12 +903,12 @@ fn test_window_render() {
     let mut screen = crate::screen::Screen::new(3, 80);
     window.render(&mut screen, Position::new(0, 0), Size::new(3, 80));
 
-    // With gutter (3 columns for 3 lines: digits(3) + 2 = 3), buffer starts at col 3
+    // With gutter (5 columns: digits(3) + 2 + fold sign), buffer starts at col 5
     // Check gutter background is rendered
     assert_eq!(screen.get_cell_mut(0, 0).unwrap().text, " ");
     // Check buffer content starts after gutter
-    assert_eq!(screen.get_cell_mut(0, 3).unwrap().text, "l");
-    assert_eq!(screen.get_cell_mut(1, 3).unwrap().text, "l");
+    assert_eq!(screen.get_cell_mut(0, CONTENT_COL).unwrap().text, "l");
+    assert_eq!(screen.get_cell_mut(1, CONTENT_COL).unwrap().text, "l");
 }
 
 #[test]
@@ -926,7 +928,7 @@ fn test_window_render_uses_theme_styles() {
         expected_gutter_style
     );
     assert_eq!(
-        screen.get_cell_mut(0, 3).unwrap().style,
+        screen.get_cell_mut(0, CONTENT_COL + 1).unwrap().style,
         expected_default_style
     );
     assert_eq!(
@@ -956,7 +958,7 @@ fn test_window_render_highlights_active_line_in_normal_mode() {
     window.render(&mut screen, Position::new(0, 0), Size::new(1, 20));
 
     assert_eq!(
-        screen.get_cell_mut(0, 3).unwrap().style,
+        screen.get_cell_mut(0, CONTENT_COL + 1).unwrap().style,
         expected_keyword_style
     );
     assert_eq!(
@@ -984,11 +986,11 @@ fn test_window_render_keeps_explicit_token_background_on_active_line() {
     window.render(&mut screen, Position::new(0, 0), Size::new(1, 20));
 
     assert_eq!(
-        screen.get_cell_mut(0, 3).unwrap().style,
+        screen.get_cell_mut(0, CONTENT_COL + 1).unwrap().style,
         expected_keyword_style
     );
     assert_eq!(
-        screen.get_cell_mut(0, 12).unwrap().style,
+        screen.get_cell_mut(0, 14).unwrap().style,
         expected_string_style
     );
 }
@@ -1018,7 +1020,7 @@ fn test_window_render_keeps_todo_marker_above_active_line_base_style() {
     window.render(&mut screen, Position::new(0, 0), Size::new(1, 80));
 
     assert_eq!(
-        screen.get_cell_mut(0, 18).unwrap().style,
+        screen.get_cell_mut(0, 21).unwrap().style,
         expected_todo_style
     );
 }
@@ -1098,7 +1100,7 @@ fn test_window_render_keeps_active_gutter_style_in_insert_mode() {
         screen.get_cell_mut(0, 0).unwrap().style,
         expected_gutter_style
     );
-    assert_eq!(screen.get_cell_mut(0, 3).unwrap().style, expected_style);
+    assert_eq!(screen.get_cell_mut(0, 7).unwrap().style, expected_style);
 }
 
 #[test]
@@ -1120,7 +1122,10 @@ fn test_window_render_skips_active_line_when_disabled() {
     let mut screen = crate::screen::Screen::new(1, 20);
     window.render(&mut screen, Position::new(0, 0), Size::new(1, 20));
 
-    assert_eq!(screen.get_cell_mut(0, 3).unwrap().style, expected_style);
+    assert_eq!(
+        screen.get_cell_mut(0, CONTENT_COL + 1).unwrap().style,
+        expected_style
+    );
 }
 
 #[test]
@@ -1159,8 +1164,8 @@ fn test_window_render_refreshes_visible_syntax_after_edit() {
     let mut second_screen = crate::screen::Screen::new(1, 24);
     second_window.render(&mut second_screen, Position::new(0, 0), Size::new(1, 24));
 
-    let first_cell = first_screen.get_cell_mut(0, 3).unwrap();
-    let second_cell = second_screen.get_cell_mut(0, 3).unwrap();
+    let first_cell = first_screen.get_cell_mut(0, CONTENT_COL + 1).unwrap();
+    let second_cell = second_screen.get_cell_mut(0, CONTENT_COL + 1).unwrap();
     let offscreen_cache = window
         .buffer_view()
         .with_buffer(|buffer| buffer.cached_syntax_spans_for_line(1))
@@ -1254,7 +1259,7 @@ fn test_window_render_expands_tabs_using_configured_width() {
     assert_eq!(screen.get_cell_mut(0, 0).unwrap().text, "a");
     assert_eq!(screen.get_cell_mut(0, 1).unwrap().text, " ");
     assert_eq!(screen.get_cell_mut(0, 2).unwrap().text, " ");
-    assert_eq!(screen.get_cell_mut(0, 3).unwrap().text, " ");
+    assert_eq!(screen.get_cell_mut(0, 4).unwrap().text, " ");
     assert_eq!(screen.get_cell_mut(0, 4).unwrap().text, " ");
     assert_eq!(screen.get_cell_mut(0, 5).unwrap().text, "b");
 }
@@ -1271,11 +1276,285 @@ fn test_window_render_expands_leading_tabs_after_gutter() {
     let mut screen = crate::screen::Screen::new(2, 12);
     window.render(&mut screen, Position::new(0, 0), Size::new(2, 12));
 
-    assert_eq!(screen.get_cell_mut(0, 3).unwrap().text, " ");
-    assert_eq!(screen.get_cell_mut(0, 4).unwrap().text, " ");
     assert_eq!(screen.get_cell_mut(0, 5).unwrap().text, " ");
     assert_eq!(screen.get_cell_mut(0, 6).unwrap().text, " ");
-    assert_eq!(screen.get_cell_mut(0, 7).unwrap().text, "X");
+    assert_eq!(screen.get_cell_mut(0, 7).unwrap().text, " ");
+    assert_eq!(screen.get_cell_mut(0, 8).unwrap().text, " ");
+    assert_eq!(screen.get_cell_mut(0, 9).unwrap().text, "X");
+}
+
+#[test]
+fn test_window_render_collapses_indent_scope_fold() {
+    let mut window = Window::new(Buffer::from_str("outer\n  inner1\n  inner2\nafter\ntail"));
+    window.set_cursor(Cursor::new(1, 0));
+
+    assert_eq!(
+        window.dispatch_action(&Action::new(ActionKind::CloseFold)),
+        ActionResult::Handled
+    );
+    let mut screen = crate::screen::Screen::new(4, 40);
+    window.render(&mut screen, Position::new(0, 0), Size::new(4, 40));
+
+    let rendered = window
+        .render_data()
+        .get_line(0)
+        .expect("folded start line should render")
+        .iter()
+        .map(|chunk| chunk.text.as_str())
+        .collect::<String>();
+
+    assert!(rendered.contains("outer"));
+    assert!(rendered.contains("... 2 lines folded"));
+    assert_eq!(window.render_data().line_data[1].buffer_line, 3);
+}
+
+#[test]
+fn test_window_render_fold_spans_blank_lines() {
+    let mut window = Window::new(Buffer::from_str("outer\n  inner1\n\n  inner2\nafter"));
+    window.set_cursor(Cursor::new(0, 0));
+
+    assert_eq!(
+        window.dispatch_action(&Action::new(ActionKind::CloseFold)),
+        ActionResult::Handled
+    );
+    let mut screen = crate::screen::Screen::new(5, 40);
+    window.render(&mut screen, Position::new(0, 0), Size::new(5, 40));
+
+    let rendered = window
+        .render_data()
+        .get_line(0)
+        .expect("folded start line should render")
+        .iter()
+        .map(|chunk| chunk.text.as_str())
+        .collect::<String>();
+
+    assert!(rendered.contains("... 3 lines folded"));
+    assert_eq!(window.render_data().line_data[1].buffer_line, 4);
+}
+
+#[test]
+fn test_window_render_does_not_fold_blank_only_suffix() {
+    let mut window = Window::new(Buffer::from_str("outer\n\n"));
+    window.set_cursor(Cursor::new(0, 0));
+
+    assert_eq!(
+        window.dispatch_action(&Action::new(ActionKind::CloseFold)),
+        ActionResult::Handled
+    );
+    let mut screen = crate::screen::Screen::new(3, 20);
+    window.render(&mut screen, Position::new(0, 0), Size::new(3, 20));
+    assert!(
+        window.render_data().line_data[0]
+            .folded_line_count
+            .is_none()
+    );
+}
+
+#[test]
+fn test_window_fold_state_is_window_local() {
+    let buffer = Buffer::from_str("outer\n  inner1\n  inner2\nafter");
+    let mut folded = Window::from_owned_buffer(buffer.clone());
+    let unfolded = Window::from_owned_buffer(buffer);
+    folded.set_cursor(Cursor::new(1, 0));
+
+    assert_eq!(
+        folded.dispatch_action(&Action::new(ActionKind::CloseFold)),
+        ActionResult::Handled
+    );
+
+    let mut folded_screen = crate::screen::Screen::new(4, 40);
+    folded.render(&mut folded_screen, Position::new(0, 0), Size::new(4, 40));
+    let folded_data = folded.render_data();
+    let unfolded_data = unfolded
+        .buffer_view()
+        .build_render_data_with_style(Size::new(4, 40), Style::default());
+
+    assert_eq!(folded_data.line_data[1].buffer_line, 3);
+    assert_eq!(unfolded_data.line_data[1].buffer_line, 1);
+}
+
+#[test]
+fn test_window_move_down_skips_folded_lines() {
+    let mut window = Window::new(Buffer::from_str("outer\n  inner1\n  inner2\nafter"));
+    window.set_cursor(Cursor::new(1, 0));
+
+    assert_eq!(
+        window.dispatch_action(&Action::new(ActionKind::CloseFold)),
+        ActionResult::Handled
+    );
+    assert_eq!(
+        window.dispatch_action(&Action::new(ActionKind::MoveDown)),
+        ActionResult::Handled
+    );
+
+    assert_eq!(window.buffer_view().cursor().line, 3);
+}
+
+#[test]
+fn test_window_move_up_skips_large_fold_without_scanning_each_line() {
+    let mut text = String::from("outer\n");
+    for idx in 0..1000 {
+        text.push_str(&format!("  inner{idx}\n"));
+    }
+    text.push_str("after");
+    let mut window = Window::new(Buffer::from_str(&text));
+    window.set_cursor(Cursor::new(0, 0));
+    assert_eq!(
+        window.dispatch_action(&Action::new(ActionKind::CloseFold)),
+        ActionResult::Handled
+    );
+    window.set_cursor(Cursor::new(1001, 0));
+
+    assert_eq!(
+        window.dispatch_action(&Action::new(ActionKind::MoveUp)),
+        ActionResult::Handled
+    );
+
+    assert_eq!(window.buffer_view().cursor().line, 0);
+}
+
+#[test]
+fn test_counted_line_jump_opens_fold_containing_target() {
+    let mut window = Window::new(Buffer::from_str("outer\n  inner1\n  inner2\nafter"));
+    window.set_cursor(Cursor::new(0, 0));
+    assert_eq!(
+        window.dispatch_action(&Action::new(ActionKind::CloseFold)),
+        ActionResult::Handled
+    );
+
+    assert_eq!(
+        window.dispatch_action(&Action::count(
+            3,
+            Box::new(Action::new(ActionKind::MoveToLastLine)),
+        )),
+        ActionResult::Handled
+    );
+    let mut screen = crate::screen::Screen::new(4, 40);
+    window.render(&mut screen, Position::new(0, 0), Size::new(4, 40));
+
+    assert_eq!(window.buffer_view().cursor().line, 2);
+    assert_eq!(window.render_data().line_data[1].buffer_line, 1);
+    assert_eq!(window.render_data().line_data[2].buffer_line, 2);
+}
+
+#[test]
+fn test_move_left_from_fold_closing_line_opens_fold() {
+    let mut window = Window::new(Buffer::from_str("struct Cli {\n    files: Vec<File>,\n}"));
+    window.set_cursor(Cursor::new(0, 0));
+    assert_eq!(
+        window.dispatch_action(&Action::new(ActionKind::CloseFold)),
+        ActionResult::Handled
+    );
+    window.set_cursor(Cursor::new(2, 0));
+
+    assert_eq!(
+        window.dispatch_action(&Action::new(ActionKind::MoveLeft)),
+        ActionResult::Handled
+    );
+    let mut screen = crate::screen::Screen::new(3, 40);
+    window.render(&mut screen, Position::new(0, 0), Size::new(3, 40));
+
+    assert_eq!(window.buffer_view().cursor().line, 1);
+    assert_eq!(window.render_data().line_data[1].buffer_line, 1);
+    assert_eq!(window.render_data().line_data[2].buffer_line, 2);
+}
+
+#[test]
+fn test_open_line_below_opens_fold_when_cursor_enters_hidden_line() {
+    let mut window = Window::new(Buffer::from_str("outer\n  inner1\n  inner2\nafter"));
+    window.set_cursor(Cursor::new(1, 0));
+    assert_eq!(
+        window.dispatch_action(&Action::new(ActionKind::CloseFold)),
+        ActionResult::Handled
+    );
+
+    assert_eq!(
+        window.dispatch_action(&Action::new(ActionKind::OpenLineBelow)),
+        ActionResult::Handled
+    );
+    let mut screen = crate::screen::Screen::new(5, 40);
+    window.render(&mut screen, Position::new(0, 0), Size::new(5, 40));
+
+    assert_eq!(window.buffer_view().cursor().line, 1);
+    assert_eq!(window.render_data().line_data[1].buffer_line, 1);
+    assert_eq!(window.render_data().line_data[2].buffer_line, 2);
+}
+
+#[test]
+fn test_open_line_above_opens_fold_when_cursor_enters_hidden_line() {
+    let mut window = Window::new(Buffer::from_str("outer\n  inner1\n  inner2\nafter"));
+    window.set_cursor(Cursor::new(1, 0));
+    assert_eq!(
+        window.dispatch_action(&Action::new(ActionKind::CloseFold)),
+        ActionResult::Handled
+    );
+    window.set_cursor(Cursor::new(3, 0));
+
+    assert_eq!(
+        window.dispatch_action(&Action::new(ActionKind::OpenLineAbove)),
+        ActionResult::Handled
+    );
+    let mut screen = crate::screen::Screen::new(5, 40);
+    window.render(&mut screen, Position::new(0, 0), Size::new(5, 40));
+
+    assert_eq!(window.buffer_view().cursor().line, 3);
+    assert_eq!(window.render_data().line_data[2].buffer_line, 2);
+    assert_eq!(window.render_data().line_data[3].buffer_line, 3);
+}
+
+#[test]
+fn test_open_line_above_on_brace_fold_end_inserts_above_brace() {
+    let mut window = Window::new(Buffer::from_str(
+        "struct Cli {\n    theme: Option<String>,\n    no_syntax: bool,\n    files: Vec<File>,\n}\n",
+    ));
+    window.set_cursor(Cursor::new(0, 0));
+    assert_eq!(
+        window.dispatch_action(&Action::new(ActionKind::CloseFold)),
+        ActionResult::Handled
+    );
+    window.set_cursor(Cursor::new(4, 0));
+
+    let mut folded_screen = crate::screen::Screen::new(3, 40);
+    window.render(&mut folded_screen, Position::new(0, 0), Size::new(3, 40));
+    assert_eq!(window.render_data().line_data[1].buffer_line, 4);
+
+    assert_eq!(
+        window.dispatch_action(&Action::new(ActionKind::OpenLineAbove)),
+        ActionResult::Handled
+    );
+
+    let text = window
+        .buffer_view()
+        .with_buffer(|buffer| buffer.as_str())
+        .expect("buffer should exist");
+
+    assert_eq!(window.buffer_view().cursor().line, 4);
+    assert_eq!(
+        text,
+        "struct Cli {\n    theme: Option<String>,\n    no_syntax: bool,\n    files: Vec<File>,\n\n}"
+    );
+}
+
+#[test]
+fn test_counted_line_jump_opens_all_nested_folds() {
+    let buffer = Buffer::from_str("outer\n  inner\n    deep\nafter");
+    let mut window = Window::from_owned_buffer(buffer);
+    window.buffer_view_mut().folded_lines.insert(0);
+    window.buffer_view_mut().folded_lines.insert(1);
+
+    assert_eq!(
+        window.dispatch_action(&Action::count(
+            3,
+            Box::new(Action::new(ActionKind::MoveToLastLine)),
+        )),
+        ActionResult::Handled
+    );
+    let mut screen = crate::screen::Screen::new(4, 40);
+    window.render(&mut screen, Position::new(0, 0), Size::new(4, 40));
+
+    assert_eq!(window.buffer_view().cursor().line, 2);
+    assert_eq!(window.render_data().line_data[1].buffer_line, 1);
+    assert_eq!(window.render_data().line_data[2].buffer_line, 2);
 }
 
 #[test]
@@ -1291,11 +1570,11 @@ fn test_window_render_draws_indent_guide_between_scope_boundaries() {
     let mut screen = crate::screen::Screen::new(6, 24);
     window.render(&mut screen, Position::new(0, 0), Size::new(6, 24));
 
-    assert_ne!(screen.get_cell_mut(0, 5).unwrap().text, "|");
-    assert_eq!(screen.get_cell_mut(1, 5).unwrap().text, "|");
-    assert_eq!(screen.get_cell_mut(2, 5).unwrap().text, "|");
-    assert_eq!(screen.get_cell_mut(3, 5).unwrap().text, "|");
-    assert_ne!(screen.get_cell_mut(4, 5).unwrap().text, "|");
+    assert_ne!(screen.get_cell_mut(0, 7).unwrap().text, "|");
+    assert_eq!(screen.get_cell_mut(1, 7).unwrap().text, "|");
+    assert_eq!(screen.get_cell_mut(2, 7).unwrap().text, "|");
+    assert_eq!(screen.get_cell_mut(3, 7).unwrap().text, "|");
+    assert_ne!(screen.get_cell_mut(4, 7).unwrap().text, "|");
 }
 
 #[test]
@@ -1311,9 +1590,9 @@ fn test_window_render_skips_indent_guide_when_disabled() {
     let mut screen = crate::screen::Screen::new(6, 24);
     window.render(&mut screen, Position::new(0, 0), Size::new(6, 24));
 
-    assert_ne!(screen.get_cell_mut(1, 5).unwrap().text, "|");
-    assert_ne!(screen.get_cell_mut(2, 5).unwrap().text, "|");
-    assert_ne!(screen.get_cell_mut(3, 5).unwrap().text, "|");
+    assert_ne!(screen.get_cell_mut(1, 7).unwrap().text, "|");
+    assert_ne!(screen.get_cell_mut(2, 7).unwrap().text, "|");
+    assert_ne!(screen.get_cell_mut(3, 7).unwrap().text, "|");
 }
 
 #[test]
@@ -1330,7 +1609,7 @@ fn test_window_render_uses_unicode_indent_glyph_when_capability_enabled() {
     let mut screen = crate::screen::Screen::new(6, 24);
     window.render(&mut screen, Position::new(0, 0), Size::new(6, 24));
 
-    assert_eq!(screen.get_cell_mut(2, 5).unwrap().text, "│");
+    assert_eq!(screen.get_cell_mut(2, 7).unwrap().text, "│");
 }
 
 #[test]
@@ -1351,7 +1630,7 @@ fn test_window_render_indent_guide_uses_split_border_style() {
     let mut screen = crate::screen::Screen::new(6, 24);
     window.render(&mut screen, Position::new(0, 0), Size::new(6, 24));
 
-    let cell = screen.get_cell_mut(2, 5).unwrap();
+    let cell = screen.get_cell_mut(2, 7).unwrap();
     assert_eq!(cell.text, "|");
     assert_eq!(cell.style, expected_style);
 }
@@ -1370,7 +1649,7 @@ fn test_window_render_indent_guide_uses_visual_column_for_tabs() {
     let mut screen = crate::screen::Screen::new(6, 24);
     window.render(&mut screen, Position::new(0, 0), Size::new(6, 24));
 
-    assert_eq!(screen.get_cell_mut(2, 8).unwrap().text, "|");
+    assert_eq!(screen.get_cell_mut(2, 10).unwrap().text, "|");
 }
 
 #[test]
@@ -1400,7 +1679,7 @@ fn test_window_render_indent_guide_preserves_visual_selection_background() {
     let mut screen = crate::screen::Screen::new(5, 24);
     window.render(&mut screen, Position::new(0, 0), Size::new(5, 24));
 
-    let cell = screen.get_cell_mut(1, 5).unwrap();
+    let cell = screen.get_cell_mut(1, 7).unwrap();
     assert_eq!(cell.text, "|");
     assert_eq!(cell.style, expected_style);
 }
@@ -1418,9 +1697,9 @@ fn test_window_render_skips_indent_guide_without_eligible_scope() {
     let mut screen = crate::screen::Screen::new(6, 24);
     window.render(&mut screen, Position::new(0, 0), Size::new(6, 24));
 
-    assert_ne!(screen.get_cell_mut(1, 5).unwrap().text, "|");
-    assert_ne!(screen.get_cell_mut(2, 5).unwrap().text, "|");
-    assert_ne!(screen.get_cell_mut(3, 5).unwrap().text, "|");
+    assert_ne!(screen.get_cell_mut(1, 7).unwrap().text, "|");
+    assert_ne!(screen.get_cell_mut(2, 7).unwrap().text, "|");
+    assert_ne!(screen.get_cell_mut(3, 7).unwrap().text, "|");
 }
 
 #[test]
@@ -1439,7 +1718,7 @@ fn test_window_render_indent_guide_does_not_overwrite_wrapped_continuation_text(
 
     // Row 2 is the second wrapped segment of line 2 ("efghij"), and the guide
     // column intersects that segment. The rendered text must win over the guide.
-    assert_eq!(screen.get_cell_mut(2, 5).unwrap().text, "g");
+    assert_eq!(screen.get_cell_mut(2, 8).unwrap().text, "f");
 }
 
 #[test]
@@ -1459,11 +1738,11 @@ fn test_window_render_fills_empty_content_rows_with_theme_default() {
         expected_gutter_style
     );
     assert_eq!(
-        screen.get_cell_mut(1, 3).unwrap().style,
+        screen.get_cell_mut(1, CONTENT_COL).unwrap().style,
         expected_default_style
     );
     assert_eq!(
-        screen.get_cell_mut(2, 3).unwrap().style,
+        screen.get_cell_mut(2, CONTENT_COL).unwrap().style,
         expected_default_style
     );
 }
@@ -2578,6 +2857,12 @@ fn test_gutter_width_calculation_includes_diff_sign_column() {
 }
 
 #[test]
+fn test_gutter_width_calculation_includes_fold_sign_column() {
+    let gutter = Gutter::new(0, 10, 9).with_fold_sign_width(1);
+    assert_eq!(gutter.calculate_width(), 4);
+}
+
+#[test]
 fn test_gutter_render_for_render_data_uses_diagnostic_signs() {
     let buffer = Buffer::from_str("one\ntwo");
     let view = BufferView::new(buffer);
@@ -2604,6 +2889,7 @@ fn test_gutter_render_for_render_data_uses_diagnostic_signs() {
                 Some(DiagnosticSeverity::HINT),
             ],
             diagnostic_sign_width: 1,
+            fold_sign_width: 0,
         },
     );
 
@@ -2648,6 +2934,7 @@ fn test_gutter_render_for_render_data_uses_distinct_diff_signs() {
             diff_modified_sign_style: Style::new().fg(Color::ansi(11)),
             diagnostic_severities: vec![None, None, None],
             diagnostic_sign_width: 0,
+            fold_sign_width: 0,
         },
     );
 
@@ -2701,12 +2988,70 @@ fn test_gutter_render_for_render_data_uses_nerdfont_diff_signs_when_enabled() {
             diff_modified_sign_style: Style::default(),
             diagnostic_severities: vec![None, None, None],
             diagnostic_sign_width: 0,
+            fold_sign_width: 0,
         },
     );
 
     assert_eq!(screen.get_cell_mut(0, 0).unwrap().text, "");
     assert_eq!(screen.get_cell_mut(1, 0).unwrap().text, "");
     assert_eq!(screen.get_cell_mut(2, 0).unwrap().text, "");
+}
+
+#[test]
+fn test_gutter_render_for_render_data_uses_ascii_fold_glyphs() {
+    let mut window = Window::new(Buffer::from_str("outer\n  inner\nafter\ntail"));
+    let mut screen = crate::screen::Screen::new(4, 20);
+    window.render(&mut screen, Position::new(0, 0), Size::new(4, 20));
+
+    assert_eq!(screen.get_cell_mut(0, 3).unwrap().text, "v");
+    assert_eq!(screen.get_cell_mut(3, 3).unwrap().text, " ");
+
+    window.set_cursor(Cursor::new(0, 0));
+    window.dispatch_action(&Action::new(ActionKind::CloseFold));
+    window.render(&mut screen, Position::new(0, 0), Size::new(4, 20));
+
+    assert_eq!(screen.get_cell_mut(0, 3).unwrap().text, ">");
+    assert_eq!(window.render_data().line_data[1].buffer_line, 2);
+}
+
+#[test]
+fn test_gutter_render_only_marks_fold_starts() {
+    let mut window = Window::new(Buffer::from_str("outer\n  inner\nafter"));
+    let mut screen = crate::screen::Screen::new(4, 20);
+    window.render(&mut screen, Position::new(0, 0), Size::new(4, 20));
+
+    assert_eq!(screen.get_cell_mut(0, 3).unwrap().text, "v");
+    assert_eq!(screen.get_cell_mut(1, 3).unwrap().text, " ");
+    assert_eq!(screen.get_cell_mut(2, 3).unwrap().text, " ");
+}
+
+#[test]
+fn test_gutter_render_does_not_mark_blank_lines_as_fold_starts() {
+    let mut window = Window::new(Buffer::from_str("outer\n  inner\n\n  nested\nafter"));
+    let mut screen = crate::screen::Screen::new(5, 20);
+    window.render(&mut screen, Position::new(0, 0), Size::new(5, 20));
+
+    assert_eq!(screen.get_cell_mut(0, 3).unwrap().text, "v");
+    assert_eq!(screen.get_cell_mut(2, 3).unwrap().text, " ");
+}
+
+#[test]
+fn test_gutter_render_for_render_data_uses_unicode_fold_glyphs() {
+    let _config_guard = globals::set_test_config(Config {
+        advanced_glyphs: BTreeSet::from([AdvancedGlyphCapability::UnicodeFolds]),
+        ..Default::default()
+    });
+    let mut window = Window::new(Buffer::from_str("outer\n  inner\nafter"));
+    let mut screen = crate::screen::Screen::new(3, 20);
+    window.render(&mut screen, Position::new(0, 0), Size::new(3, 20));
+
+    assert_eq!(screen.get_cell_mut(0, 3).unwrap().text, "▼");
+
+    window.set_cursor(Cursor::new(0, 0));
+    window.dispatch_action(&Action::new(ActionKind::CloseFold));
+    window.render(&mut screen, Position::new(0, 0), Size::new(3, 20));
+
+    assert_eq!(screen.get_cell_mut(0, 3).unwrap().text, "▶");
 }
 
 #[test]
@@ -2835,7 +3180,7 @@ fn test_window_render_supports_relative_line_numbers_in_all_modes() {
         mode_window.render(&mut screen, Position::new(0, 0), Size::new(5, 20));
 
         for (expected, row) in expected_rows {
-            assert_eq!(screen.get_cell_mut(row, 1).unwrap().text, expected);
+            assert_eq!(screen.get_cell_mut(row, 2).unwrap().text, expected);
         }
     }
 }
@@ -2931,7 +3276,10 @@ fn test_window_render_applies_diagnostic_undercurl_to_buffer_ranges() {
         DiagnosticSeverity::WARNING,
         Style::default(),
     ));
-    let content_col = Gutter::new(0, 1, 1).calculate_width();
+    let content_col = Gutter::new(0, 1, 1)
+        .with_diagnostic_sign_width(1)
+        .with_fold_sign_width(FOLD_SIGN_WIDTH)
+        .calculate_width();
 
     assert_eq!(
         screen.get_cell_mut(0, content_col).unwrap().style,
@@ -3076,9 +3424,9 @@ fn test_window_visual_cursor_with_gutter() {
     assert!(cursor_pos.is_some());
     let pos = cursor_pos.unwrap();
 
-    // Cursor should be offset by gutter width (3 columns for 3 lines)
-    // The cursor is at column 2 in the content, plus 3 for gutter = column 5
-    let gutter_width = 3; // digits(3) + 2 = 3
+    // Cursor should be offset by gutter width (5 columns for 3 lines plus fold sign spacing)
+    // The cursor is at column 2 in the content, plus 5 for gutter = column 7
+    let gutter_width = 5; // digits(3) + 2 + fold sign + spacer = 5
     assert_eq!(pos.col, 2 + gutter_width);
 }
 
@@ -3093,7 +3441,7 @@ fn test_window_visual_cursor_ignores_ghost_text() {
     window.render(&mut screen, Position::new(0, 0), Size::new(1, 20));
 
     let pos = window.visual_cursor().expect("cursor should be visible");
-    assert_eq!(pos.col, 11);
+    assert_eq!(pos.col, 13);
 }
 
 #[test]
@@ -3107,7 +3455,7 @@ fn test_window_visual_cursor_does_not_count_ghost_text_at_cursor() {
     window.render(&mut screen, Position::new(0, 0), Size::new(1, 20));
 
     let pos = window.visual_cursor().expect("cursor should be visible");
-    assert_eq!(pos.col, 10);
+    assert_eq!(pos.col, 12);
 }
 
 #[test]
@@ -3120,6 +3468,8 @@ fn test_render_data_cursor_ignores_ghost_text_after_overlay_split() {
         width_offset: 0,
         show_gutter_line_number: true,
         base_style: Style::default(),
+        fold_glyph: None,
+        folded_line_count: None,
         chunks: vec![
             RenderChunk::new("ab", Style::default()),
             RenderChunk::ghost_text("ghost", Style::default()),
@@ -3156,6 +3506,8 @@ fn test_render_data_accent_range_ignores_ghost_text_when_counting_bytes() {
         width_offset: 0,
         show_gutter_line_number: true,
         base_style: Style::default(),
+        fold_glyph: None,
+        folded_line_count: None,
         chunks: vec![
             RenderChunk::new("ab", Style::default()),
             RenderChunk::ghost_text("ghost", Style::default()),
@@ -3228,7 +3580,7 @@ fn test_window_visual_cursor_drops_deleted_inlay_hint_after_di_paren() {
     assert!(rendered_text.contains(": WorkerGuard"));
     assert!(!rendered_text.contains("log_file"));
     assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 37));
-    assert_eq!(pos.col, 53);
+    assert_eq!(pos.col, 55);
 }
 
 #[test]
@@ -3321,7 +3673,7 @@ fn test_window_visual_cursor_maps_to_wrapped_continuation_row() {
 
     let cursor = window.visual_cursor().expect("cursor should be visible");
     assert_eq!(cursor.row, 1);
-    assert_eq!(cursor.col, 4);
+    assert_eq!(cursor.col, 6);
 }
 
 #[test]
@@ -5846,19 +6198,13 @@ fn test_indent_guide_appears_with_step_by_step_editing_at_column_zero() {
     let mut screen = crate::screen::Screen::new(5, 24);
     window.render(&mut screen, Position::new(0, 0), Size::new(5, 24));
 
-    let _ = window.buffer_view().with_buffer(|b| {
-        let scopes = b.cached_indent_scopes();
-        let scope_ids = b.cached_line_indent_scope_ids(3);
-    });
-
     // Check for the guide character on screen row for the `"hello"` line.
-    // Screen layout: 5 rows (0-4), gutter width = digits(5)+2 = 1+2 = 3.
-    // Row 3 = buffer line 3 = `   "hello"`, guide expected at column 3 (gutter) + indent_width(0) = col 3
+    // Screen layout: 5 rows (0-4), gutter width includes the reserved fold sign.
+    // Row 3 = buffer line 3 = `   "hello"`; guide is at the first content column.
     let guide_cell = screen
-        .get_cell_mut(3, 3)
+        .get_cell_mut(3, 5)
         .map(|c| c.text.clone())
         .unwrap_or_default();
-    eprintln!("guide at (3,3): {:?}", guide_cell);
     assert_eq!(
         guide_cell, "|",
         "indent guide should appear on the indented line after step-by-step edit"

@@ -6,6 +6,7 @@
 //! starting from its origin.
 
 mod commands;
+mod fold;
 mod geometry;
 mod gutter;
 mod motions;
@@ -30,9 +31,12 @@ use crate::terminal::CursorStyle;
 use crate::terminal::Key;
 use crate::terminal::Style;
 use lsp_types::DiagnosticSeverity;
+use std::collections::BTreeSet;
 use std::fmt;
 use std::time::Instant;
 use unicode_segmentation::UnicodeSegmentation;
+
+const FOLD_SIGN_WIDTH: u16 = 2;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Position {
@@ -66,6 +70,8 @@ pub struct Gutter {
     diagnostic_sign_width: u16,
     /// Width reserved for diff markers.
     diff_sign_width: u16,
+    /// Width reserved for fold markers.
+    fold_sign_width: u16,
     /// Resolved style for the gutter.
     style: Style,
 }
@@ -89,6 +95,8 @@ pub struct GutterRenderState {
     pub diff_markers: Vec<Option<DiffMarkerKind>>,
     /// Width reserved for the diff sign column.
     pub diff_sign_width: u16,
+    /// Width reserved for the fold sign column.
+    pub fold_sign_width: u16,
     /// Style used for added diff markers.
     pub diff_added_sign_style: Style,
     /// Style used for deleted diff markers.
@@ -113,7 +121,15 @@ pub struct LineData {
     pub show_gutter_line_number: bool,
     /// Extra base style applied before this line's chunks are rendered.
     pub base_style: Style,
+    pub fold_glyph: Option<FoldGutterGlyph>,
+    pub folded_line_count: Option<usize>,
     pub chunks: Vec<RenderChunk>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FoldGutterGlyph {
+    Open,
+    Closed,
 }
 
 #[derive(Debug, Clone)]
@@ -132,6 +148,7 @@ pub struct BufferView {
     remembered_visual_col: Option<usize>,
     visual_selection: Option<VisualSelection>,
     yank_flash: Option<YankFlash>,
+    folded_lines: BTreeSet<usize>,
     rendered_visual_generation: u64,
 }
 
@@ -403,6 +420,7 @@ impl Window {
         let gutter_width = Gutter::new_with_style(0, size.rows, total_lines, gutter_style)
             .with_diagnostic_sign_width(diagnostic_sign_width)
             .with_diff_sign_width(diff_sign_width)
+            .with_fold_sign_width(FOLD_SIGN_WIDTH)
             .calculate_width();
         let mut render_state = renderer::BufferRenderState {
             cursor: self.buffer_view.cursor(),
@@ -469,6 +487,7 @@ impl Window {
                 self.buffer_view.buffer_id_opt(),
             ))
             .with_diff_sign_width(diff_sign_width_for_buffer(self.buffer_view.buffer_id_opt()))
+            .with_fold_sign_width(FOLD_SIGN_WIDTH)
             .calculate_width();
 
         self.buffer_view

@@ -82,6 +82,9 @@ fn register_motion_bindings(trie_keymap: &mut TrieKeymap) {
     trie_keymap.insert_str("zt", Action::new(ActionKind::ViewportCursorTop));
     trie_keymap.insert_str("zz", Action::new(ActionKind::ViewportCursorCenter));
     trie_keymap.insert_str("zb", Action::new(ActionKind::ViewportCursorBottom));
+    trie_keymap.insert_str("za", Action::new(ActionKind::ToggleFold));
+    trie_keymap.insert_str("zo", Action::new(ActionKind::OpenFold));
+    trie_keymap.insert_str("zc", Action::new(ActionKind::CloseFold));
     trie_keymap.insert_str("{", Action::new(ActionKind::MoveToPreviousParagraph));
     trie_keymap.insert_str("}", Action::new(ActionKind::MoveToNextParagraph));
     trie_keymap.insert_str("[h", Action::new(ActionKind::MoveToPreviousDiffHunk));

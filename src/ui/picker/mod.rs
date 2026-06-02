@@ -1993,12 +1993,12 @@ mod tests {
         window.render(&mut window_screen, Position::new(1, 1), Size::new(3, 18));
 
         assert_eq!(
-            row_text(&mut preview_screen, 1, 0).trim_end(),
-            row_text(&mut window_screen, 1, 0).trim_end()
+            row_text(&mut preview_screen, 1, 0).trim_start().trim_end(),
+            row_text(&mut window_screen, 1, 0).trim_start().trim_end()
         );
         assert_eq!(
-            row_text(&mut preview_screen, 2, 0).trim_end(),
-            row_text(&mut window_screen, 2, 0).trim_end()
+            row_text(&mut preview_screen, 2, 0).trim_start().trim_end(),
+            row_text(&mut window_screen, 2, 0).trim_start().trim_end()
         );
 
         std::fs::remove_file(file_path).ok();

@@ -1515,9 +1515,12 @@ fn test_layout_render_keeps_syntax_label_when_syntax_disabled() {
 
     layout.render(&mut screen, Position::new(0, 0), Size::new(3, 40));
 
-    assert_eq!(screen.get_cell_mut(1, 3).unwrap().text, "f");
+    let content_col = (0..40)
+        .find(|col| screen.get_cell_mut(1, *col).unwrap().text == "f")
+        .expect("buffer content should render");
+    assert_eq!(screen.get_cell_mut(1, content_col).unwrap().text, "f");
     assert_eq!(
-        screen.get_cell_mut(1, 3).unwrap().style,
+        screen.get_cell_mut(1, content_col).unwrap().style,
         border_theme().default_style()
     );
     assert_eq!(screen.get_cell_mut(2, 9).unwrap().text, "R");
