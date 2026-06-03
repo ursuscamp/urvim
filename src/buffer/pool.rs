@@ -264,8 +264,8 @@ impl BufferPool {
                     if let JobKind::DiffRefresh(buffer_id) = kind
                         && let Some(buffer) = self.buffers.get_mut(&buffer_id)
                     {
-                        if buffer.diff_background_generation == Some(buffer.diff_generation) {
-                            buffer.diff_background_generation = None;
+                        if buffer.generations.diff_background == Some(buffer.generations.diff) {
+                            buffer.generations.diff_background = None;
                         }
                     }
                     tracing::warn!(?error, "buffer-pool job failed");
@@ -455,12 +455,12 @@ impl BufferPool {
                 let generation = buffer.syntax_generation();
                 let syntax_needed = (!buffer.syntax_cache_complete()
                     || buffer.pending_syntax_dirty_suffix_start().is_some())
-                    && buffer.syntax_background_generation != Some(generation);
+                    && buffer.generations.syntax_background != Some(generation);
                 let indent_needed = buffer.indent_scope_cache_stale()
-                    && buffer.indent_background_generation != Some(generation);
-                let diff_generation = buffer.diff_generation;
+                    && buffer.generations.indent_background != Some(generation);
+                let diff_generation = buffer.generations.diff;
                 let diff_needed = buffer.diff_cache_stale()
-                    && buffer.diff_background_generation != Some(diff_generation);
+                    && buffer.generations.diff_background != Some(diff_generation);
 
                 if !syntax_needed && !indent_needed && !diff_needed {
                     return None;
@@ -508,7 +508,7 @@ impl BufferPool {
             if self.submit_background_job(kind, token, job).is_ok()
                 && let Some(buffer) = self.buffers.get_mut(&buffer_id)
             {
-                buffer.syntax_background_generation = Some(generation);
+                buffer.generations.syntax_background = Some(generation);
             }
         }
 
@@ -518,7 +518,7 @@ impl BufferPool {
             if self.submit_background_job(kind, token, job).is_ok()
                 && let Some(buffer) = self.buffers.get_mut(&buffer_id)
             {
-                buffer.indent_background_generation = Some(generation);
+                buffer.generations.indent_background = Some(generation);
             }
         }
 
@@ -528,7 +528,7 @@ impl BufferPool {
             if self.submit_background_job(kind, token, job).is_ok()
                 && let Some(buffer) = self.buffers.get_mut(&buffer_id)
             {
-                buffer.diff_background_generation = Some(diff_generation);
+                buffer.generations.diff_background = Some(diff_generation);
             }
         }
     }

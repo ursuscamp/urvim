@@ -2120,11 +2120,11 @@ impl Buffer {
         }
 
         self.buffer_cache.apply_edits(edits);
-        self.syntax_generation = self.syntax_generation.wrapping_add(1);
-        self.syntax_background_generation = None;
-        self.indent_background_generation = None;
-        self.diff_generation = self.diff_generation.wrapping_add(1);
-        self.diff_background_generation = None;
+        self.generations.syntax = self.generations.syntax.wrapping_add(1);
+        self.generations.syntax_background = None;
+        self.generations.indent_background = None;
+        self.generations.diff = self.generations.diff.wrapping_add(1);
+        self.generations.diff_background = None;
         if edits.iter().any(|edit| edit.start_line == 0) {
             self.refresh_syntax();
         }
@@ -2197,12 +2197,12 @@ impl Buffer {
 
     /// Returns the current syntax generation used to reject stale background results.
     pub fn syntax_generation(&self) -> u64 {
-        self.syntax_generation
+        self.generations.syntax
     }
 
     /// Returns true when a syntax catch-up job has been queued for the current generation.
     pub fn syntax_background_pending(&self) -> bool {
-        self.syntax_background_generation.is_some()
+        self.generations.syntax_background.is_some()
     }
 
     /// Returns the highlighted spans for a line, computing them on demand.
@@ -2219,58 +2219,58 @@ impl Buffer {
 
     /// Applies a background buffer cache refresh result when it still matches this buffer.
     pub fn apply_buffer_cache_refresh_result(&mut self, result: BufferCacheRefreshResult) -> bool {
-        if result.generation != self.syntax_generation {
+        if result.generation != self.generations.syntax {
             return false;
         }
 
         self.buffer_cache.replace_with(result.cache);
         self.sync_undo_snapshot_cache_if_current();
-        if self.syntax_background_generation == Some(result.generation) {
-            self.syntax_background_generation = None;
+        if self.generations.syntax_background == Some(result.generation) {
+            self.generations.syntax_background = None;
         }
         true
     }
 
     /// Applies a background syntax refresh result when it still matches this buffer.
     pub fn apply_syntax_refresh_result(&mut self, result: SyntaxRefreshResult) -> bool {
-        if result.generation != self.syntax_generation {
+        if result.generation != self.generations.syntax {
             return false;
         }
 
         self.buffer_cache.replace_syntax_cache(result.syntax_cache);
         self.sync_undo_snapshot_cache_if_current();
-        if self.syntax_background_generation == Some(result.generation) {
-            self.syntax_background_generation = None;
+        if self.generations.syntax_background == Some(result.generation) {
+            self.generations.syntax_background = None;
         }
         true
     }
 
     /// Applies a background indent scope refresh result when it still matches this buffer.
     pub fn apply_indent_scope_refresh_result(&mut self, result: IndentScopeRefreshResult) -> bool {
-        if result.generation != self.syntax_generation {
+        if result.generation != self.generations.syntax {
             return false;
         }
 
         self.buffer_cache
             .replace_indent_scope_cache(result.indent_scope_cache);
         self.sync_undo_snapshot_cache_if_current();
-        if self.indent_background_generation == Some(result.generation) {
-            self.indent_background_generation = None;
+        if self.generations.indent_background == Some(result.generation) {
+            self.generations.indent_background = None;
         }
         true
     }
 
     /// Applies a background diff refresh result when it still matches this buffer.
     pub fn apply_diff_refresh_result(&mut self, result: crate::buffer::DiffRefreshResult) -> bool {
-        if result.generation != self.diff_generation {
+        if result.generation != self.generations.diff {
             return false;
         }
 
-        self.diff_cache.replace_hunks(result.hunks);
-        self.diff_cache_generation = Some(result.generation);
+        self.diff_cache
+            .replace_hunks_for_generation(result.generation, result.hunks);
         self.diff_tracked = Some(result.tracked);
-        if self.diff_background_generation == Some(result.generation) {
-            self.diff_background_generation = None;
+        if self.generations.diff_background == Some(result.generation) {
+            self.generations.diff_background = None;
         }
         true
     }
@@ -2279,17 +2279,17 @@ impl Buffer {
     pub fn request_buffer_cache_refresh(&mut self, buffer_id: BufferId) {
         let syntax_needed = (self.buffer_cache.syntax_cache.has_dirty_suffix()
             || !self.syntax_cache_complete())
-            && self.syntax_background_generation != Some(self.syntax_generation);
+            && self.generations.syntax_background != Some(self.generations.syntax);
         let indent_needed = self.indent_scope_cache_stale()
-            && self.indent_background_generation != Some(self.syntax_generation);
+            && self.generations.indent_background != Some(self.generations.syntax);
         let diff_needed = self.diff_cache_stale()
-            && self.diff_background_generation != Some(self.diff_generation);
+            && self.generations.diff_background != Some(self.generations.diff);
 
         if !syntax_needed && !indent_needed && !diff_needed {
             return;
         }
 
-        let generation = self.syntax_generation;
+        let generation = self.generations.syntax;
 
         if syntax_needed {
             let job = SyntaxRefreshJob::new(
@@ -2307,7 +2307,7 @@ impl Buffer {
             });
 
             if submitted {
-                self.syntax_background_generation = Some(generation);
+                self.generations.syntax_background = Some(generation);
             }
         }
 
@@ -2326,7 +2326,7 @@ impl Buffer {
             });
 
             if submitted {
-                self.indent_background_generation = Some(generation);
+                self.generations.indent_background = Some(generation);
             }
         }
 
@@ -2335,16 +2335,17 @@ impl Buffer {
                 return;
             };
 
-            let job = DiffRefreshJob::new(buffer_id, self.diff_generation, path, self.line_texts());
+            let job =
+                DiffRefreshJob::new(buffer_id, self.generations.diff, path, self.line_texts());
             let kind = JobKind::DiffRefresh(buffer_id);
-            let token = JobToken::new(self.diff_generation);
+            let token = JobToken::new(self.generations.diff);
 
             let submitted = globals::with_buffer_pool(|buffer_pool| {
                 buffer_pool.submit_background_job(kind, token, job).is_ok()
             });
 
             if submitted {
-                self.diff_background_generation = Some(self.diff_generation);
+                self.generations.diff_background = Some(self.generations.diff);
             }
         }
     }
@@ -2923,14 +2924,14 @@ mod tests {
     #[test]
     fn background_generation_is_cleared_when_syntax_is_invalidated() {
         let mut buffer = Buffer::from_str("line 1\nline 2");
-        buffer.syntax_generation = 7;
-        buffer.syntax_background_generation = Some(7);
+        buffer.generations.syntax = 7;
+        buffer.generations.syntax_background = Some(7);
         buffer.ensure_syntax_through(1);
 
         buffer.invalidate_syntax_from(1);
 
         assert_eq!(buffer.syntax_generation(), 8);
-        assert_eq!(buffer.syntax_background_generation, None);
+        assert_eq!(buffer.generations.syntax_background, None);
         assert!(buffer.cached_syntax_spans_for_line(0).is_some());
         assert!(buffer.cached_syntax_spans_for_line(1).is_some());
         assert!(buffer.syntax_cache_complete());
@@ -2940,11 +2941,11 @@ mod tests {
     fn complete_cache_requests_no_background_catch_up() {
         let mut buffer = Buffer::from_str("line 1");
         buffer.ensure_syntax_through(0);
-        buffer.syntax_background_generation = None;
+        buffer.generations.syntax_background = None;
 
         buffer.request_syntax_catch_up(BufferId::new(1));
 
-        assert_eq!(buffer.syntax_background_generation, None);
+        assert_eq!(buffer.generations.syntax_background, None);
     }
 
     #[test]

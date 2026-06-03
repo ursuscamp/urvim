@@ -194,6 +194,16 @@ impl DiskState {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct Generations {
+    syntax: u64,
+    syntax_background: Option<u64>,
+    indent_background: Option<u64>,
+    diff: u64,
+    diff_background: Option<u64>,
+    visual: u64,
+}
+
 /// Stores undo/redo history for a buffer.
 ///
 /// The history is a list of snapshots, with a position pointer indicating
@@ -236,14 +246,8 @@ pub struct Buffer {
     saved_lines: PieceTable,
     saved_disk_state: Option<DiskState>,
     path: Option<AbsolutePath>,
-    syntax_generation: u64,
-    syntax_background_generation: Option<u64>,
-    indent_background_generation: Option<u64>,
-    diff_generation: u64,
-    diff_background_generation: Option<u64>,
-    diff_cache_generation: Option<u64>,
+    generations: Generations,
     diff_tracked: Option<bool>,
-    visual_generation: u64,
     undo_state: UndoState,
     buffer_cache: BufferCache,
     diff_cache: DiffCache,
@@ -260,14 +264,8 @@ impl Clone for Buffer {
             saved_lines: self.saved_lines.clone(),
             saved_disk_state: self.saved_disk_state,
             path: self.path.clone(),
-            syntax_generation: self.syntax_generation,
-            syntax_background_generation: self.syntax_background_generation,
-            indent_background_generation: self.indent_background_generation,
-            diff_generation: self.diff_generation,
-            diff_background_generation: self.diff_background_generation,
-            diff_cache_generation: self.diff_cache_generation,
+            generations: self.generations,
             diff_tracked: self.diff_tracked,
-            visual_generation: self.visual_generation,
             undo_state: self.undo_state.clone(),
             buffer_cache: self.buffer_cache.clone(),
             diff_cache: self.diff_cache.clone(),
@@ -322,8 +320,7 @@ impl Buffer {
     pub fn set_path(&mut self, path: AbsolutePath) {
         self.path = Some(path);
         self.diff_cache.clear();
-        self.diff_cache_generation = None;
-        self.diff_background_generation = None;
+        self.generations.diff_background = None;
         self.diff_tracked = None;
         self.refresh_syntax();
     }
@@ -349,8 +346,8 @@ impl Buffer {
             return false;
         }
 
-        self.diff_cache_generation != Some(self.diff_generation)
-            || self.diff_background_generation == Some(self.diff_generation)
+        !self.diff_cache.is_current_for(self.generations.diff)
+            || self.generations.diff_background == Some(self.generations.diff)
     }
 
     /// Returns the reserved gutter width for diff markers.
@@ -359,7 +356,7 @@ impl Buffer {
             return 0;
         }
 
-        if self.diff_cache.is_empty() && self.diff_cache_generation == Some(self.diff_generation) {
+        if self.diff_cache.is_empty() && self.diff_cache.is_current_for(self.generations.diff) {
             0
         } else {
             1
@@ -457,7 +454,7 @@ impl Buffer {
 
     /// Returns the generation for rendered visual decorations.
     pub fn visual_generation(&self) -> u64 {
-        self.visual_generation
+        self.generations.visual
     }
 
     /// Gets the line at the specified index.
@@ -531,14 +528,14 @@ impl Buffer {
         self.lines.replace_text(text);
         let syntax_name = self.buffer_cache.syntax_name().to_owned();
         self.buffer_cache = BufferCache::new(syntax_name);
-        self.syntax_generation = self.syntax_generation.wrapping_add(1);
-        self.syntax_background_generation = None;
-        self.indent_background_generation = None;
+        self.generations.syntax = self.generations.syntax.wrapping_add(1);
+        self.generations.syntax_background = None;
+        self.generations.indent_background = None;
         self.clear_markers();
     }
 
     fn bump_visual_generation(&mut self) {
-        self.visual_generation = self.visual_generation.wrapping_add(1);
+        self.generations.visual = self.generations.visual.wrapping_add(1);
     }
 
     fn refresh_syntax(&mut self) {
@@ -552,9 +549,9 @@ impl Buffer {
         if self.syntax_name() != new_syntax_name {
             self.buffer_cache.set_syntax_name(new_syntax_name);
             self.buffer_cache.invalidate_from(0, 0);
-            self.syntax_generation = self.syntax_generation.wrapping_add(1);
-            self.syntax_background_generation = None;
-            self.indent_background_generation = None;
+            self.generations.syntax = self.generations.syntax.wrapping_add(1);
+            self.generations.syntax_background = None;
+            self.generations.indent_background = None;
         }
     }
 

@@ -156,11 +156,11 @@ impl Buffer {
                 self.lines = lines;
                 self.buffer_cache = buffer_cache;
                 self.markers = markers;
-                self.syntax_generation = self.syntax_generation.wrapping_add(1);
-                self.syntax_background_generation = None;
-                self.indent_background_generation = None;
-                self.diff_generation = self.diff_generation.wrapping_add(1);
-                self.diff_background_generation = None;
+                self.generations.syntax = self.generations.syntax.wrapping_add(1);
+                self.generations.syntax_background = None;
+                self.generations.indent_background = None;
+                self.generations.diff = self.generations.diff.wrapping_add(1);
+                self.generations.diff_background = None;
                 Some(cursor)
             }
             None => None,
@@ -173,11 +173,11 @@ impl Buffer {
                 self.lines = lines;
                 self.buffer_cache = buffer_cache;
                 self.markers = markers;
-                self.syntax_generation = self.syntax_generation.wrapping_add(1);
-                self.syntax_background_generation = None;
-                self.indent_background_generation = None;
-                self.diff_generation = self.diff_generation.wrapping_add(1);
-                self.diff_background_generation = None;
+                self.generations.syntax = self.generations.syntax.wrapping_add(1);
+                self.generations.syntax_background = None;
+                self.generations.indent_background = None;
+                self.generations.diff = self.generations.diff.wrapping_add(1);
+                self.generations.diff_background = None;
                 Some(cursor)
             }
             None => None,

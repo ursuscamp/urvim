@@ -302,6 +302,7 @@ fn merge_hunks(mut hunks: Vec<DiffHunk>) -> Vec<DiffHunk> {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DiffCache {
     hunks: Vec<DiffHunk>,
+    generation: Option<u64>,
 }
 
 impl DiffCache {
@@ -320,14 +321,26 @@ impl DiffCache {
         self.hunks.is_empty()
     }
 
+    /// Returns true when the cache was computed for the given generation.
+    pub fn is_current_for(&self, generation: u64) -> bool {
+        self.generation == Some(generation)
+    }
+
     /// Replaces all cached hunks.
     pub fn replace_hunks(&mut self, hunks: Vec<DiffHunk>) {
         self.hunks = merge_hunks(hunks);
     }
 
+    /// Replaces all cached hunks and records their source generation.
+    pub fn replace_hunks_for_generation(&mut self, generation: u64, hunks: Vec<DiffHunk>) {
+        self.replace_hunks(hunks);
+        self.generation = Some(generation);
+    }
+
     /// Clears the cached hunks.
     pub fn clear(&mut self) {
         self.hunks.clear();
+        self.generation = None;
     }
 
     /// Applies one normalized line edit to the cache.
