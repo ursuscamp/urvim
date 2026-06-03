@@ -5,17 +5,15 @@
 //! screen position (origin) and size, and renders the shared buffer content
 //! starting from its origin.
 
+mod buffer_view;
 mod commands;
-mod fold;
 mod geometry;
 mod gutter;
 mod motions;
 mod render;
 pub mod renderer;
 mod session;
-mod view;
 mod widget;
-mod wrap;
 
 use crate::action::ActionResult;
 use crate::buffer::{Boundary, Buffer, BufferId, Cursor, DiffMarkerKind};
@@ -31,10 +29,11 @@ use crate::terminal::CursorStyle;
 use crate::terminal::Key;
 use crate::terminal::Style;
 use lsp_types::DiagnosticSeverity;
-use std::collections::BTreeSet;
 use std::fmt;
-use std::time::Instant;
-use unicode_segmentation::UnicodeSegmentation;
+
+pub use buffer_view::{
+    BufferView, VisualSelection, VisualSelectionKind, YankFlash, YankFlashSelection,
+};
 
 const FOLD_SIGN_WIDTH: u16 = 2;
 
@@ -136,56 +135,6 @@ pub enum FoldGutterGlyph {
 pub struct RenderData {
     line_data: Vec<LineData>,
     visible_rows: u16,
-}
-
-#[derive(Debug, Clone)]
-/// A window-local view of a shared buffer plus scroll and cursor state.
-pub struct BufferView {
-    buffer: view::BufferBacking,
-    scroll_offset: Position,
-    wrapped_row_offset: u16,
-    cursor: Cursor,
-    remembered_visual_col: Option<usize>,
-    visual_selection: Option<VisualSelection>,
-    yank_flash: Option<YankFlash>,
-    folded_lines: BTreeSet<usize>,
-    rendered_visual_generation: u64,
-}
-
-/// Kind of visual selection currently active in a buffer view.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum VisualSelectionKind {
-    /// Character-wise selection.
-    Character,
-    /// Whole-line selection.
-    Line,
-}
-
-/// Active visual selection metadata stored by a window-local buffer view.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct VisualSelection {
-    /// Selection anchor cursor.
-    pub anchor: Cursor,
-    /// Selection granularity.
-    pub kind: VisualSelectionKind,
-}
-
-/// A transient yank flash selection used for brief normal-mode feedback.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum YankFlashSelection {
-    /// Characterwise selection range.
-    Character(crate::buffer::TextObjectRange),
-    /// Linewise selection span.
-    Line { start_line: usize, count: usize },
-}
-
-/// A transient yank flash with an expiration time.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct YankFlash {
-    /// The flashed region.
-    pub selection: YankFlashSelection,
-    /// Time when the flash should expire.
-    pub expires_at: Instant,
 }
 
 pub struct Window {

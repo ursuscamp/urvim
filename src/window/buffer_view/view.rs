@@ -1,17 +1,25 @@
-use super::*;
+use super::fold;
+use super::wrap::WrappedLineSegment;
+use super::{BufferView, VisualSelection, VisualSelectionKind, YankFlash, YankFlashSelection};
 use crate::buffer::BufferId;
+use crate::buffer::{Buffer, Cursor};
 use crate::buffer::{
     Marker, MarkerPayload, MarkerShape, TextRef, configured_tab_width, display_grapheme_width,
     display_width_at,
 };
 use crate::config::ScrollMargin;
 use crate::config::WrapMode;
+use crate::globals;
+use crate::lsp::diagnostics::{diagnostic_severity, diagnostic_severity_rank};
+use crate::terminal::Style;
 use crate::theme::Tag;
-use crate::window::wrap::WrappedLineSegment;
+use crate::window::{FoldGutterGlyph, LineData, Position, RenderChunk, RenderData, Size};
 use smol_str::SmolStr;
 use std::cell::RefCell;
+use std::collections::BTreeSet;
 use std::ops::Range;
 use std::time::{Duration, Instant};
+use unicode_segmentation::UnicodeSegmentation;
 
 #[derive(Debug, Clone)]
 pub(super) enum BufferBacking {
@@ -154,7 +162,7 @@ impl BufferView {
     ///
     /// The returned line bounds are exclusive boundary lines, so callers render
     /// on `start_exclusive + 1..end_exclusive`.
-    pub(super) fn active_indent_guide(&self) -> Option<(usize, usize, usize)> {
+    pub(in crate::window) fn active_indent_guide(&self) -> Option<(usize, usize, usize)> {
         self.with_buffer(|buffer| {
             if buffer.line_count() == 0 {
                 return None;

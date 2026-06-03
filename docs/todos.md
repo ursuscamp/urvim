@@ -20,4 +20,3 @@ This is a list, in no particular order, of things that need to be addressed whic
 - lot of repetition in globals.rs, maybe modularize it?
 - colorscheme picker should duplicate the other pickers
 - in normal mode, cursor should not move to newline
-- bufferview should probably have its own submodule of window at this point

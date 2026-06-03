@@ -1,6 +1,7 @@
-use super::*;
+use super::BufferView;
 use crate::buffer::display_grapheme_width;
 use crate::config::WrapMode;
+use unicode_segmentation::UnicodeSegmentation;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WrappedLineSegment {

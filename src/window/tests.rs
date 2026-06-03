@@ -1539,8 +1539,16 @@ fn test_open_line_above_on_brace_fold_end_inserts_above_brace() {
 fn test_counted_line_jump_opens_all_nested_folds() {
     let buffer = Buffer::from_str("outer\n  inner\n    deep\nafter");
     let mut window = Window::from_owned_buffer(buffer);
-    window.buffer_view_mut().folded_lines.insert(0);
-    window.buffer_view_mut().folded_lines.insert(1);
+    window.set_cursor(Cursor::new(0, 0));
+    assert_eq!(
+        window.dispatch_action(&Action::new(ActionKind::CloseFold)),
+        ActionResult::Handled
+    );
+    window.set_cursor(Cursor::new(1, 0));
+    assert_eq!(
+        window.dispatch_action(&Action::new(ActionKind::CloseFold)),
+        ActionResult::Handled
+    );
 
     assert_eq!(
         window.dispatch_action(&Action::count(
