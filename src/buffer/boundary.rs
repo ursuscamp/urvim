@@ -195,7 +195,8 @@ impl Buffer {
                         }
                     }
 
-                    // Skip whitespace to find the next word
+                    // Skip whitespace to find the next word-like run. Punctuation
+                    // separated from a word by spaces is still its own `w` target.
                     while check_col < line_len {
                         match line.next_grapheme(check_col) {
                             Some(gg)
@@ -203,6 +204,12 @@ impl Buffer {
                                     && Self::is_word_char(gg.as_str()) =>
                             {
                                 // Found start of next word - return this position
+                                return Some(Cursor::new(line_idx, check_col));
+                            }
+                            Some(gg)
+                                if gg.byte_idx() == check_col
+                                    && !Self::is_whitespace_char(gg.as_str()) =>
+                            {
                                 return Some(Cursor::new(line_idx, check_col));
                             }
                             Some(gg) if gg.byte_idx() == check_col => {

@@ -2638,6 +2638,30 @@ assert_next_boundary!(
 );
 
 assert_next_boundary!(
+    test_word_forward_to_spaced_nonword_at_line_end,
+    "hello   ---\nworld",
+    Cursor::new(0, 0),
+    Boundary::Word,
+    Some(Cursor::new(0, 8))
+);
+
+assert_next_boundary!(
+    test_word_forward_to_spaced_nonword_before_next_word,
+    "hello   ...   world",
+    Cursor::new(0, 0),
+    Boundary::Word,
+    Some(Cursor::new(0, 8))
+);
+
+assert_next_boundary!(
+    test_word_forward_from_spaced_nonword_to_next_word,
+    "hello   ...   world",
+    Cursor::new(0, 8),
+    Boundary::Word,
+    Some(Cursor::new(0, 14))
+);
+
+assert_next_boundary!(
     test_word_forward_nonword_at_start,
     "...hello",
     Cursor::new(0, 0),
