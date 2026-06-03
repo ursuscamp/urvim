@@ -35,7 +35,7 @@ impl CompletionJob {
             source,
         } = self;
         let results = match source {
-            CompletionSourceKind::Lsp => crate::globals::try_with_lsp_runtime_mut(|runtime| {
+            CompletionSourceKind::Lsp => crate::globals::with_lsp_runtime_mut(|runtime| {
                 runtime.completion_buffer(buffer_id, cursor)
             })
             .and_then(Result::ok)
