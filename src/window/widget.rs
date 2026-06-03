@@ -11,7 +11,11 @@ impl Window {
         let result =
             match action.kind.as_ref() {
                 Some(ActionKind::MoveLeft) => {
-                    self.move_cursor_left();
+                    if action.from_mode == Some(ModeKind::Insert) {
+                        self.move_cursor_left();
+                    } else {
+                        self.move_cursor_left_within_line();
+                    }
                     ActionResult::Handled
                 }
                 Some(ActionKind::MoveDown) => {

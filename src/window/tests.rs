@@ -1438,7 +1438,7 @@ fn test_counted_line_jump_opens_fold_containing_target() {
 }
 
 #[test]
-fn test_move_left_from_fold_closing_line_opens_fold() {
+fn test_move_left_from_fold_closing_line_stays_on_line_start() {
     let mut window = Window::new(Buffer::from_str("struct Cli {\n    files: Vec<File>,\n}"));
     window.set_cursor(Cursor::new(0, 0));
     assert_eq!(
@@ -1454,9 +1454,8 @@ fn test_move_left_from_fold_closing_line_opens_fold() {
     let mut screen = crate::screen::Screen::new(3, 40);
     window.render(&mut screen, Position::new(0, 0), Size::new(3, 40));
 
-    assert_eq!(window.buffer_view().cursor().line, 1);
-    assert_eq!(window.render_data().line_data[1].buffer_line, 1);
-    assert_eq!(window.render_data().line_data[2].buffer_line, 2);
+    assert_eq!(window.buffer_view().cursor(), Cursor::new(2, 0));
+    assert_eq!(window.render_data().line_data[1].buffer_line, 2);
 }
 
 #[test]
@@ -4507,6 +4506,60 @@ fn test_visual_cursor_does_not_move_past_last_character() {
     assert_eq!(window.dispatch_action(&action), ActionResult::Handled);
 
     assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 2));
+}
+
+#[test]
+fn test_normal_cursor_does_not_move_before_line_start() {
+    let buffer = Buffer::from_str("abc\ndef");
+    let mut window = Window::new(buffer);
+    window.set_cursor(Cursor::new(1, 0));
+
+    assert_eq!(
+        window.dispatch_action(&Action::new(ActionKind::MoveLeft)),
+        ActionResult::Handled
+    );
+
+    assert_eq!(window.buffer_view().cursor(), Cursor::new(1, 0));
+}
+
+#[test]
+fn test_visual_cursor_does_not_move_before_line_start() {
+    let (_t, _c) = visual_test_setup();
+    let buffer = Buffer::from_str("abc\ndef");
+    let mut window = Window::new(buffer);
+    window.switch_mode(ModeKind::Visual);
+    window.set_cursor(Cursor::new(1, 0));
+
+    let action = Action::new(ActionKind::MoveLeft).with_from_mode(ModeKind::Visual);
+    assert_eq!(window.dispatch_action(&action), ActionResult::Handled);
+
+    assert_eq!(window.buffer_view().cursor(), Cursor::new(1, 0));
+}
+
+#[test]
+fn test_replace_cursor_does_not_move_before_line_start() {
+    let buffer = Buffer::from_str("abc\ndef");
+    let mut window = Window::new(buffer);
+    window.switch_mode(ModeKind::Replace);
+    window.set_cursor(Cursor::new(1, 0));
+
+    let action = Action::new(ActionKind::MoveLeft).with_from_mode(ModeKind::Replace);
+    assert_eq!(window.dispatch_action(&action), ActionResult::Handled);
+
+    assert_eq!(window.buffer_view().cursor(), Cursor::new(1, 0));
+}
+
+#[test]
+fn test_insert_cursor_can_move_to_previous_line_end() {
+    let buffer = Buffer::from_str("abc\ndef");
+    let mut window = Window::new(buffer);
+    window.switch_mode(ModeKind::Insert);
+    window.set_cursor(Cursor::new(1, 0));
+
+    let action = Action::new(ActionKind::MoveLeft).with_from_mode(ModeKind::Insert);
+    assert_eq!(window.dispatch_action(&action), ActionResult::Handled);
+
+    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 3));
 }
 
 #[test]

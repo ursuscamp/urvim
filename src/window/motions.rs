@@ -121,6 +121,17 @@ impl Window {
         }
     }
 
+    pub fn move_cursor_left_within_line(&mut self) {
+        let cursor = self.buffer_view.cursor();
+        if let Some(new_cursor) = self
+            .buffer_view
+            .with_buffer(|buffer| buffer.prev_cursor_line(cursor))
+            .flatten()
+        {
+            self.buffer_view.set_cursor(new_cursor);
+        }
+    }
+
     pub fn move_cursor_right(&mut self) {
         let cursor = self.buffer_view.cursor();
         if let Some(new_cursor) = self
