@@ -647,6 +647,13 @@ impl Window {
                 | None => ActionResult::NotHandled,
             };
 
+        if result == ActionResult::Handled && action.from_mode != Some(ModeKind::Insert) {
+            let mode = action
+                .to_mode
+                .unwrap_or(action.from_mode.unwrap_or_else(|| self.mode_kind()));
+            self.clamp_cursor_for_mode(mode);
+        }
+
         if result == ActionResult::Handled && action.resets_remembered_column() {
             self.buffer_view.update_remembered_to_current();
         }

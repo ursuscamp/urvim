@@ -312,7 +312,34 @@ impl Window {
             }
         };
 
+        self.clamp_cursor_for_mode(to_mode);
+
         repeat_text
+    }
+
+    pub(super) fn clamp_cursor_for_mode(&mut self, mode: ModeKind) {
+        if mode == ModeKind::Insert {
+            return;
+        }
+
+        let cursor = self.buffer_view.cursor();
+        let Some(clamped) = self.buffer_view.with_buffer(|buffer| {
+            let synced = buffer.sync_cursor(cursor);
+            let line_len = buffer.line_len(synced.line);
+            if line_len == 0 || synced.col < line_len {
+                synced
+            } else {
+                let col = buffer
+                    .prev_cursor_line(synced)
+                    .map(|previous| previous.col)
+                    .unwrap_or(0);
+                Cursor::new(synced.line, col)
+            }
+        }) else {
+            return;
+        };
+
+        self.buffer_view.set_cursor(clamped);
     }
 
     /// Returns and clears the repeat-text suffix produced by the last handled action.

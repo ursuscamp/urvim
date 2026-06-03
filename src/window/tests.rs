@@ -224,7 +224,7 @@ fn test_replace_backspace_removes_inserted_character_past_line_end() {
         ActionResult::Handled
     );
     assert_eq!(buffer_text(window.buffer_view()), "hix");
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 3));
+    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 2));
 
     assert_eq!(
         window.dispatch_action(
@@ -238,7 +238,7 @@ fn test_replace_backspace_removes_inserted_character_past_line_end() {
         ActionResult::Handled
     );
     assert_eq!(buffer_text(window.buffer_view()), "hi");
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 2));
+    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 1));
 }
 
 #[test]
@@ -2304,7 +2304,7 @@ fn test_open_line_above_uses_neighbor_indent() {
         buffer_text(window.buffer_view()),
         "  fn main() {\n    \n    println!(\"hi\");\n  }"
     );
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(1, 4));
+    assert_eq!(window.buffer_view().cursor(), Cursor::new(1, 3));
 }
 
 #[test]
@@ -2535,7 +2535,7 @@ fn test_raw_paste_in_normal_mode_inserts_text_without_mode_change() {
     );
 
     assert_eq!(buffer_text(window.buffer_view()), "hello world");
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 11));
+    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 10));
     assert_eq!(window.mode_kind(), ModeKind::Normal);
 
     apply_undo(&mut window);
@@ -2588,7 +2588,7 @@ fn test_raw_paste_replaces_visual_line_selection_and_exits_to_normal_mode() {
     window.switch_mode(ModeKind::Normal);
 
     assert_eq!(buffer_text(window.buffer_view()), "Z\nghi");
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 1));
+    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 0));
     assert_eq!(window.mode_kind(), ModeKind::Normal);
     assert_eq!(window.buffer_view().visual_selection(), None);
 }
@@ -4405,8 +4405,8 @@ fn test_column_preservation_first_vertical_move() {
     // First move down via Window - should use current column (5), remember it
     window.dispatch_action(&Action::new(ActionKind::MoveDown));
     assert_eq!(window.buffer_view.cursor().line, 1);
-    // Line 2 is "ij" (length 2), so column 5 should clamp to 2
-    assert_eq!(window.buffer_view.cursor().col, 2);
+    // Line 2 is "ij", so normal mode should clamp to its last character.
+    assert_eq!(window.buffer_view.cursor().col, 1);
 }
 
 #[test]
@@ -4466,12 +4466,92 @@ fn test_column_preservation_clamp_on_short_line() {
 
     // Move down to shorter line "ij" (length 2)
     window.dispatch_action(&Action::new(ActionKind::MoveDown));
-    // Should clamp to column 2 (end of "ij")
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(1, 2));
+    // Should clamp to column 1 (last character of "ij")
+    assert_eq!(window.buffer_view.cursor(), Cursor::new(1, 1));
 
     // Move down to longer line - should use remembered column 5
     window.dispatch_action(&Action::new(ActionKind::MoveDown));
     assert_eq!(window.buffer_view.cursor(), Cursor::new(2, 5));
+}
+
+#[test]
+fn test_normal_cursor_does_not_move_past_last_character() {
+    let buffer = Buffer::from_str("abc");
+    let mut window = Window::new(buffer);
+    window.set_cursor(Cursor::new(0, 1));
+
+    assert_eq!(
+        window.dispatch_action(&Action::new(ActionKind::MoveRight)),
+        ActionResult::Handled
+    );
+    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 2));
+    assert_eq!(
+        window.dispatch_action(&Action::new(ActionKind::MoveRight)),
+        ActionResult::Handled
+    );
+
+    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 2));
+}
+
+#[test]
+fn test_visual_cursor_does_not_move_past_last_character() {
+    let (_t, _c) = visual_test_setup();
+    let buffer = Buffer::from_str("abc");
+    let mut window = Window::new(buffer);
+    window.switch_mode(ModeKind::Visual);
+    window.set_cursor(Cursor::new(0, 1));
+
+    let action = Action::new(ActionKind::MoveRight).with_from_mode(ModeKind::Visual);
+    assert_eq!(window.dispatch_action(&action), ActionResult::Handled);
+    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 2));
+    assert_eq!(window.dispatch_action(&action), ActionResult::Handled);
+
+    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 2));
+}
+
+#[test]
+fn test_leaving_insert_clamps_cursor_to_last_character() {
+    let buffer = Buffer::from_str("abc");
+    let mut window = Window::new(buffer);
+    window.switch_mode(ModeKind::Insert);
+    window.set_cursor(Cursor::new(0, 3));
+
+    window.switch_mode(ModeKind::Normal);
+
+    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 2));
+}
+
+#[test]
+fn test_non_insert_cursor_can_remain_on_empty_line() {
+    let buffer = Buffer::from_str("");
+    let mut window = Window::new(buffer);
+    window.set_cursor(Cursor::new(0, 0));
+
+    assert_eq!(
+        window.dispatch_action(&Action::new(ActionKind::MoveRight)),
+        ActionResult::Handled
+    );
+
+    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 0));
+}
+
+#[test]
+fn test_insert_mode_cursor_can_stay_at_line_end() {
+    let buffer = Buffer::from_str("abc");
+    let mut window = Window::new(buffer);
+    window.switch_mode(ModeKind::Insert);
+    window.set_cursor(Cursor::new(0, 3));
+
+    assert_eq!(
+        window.dispatch_action(
+            &Action::insert_char('d')
+                .with_from_mode(ModeKind::Insert)
+                .with_to_mode(ModeKind::Insert)
+        ),
+        ActionResult::Handled
+    );
+
+    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 4));
 }
 
 #[test]
@@ -4584,7 +4664,7 @@ fn test_page_motions_clamp_on_short_line() {
     window.render(&mut screen, Position::new(0, 0), Size::new(3, 40));
 
     window.dispatch_action(&Action::new(ActionKind::MovePageDown));
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(3, 2));
+    assert_eq!(window.buffer_view.cursor(), Cursor::new(3, 1));
 }
 
 #[test]
@@ -5977,7 +6057,7 @@ fn paste_after_linewise_puts_cursor_at_end_of_last_pasted_line() {
         ActionResult::Handled
     );
     assert_eq!(buffer_text(window.buffer_view()), "ab\nhello");
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(1, 5));
+    assert_eq!(window.buffer_view().cursor(), Cursor::new(1, 4));
 }
 
 #[test]
@@ -6019,7 +6099,7 @@ fn paste_after_linewise_multiline_puts_cursor_at_end_of_last_line() {
         ActionResult::Handled
     );
     assert_eq!(buffer_text(window.buffer_view()), "ab\none\ntwo");
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(2, 3));
+    assert_eq!(window.buffer_view().cursor(), Cursor::new(2, 2));
 }
 
 #[test]
@@ -6088,7 +6168,7 @@ fn paste_after_linewise_multiple_lines_inserts_all_content() {
         buffer_text(window.buffer_view()),
         "alpha\none\ntwo\nthree\nfour\nbeta"
     );
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(4, 4));
+    assert_eq!(window.buffer_view().cursor(), Cursor::new(4, 3));
 }
 
 #[test]
