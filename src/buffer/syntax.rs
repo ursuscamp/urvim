@@ -73,9 +73,15 @@ struct RenderLineEdit {
 }
 
 #[derive(Debug, Clone)]
+struct RenderSyntaxLine {
+    line: Arc<str>,
+    spans: Arc<[SyntaxSpan]>,
+}
+
+#[derive(Debug, Clone)]
 struct RenderSyntaxSnapshot {
     start_line: usize,
-    spans: Vec<Arc<[SyntaxSpan]>>,
+    lines: Vec<RenderSyntaxLine>,
     edits: Vec<RenderLineEdit>,
 }
 
@@ -170,14 +176,17 @@ impl SyntaxCache {
         self.render_snapshot = None;
     }
 
-    fn capture_cached_spans_from(&self, start_line: usize) -> Vec<Arc<[SyntaxSpan]>> {
-        let mut spans = Vec::new();
+    fn capture_cached_lines_from(&self, start_line: usize) -> Vec<RenderSyntaxLine> {
+        let mut lines = Vec::new();
         let mut line = start_line;
-        while let Some(line_spans) = self.cached_spans_for_line_ref(line) {
-            spans.push(Arc::from(line_spans.to_vec().into_boxed_slice()));
+        while let Some(line_view) = self.line_view(line) {
+            lines.push(RenderSyntaxLine {
+                line: Arc::from(line_view.line),
+                spans: Arc::from(line_view.spans.to_vec().into_boxed_slice()),
+            });
             line += 1;
         }
-        spans
+        lines
     }
 
     fn translate_render_snapshot_line(&self, line: usize) -> Option<usize> {
@@ -214,11 +223,20 @@ impl SyntaxCache {
             return;
         }
 
-        // Preserve the existing stale render snapshot across zero-delta follow-up
-        // edits so multi-step changes like `cw` keep the pre-edit styling visible
-        // until syntax highlighting catches up.
-        if edits.iter().all(|edit| edit.line_delta == 0) && self.render_snapshot.is_some() {
-            return;
+        // Preserve simple stale render snapshots across zero-delta follow-up edits
+        // so multi-step changes like `cw` keep pre-edit styling visible until
+        // syntax highlighting catches up. Do not keep a snapshot that already
+        // includes line-shifting edits: a later same-line insertion would reuse
+        // stale line translations and can style the dirty suffix from the wrong
+        // pre-edit line.
+        if edits.iter().all(|edit| edit.line_delta == 0)
+            && let Some(snapshot) = self.render_snapshot.as_ref()
+        {
+            if snapshot.edits.iter().all(|edit| edit.line_delta == 0) {
+                return;
+            }
+
+            self.clear_render_snapshot();
         }
 
         if self.render_snapshot.is_some() && edits.iter().any(|edit| edit.line_delta != 0) {
@@ -227,15 +245,15 @@ impl SyntaxCache {
 
         edits.sort_by_key(|edit| edit.line);
         let start_line = 0;
-        let spans = self.capture_cached_spans_from(start_line);
-        if spans.is_empty() {
+        let lines = self.capture_cached_lines_from(start_line);
+        if lines.is_empty() {
             self.clear_render_snapshot();
             return;
         }
 
         self.render_snapshot = Some(RenderSyntaxSnapshot {
             start_line,
-            spans,
+            lines,
             edits,
         });
     }
@@ -562,7 +580,11 @@ impl SyntaxCache {
     }
 
     /// Returns cached spans for rendering, falling back to the last stale snapshot.
-    pub fn render_spans_for_line_ref(&self, line: usize) -> Option<&[SyntaxSpan]> {
+    pub fn render_spans_for_line_ref(
+        &self,
+        line: usize,
+        current_line_text: &str,
+    ) -> Option<&[SyntaxSpan]> {
         if let Some(spans) = self.cached_spans_for_line_ref(line) {
             return Some(spans);
         }
@@ -577,7 +599,11 @@ impl SyntaxCache {
         let snapshot = self.render_snapshot.as_ref()?;
         let old_line = self.translate_render_snapshot_line(line)?;
         let snapshot_line = old_line.checked_sub(snapshot.start_line)?;
-        snapshot.spans.get(snapshot_line).map(AsRef::as_ref)
+        snapshot
+            .lines
+            .get(snapshot_line)
+            .filter(|line| line.line.as_ref() == current_line_text)
+            .map(|line| line.spans.as_ref())
     }
 
     /// Returns how many leading lines currently have cached syntax data.
@@ -1300,8 +1326,13 @@ impl BufferCache {
     }
 
     /// Returns syntax spans for rendering, falling back to stale cached spans.
-    pub fn render_spans_for_line_ref(&self, line: usize) -> Option<&[SyntaxSpan]> {
-        self.syntax_cache.render_spans_for_line_ref(line)
+    pub fn render_spans_for_line_ref(
+        &self,
+        line: usize,
+        current_line_text: &str,
+    ) -> Option<&[SyntaxSpan]> {
+        self.syntax_cache
+            .render_spans_for_line_ref(line, current_line_text)
     }
 
     /// Returns how many leading lines currently have cached syntax data.
@@ -2160,8 +2191,13 @@ impl Buffer {
     }
 
     /// Returns syntax spans for rendering, falling back to stale cached spans.
-    pub fn render_syntax_spans_for_line_ref(&self, line: usize) -> Option<&[SyntaxSpan]> {
-        self.buffer_cache.render_spans_for_line_ref(line)
+    pub fn render_syntax_spans_for_line_ref(
+        &self,
+        line: usize,
+        current_line_text: &str,
+    ) -> Option<&[SyntaxSpan]> {
+        self.buffer_cache
+            .render_spans_for_line_ref(line, current_line_text)
     }
 
     /// Returns true when the indent-scope cache needs rebuilding.

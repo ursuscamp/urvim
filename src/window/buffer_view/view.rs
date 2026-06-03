@@ -676,7 +676,7 @@ impl BufferView {
                     let line_text = line_text.contiguous_text_with_scratch(&mut line_scratch);
                     let syntax_spans = if syntax_enabled {
                         buffer
-                            .render_syntax_spans_for_line_ref(buffer_line_idx)
+                            .render_syntax_spans_for_line_ref(buffer_line_idx, line_text)
                             .unwrap_or_default()
                     } else {
                         &[]

@@ -272,6 +272,62 @@ fn test_rust_keeps_prefix_highlight_after_lsp_completion_edits_then_insert_char(
 }
 
 #[test]
+fn test_rust_lsp_completion_top_edit_follow_up_char_drops_shifted_render_fallback() {
+    let body = (0..1024)
+        .map(|idx| format!("fn filler_{idx}() {{ let value_{idx} = {idx}; }}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let source = format!("fn main() {{\n    let guard = String::new()\n}}\n{body}");
+    let mut buf = fixture_buffer("syntax-rust-lsp-completion-follow-up-render", "rs", &source);
+
+    buf.ensure_syntax_through(buf.line_count().saturating_sub(1));
+    let completion_line = line_containing(&buf, "let guard");
+    let line_text = buf
+        .line_at(completion_line)
+        .expect("guard line should exist")
+        .to_string();
+    let guard_start = line_text.find("guard").expect("line should contain guard");
+    let guard_end = guard_start + "guard".len();
+    let range = TextObjectRange {
+        start: Cursor::new(completion_line, guard_start),
+        end: Cursor::new(completion_line, guard_end),
+    };
+    let additional_edits = vec![crate::ui::completion::CompletionTextEdit {
+        range: TextObjectRange {
+            start: Cursor::new(0, 0),
+            end: Cursor::new(0, 0),
+        },
+        text: "use std::borrow::Cow;\n".to_string(),
+    }];
+
+    let cursor = buf
+        .apply_completion(
+            range,
+            "guard_handle",
+            "guard_handle".len(),
+            &additional_edits,
+        )
+        .expect("completion should apply");
+    buf.insert_char(cursor, ';');
+
+    let rendered_filler_line = line_containing(&buf, "fn filler_1023()");
+    assert!(
+        buf.cached_syntax_spans_for_line(rendered_filler_line)
+            .is_none(),
+        "far line should be in the dirty suffix after follow-up edit"
+    );
+    let rendered_line_text = buf
+        .line_at(rendered_filler_line)
+        .expect("rendered filler line should exist")
+        .to_string();
+    assert!(
+        buf.render_syntax_spans_for_line_ref(rendered_filler_line, &rendered_line_text)
+            .is_none(),
+        "far dirty line should not render with shifted stale spans after follow-up edit"
+    );
+}
+
+#[test]
 fn test_rust_lsp_completion_top_edit_does_not_force_full_cache_warm() {
     let body = (0..1024)
         .map(|idx| format!("fn filler_{idx}() {{ let value_{idx} = {idx}; }}"))
@@ -356,13 +412,43 @@ fn test_rust_lsp_completion_keeps_dirty_viewport_highlighted() {
         .expect("filler line should exist")
         .to_string();
     let stale_spans = buf
-        .render_syntax_spans_for_line_ref(rendered_filler_line)
+        .render_syntax_spans_for_line_ref(rendered_filler_line, &filler_line_text)
         .expect("rendered line should keep stale syntax spans");
 
     assert_spans_include_exact_style(stale_spans, &filler_line_text, "fn", tag("keyword"));
     assert!(
         buf.cached_syntax_spans_for_line(rendered_filler_line)
             .is_none()
+    );
+}
+
+#[test]
+fn test_rust_render_fallback_rejects_mismatched_stale_line_text() {
+    let body = (0..1024)
+        .map(|idx| format!("fn filler_{idx}() {{ let value_{idx} = {idx}; }}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let source = format!("fn main() {{\n    let guard = String::new();\n}}\n{body}");
+    let mut buf = fixture_buffer("syntax-rust-render-fallback-mismatch", "rs", &source);
+
+    buf.ensure_syntax_through(buf.line_count().saturating_sub(1));
+    buf.insert_text(Cursor::new(0, 0), "use std::borrow::Cow;\n");
+
+    let shifted_filler_line = line_containing(&buf, "fn filler_1023()");
+    let shifted_filler_text = buf
+        .line_at(shifted_filler_line)
+        .expect("shifted filler line should exist")
+        .to_string();
+    let stale_spans = buf
+        .render_syntax_spans_for_line_ref(shifted_filler_line, &shifted_filler_text)
+        .expect("unchanged shifted line should keep stale syntax spans");
+    assert_spans_include_exact_style(stale_spans, &shifted_filler_text, "fn", tag("keyword"));
+
+    let mismatched_text = "    let guard = String::new();";
+    assert!(
+        buf.render_syntax_spans_for_line_ref(shifted_filler_line, mismatched_text)
+            .is_none(),
+        "stale render fallback should not style different current line text"
     );
 }
 
@@ -396,7 +482,7 @@ fn test_rust_same_line_edit_keeps_dirty_viewport_highlighted() {
         .expect("filler line should exist")
         .to_string();
     let stale_spans = buf
-        .render_syntax_spans_for_line_ref(rendered_filler_line)
+        .render_syntax_spans_for_line_ref(rendered_filler_line, &filler_line_text)
         .expect("rendered line should keep stale syntax spans");
 
     assert_spans_include_exact_style(stale_spans, &filler_line_text, "fn", tag("keyword"));
