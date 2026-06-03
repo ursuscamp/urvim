@@ -1052,6 +1052,37 @@ fn test_window_render_keeps_inlay_hint_background_on_active_line() {
 }
 
 #[test]
+fn test_window_render_ghost_text_inherits_active_line_background() {
+    let mut buffer = Buffer::from_str("abcd");
+    buffer.insert_ghost_text(Cursor::new(0, 2), crate::buffer::Gravity::Right, "ghost");
+    let mut window = Window::new(buffer);
+    let theme = syntax_themed_window();
+    let expected_ghost_style = theme
+        .default_style()
+        .overlay(theme.highlight_style_for_name("ui.window.active_line"))
+        .overlay(
+            Style::new()
+                .set_foreground(theme.default_style().foreground())
+                .faint()
+                .italic(),
+        );
+    let _theme_guard = globals::set_test_active_theme(theme);
+    let _config_guard = globals::set_test_config(Config {
+        active_line: true,
+        syntax: false,
+        ..Default::default()
+    });
+
+    let mut screen = crate::screen::Screen::new(1, 20);
+    window.render(&mut screen, Position::new(0, 0), Size::new(1, 20));
+
+    assert_eq!(
+        screen.get_cell_mut(0, CONTENT_COL + 2).unwrap().style,
+        expected_ghost_style
+    );
+}
+
+#[test]
 fn test_window_render_records_buffer_visual_generation() {
     let mut buffer = Buffer::from_str("abcd");
     buffer.insert_inlay_hint(Cursor::new(0, 2), crate::buffer::Gravity::Right, "hint");
@@ -1306,6 +1337,43 @@ fn test_window_render_collapses_indent_scope_fold() {
     assert!(rendered.contains("outer"));
     assert!(rendered.contains("... 2 lines folded"));
     assert_eq!(window.render_data().line_data[1].buffer_line, 3);
+}
+
+#[test]
+fn test_window_render_fold_text_inherits_active_line_background() {
+    let mut window = Window::new(Buffer::from_str("outer\n  inner1\n  inner2\nafter"));
+    window.set_cursor(Cursor::new(0, 0));
+    let theme = syntax_themed_window();
+    let expected_fold_style = theme
+        .default_style()
+        .overlay(theme.highlight_style_for_name("ui.window.active_line"))
+        .overlay(
+            Style::new()
+                .set_foreground(theme.default_style().foreground())
+                .faint()
+                .italic(),
+        );
+    let _theme_guard = globals::set_test_active_theme(theme);
+    let _config_guard = globals::set_test_config(Config {
+        active_line: true,
+        syntax: false,
+        ..Default::default()
+    });
+
+    assert_eq!(
+        window.dispatch_action(&Action::new(ActionKind::CloseFold)),
+        ActionResult::Handled
+    );
+    let mut screen = crate::screen::Screen::new(4, 40);
+    window.render(&mut screen, Position::new(0, 0), Size::new(4, 40));
+
+    assert_eq!(
+        screen
+            .get_cell_mut(0, CONTENT_COL + "outer".len() as u16)
+            .unwrap()
+            .style,
+        expected_fold_style
+    );
 }
 
 #[test]

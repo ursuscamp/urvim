@@ -759,7 +759,7 @@ impl BufferView {
                         if let Some(count) = folded_line_count {
                             chunks.push(RenderChunk::ghost_text(
                                 &format!(" ... {count} lines folded"),
-                                default_style.faint().italic(),
+                                Self::default_ghost_style(default_style),
                             ));
                         }
                         let line_data = LineData {
@@ -1001,11 +1001,18 @@ impl BufferView {
             visible_start,
             visible_end,
             markers,
-            default_style.faint().italic(),
-            inlay_hint_style.unwrap_or(default_style.faint().italic()),
+            Self::default_ghost_style(default_style),
+            inlay_hint_style.unwrap_or_else(|| Self::default_ghost_style(default_style)),
         );
 
         chunks
+    }
+
+    fn default_ghost_style(default_style: Style) -> Style {
+        Style::new()
+            .set_foreground(default_style.foreground())
+            .faint()
+            .italic()
     }
 
     fn apply_marker_chunks(
