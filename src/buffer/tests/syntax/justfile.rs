@@ -9,13 +9,13 @@ fn test_justfile_fixture_uses_grammar_rules() {
         .syntax_spans_for_line(0)
         .expect("comment line should exist");
     let recipe = buf
-        .syntax_spans_for_line(1)
+        .syntax_spans_for_line(3)
         .expect("recipe line should exist");
     let call = buf
-        .syntax_spans_for_line(2)
+        .syntax_spans_for_line(11)
         .expect("call line should exist");
     let assignment = buf
-        .syntax_spans_for_line(3)
+        .syntax_spans_for_line(5)
         .expect("assignment line should exist");
 
     assert_spans_include_comment_style(&comment);

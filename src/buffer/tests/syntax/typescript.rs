@@ -43,6 +43,25 @@ fn test_typescript_fixture_uses_grammar_rules() {
         "value",
         tag("variable"),
     );
+    assert_exact_spans(
+        &jsx_line,
+        &[
+            (0, 5, tag("keyword")),
+            (6, 10, tag("variable")),
+            (11, 12, tag("operator")),
+            (13, 14, tag("punctuation")),
+            (14, 20, tag("markup.tag")),
+            (21, 25, tag("variable.property")),
+            (25, 26, tag("operator")),
+            (26, 27, tag("string")),
+            (27, 34, tag("string")),
+            (34, 35, tag("string")),
+            (36, 44, tag("variable.property")),
+            (45, 46, tag("punctuation")),
+            (46, 47, tag("punctuation")),
+            (47, 48, tag("punctuation")),
+        ],
+    );
     assert_spans_include_style(&jsx_line, tag("markup.tag"));
     assert_spans_include_style(&jsx_line, tag("variable.property"));
     assert_spans_include_style(&jsx_line, tag("string"));
@@ -55,10 +74,76 @@ fn test_typescript_tsx_lines_look_like_jsx() {
             .unwrap();
     let mut buf =
         Buffer::from_str_with_path("const view = <Button kind=\"primary\" disabled />;", path);
+    let line = buf.line_at(0).expect("line should exist").to_string();
 
     let spans = buf.syntax_spans_for_line(0).expect("line should exist");
     assert_spans_include_style(&spans, tag("markup.tag"));
     assert_spans_include_style(&spans, tag("variable.property"));
     assert_spans_include_style(&spans, tag("string"));
     assert_spans_include_style(&spans, tag("punctuation"));
+    assert_spans_include_exact_style(&spans, line.as_str(), "disabled", tag("variable.property"));
+}
+
+#[test]
+fn test_typescript_jsx_highlights_lowercase_tags_fragments_and_qualified_names() {
+    let path = AbsolutePath::from_path(temp_path_with_ext("syntax-typescript-jsx", "ts").as_path())
+        .unwrap();
+    let mut buf = Buffer::from_str_with_path(
+        "const view = <><div className=\"app\" hidden>{message}</div><UI.Card /><svg:path /></>;",
+        path,
+    );
+    let line = buf.line_at(0).expect("line should exist").to_string();
+
+    let spans = buf.syntax_spans_for_line(0).expect("line should exist");
+    assert_spans_include_exact_style(&spans, line.as_str(), "<", tag("punctuation"));
+    assert_spans_include_exact_style(&spans, line.as_str(), "div", tag("markup.tag"));
+    assert_spans_include_exact_style(&spans, line.as_str(), "/", tag("punctuation"));
+    assert_spans_include_exact_style(&spans, line.as_str(), "UI.Card", tag("markup.tag"));
+    assert_spans_include_exact_style(&spans, line.as_str(), "svg:path", tag("markup.tag"));
+    assert_spans_include_exact_style(&spans, line.as_str(), "className", tag("variable.property"));
+    assert_spans_include_exact_style(&spans, line.as_str(), "hidden", tag("variable.property"));
+    assert_spans_include_exact_style(&spans, line.as_str(), "message", tag("variable"));
+    assert_jsx_delimiter_style(&spans, line.as_str(), "</div>", ">", tag("punctuation"));
+    assert_jsx_delimiter_style(&spans, line.as_str(), "UI.Card />", "/", tag("punctuation"));
+    assert_jsx_delimiter_style(&spans, line.as_str(), "UI.Card />", ">", tag("punctuation"));
+    assert_jsx_delimiter_style(
+        &spans,
+        line.as_str(),
+        "svg:path />",
+        "/",
+        tag("punctuation"),
+    );
+    assert_jsx_delimiter_style(
+        &spans,
+        line.as_str(),
+        "svg:path />",
+        ">",
+        tag("punctuation"),
+    );
+}
+
+fn assert_jsx_delimiter_style(
+    spans: &[crate::buffer::syntax::SyntaxSpan],
+    line: &str,
+    containing_fragment: &str,
+    delimiter: &str,
+    style: Tag,
+) {
+    let fragment_start = line
+        .find(containing_fragment)
+        .unwrap_or_else(|| panic!("expected line to contain fragment {containing_fragment:?}"));
+    let delimiter_start = line[fragment_start..]
+        .find(delimiter)
+        .map(|offset| fragment_start + offset)
+        .unwrap_or_else(|| panic!("expected fragment to contain delimiter {delimiter:?}"));
+    let delimiter_end = delimiter_start + delimiter.len();
+
+    assert!(
+        spans.iter().any(|span| {
+            span.start_byte == delimiter_start
+                && span.end_byte == delimiter_end
+                && span.style == style
+        }),
+        "expected delimiter {delimiter:?} in {containing_fragment:?} at {delimiter_start}..{delimiter_end} to use style {style:?}"
+    );
 }

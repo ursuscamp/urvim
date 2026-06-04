@@ -9,16 +9,16 @@ fn test_erlang_fixture_uses_grammar_rules() {
         .syntax_spans_for_line(0)
         .expect("comment line should exist");
     let module_line = buf
-        .syntax_spans_for_line(1)
+        .syntax_spans_for_line(4)
         .expect("module line should exist");
     let export_line = buf
-        .syntax_spans_for_line(2)
+        .syntax_spans_for_line(6)
         .expect("export line should exist");
     let string_line = buf
-        .syntax_spans_for_line(5)
+        .syntax_spans_for_line(18)
         .expect("string line should exist");
     let atom_line = buf
-        .syntax_spans_for_line(6)
+        .syntax_spans_for_line(21)
         .expect("atom line should exist");
 
     assert_spans_include_comment_style(&comment);

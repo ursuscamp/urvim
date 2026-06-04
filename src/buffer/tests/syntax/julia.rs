@@ -9,16 +9,16 @@ fn test_julia_fixture_uses_grammar_rules() {
         .syntax_spans_for_line(0)
         .expect("comment line should exist");
     let module_line = buf
-        .syntax_spans_for_line(1)
+        .syntax_spans_for_line(7)
         .expect("module line should exist");
     let macro_line = buf
-        .syntax_spans_for_line(2)
+        .syntax_spans_for_line(9)
         .expect("macro line should exist");
     let string_line = buf
-        .syntax_spans_for_line(3)
+        .syntax_spans_for_line(28)
         .expect("string line should exist");
     let number_line = buf
-        .syntax_spans_for_line(5)
+        .syntax_spans_for_line(19)
         .expect("number line should exist");
 
     assert_spans_include_comment_style(&comment);

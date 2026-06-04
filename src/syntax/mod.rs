@@ -1,15 +1,14 @@
-//! Syntax registry, schema, and loader for urvim syntax highlighting.
+//! Syntax registry and built-in tokenizer metadata for urvim syntax highlighting.
 
 mod builtin;
+pub(crate) mod builtin_tokenizers;
 mod definition;
 mod error;
-mod loader;
 mod normalize;
 mod registry;
 
 pub use definition::{
-    ContextControl, ContextEntry, ContextMatch, ContextPush, InjectedSyntaxFallback,
-    InjectedSyntaxRule, InjectedSyntaxSelector, SyntaxDefinition, SyntaxMetadata, SyntaxRule,
+    SyntaxDefinition, SyntaxMetadata, SyntaxMetadataSpec, SyntaxSpec, SyntaxTokenizer,
 };
 pub use error::SyntaxLoadError;
 pub use registry::{

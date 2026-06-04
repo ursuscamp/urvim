@@ -9,16 +9,16 @@ fn test_elixir_fixture_uses_grammar_rules() {
         .syntax_spans_for_line(0)
         .expect("comment line should exist");
     let module_line = buf
-        .syntax_spans_for_line(1)
+        .syntax_spans_for_line(3)
         .expect("module line should exist");
     let attr_line = buf
-        .syntax_spans_for_line(2)
+        .syntax_spans_for_line(8)
         .expect("attribute line should exist");
     let string_line = buf
-        .syntax_spans_for_line(4)
+        .syntax_spans_for_line(12)
         .expect("string line should exist");
     let atom_line = buf
-        .syntax_spans_for_line(7)
+        .syntax_spans_for_line(23)
         .expect("atom line should exist");
 
     assert_spans_include_comment_style(&comment);

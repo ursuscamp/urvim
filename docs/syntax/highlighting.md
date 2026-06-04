@@ -6,17 +6,20 @@ urvim does not parse source code into an AST. Instead, it chooses a syntax defin
 
 ## Main Files
 
-| File | Role |
-|---|---|
-| `src/syntax/mod.rs` | Loads and validates syntax grammar files, builds the registry, resolves syntax names, and promotes compiled syntax definitions on demand. |
-| `src/syntax/builtins/*.toml` | Built-in syntax grammar files. |
-| `src/buffer/io.rs` | Chooses an initial syntax when a buffer is created from text or a file path. |
-| `src/buffer/mod.rs` | Stores the active syntax name, resolves display labels, and refreshes syntax when the buffer changes. |
-| `src/buffer/syntax.rs` | Tokenizes lines, caches syntax state, and computes highlight spans. |
-| `docs/background-jobs.md` | Describes the internal deferred-work framework that syntax catch-up uses. |
-| `src/window/view.rs` | Requests spans for visible lines and converts tags into highlight overlays. |
-| `src/theme/model.rs` | Defines theme style data, including the unified highlight-name mapping. |
-| `src/window/render.rs` | Applies the chosen line base style and writes styled chunks to the terminal screen. |
+| File                                 | Role                                                                                                                       |
+| ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------- |
+| `src/syntax/mod.rs`                  | Exposes syntax definitions, the builtin registry, and tokenizer dispatch entry points.                                     |
+| `src/syntax/builtin.rs`              | Defines builtin syntax metadata such as names, aliases, filename patterns, shebang patterns, glyphs, and comment prefixes. |
+| `src/syntax/definition.rs`           | Defines syntax metadata and the `SyntaxTokenizer` enum used for dispatch.                                                  |
+| `src/syntax/registry.rs`             | Builds the builtin syntax registry and resolves syntax names, aliases, filename matches, and shebang matches.              |
+| `src/syntax/builtin_tokenizers/*.rs` | Builtin builtin scanners. Each tokenizer walks one line and returns tagged spans plus any cross-line state.                |
+| `src/buffer/io.rs`                   | Chooses an initial syntax when a buffer is created from text or a file path.                                               |
+| `src/buffer/mod.rs`                  | Stores the active syntax name, resolves display labels, and refreshes syntax when the buffer changes.                      |
+| `src/buffer/syntax.rs`               | Tokenizes lines, caches syntax state, and computes highlight spans.                                                        |
+| `docs/background-jobs.md`            | Describes the internal deferred-work framework that syntax catch-up uses.                                                  |
+| `src/window/view.rs`                 | Requests spans for visible lines and converts tags into highlight overlays.                                                |
+| `src/theme/model.rs`                 | Defines theme style data, including the unified highlight-name mapping.                                                    |
+| `src/window/render.rs`               | Applies the chosen line base style and writes styled chunks to the terminal screen.                                        |
 
 ## Core Concepts
 
@@ -25,14 +28,11 @@ urvim does not parse source code into an AST. Instead, it chooses a syntax defin
 A syntax definition contains:
 
 - metadata such as `name`, `display_name`, `alias`, `filename`, `shebang`, and `comment_prefix`
-- one ordered `rules` list
+- a `SyntaxTokenizer` value that selects the builtin tokenizer implementation
 
-### Rule
+### Tokenizer
 
-Rules are matched in order. The supported rule kinds are:
-
-- `regex`
-- `injection`
+A tokenizer is Rust code under `src/syntax/builtin_tokenizers/`. It scans a single line from left to right, pushes `SyntaxSpan` values with semantic tags, and returns updated `SyntaxState` for constructs that can continue onto later lines.
 
 ### Tag
 
@@ -55,7 +55,7 @@ flowchart TD
     D --> E["Use cached spans when they already exist"]
     E --> F["Render visible lines immediately"]
     F --> G["Background catch-up fills in missing cache lines"]
-    G --> H["Tokenizer walks lines using ordered rules"]
+    G --> H["Builtin tokenizer walks lines"]
     H --> I["Spans are returned as tags"]
     I --> J["Theme maps tags to styles"]
     J --> K["Terminal renders styled chunks"]
@@ -67,7 +67,7 @@ flowchart TD
 
 Syntax selection happens before highlighting begins.
 
-The key entry point is `src/syntax/mod.rs`, where `resolve_builtin_syntax` checks:
+The key entry point is `src/syntax/registry.rs`, where `SyntaxRegistry::resolve_for_path` checks:
 
 1. `shebang` patterns
 2. filename patterns
@@ -84,8 +84,7 @@ The cache makes sure earlier lines have already been tokenized, then returns the
 If the requested line is not cached yet, the render path does not block waiting for the full file. It uses the current base style for that line and relies on the background job framework to catch up afterward.
 That background work may be superseded by newer edits, but the last completed highlight stays visible until a fresher result is accepted.
 
-The tokenizer walks the line from left to right and tries the active rules in order.
-The first matching rule wins, so specific patterns should come before broad fallback patterns.
+The tokenizer walks the line from left to right. Most tokenizers are structured as an ordered sequence of direct byte-level checks, so specific patterns should come before broad fallback patterns.
 
 ## Syntax State
 
@@ -93,9 +92,9 @@ urvim keeps state across lines so multiline strings, block comments, code fences
 
 Context markers are the main way rules communicate with later rules:
 
-- `requires` checks whether a marker is already active
-- `push` adds markers or payload-bearing entries
-- `pop` removes the most recent matching entry
+- `ctx.contains(...)` checks whether a marker is already active
+- `ctx.push(...)` and `ctx.push_with_payload(...)` add markers or payload-bearing entries
+- `ctx.pop(...)` removes the most recent matching entry
 
 ## Rendering
 
@@ -114,13 +113,13 @@ Theme highlights use the unified hierarchical naming model:
 - the lookup rules are hierarchical, so the nearest defined parent wins when a specific highlight is missing
 - highlight lookup returns the explicit overlay for that name; renderers decide which base style to layer underneath it
 
-When a syntax tag is resolved, urvim maps the raw tag into the syntax highlight namespace before asking the theme for an overlay. That keeps the grammar vocabulary and the theme vocabulary aligned without requiring the grammar tags themselves to be renamed.
+When a syntax tag is resolved, urvim maps the raw tag into the syntax highlight namespace before asking the theme for an overlay. That keeps the tokenizer vocabulary and the theme vocabulary aligned without requiring tokenizer code to include the `syntax.` prefix.
 
 Renderers then choose the base style explicitly. A window line uses the theme default style on ordinary lines and `theme.default_style().overlay(ui.window.active_line)` on the active line before chunk overlays are applied.
 
 So the pipeline is:
 
-`grammar -> tags -> unified theme overlays -> renderer-chosen base style -> terminal output`
+`tokenizer -> tags -> unified theme overlays -> renderer-chosen base style -> terminal output`
 
 ## After An Edit
 
@@ -134,32 +133,13 @@ Older queued catch-up jobs for the same buffer are also pruned before execution,
 
 ## Practical Advice
 
-- Put comments and other structural matches before broad fallback matches.
-- Keep regexes narrow.
-- Use `lookahead` for call-style identifiers when you want the name highlighted
-  only when a delimiter like `(` follows immediately after optional whitespace.
-- Use `namespace` for qualified prefixes and module paths like `std::`,
-  `crate::`, or `super::`.
-- Use `context` when a rule only makes sense after an earlier opener.
-- Reach for `injection` when a body needs nested highlighting.
+- Put comments, strings, and other structural matches before broad fallback matches.
+- Prefer direct byte-level checks such as `tail.starts_with(...)`, byte indexing, and `char_indices()` over allocation-heavy helpers in hot paths.
+- Precompute reusable tags with `static LazyLock<Tag>`.
+- Use lookahead logic for call-style identifiers when you want the name highlighted only when a delimiter like `(` follows immediately after optional whitespace.
+- Use `ContextStack` when a construct can continue across lines or when a token only makes sense after an earlier opener.
+- Use nested tokenization/injection helpers when a body needs another syntax, such as Markdown code fences or HTML `<script>` bodies.
 
-## Example
+See `docs/syntax/grammar.md` for the current builtin-tokenizer authoring guide.
 
-```toml
-[metadata]
-name = "example"
-display_name = "Example"
-filename = ["\\.ex$"]
-shebang = []
-
-[[rules]]
-kind = "regex"
-pattern = "#.*$"
-tag = "comment"
-
-[[rules]]
-kind = "injection"
-selector = { capture = "^[ \\t]*([A-Za-z0-9_+-]+)" }
-fallback = "unstyled"
-context = { requires = ["script_host"] }
-```
+The tokenizer contract lives in the [builtin syntax grammar guide](grammar.md#tokenizer-contract).

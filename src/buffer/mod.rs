@@ -48,7 +48,7 @@ mod pool;
 mod quote_text_object;
 mod search;
 mod surround;
-mod syntax;
+pub(crate) mod syntax;
 mod tab;
 mod text;
 mod text_object;

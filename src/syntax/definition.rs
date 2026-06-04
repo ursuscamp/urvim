@@ -1,126 +1,143 @@
-use crate::terminal::Color;
-use crate::theme::Tag;
+use crate::terminal::{Color, Rgb};
 use regex::Regex;
-use serde::Deserialize;
 use smol_str::SmolStr;
 
-/// How unresolved injected syntax should be rendered.
+use super::error::SyntaxLoadError;
+use super::normalize::normalize_label;
+
+/// Selects the tokenizer used for a syntax definition.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum InjectedSyntaxFallback {
-    /// Render the body using the enclosing region style.
-    ParentStyle,
-    /// Render the body without nested syntax styling.
-    Unstyled,
+pub enum SyntaxTokenizer {
+    /// Plain text tokenizer that emits no spans.
+    Plaintext,
+    /// Builtin scanner for Bash syntax.
+    Bash,
+    /// Builtin scanner for C syntax.
+    C,
+    /// Builtin scanner for C# syntax.
+    Csharp,
+    /// Builtin scanner for CMake syntax.
+    Cmake,
+    /// Builtin scanner for C++ syntax.
+    Cpp,
+    /// Builtin scanner for CSS syntax.
+    Css,
+    /// Builtin scanner for Dart syntax.
+    Dart,
+    /// Builtin scanner for Dockerfile syntax.
+    Dockerfile,
+    /// Builtin scanner for Elixir syntax.
+    Elixir,
+    /// Builtin scanner for Erlang syntax.
+    Erlang,
+    /// Builtin scanner for Fish syntax.
+    Fish,
+    /// Builtin scanner for F# syntax.
+    Fsharp,
+    /// Builtin scanner for Go syntax.
+    Go,
+    /// Builtin scanner for Haskell syntax.
+    Haskell,
+    /// Builtin scanner for HTML syntax.
+    Html,
+    /// Builtin scanner for Java syntax.
+    Java,
+    /// Builtin scanner for JavaScript syntax.
+    Javascript,
+    /// Builtin scanner for JSON syntax.
+    Json,
+    /// Builtin scanner for Julia syntax.
+    Julia,
+    /// Builtin scanner for Kotlin syntax.
+    Kotlin,
+    /// Builtin scanner for Justfile syntax.
+    Justfile,
+    /// Builtin scanner for Makefile syntax.
+    Makefile,
+    /// Builtin scanner for Markdown syntax.
+    Markdown,
+    /// Builtin scanner for Nim syntax.
+    Nim,
+    /// Builtin scanner for OCaml syntax.
+    Ocaml,
+    /// Builtin scanner for Perl syntax.
+    Perl,
+    /// Builtin scanner for PHP syntax.
+    Php,
+    /// Builtin scanner for Python syntax.
+    Python,
+    /// Builtin scanner for PowerShell syntax.
+    Powershell,
+    /// Builtin scanner for R syntax.
+    R,
+    /// Builtin scanner for Ruby syntax.
+    Ruby,
+    /// Builtin scanner for Rust syntax.
+    Rust,
+    /// Builtin scanner for Scala syntax.
+    Scala,
+    /// Builtin scanner for Shell syntax.
+    Shell,
+    /// Builtin scanner for Swift syntax.
+    Swift,
+    /// Builtin scanner for TOML syntax.
+    Toml,
+    /// Builtin scanner for TypeScript syntax.
+    Typescript,
+    /// Builtin scanner for YAML syntax.
+    Yaml,
+    /// Builtin scanner for Zsh syntax.
+    Zsh,
+    /// Builtin scanner for Zig syntax.
+    Zig,
 }
 
-/// A nested syntax selector for an injected region.
-#[derive(Debug, Clone)]
-pub enum InjectedSyntaxSelector {
-    /// Resolve a fixed canonical syntax name.
-    Static { name: SmolStr },
-    /// Resolve from a captured region-opener tag.
-    Capture { pattern: Regex },
+/// Static syntax metadata used to build compiled syntax definitions.
+#[derive(Debug, Clone, Copy)]
+pub struct SyntaxMetadataSpec {
+    /// The canonical syntax name.
+    pub name: &'static str,
+    /// The user-facing display label.
+    pub display_name: &'static str,
+    /// Alternate labels that resolve to the same syntax.
+    pub alias: &'static [&'static str],
+    /// The canonical line comment prefix used by comment toggle actions.
+    pub comment_prefix: Option<&'static str>,
+    /// The optional filetype glyph used in compact UI surfaces.
+    pub glyph: Option<&'static str>,
+    /// The optional default color for the filetype glyph.
+    pub glyph_color: Option<&'static str>,
+    /// Filename regex patterns used for syntax resolution.
+    pub filename: &'static [&'static str],
+    /// Shebang regex patterns used for syntax resolution.
+    pub shebang: &'static [&'static str],
 }
 
-/// An injected syntax rule attached to a regex-driven body.
-#[derive(Debug, Clone)]
-pub struct InjectedSyntaxRule {
-    /// How the nested syntax should be resolved.
-    pub selector: InjectedSyntaxSelector,
-    /// How unresolved nested syntax should render.
-    pub fallback: InjectedSyntaxFallback,
+/// Static syntax definition data for a built-in tokenizer.
+#[derive(Debug, Clone, Copy)]
+pub struct SyntaxSpec {
+    /// Static metadata for the syntax.
+    pub metadata: SyntaxMetadataSpec,
+    /// Builtin scanner for the syntax.
+    pub tokenizer: SyntaxTokenizer,
 }
 
-/// Context-sensitive matching and stack updates for a syntax region.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ContextControl {
-    /// Context markers that must already be active for the region to match.
-    pub requires: Vec<SmolStr>,
-    /// Context markers to activate when the region opens.
-    pub push: Vec<ContextPush>,
-    /// Context markers to deactivate when the region opens or closes.
-    pub pop: Vec<SmolStr>,
-    /// Optional active context name and capture index whose payload must prefix-match the token text.
-    pub payload_match: Option<ContextMatch>,
-}
-
-/// A context marker to activate, optionally populated from a regex capture.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ContextPush {
-    /// The active context name.
-    pub name: SmolStr,
-    /// Optional capture group index copied into the context payload.
-    pub capture: Option<usize>,
-}
-
-/// A payload-bearing context match constraint.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ContextMatch {
-    /// The active context name.
-    pub name: SmolStr,
-    /// Optional capture group index to compare against the active payload.
-    pub capture: Option<usize>,
-}
-
-/// An active context entry tracked by the syntax tokenizer.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ContextEntry {
-    /// The active context name.
-    pub name: SmolStr,
-    /// The payload associated with the active context, if any.
-    pub payload: Option<String>,
-}
-
-/// A compiled syntax definition loaded from TOML.
+/// A compiled syntax definition.
 #[derive(Debug, Clone)]
 pub struct SyntaxDefinition {
     /// Syntax metadata used for resolution and display.
     pub metadata: SyntaxMetadata,
-    /// Ordered rules used by the context-driven tokenizer.
-    pub rules: Vec<SyntaxRule>,
-    pub(super) regex_rule_indexes: Vec<usize>,
-    pub(super) injection_rule_indexes: Vec<usize>,
-}
-
-/// A compiled syntax rule in the context-driven rule list.
-#[derive(Debug, Clone)]
-pub enum SyntaxRule {
-    /// A regular-expression rule that emits a tag and can update context.
-    Regex {
-        /// Compiled regular expression.
-        regex: Regex,
-        /// Optional regex that must also match immediately after the main match.
-        lookahead: Option<Regex>,
-        /// Syntax tag applied to the match.
-        tag: Tag,
-        /// Context updates applied when this rule matches.
-        context: Option<ContextControl>,
-    },
-    /// A nested-syntax delegation rule that uses active context to decide body highlighting.
-    Injection {
-        /// How the nested syntax should be resolved.
-        selector: InjectedSyntaxSelector,
-        /// How unresolved nested syntax should render.
-        fallback: InjectedSyntaxFallback,
-        /// Context updates applied when this rule matches.
-        context: Option<ContextControl>,
-    },
+    /// Builtin scanner used for highlighting.
+    pub tokenizer: SyntaxTokenizer,
 }
 
 impl SyntaxDefinition {
-    /// Creates a compiled syntax definition with precomputed rule buckets.
-    pub fn new(
-        metadata: SyntaxMetadata,
-        rules: Vec<SyntaxRule>,
-        regex_rule_indexes: Vec<usize>,
-        injection_rule_indexes: Vec<usize>,
-    ) -> Self {
-        Self {
-            metadata,
-            rules,
-            regex_rule_indexes,
-            injection_rule_indexes,
-        }
+    /// Creates a compiled syntax definition from a static built-in spec.
+    pub fn from_spec(spec: &SyntaxSpec) -> Result<Self, SyntaxLoadError> {
+        Ok(Self {
+            metadata: SyntaxMetadata::from_spec(&spec.metadata)?,
+            tokenizer: spec.tokenizer,
+        })
     }
 
     /// Returns the canonical syntax name.
@@ -131,21 +148,6 @@ impl SyntaxDefinition {
     /// Returns the user-facing syntax label.
     pub fn display_name(&self) -> &str {
         &self.metadata.display_name
-    }
-
-    /// Returns the ordered rules list, if the syntax uses the new context-driven model.
-    pub fn rules(&self) -> &[SyntaxRule] {
-        &self.rules
-    }
-
-    /// Returns the rule indexes for regex-driven matches.
-    pub fn regex_rule_indexes(&self) -> &[usize] {
-        &self.regex_rule_indexes
-    }
-
-    /// Returns the rule indexes for injection-driven matches.
-    pub fn injection_rule_indexes(&self) -> &[usize] {
-        &self.injection_rule_indexes
     }
 
     /// Returns the syntax glyph, if one is configured.
@@ -180,96 +182,111 @@ pub struct SyntaxMetadata {
     pub shebang: Vec<Regex>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(super) struct RawSyntaxDefinition {
-    pub metadata: RawSyntaxMetadata,
-    #[serde(default)]
-    pub rules: Vec<RawRule>,
+impl SyntaxMetadata {
+    /// Creates compiled metadata from a static built-in spec.
+    pub fn from_spec(spec: &SyntaxMetadataSpec) -> Result<Self, SyntaxLoadError> {
+        let name = spec.name.trim();
+        if name.is_empty() {
+            return Err(SyntaxLoadError::InvalidSyntaxName(spec.name.to_string()));
+        }
+        let name = SmolStr::new(name.to_ascii_lowercase());
+
+        let display_name = SmolStr::new(spec.display_name.trim());
+        if display_name.is_empty() {
+            return Err(SyntaxLoadError::InvalidSyntaxName(
+                spec.display_name.to_string(),
+            ));
+        }
+
+        let mut aliases = Vec::with_capacity(spec.alias.len());
+        for alias in spec.alias {
+            let alias =
+                normalize_label(alias).ok_or_else(|| SyntaxLoadError::InvalidSyntaxAlias {
+                    syntax: name.to_string(),
+                    alias: (*alias).to_string(),
+                })?;
+            if alias == name || aliases.iter().any(|existing| existing == &alias) {
+                return Err(SyntaxLoadError::DuplicateSyntaxAlias {
+                    syntax: name.to_string(),
+                    alias: alias.to_string(),
+                });
+            }
+            aliases.push(alias);
+        }
+
+        let comment_prefix = spec
+            .comment_prefix
+            .map(|prefix| {
+                let prefix = prefix.trim();
+                if prefix.is_empty() {
+                    Err(SyntaxLoadError::InvalidCommentPrefix {
+                        syntax: name.to_string(),
+                        comment_prefix: prefix.to_string(),
+                    })
+                } else {
+                    Ok(SmolStr::new(prefix))
+                }
+            })
+            .transpose()?;
+
+        let glyph = spec
+            .glyph
+            .map(|glyph| {
+                let glyph = glyph.trim();
+                if glyph.is_empty() {
+                    Err(SyntaxLoadError::InvalidGlyph {
+                        syntax: name.to_string(),
+                        glyph: glyph.to_string(),
+                    })
+                } else {
+                    Ok(SmolStr::new(glyph))
+                }
+            })
+            .transpose()?;
+
+        let glyph_color = spec
+            .glyph_color
+            .map(|color| parse_rgb_color(name.as_str(), color))
+            .transpose()?;
+
+        let filename = compile_patterns(name.as_str(), spec.filename)?;
+        let shebang = compile_patterns(name.as_str(), spec.shebang)?;
+
+        Ok(Self {
+            name,
+            display_name,
+            alias: aliases,
+            comment_prefix,
+            glyph,
+            glyph_color,
+            filename,
+            shebang,
+        })
+    }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(super) struct RawSyntaxMetadata {
-    pub name: String,
-    pub display_name: String,
-    #[serde(default)]
-    pub alias: Vec<String>,
-    #[serde(default)]
-    pub comment_prefix: Option<String>,
-    #[serde(default)]
-    pub glyph: Option<String>,
-    #[serde(default)]
-    pub glyph_color: Option<RawGlyphColor>,
-    #[serde(default)]
-    pub filename: Vec<String>,
-    #[serde(default)]
-    pub shebang: Vec<String>,
+fn compile_patterns(syntax: &str, patterns: &[&str]) -> Result<Vec<Regex>, SyntaxLoadError> {
+    patterns
+        .iter()
+        .filter_map(|pattern| {
+            let pattern = pattern.trim();
+            (!pattern.is_empty()).then_some(pattern)
+        })
+        .map(|pattern| {
+            Regex::new(pattern).map_err(|error| SyntaxLoadError::InvalidRegex {
+                syntax: syntax.to_string(),
+                pattern: pattern.to_string(),
+                message: error.to_string(),
+            })
+        })
+        .collect()
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(untagged)]
-pub(super) enum RawGlyphColor {
-    Ansi(u8),
-    Rgb(String),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-pub(super) enum RawRule {
-    Regex {
-        pattern: String,
-        #[serde(default)]
-        lookahead: Option<String>,
-        tag: String,
-        #[serde(default)]
-        context: Option<RawContextControl>,
-    },
-    Injection {
-        selector: RawInjectionSelector,
-        fallback: RawInjectedSyntaxFallback,
-        #[serde(default)]
-        context: Option<RawContextControl>,
-    },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(super) struct RawContextControl {
-    #[serde(default)]
-    pub requires: Vec<String>,
-    #[serde(default)]
-    pub push: Vec<RawContextPush>,
-    #[serde(default)]
-    pub pop: Vec<String>,
-    #[serde(default)]
-    pub payload_match: Option<RawContextMatch>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(untagged)]
-pub(super) enum RawContextPush {
-    Name(String),
-    Capture { name: String, capture: usize },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(untagged)]
-pub(super) enum RawContextMatch {
-    Name(String),
-    Capture { name: String, capture: usize },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(untagged)]
-pub(super) enum RawInjectionSelector {
-    Static { name: String },
-    Capture { capture: String },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub(super) enum RawInjectedSyntaxFallback {
-    ParentStyle,
-    Unstyled,
+fn parse_rgb_color(syntax: &str, value: &str) -> Result<Color, SyntaxLoadError> {
+    Rgb::parse_hex(value.trim())
+        .map(Color::Rgb)
+        .map_err(|_| SyntaxLoadError::InvalidGlyphColor {
+            syntax: syntax.to_string(),
+            color: value.to_string(),
+        })
 }

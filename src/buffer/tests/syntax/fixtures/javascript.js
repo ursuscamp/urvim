@@ -29,3 +29,5 @@ class Secret {
     return this.#value;
   }
 }
+
+const view = <><div className="app" hidden>{text}</div><Button disabled /></>;

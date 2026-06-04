@@ -9,16 +9,16 @@ fn test_scala_fixture_uses_grammar_rules() {
         .syntax_spans_for_line(0)
         .expect("comment line should exist");
     let annotation = buf
-        .syntax_spans_for_line(1)
+        .syntax_spans_for_line(6)
         .expect("annotation line should exist");
     let function_line = buf
-        .syntax_spans_for_line(2)
+        .syntax_spans_for_line(7)
         .expect("function line should exist");
     let string_line = buf
-        .syntax_spans_for_line(3)
+        .syntax_spans_for_line(8)
         .expect("string line should exist");
     let number_line = buf
-        .syntax_spans_for_line(4)
+        .syntax_spans_for_line(9)
         .expect("number line should exist");
 
     assert_spans_include_comment_style(&comment);
@@ -37,4 +37,26 @@ fn test_scala_function_call_highlights_function_name() {
 
     let spans = buf.syntax_spans_for_line(0).expect("line should exist");
     assert_spans_include_style(&spans, tag("function"));
+}
+
+#[test]
+fn test_scala_fixture_highlights_base_and_exponent_number_literals() {
+    let fixture = include_str!("fixtures/scala.scala");
+    let mut buf = fixture_buffer("syntax-scala-number-literals", "scala", fixture);
+
+    assert_scala_exact_style(&mut buf, 13, "0xFF", tag("number"));
+    assert_scala_exact_style(&mut buf, 14, "0b1010_0011", tag("number"));
+    assert_scala_exact_style(&mut buf, 15, "1.5e-2", tag("number"));
+}
+
+fn assert_scala_exact_style(buf: &mut Buffer, line_index: usize, fragment: &str, style: Tag) {
+    let spans = buf
+        .syntax_spans_for_line(line_index)
+        .unwrap_or_else(|| panic!("line {line_index} should exist"));
+    let line = buf
+        .line_at(line_index)
+        .unwrap_or_else(|| panic!("line {line_index} should exist"))
+        .to_string();
+
+    assert_spans_include_exact_style(&spans, line.as_str(), fragment, style);
 }

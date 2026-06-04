@@ -5,18 +5,16 @@ use crate::buffer::Buffer;
 use crate::buffer::BufferId;
 use crate::buffer::{BufferEditEffect, DiffRefreshJob, PieceTable, TextRef, TextSnapshot};
 use crate::globals;
-use crate::syntax::{
-    ContextControl, InjectedSyntaxFallback, InjectedSyntaxSelector, SyntaxDefinition, SyntaxRule,
-    builtin_syntax_registry,
-};
+use crate::syntax::{SyntaxDefinition, SyntaxTokenizer, builtin_syntax_registry};
 use crate::theme::Tag;
-use regex::Regex;
 use smol_str::SmolStr;
 use std::sync::Arc;
 
 const SYNTAX_REFRESH_UPDATE_LINES: usize = 512;
 const LINE_FINGERPRINT_OFFSET: u64 = 0xcbf29ce484222325;
 const LINE_FINGERPRINT_PRIME: u64 = 0x100000001b3;
+const CONTEXT_ID_OFFSET: u64 = 0xcbf29ce484222325;
+const CONTEXT_ID_PRIME: u64 = 0x100000001b3;
 
 /// Stable identity for one line's text used by syntax cache reconvergence.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -45,6 +43,41 @@ impl LineFingerprint {
     fn from_text_ref(text: &(impl TextRef + ?Sized)) -> Self {
         Self::from_chunks(text.chunks())
     }
+}
+
+/// Stable identity for one syntax context stack entry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
+pub(crate) struct ContextId(u64);
+
+impl ContextId {
+    /// Creates a compile-time context id from a syntax namespace and local name.
+    pub(crate) const fn new(namespace: &str, name: &str) -> Self {
+        Self(hash_context_id(namespace, name))
+    }
+}
+
+const fn hash_context_id(namespace: &str, name: &str) -> u64 {
+    let mut hash = CONTEXT_ID_OFFSET;
+    let namespace_bytes = namespace.as_bytes();
+    let mut index = 0;
+    while index < namespace_bytes.len() {
+        hash ^= namespace_bytes[index] as u64;
+        hash = hash.wrapping_mul(CONTEXT_ID_PRIME);
+        index += 1;
+    }
+
+    hash ^= 0xff;
+    hash = hash.wrapping_mul(CONTEXT_ID_PRIME);
+
+    let name_bytes = name.as_bytes();
+    index = 0;
+    while index < name_bytes.len() {
+        hash ^= name_bytes[index] as u64;
+        hash = hash.wrapping_mul(CONTEXT_ID_PRIME);
+        index += 1;
+    }
+
+    hash
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1146,37 +1179,52 @@ impl IndentScopeRefreshJob {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-enum SyntaxState {
+pub(crate) enum SyntaxState {
     #[default]
     Plain,
     Code(CodeState),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum CodeState {
+pub(crate) enum CodeState {
     Normal {
         contexts: ContextStack,
     },
     RuleList {
         contexts: ContextStack,
-        injection: Option<RuleListInjectionState>,
+        injection: Option<TokenizerInjectionState>,
         parent_style: Option<Tag>,
     },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum InjectedSyntaxFallback {
+    Unstyled,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct RuleListInjectionState {
-    nested: Option<NestedState>,
-    fallback: InjectedSyntaxFallback,
-    parent_style: Option<Tag>,
+pub(crate) struct TokenizerInjectionState {
+    pub(crate) nested: Option<NestedState>,
+    pub(crate) fallback: InjectedSyntaxFallback,
+    pub(crate) parent_style: Option<Tag>,
 }
 
 #[derive(Debug, Clone)]
-enum NestedState {
+pub(crate) enum NestedState {
     Syntax {
         syntax_definition: Arc<SyntaxDefinition>,
         state: Box<SyntaxState>,
     },
+}
+
+impl NestedState {
+    pub(crate) fn new_syntax(definition: Arc<SyntaxDefinition>) -> Self {
+        let state = Box::new(initial_state_for_definition(definition.as_ref()));
+        NestedState::Syntax {
+            syntax_definition: definition,
+            state,
+        }
+    }
 }
 
 impl PartialEq for NestedState {
@@ -1199,22 +1247,35 @@ impl PartialEq for NestedState {
 impl Eq for NestedState {}
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-struct ContextStack {
-    entries: Vec<crate::syntax::ContextEntry>,
+pub(crate) struct ContextStack {
+    pub(crate) entries: Vec<ContextEntry>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ContextEntry {
+    pub(crate) name: ContextId,
+    pub(crate) payload: Option<String>,
 }
 
 impl ContextStack {
-    fn contains(&self, marker: &str) -> bool {
-        self.entries.iter().any(|active| active.name == marker)
+    pub(crate) fn top_is(&self, marker: ContextId) -> bool {
+        self.entries
+            .last()
+            .is_some_and(|active| active.name == marker)
     }
 
-    fn contains_all(&self, required: &[smol_str::SmolStr]) -> bool {
-        required
+    pub(crate) fn contains_anywhere(&self, marker: ContextId) -> bool {
+        self.depth(marker) > 0
+    }
+
+    pub(crate) fn depth(&self, marker: ContextId) -> usize {
+        self.entries
             .iter()
-            .all(|marker| self.entries.iter().any(|active| active.name == *marker))
+            .filter(|active| active.name == marker)
+            .count()
     }
 
-    fn payload_for(&self, name: &str) -> Option<&str> {
+    pub(crate) fn payload_for(&self, name: ContextId) -> Option<&str> {
         self.entries
             .iter()
             .rev()
@@ -1222,385 +1283,66 @@ impl ContextStack {
             .and_then(|entry| entry.payload.as_deref())
     }
 
-    fn push_all(
-        &mut self,
-        markers: &[crate::syntax::ContextPush],
-        captures: Option<&regex::Captures<'_>>,
-    ) {
-        for marker in markers {
-            let payload = marker.capture.and_then(|capture| {
-                captures
-                    .and_then(|captures| captures.get(capture))
-                    .map(|capture| capture.as_str().to_string())
-            });
-            self.entries.push(crate::syntax::ContextEntry {
-                name: marker.name.clone(),
-                payload,
-            });
+    pub(crate) fn push(&mut self, marker: ContextId) {
+        self.entries.push(ContextEntry {
+            name: marker,
+            payload: None,
+        });
+    }
+
+    pub(crate) fn pop(&mut self, marker: ContextId) {
+        if let Some(index) = self
+            .entries
+            .iter()
+            .rposition(|active| active.name == marker)
+        {
+            self.entries.remove(index);
         }
     }
 
-    fn pop_all(&mut self, markers: &[smol_str::SmolStr]) {
-        for marker in markers {
-            if let Some(index) = self
-                .entries
-                .iter()
-                .rposition(|active| active.name == *marker)
-            {
-                self.entries.remove(index);
-            }
+    pub(crate) fn pop_top(&mut self, marker: ContextId) -> bool {
+        if self.top_is(marker) {
+            self.entries.pop();
+            true
+        } else {
+            false
         }
     }
-}
 
-fn apply_context_control(
-    contexts: &mut ContextStack,
-    control: Option<&ContextControl>,
-    captures: Option<&regex::Captures<'_>>,
-) {
-    let Some(control) = control else {
-        return;
-    };
-
-    contexts.pop_all(&control.pop);
-    contexts.push_all(&control.push, captures);
-}
-
-fn context_payload_matches(
-    contexts: &ContextStack,
-    control: &ContextControl,
-    matched_text: &str,
-    captures: Option<&regex::Captures<'_>>,
-) -> bool {
-    let Some(payload_match) = control.payload_match.as_ref() else {
-        return true;
-    };
-
-    let Some(payload) = contexts.payload_for(&payload_match.name) else {
-        return false;
-    };
-
-    let candidate = if let Some(capture) = payload_match.capture {
-        captures
-            .and_then(|captures| captures.get(capture))
-            .map(|capture| capture.as_str())
-            .unwrap_or(matched_text)
-    } else {
-        matched_text
-    };
-
-    candidate.starts_with(payload)
+    pub(crate) fn push_with_payload(&mut self, marker: ContextId, payload: &str) {
+        self.entries.push(ContextEntry {
+            name: marker,
+            payload: Some(payload.to_string()),
+        });
+    }
 }
 
 fn syntax_definition(syntax_name: &str) -> Option<std::sync::Arc<SyntaxDefinition>> {
-    builtin_syntax_registry().ok()?.promote(syntax_name).ok()
+    builtin_syntax_registry().ok()?.get_by_name(syntax_name)
 }
 
-fn tokenize_line_definition(
+pub(crate) fn syntax_definition_by_name(name: &str) -> Option<std::sync::Arc<SyntaxDefinition>> {
+    syntax_definition(name)
+}
+
+pub(crate) fn tokenize_line_definition(
     definition: &SyntaxDefinition,
     line: &str,
     state: SyntaxState,
 ) -> (Vec<SyntaxSpan>, SyntaxState) {
-    if !definition.rules().is_empty() {
-        tokenize_rule_list_line(definition, line, state)
-    } else {
-        tokenize_code_line(definition, line, state)
-    }
-}
-
-fn tokenize_rule_list_line(
-    definition: &SyntaxDefinition,
-    line: &str,
-    state: SyntaxState,
-) -> (Vec<SyntaxSpan>, SyntaxState) {
-    let mut spans = Vec::new();
-    let mut index = 0;
-    let regex_rule_indexes = definition.regex_rule_indexes();
-    let injection_rule_indexes = definition.injection_rule_indexes();
-    let mut state = match state {
-        SyntaxState::Code(CodeState::RuleList {
-            contexts,
-            injection,
-            parent_style,
-        }) => (contexts, injection, parent_style),
-        SyntaxState::Code(CodeState::Normal { contexts }) => (contexts, None, None),
-        _ => (ContextStack::default(), None, None),
-    };
-
-    while index < line.len() {
-        let (contexts, injection, parent_style) = &mut state;
-
-        if injection.is_some() && !has_active_injection(definition, contexts) {
-            *injection = None;
-        }
-
-        if let Some(injection_state) = injection.as_mut() {
-            if let Some(regex_match) = find_next_rule_list_regex_match(
-                definition,
-                regex_rule_indexes,
-                line,
-                index,
-                contexts,
-            ) {
-                if regex_match.0 > index {
-                    let body = &line[index..regex_match.0];
-                    let mut body_spans = tokenize_injection_body(injection_state, body, index);
-                    spans.append(&mut body_spans);
-                    index = regex_match.0;
-                    continue;
-                }
-            } else {
-                let body = &line[index..];
-                let mut body_spans = tokenize_injection_body(injection_state, body, index);
-                spans.append(&mut body_spans);
-                index = line.len();
-                continue;
-            }
-        }
-
-        let mut chosen = None;
-        for rule_idx in regex_rule_indexes {
-            if let SyntaxRule::Regex {
-                regex,
-                lookahead,
-                tag,
-                context,
-            } = &definition.rules[*rule_idx]
-            {
-                if let Some(context) = context.as_ref()
-                    && !contexts.contains_all(&context.requires)
-                {
-                    continue;
-                }
-                if let Some(hit) = regex_match_at(regex, lookahead.as_ref(), line, index, true) {
-                    let matched_text = line.get(hit.start..hit.end).unwrap_or("");
-                    if let Some(context) = context.as_ref()
-                        && !context_payload_matches(
-                            contexts,
-                            context,
-                            matched_text,
-                            hit.captures.as_ref(),
-                        )
-                    {
-                        continue;
-                    }
-
-                    let is_closing = context
-                        .as_ref()
-                        .is_some_and(|context| !context.pop.is_empty() && context.push.is_empty());
-                    let should_replace = chosen.as_ref().is_none_or(
-                        |candidate: &(
-                            usize,
-                            usize,
-                            regex::Captures<'_>,
-                            bool,
-                            Tag,
-                            Option<ContextControl>,
-                        )| !candidate.3 && is_closing,
-                    );
-                    if should_replace {
-                        chosen = Some((
-                            hit.start,
-                            hit.end,
-                            hit.captures.expect("captures requested"),
-                            is_closing,
-                            tag.clone(),
-                            context.clone(),
-                        ));
-                        if is_closing {
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-
-        if let Some((start, end, captures, _, tag, context)) = chosen {
-            let mut chosen_spans = vec![SyntaxSpan::new(start, end, tag.clone())];
-            spans.append(&mut chosen_spans);
-            apply_context_control(contexts, context.as_ref(), Some(&captures));
-            *parent_style = Some(tag);
-            if contexts.entries.is_empty() {
-                *parent_style = None;
-            }
-            index = end;
-            continue;
-        }
-
-        let mut matched = false;
-        for rule_idx in injection_rule_indexes {
-            if let SyntaxRule::Injection {
-                selector,
-                fallback,
-                context,
-            } = &definition.rules[*rule_idx]
-            {
-                if injection.is_some() {
-                    continue;
-                }
-                if let Some(context) = context.as_ref()
-                    && !contexts.contains_all(&context.requires)
-                {
-                    continue;
-                }
-
-                let nested = resolve_rule_list_injection(selector, line.get(index..).unwrap_or(""));
-                *injection = Some(RuleListInjectionState {
-                    nested,
-                    fallback: *fallback,
-                    parent_style: parent_style.clone(),
-                });
-                matched = true;
-                break;
-            }
-        }
-
-        if matched {
-            continue;
-        }
-
-        let Some((byte_len, _)) = next_char(line, index) else {
-            break;
-        };
-        index += byte_len;
-    }
-
-    (
-        spans,
-        SyntaxState::Code(CodeState::RuleList {
-            contexts: state.0,
-            injection: state.1,
-            parent_style: state.2,
-        }),
+    crate::syntax::builtin_tokenizers::dispatch_builtin(
+        definition.tokenizer,
+        definition,
+        line,
+        state,
     )
 }
 
-fn has_active_injection(definition: &SyntaxDefinition, contexts: &ContextStack) -> bool {
-    definition.injection_rule_indexes().iter().any(|rule_idx| {
-        matches!(
-            &definition.rules[*rule_idx],
-            SyntaxRule::Injection { context, .. }
-                if context
-                    .as_ref()
-                    .is_some_and(|context| contexts.contains_all(&context.requires))
-        )
-    })
-}
-
-fn find_next_rule_list_regex_match(
-    definition: &SyntaxDefinition,
-    regex_rule_indexes: &[usize],
-    line: &str,
-    start: usize,
-    contexts: &ContextStack,
-) -> Option<(usize, usize)> {
-    let mut index = start;
-    while index < line.len() {
-        for rule_idx in regex_rule_indexes {
-            if let SyntaxRule::Regex {
-                regex,
-                lookahead,
-                context,
-                ..
-            } = &definition.rules[*rule_idx]
-            {
-                if let Some(context) = context.as_ref()
-                    && !contexts.contains_all(&context.requires)
-                {
-                    continue;
-                }
-                if contexts.contains("markdown_code_fence_body") && context.is_none() {
-                    continue;
-                }
-                if let Some(hit) = regex_match_at(regex, lookahead.as_ref(), line, index, false) {
-                    return Some((hit.start, hit.end));
-                }
-            }
-        }
-
-        let Some((byte_len, _)) = next_char(line, index) else {
-            break;
-        };
-        index += byte_len;
-    }
-
-    None
-}
-
-fn resolve_rule_list_injection(
-    selector: &InjectedSyntaxSelector,
-    opener_tail: &str,
-) -> Option<NestedState> {
-    let label = match selector {
-        InjectedSyntaxSelector::Static { name } => name.as_str(),
-        InjectedSyntaxSelector::Capture { pattern } => {
-            let captures = pattern.captures(opener_tail)?;
-            captures.get(1).or_else(|| captures.get(0))?.as_str()
-        }
-    };
-
-    let registry = builtin_syntax_registry().ok()?;
-    let canonical = registry.resolve_label(label)?;
-    let definition = registry.promote(canonical.as_str()).ok()?;
-    let state = initial_state_for_definition(definition.as_ref());
-    Some(NestedState::Syntax {
-        syntax_definition: definition,
-        state: Box::new(state),
-    })
-}
-
-fn tokenize_code_line(
-    definition: &SyntaxDefinition,
-    line: &str,
-    state: SyntaxState,
-) -> (Vec<SyntaxSpan>, SyntaxState) {
-    let state = match state {
-        SyntaxState::Code(code_state) => code_state,
-        _ => CodeState::Normal {
-            contexts: ContextStack::default(),
-        },
-    };
-
-    match state {
-        CodeState::RuleList {
-            contexts,
-            injection,
-            parent_style,
-        } => {
-            let (spans, next_state) = tokenize_rule_list_line(
-                definition,
-                line,
-                SyntaxState::Code(CodeState::RuleList {
-                    contexts,
-                    injection,
-                    parent_style,
-                }),
-            );
-            let state = match next_state {
-                SyntaxState::Code(CodeState::RuleList {
-                    contexts,
-                    injection,
-                    parent_style,
-                }) => CodeState::RuleList {
-                    contexts,
-                    injection,
-                    parent_style,
-                },
-                SyntaxState::Code(CodeState::Normal { contexts }) => CodeState::Normal { contexts },
-                SyntaxState::Plain => CodeState::Normal {
-                    contexts: ContextStack::default(),
-                },
-            };
-            (spans, SyntaxState::Code(state))
-        }
-        CodeState::Normal { contexts } => (
-            Vec::new(),
-            SyntaxState::Code(CodeState::Normal { contexts }),
-        ),
-    }
-}
-
-fn tokenize_nested_body(nested: &mut NestedState, body: &str, offset: usize) -> Vec<SyntaxSpan> {
+pub(crate) fn tokenize_nested_body(
+    nested: &mut NestedState,
+    body: &str,
+    offset: usize,
+) -> Vec<SyntaxSpan> {
     match nested {
         NestedState::Syntax {
             syntax_definition,
@@ -1614,27 +1356,27 @@ fn tokenize_nested_body(nested: &mut NestedState, body: &str, offset: usize) -> 
     }
 }
 
-fn tokenize_injection_body(
-    injection_state: &mut RuleListInjectionState,
+/// Tokenize injected nested syntax and keep the host parent style in sync.
+pub(crate) fn tokenize_injected_body(
+    inj: &mut TokenizerInjectionState,
     body: &str,
     offset: usize,
 ) -> Vec<SyntaxSpan> {
-    if let Some(nested) = injection_state.nested.as_mut() {
-        return tokenize_nested_body(nested, body, offset);
+    if let Some(ref mut nested) = inj.nested {
+        let spans = tokenize_nested_body(nested, body, offset);
+        let NestedState::Syntax { state, .. } = nested;
+        if let SyntaxState::Code(CodeState::RuleList {
+            parent_style: ps, ..
+        }) = state.as_ref()
+        {
+            inj.parent_style = ps.clone();
+        }
+        spans
+    } else {
+        match inj.fallback {
+            InjectedSyntaxFallback::Unstyled => Vec::new(),
+        }
     }
-
-    if matches!(
-        injection_state.fallback,
-        InjectedSyntaxFallback::ParentStyle
-    ) {
-        let Some(style) = injection_state.parent_style.clone() else {
-            return Vec::new();
-        };
-
-        return vec![SyntaxSpan::new(offset, offset + body.len(), style)];
-    }
-
-    Vec::new()
 }
 
 fn offset_spans(spans: Vec<SyntaxSpan>, offset: usize) -> Vec<SyntaxSpan> {
@@ -1644,84 +1386,13 @@ fn offset_spans(spans: Vec<SyntaxSpan>, offset: usize) -> Vec<SyntaxSpan> {
         .collect()
 }
 
-fn initial_state_for_definition(definition: &SyntaxDefinition) -> SyntaxState {
-    if !definition.rules().is_empty() {
-        SyntaxState::Code(CodeState::RuleList {
+pub(crate) fn initial_state_for_definition(definition: &SyntaxDefinition) -> SyntaxState {
+    match definition.tokenizer {
+        SyntaxTokenizer::Plaintext => SyntaxState::Plain,
+        _ => SyntaxState::Code(CodeState::Normal {
             contexts: ContextStack::default(),
-            injection: None,
-            parent_style: None,
-        })
-    } else {
-        SyntaxState::Plain
+        }),
     }
-}
-
-fn next_char(line: &str, index: usize) -> Option<(usize, char)> {
-    let tail = line.get(index..)?;
-    let ch = tail.chars().next()?;
-    Some((ch.len_utf8(), ch))
-}
-
-struct RegexMatch<'a> {
-    start: usize,
-    end: usize,
-    captures: Option<regex::Captures<'a>>,
-}
-
-fn regex_match_at<'a>(
-    regex: &'a Regex,
-    lookahead: Option<&'a Regex>,
-    line: &'a str,
-    index: usize,
-    want_captures: bool,
-) -> Option<RegexMatch<'a>> {
-    let pattern = regex.as_str();
-    let (start, end, captures) = if want_captures {
-        if pattern.starts_with('^') || pattern.starts_with("\\A") {
-            let tail = line.get(index..)?;
-            let captures = regex.captures(tail)?;
-            let matched = captures.get(0)?;
-            if matched.start() != 0 {
-                return None;
-            }
-            (index, index + matched.end(), Some(captures))
-        } else {
-            let captures = regex.captures_at(line, index)?;
-            let matched = captures.get(0)?;
-            if matched.start() != index {
-                return None;
-            }
-            (matched.start(), matched.end(), Some(captures))
-        }
-    } else if pattern.starts_with('^') || pattern.starts_with("\\A") {
-        let tail = line.get(index..)?;
-        let matched = regex.find(tail)?;
-        if matched.start() != 0 {
-            return None;
-        }
-        (index, index + matched.end(), None)
-    } else if let Some(matched) = regex.find_at(line, index) {
-        if matched.start() != index {
-            return None;
-        }
-        (matched.start(), matched.end(), None)
-    } else {
-        return None;
-    };
-
-    if let Some(lookahead) = lookahead {
-        let tail = line.get(end..)?;
-        let matched = lookahead.find(tail)?;
-        if matched.start() != 0 {
-            return None;
-        }
-    }
-
-    Some(RegexMatch {
-        start,
-        end,
-        captures,
-    })
 }
 
 impl Buffer {
@@ -2091,6 +1762,65 @@ mod tests {
     }
 
     #[test]
+    fn context_stack_top_is_checks_only_top_entry() {
+        let mut stack = ContextStack::default();
+        const OUTER: ContextId = ContextId::new("test", "outer");
+        const INNER: ContextId = ContextId::new("test", "inner");
+        stack.push(OUTER);
+        stack.push(INNER);
+
+        assert!(stack.top_is(INNER));
+        assert!(!stack.top_is(OUTER));
+        assert!(stack.contains_anywhere(OUTER));
+    }
+
+    #[test]
+    fn context_stack_pop_top_only_removes_matching_top_entry() {
+        let mut stack = ContextStack::default();
+        const OUTER: ContextId = ContextId::new("test", "outer");
+        const INNER: ContextId = ContextId::new("test", "inner");
+        stack.push(OUTER);
+        stack.push(INNER);
+
+        assert!(!stack.pop_top(OUTER));
+        assert!(stack.top_is(INNER));
+        assert_eq!(stack.depth(OUTER), 1);
+        assert_eq!(stack.depth(INNER), 1);
+
+        assert!(stack.pop_top(INNER));
+        assert!(stack.top_is(OUTER));
+        assert_eq!(stack.depth(INNER), 0);
+    }
+
+    #[test]
+    fn context_stack_depth_counts_duplicate_markers() {
+        let mut stack = ContextStack::default();
+        const COMMENT: ContextId = ContextId::new("test", "comment");
+        const STRING: ContextId = ContextId::new("test", "string");
+        const MISSING: ContextId = ContextId::new("test", "missing");
+        stack.push(COMMENT);
+        stack.push(STRING);
+        stack.push(COMMENT);
+
+        assert_eq!(stack.depth(COMMENT), 2);
+        assert_eq!(stack.depth(STRING), 1);
+        assert_eq!(stack.depth(MISSING), 0);
+    }
+
+    #[test]
+    fn context_stack_payload_for_returns_nearest_matching_payload() {
+        let mut stack = ContextStack::default();
+        const HEREDOC: ContextId = ContextId::new("test", "heredoc");
+        const BODY: ContextId = ContextId::new("test", "body");
+        stack.push_with_payload(HEREDOC, "FIRST");
+        stack.push(BODY);
+        stack.push_with_payload(HEREDOC, "SECOND");
+
+        assert_eq!(stack.payload_for(HEREDOC), Some("SECOND"));
+        assert_eq!(stack.payload_for(BODY), None);
+    }
+
+    #[test]
     fn line_fingerprint_matches_contiguous_and_piece_table_chunks() {
         let mut lines = PieceTable::from_text("prefixsuffix");
         lines
@@ -2106,79 +1836,6 @@ mod tests {
             LineFingerprint::new("prefixsuffix"),
             LineFingerprint::from_text_ref(&line)
         );
-    }
-
-    #[test]
-    fn parent_style_fallback_uses_the_injection_opener_tag() {
-        let definition = SyntaxDefinition::new(
-            crate::syntax::SyntaxMetadata {
-                name: SmolStr::new("example"),
-                display_name: SmolStr::new("Example"),
-                alias: Vec::new(),
-                comment_prefix: None,
-                glyph: None,
-                glyph_color: None,
-                filename: Vec::new(),
-                shebang: Vec::new(),
-            },
-            vec![
-                SyntaxRule::Regex {
-                    regex: Regex::new(r"^```[A-Za-z]+$").expect("valid opener regex"),
-                    lookahead: None,
-                    tag: tag("markup.code"),
-                    context: Some(ContextControl {
-                        requires: Vec::new(),
-                        push: vec![crate::syntax::ContextPush {
-                            name: SmolStr::new("fence"),
-                            capture: None,
-                        }],
-                        pop: Vec::new(),
-                        payload_match: None,
-                    }),
-                },
-                SyntaxRule::Injection {
-                    selector: InjectedSyntaxSelector::Static {
-                        name: SmolStr::new("missing"),
-                    },
-                    fallback: InjectedSyntaxFallback::ParentStyle,
-                    context: Some(ContextControl {
-                        requires: vec![SmolStr::new("fence")],
-                        push: Vec::new(),
-                        pop: Vec::new(),
-                        payload_match: None,
-                    }),
-                },
-                SyntaxRule::Regex {
-                    regex: Regex::new(r"^```$").expect("valid closer regex"),
-                    lookahead: None,
-                    tag: tag("markup.code"),
-                    context: Some(ContextControl {
-                        requires: vec![SmolStr::new("fence")],
-                        push: Vec::new(),
-                        pop: vec![SmolStr::new("fence")],
-                        payload_match: None,
-                    }),
-                },
-            ],
-            vec![0, 2],
-            vec![1],
-        );
-
-        let (opener_spans, state) =
-            tokenize_rule_list_line(&definition, "```example", SyntaxState::default());
-        assert!(
-            opener_spans
-                .iter()
-                .any(|span| span.style == tag("markup.code"))
-        );
-
-        let (body_spans, state) = tokenize_rule_list_line(&definition, "body text", state);
-        assert_eq!(body_spans.len(), 1);
-        assert_eq!(body_spans[0].style, tag("markup.code"));
-
-        let (closing_spans, _) = tokenize_rule_list_line(&definition, "```", state);
-        assert_eq!(closing_spans.len(), 1);
-        assert_eq!(closing_spans[0].style, tag("markup.code"));
     }
 
     #[test]

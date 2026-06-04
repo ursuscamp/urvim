@@ -1,5 +1,50 @@
 # Justfile syntax fixture
-default:
-    echo "hello {{name}}"
+# Multi-line comment
+
+default: build test
+
 name := "urvim"
 version := 42
+debug := false
+port := 8080
+
+build:
+    echo "building {{name}} v{{version}}"
+    cargo build --release
+
+test: build
+    cargo test
+    echo "tests {{if debug { \"with debug\" } else { \"without debug\" }}}"
+
+run: build
+    ./target/release/{{name}} --port {{port}}
+
+clean:
+    cargo clean
+    rm -rf target/
+
+lint:
+    cargo clippy -- -D warnings
+    cargo fmt --check
+
+docs:
+    cargo doc --no-deps
+    echo "documentation generated"
+
+release: test lint docs
+    cargo build --release
+    cp target/release/{{name}} /usr/local/bin/
+
+format:
+    cargo fmt
+
+_setting:
+    echo "settings are private"
+
+[private]
+internal_task:
+    echo "this task is private"
+
+[no-cd]
+deploy:
+    rsync -avz ./target/release/{{name}} server:/opt/{{name}}/

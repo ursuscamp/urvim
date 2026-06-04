@@ -9,16 +9,16 @@ fn test_zig_fixture_uses_grammar_rules() {
         .syntax_spans_for_line(0)
         .expect("comment line should exist");
     let import_line = buf
-        .syntax_spans_for_line(1)
+        .syntax_spans_for_line(4)
         .expect("import line should exist");
     let const_line = buf
-        .syntax_spans_for_line(2)
+        .syntax_spans_for_line(9)
         .expect("const line should exist");
     let string_line = buf
-        .syntax_spans_for_line(4)
+        .syntax_spans_for_line(11)
         .expect("string line should exist");
     let call_line = buf
-        .syntax_spans_for_line(5)
+        .syntax_spans_for_line(44)
         .expect("call line should exist");
 
     assert_spans_include_comment_style(&comment);

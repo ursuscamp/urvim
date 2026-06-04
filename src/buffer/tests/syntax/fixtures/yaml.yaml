@@ -1,15 +1,68 @@
 # YAML syntax fixture
 %YAML 1.2
+---
 name: Ada
 title: "Engineer"
 bio: |
   Builds tools
   Likes syntax
 age: 42
+height: 1.75
+active: true
+inactive: false
+null_value: null
+
 anchor: &home
-city: London
+  city: London
+  country: UK
 alias: *home
 tagged: !person Ada
+
 list:
   - one
   - two
+  - three
+
+mapping:
+  key1: value1
+  key2: value2
+
+nested:
+  inner:
+    deeper: 42
+    items:
+      - a
+      - b
+
+multiline_flow: {name: Ada, age: 42}
+
+literal_block: |
+  First line
+  Second line
+  Third line
+
+folded_block: >
+  This is folded
+  text that becomes
+  a single paragraph
+
+quoted_single: 'escaped single ''quote'''
+quoted_double: "escaped \"double\" quote\nnewline"
+
+special_values:
+  - .nan
+  - .inf
+  - -.inf
+  - yes
+  - no
+  - on
+  - off
+
+binary_data: !!binary |
+  R0lGODlhDAAMAIQAAP//9/X
+  17unp5WZmZgAAAOfn515eXg
+
+multi_doc_separator: value
+---
+second_doc: true
+...

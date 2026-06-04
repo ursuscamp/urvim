@@ -9,16 +9,16 @@ fn test_ocaml_fixture_uses_grammar_rules() {
         .syntax_spans_for_line(0)
         .expect("comment line should exist");
     let string_line = buf
-        .syntax_spans_for_line(1)
+        .syntax_spans_for_line(5)
         .expect("string line should exist");
     let number_line = buf
-        .syntax_spans_for_line(2)
+        .syntax_spans_for_line(6)
         .expect("number line should exist");
     let constant_line = buf
-        .syntax_spans_for_line(3)
+        .syntax_spans_for_line(7)
         .expect("constant line should exist");
     let char_line = buf
-        .syntax_spans_for_line(4)
+        .syntax_spans_for_line(8)
         .expect("char line should exist");
 
     assert_spans_include_comment_style(&comment);

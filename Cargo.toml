@@ -2,6 +2,7 @@
 name = "urvim"
 version = "0.1.0"
 edition = "2024"
+default-run = "urvim"
 
 [dependencies]
 rustix = { version = "0.38", features = ["termios", "event", "fs"] }
@@ -45,4 +46,12 @@ harness = false
 
 [[bench]]
 name = "marker_store"
+harness = false
+
+[[bench]]
+name = "syntax_tokenizer_html"
+harness = false
+
+[[bench]]
+name = "syntax_tokenizer_rust"
 harness = false

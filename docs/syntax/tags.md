@@ -1,7 +1,7 @@
 # Syntax Tags
 
 This document describes the standard syntax tag vocabulary used by urvim's syntax system.
-Grammar authors may define additional valid tags, but the tags below are the recommended base set for common syntax concepts.
+Tokenizer authors may define additional valid tags, but the tags below are the recommended base set for common syntax concepts.
 
 Theme authors should use these tags under the `syntax.` highlight namespace when styling them in a theme file.
 
@@ -64,13 +64,13 @@ Theme authors should use these tags under the `syntax.` highlight namespace when
 
 `string.interpolation` is the recommended child tag for embedded expression-like
 regions inside strings, including placeholder-style bodies in language-specific
-format strings. Grammars may still use other existing tags such as `punctuation`,
+format strings. Tokenizers may still use other existing tags such as `punctuation`,
 `variable`, or `number` for the pieces within that region when those tags better
 describe the syntax being highlighted.
 
 ## Markup Body Convention
 
-For markup-style grammars, it is a good practice to tag the interior body text of a markup region with a `.text` refinement when that body should be styleable independently of surrounding punctuation or delimiters.
+For markup-style tokenizers, it is a good practice to tag the interior body text of a markup region with a `.text` refinement when that body should be styleable independently of surrounding punctuation or delimiters.
 
 Examples:
 
@@ -79,4 +79,4 @@ Examples:
 - `markup.heading.text`
 - `markup.code.inline.text`
 
-The `.text` refinement is a convention, not a requirement. Grammars may use it when it improves styling control.
+The `.text` refinement is a convention, not a requirement. Tokenizers may use it when it improves styling control.

@@ -9,16 +9,16 @@ fn test_php_fixture_uses_grammar_rules() {
         .syntax_spans_for_line(1)
         .expect("comment line should exist");
     let class_line = buf
-        .syntax_spans_for_line(2)
+        .syntax_spans_for_line(15)
         .expect("class line should exist");
     let prop_line = buf
-        .syntax_spans_for_line(3)
+        .syntax_spans_for_line(16)
         .expect("property line should exist");
     let number_line = buf
-        .syntax_spans_for_line(4)
+        .syntax_spans_for_line(17)
         .expect("number line should exist");
     let function_line = buf
-        .syntax_spans_for_line(5)
+        .syntax_spans_for_line(21)
         .expect("function line should exist");
 
     assert_spans_include_comment_style(&comment);
@@ -35,17 +35,40 @@ fn test_php_fixture_highlights_heredoc_markers() {
     let mut buf = fixture_buffer("syntax-php-heredoc", "php", fixture);
 
     let heredoc_opener = buf
-        .syntax_spans_for_line(10)
+        .syntax_spans_for_line(77)
         .expect("heredoc opener line should exist");
     let heredoc_body = buf
-        .syntax_spans_for_line(11)
+        .syntax_spans_for_line(78)
         .expect("heredoc body line should exist");
     let heredoc_end = buf
-        .syntax_spans_for_line(12)
+        .syntax_spans_for_line(79)
         .expect("heredoc terminator line should exist");
 
     assert_spans_include_style(&heredoc_opener, tag("string.escape"));
     assert_spans_include_style(&heredoc_body, tag("string.heredoc"));
     assert_spans_include_style(&heredoc_end, tag("string.escape"));
     assert_spans_include_style(&heredoc_end, tag("punctuation"));
+}
+
+#[test]
+fn test_php_fixture_highlights_base_and_exponent_number_literals() {
+    let fixture = include_str!("fixtures/php.php");
+    let mut buf = fixture_buffer("syntax-php-number-literals", "php", fixture);
+
+    assert_php_number_literal(&mut buf, 32, "0xFF");
+    assert_php_number_literal(&mut buf, 33, "0o77");
+    assert_php_number_literal(&mut buf, 34, "0b1010_0011");
+    assert_php_number_literal(&mut buf, 35, "1.5e-2");
+}
+
+fn assert_php_number_literal(buf: &mut Buffer, line_index: usize, literal: &str) {
+    let spans = buf
+        .syntax_spans_for_line(line_index)
+        .unwrap_or_else(|| panic!("line {line_index} should exist"));
+    let line = buf
+        .line_at(line_index)
+        .unwrap_or_else(|| panic!("line {line_index} should exist"))
+        .to_string();
+
+    assert_spans_include_exact_style(&spans, line.as_str(), literal, tag("number"));
 }

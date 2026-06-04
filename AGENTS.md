@@ -30,3 +30,11 @@ urvim is a terminal based text editor.
 - instead of module_name.rs and module_name/sub_mod.rs pattern, use module_name/mod.rs and module_name/sub_mod.rs pattern
 - backward compatibility isnt import because this is not a publicly release project yet
 - use prettier to format doc files after modification: `npx prettier -w doc_file.md`
+- when building builtin (parser-combinator) tokenizers in src/syntax/builtin_tokenizers/
+  - use direct byte-level checks (`tail.starts_with()`, `char_indices()`) instead of closure-based combinators (like `tag()` wrapper) — closures add indirection with no benefit over direct calls
+  - pre-compute Tag::parse results as `static LazyLock<Tag>` at module level to avoid re-parsing the same tag string on every match
+  - avoid `format!()` in hot paths — use slice arithmetic (`tail[1..].starts_with(...)`) instead of constructing temporary strings
+  - add a comparison test (`test_*_regex_and_combinator_produce_identical_spans`) that tokenizes every line of the fixture through both engines and asserts every span matches exactly
+  - when the injection scan searches for boundaries, it must check every byte position for ANY pattern that could end the injection (matching `find_next_rule_list_regex_match`), not just closing tags — otherwise output diverges from the regex engine
+  - closing rules (pop-only context) must be checked before opening rules (push context) when both match at the same position, otherwise the tokenizer won't match the regex engine's closing-rule preference
+  - add criterion benchmarks for new tokenizers to enable before/after comparison; save results to docs/benchmarks/

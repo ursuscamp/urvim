@@ -1,185 +1,133 @@
-# Syntax Grammar Files
+# Builtin Syntax Tokenizers
 
-This document describes urvim's TOML-based syntax grammar format.
+urvim no longer uses TOML syntax grammar files. Builtin syntaxes are defined in Rust metadata and highlighted by Rust tokenizer modules.
 
-Grammar files are data. A syntax definition is made of metadata plus one ordered `rules` list.
-Rules are evaluated from top to bottom, and the first match at the current scan position wins.
-
-Tag names are described in [docs/syntax/tags.md](docs/syntax/tags.md).
+Tag names are described in [tags.md](tags.md).
 
 ## File Layout
 
-```toml
-[metadata]
-name = "example"
-display_name = "Example"
-alias = ["ex"]
-glyph = ""
-glyph_color = "#dea584"
-filename = ["\\.ex$"]
-shebang = ["^#!.*\\bexample(?:\\s|$)"]
-comment_prefix = "#"
-
-[[rules]]
-kind = "regex"
-pattern = "#.*$"
-tag = "comment"
-```
-
-The `[metadata]` section tells urvim how to recognize and present the syntax.
-The `rules` list describes how to color text once the syntax has been selected.
-
-urvim parses builtin grammar files into a raw registry first and promotes a syntax to its compiled form only when it is actually needed for tokenization.
+| File                                            | Purpose                                                    |
+| ----------------------------------------------- | ---------------------------------------------------------- |
+| `src/syntax/builtin.rs`                         | Builtin syntax metadata catalog.                           |
+| `src/syntax/definition.rs`                      | `SyntaxDefinition`, metadata types, and `SyntaxTokenizer`. |
+| `src/syntax/registry.rs`                        | Registry construction and syntax resolution.               |
+| `src/syntax/builtin_tokenizers/mod.rs`          | Tokenizer module declarations and dispatch.                |
+| `src/syntax/builtin_tokenizers/<name>.rs`       | One line tokenizer for a syntax.                           |
+| `src/buffer/tests/syntax/<name>.rs`             | Syntax regression tests.                                   |
+| `src/buffer/tests/syntax/fixtures/<name>.<ext>` | Fixture text used by syntax tests.                         |
 
 ## Metadata
 
-| Field | Purpose | Guidance |
-|---|---|---|
-| `name` | Canonical syntax name | Use a short, stable, lower-case identifier such as `javascript` or `markdown`. |
-| `display_name` | Human-readable label | Use the name you want in the status bar and any UI labels. |
-| `alias` | Alternate labels | Add common shorthand labels such as `js`, `md`, or `rb`. |
-| `comment_prefix` | Canonical line comment prefix | Use the token that should be inserted and removed by line-comment toggle actions, such as `//`, `#`, or `--`. Leave it unset for syntaxes without a line comment form. |
-| `glyph` | Optional filetype icon | Use a nerdfont glyph when the language should appear with an icon in the tab bar and status bar. Leave it unset for languages without a good icon. |
-| `glyph_color` | Optional glyph foreground color | Use a default foreground color associated with the language icon. The value can be an ANSI index or an RGB hex color, matching the editor's other color literals. |
-| `filename` | Filename-matching regexes | Use these for extensions or fixed names. The loader matches against the lower-cased basename, so write the pattern as if the filename were lower-case. |
-| `shebang` | Shebang regexes | Use these for shebangs, magic comments, and other header markers. These are checked before filename matching. |
+Add or update metadata in `src/syntax/builtin.rs`.
 
-## Rules
+Important fields:
 
-Rules are ordered. Keep specific rules before broad fallback rules.
+| Field            | Purpose                                                    |
+| ---------------- | ---------------------------------------------------------- |
+| `name`           | Canonical syntax name.                                     |
+| `display_name`   | Label shown in UI.                                         |
+| `alias`          | Alternate names.                                           |
+| `filename`       | Filename regexes matched against the lower-cased basename. |
+| `shebang`        | Shebang/header regexes checked before filename matching.   |
+| `comment_prefix` | Line comment prefix used by comment toggling.              |
+| `tokenizer`      | `SyntaxTokenizer` variant dispatched for highlighting.     |
 
-The supported rule kinds are:
+Filename and shebang metadata still use regexes. Runtime tokenization should live in builtin scanner code rather than syntax grammar files.
 
-- `regex`
-- `injection`
+## Tokenizer Shape
 
-### `regex`
+Each tokenizer exports a function like:
 
-Use `kind = "regex"` for single-pattern matches that do not need a closing delimiter.
-You can also add an optional `lookahead` regex to require a specific suffix
-immediately after the main match without consuming it.
-
-```toml
-[[rules]]
-kind = "regex"
-pattern = "//.*$"
-tag = "comment.line"
-
-[[rules]]
-kind = "regex"
-pattern = "\\b[A-Za-z_][A-Za-z0-9_]*\\b"
-lookahead = "\\s*\\("
-tag = "function"
+```rust
+pub(crate) fn tokenize_example_line(
+    line: &str,
+    state: SyntaxState,
+) -> (Vec<SyntaxSpan>, SyntaxState) {
+    // scan line and return spans plus updated state
+}
 ```
 
-Best uses:
+The usual structure is:
 
-| Good fit | Why |
-|---|---|
-| comments | They are usually simple and line-oriented. |
-| keywords | A word boundary regex is often enough. |
-| numbers, constants, simple identifiers | These are easy to describe with one pattern. |
-| language directives | Preprocessor lines, annotations, and decorators often fit well here. |
+1. Restore `ContextStack`, injection state, and parent style from `SyntaxState`.
+2. Walk the line with a byte index.
+3. Handle active multiline contexts first, such as block comments, strings, heredocs, or injections.
+4. Match top-level comments, strings, numbers, keywords, identifiers, punctuation, and operators.
+5. Push `SyntaxSpan::new(start, end, tag)` for styled regions.
+6. Return `SyntaxState::Code(CodeState::RuleList { ... })` with updated context.
 
-The optional `lookahead` pattern is checked against the text immediately after the main match. The rule only wins when the lookahead also matches, which is useful for call-like names such as `name(...)` and macro-like forms.
+## State
 
-### `injection`
+Use `ContextStack` for anything that can continue past the current line.
 
-Use `kind = "injection"` when the current context should delegate body highlighting to another syntax.
+Common patterns:
 
-```toml
-[[rules]]
-kind = "injection"
-selector = { name = "javascript" }
-fallback = "unstyled"
-context = { requires = ["script_host"] }
+- `ctx.push("name")` when an opener is found.
+- `ctx.pop_top("name")` when a closer must match the top of the stack.
+- `ctx.top_is("name")` to route scanning while a context is active.
+- `ctx.contains_anywhere("name")` only when non-top membership is intentional.
+- `ctx.push_with_payload("name", payload)` for heredoc/code-fence terminators.
+- `ctx.payload_for("name")` to read that payload later.
+
+Keep closing-rule checks before opening-rule checks when both can match at the same byte. That preserves expected closing preference for nested or injected contexts.
+
+## Tokenizer Contract
+
+Builtin scanners are the canonical syntax implementation.
+
+1. Tokenizers scan one line at a time and return updated cross-line state.
+2. State must stay deterministic, cloneable, and comparable so syntax caches can reconverge after edits.
+3. Strictly nested contexts should use stack-top checks like `top_is` and `pop_top`.
+4. Broad host flags should use `contains_anywhere` only when non-top membership is intentional.
+5. Closing rules should run before opening rules when both match the same byte.
+6. Injection boundary scans must check every byte position for any host rule that can end the injected body.
+7. Direct byte-level checks are preferred in hot paths.
+8. Shared helpers should only be used when semantics are identical; language-specific quirks should stay local and explicit.
+9. Public syntax modules, types, and methods need documentation comments.
+10. New or changed tokenizer behavior should include fixture coverage and exact-span tests where precedence or boundaries matter.
+
+See also [docs/syntax/highlighting.md](highlighting.md) for the broader syntax pipeline.
+
+## Tags
+
+Define frequently used tags as `static LazyLock<Tag>` values near the top of the tokenizer.
+
+```rust
+tag_static!(COMMENT, "comment");
+tag_static!(KW, "keyword");
+tag_static!(S, "string");
 ```
 
-Use `selector = { capture = "..." }` when the opener text chooses the nested syntax.
+Tokenizers should use semantic tags such as `keyword`, `string`, `comment.block`, `number`, `variable.property`, and `markup.tag`. Theme lookup adds the `syntax.` namespace later.
 
-## Context Markers
+## Performance Guidelines
 
-Context markers let rules depend on earlier matches. They can be plain markers or payload-bearing entries that carry opener-specific text forward.
+- Prefer direct byte-level checks such as `tail.starts_with(...)`, `as_bytes()`, and `char_indices()`.
+- Avoid `format!()` and other allocation-heavy work in hot scanning paths.
+- Consume runs of text in one span when possible instead of advancing one byte at a time.
+- Keep helper functions small and syntax-local unless sharing avoids meaningful duplication.
+- Precompute parsed `Tag` values with `LazyLock`.
 
-Payloads are useful when a later rule needs more than just “this mode is active.” For example, heredoc-style rules can push a marker with the captured terminator text, then later require that the active payload prefix-matches the closing token before the context is popped.
+## Tests
 
-The payload-bearing form looks like this:
+When adding or changing a tokenizer:
 
-```toml
-[[rules]]
-kind = "regex"
-pattern = "<<(EOF|END)"
-tag = "string"
-context = { push = [{ name = "heredoc", capture = 1 }, "heredoc_body"] }
+1. Update or add a fixture in `src/buffer/tests/syntax/fixtures/`.
+2. Add exact-span tests in `src/buffer/tests/syntax/<name>.rs` for bug-prone forms.
+3. Run the focused test, for example `cargo test buffer::tests::syntax::ruby`.
+4. Run `cargo check`.
 
-[[rules]]
-kind = "regex"
-pattern = "EOF|END"
-tag = "string"
-context = { requires = ["heredoc"], payload_match = { name = "heredoc" }, pop = ["heredoc", "heredoc_body"] }
+Useful assertions include:
+
+- `assert_spans_include_style(...)` for broad smoke coverage.
+- `assert_spans_include_exact_style(...)` for regressions where a specific token must have a specific tag.
+
+## Debugging
+
+Use `dump_tokens` to inspect actual spans:
+
+```sh
+cargo run --bin dump_tokens -- path/to/file
 ```
 
-In this example, the opener captures the terminator text into the `heredoc` context entry, and the closer only matches when the current text is compatible with that stored payload.
-
-```toml
-[[rules]]
-kind = "regex"
-pattern = "\""
-tag = "string"
-context = { push = ["in_string"] }
-
-[[rules]]
-kind = "regex"
-pattern = "\""
-tag = "string"
-context = { requires = ["in_string"], pop = ["in_string"] }
-```
-
-`requires` checks for presence anywhere in the active context stack.
-`push` adds markers or payload-bearing entries, and `pop` removes the most recent matching entry.
-
-## Choosing The Right Shape
-
-| Shape | Use when |
-|---|---|
-| `regex` | The match is local and self-contained. |
-| `injection` | The active context should delegate the body to another syntax. |
-
-## Validation
-
-The loader validates:
-
-- metadata names and aliases
-- comment prefixes
-- glyphs and glyph colors
-- tags
-- regexes
-- context markers
-- injected syntax targets
-
-## Small Complete Example
-
-```toml
-[metadata]
-name = "example"
-display_name = "Example"
-alias = ["ex"]
-glyph = ""
-glyph_color = "#dea584"
-filename = ["\\.ex$"]
-shebang = []
-comment_prefix = "#"
-
-[[rules]]
-kind = "regex"
-pattern = "#.*$"
-tag = "comment"
-
-[[rules]]
-kind = "injection"
-selector = { name = "javascript" }
-fallback = "unstyled"
-context = { requires = ["script_host"] }
-```
-
-If you are writing a new grammar, start with metadata, then add a small ordered `rules` list, and only add context or injection when the syntax genuinely needs it.
+The output is JSON-lines with byte ranges, styles, and token text. It is the fastest way to diagnose surprising highlighting.

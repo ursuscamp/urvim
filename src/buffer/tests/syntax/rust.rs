@@ -59,6 +59,193 @@ fn test_rust_fixture_uses_grammar_rules() {
     assert_spans_include_exact_style(&block_line, &block_line_text, "{", tag("punctuation"));
     assert_spans_include_style(&char_line, tag("constant"));
     assert_spans_include_style(&escaped_char_line, tag("constant"));
+    assert_exact_spans(
+        &buf.syntax_spans_for_line(24)
+            .expect("format line should exist"),
+        &[
+            (4, 7, tag("keyword")),
+            (8, 17, tag("variable")),
+            (18, 19, tag("operator")),
+            (20, 27, tag("function.macro")),
+            (27, 28, tag("punctuation")),
+            (28, 29, tag("string")),
+            (29, 36, tag("string")),
+            (36, 37, tag("punctuation")),
+            (37, 38, tag("punctuation")),
+            (38, 39, tag("string")),
+            (39, 40, tag("string")),
+            (40, 41, tag("punctuation")),
+            (42, 47, tag("variable")),
+            (47, 48, tag("punctuation")),
+            (48, 49, tag("punctuation")),
+        ],
+    );
+}
+
+#[test]
+fn test_rust_fixture_highlights_raw_and_format_strings_exactly() {
+    let mut buf = fixture_buffer("syntax-rust-exact-spans", "rs", rust_fixture_source());
+
+    assert_exact_spans(
+        &buf.syntax_spans_for_line(1)
+            .expect("block comment line should exist"),
+        &[
+            (0, 2, tag("comment.block")),
+            (2, 17, tag("comment.block")),
+            (17, 19, tag("comment.block")),
+        ],
+    );
+    assert_exact_spans(
+        &buf.syntax_spans_for_line(24)
+            .expect("format line should exist"),
+        &[
+            (4, 7, tag("keyword")),
+            (8, 17, tag("variable")),
+            (18, 19, tag("operator")),
+            (20, 27, tag("function.macro")),
+            (27, 28, tag("punctuation")),
+            (28, 29, tag("string")),
+            (29, 36, tag("string")),
+            (36, 37, tag("punctuation")),
+            (37, 38, tag("punctuation")),
+            (38, 39, tag("string")),
+            (39, 40, tag("string")),
+            (40, 41, tag("punctuation")),
+            (42, 47, tag("variable")),
+            (47, 48, tag("punctuation")),
+            (48, 49, tag("punctuation")),
+        ],
+    );
+    assert_exact_spans(
+        &buf.syntax_spans_for_line(25)
+            .expect("named format line should exist"),
+        &[
+            (4, 7, tag("keyword")),
+            (8, 23, tag("variable")),
+            (24, 25, tag("operator")),
+            (26, 33, tag("function.macro")),
+            (33, 34, tag("punctuation")),
+            (34, 35, tag("string")),
+            (35, 36, tag("punctuation")),
+            (36, 40, tag("variable.global")),
+            (40, 41, tag("punctuation")),
+            (41, 43, tag("number")),
+            (43, 44, tag("punctuation")),
+            (44, 45, tag("string")),
+            (45, 46, tag("punctuation")),
+            (47, 51, tag("variable")),
+            (52, 53, tag("operator")),
+            (54, 59, tag("variable")),
+            (59, 60, tag("punctuation")),
+            (60, 61, tag("punctuation")),
+        ],
+    );
+    assert_exact_spans(
+        &buf.syntax_spans_for_line(26)
+            .expect("escaped format line should exist"),
+        &[
+            (4, 7, tag("keyword")),
+            (8, 15, tag("variable")),
+            (16, 17, tag("operator")),
+            (18, 25, tag("function.macro")),
+            (25, 26, tag("punctuation")),
+            (26, 27, tag("string")),
+            (27, 29, tag("string.escape")),
+            (29, 36, tag("string")),
+            (36, 38, tag("string.escape")),
+            (38, 39, tag("string")),
+            (39, 40, tag("punctuation")),
+            (40, 41, tag("punctuation")),
+        ],
+    );
+    assert_exact_spans(
+        &buf.syntax_spans_for_line(39)
+            .expect("raw string opener line should exist"),
+        &[
+            (4, 7, tag("keyword")),
+            (8, 11, tag("variable")),
+            (12, 13, tag("operator")),
+            (14, 17, tag("string")),
+            (17, 21, tag("string")),
+            (21, 22, tag("string")),
+            (22, 28, tag("string")),
+            (28, 29, tag("string")),
+            (29, 31, tag("string")),
+            (31, 32, tag("punctuation")),
+        ],
+    );
+    assert_exact_spans(
+        &buf.syntax_spans_for_line(40)
+            .expect("raw string body line should exist"),
+        &[
+            (4, 7, tag("keyword")),
+            (8, 21, tag("variable")),
+            (22, 23, tag("operator")),
+            (24, 27, tag("string")),
+            (27, 32, tag("string")),
+        ],
+    );
+    assert_exact_spans(
+        &buf.syntax_spans_for_line(41)
+            .expect("raw string closing line should exist"),
+        &[
+            (0, 6, tag("string")),
+            (6, 8, tag("string")),
+            (8, 9, tag("punctuation")),
+        ],
+    );
+    assert_exact_spans(
+        &buf.syntax_spans_for_line(42)
+            .expect("bytes line should exist"),
+        &[
+            (4, 7, tag("keyword")),
+            (8, 13, tag("variable")),
+            (14, 15, tag("operator")),
+            (16, 18, tag("string")),
+            (18, 21, tag("string")),
+            (21, 23, tag("string.escape")),
+            (23, 24, tag("string")),
+            (24, 25, tag("punctuation")),
+        ],
+    );
+    assert_exact_spans(
+        &buf.syntax_spans_for_line(43)
+            .expect("raw bytes line should exist"),
+        &[
+            (4, 7, tag("keyword")),
+            (8, 17, tag("variable")),
+            (18, 19, tag("operator")),
+            (20, 24, tag("string")),
+            (24, 33, tag("string")),
+            (33, 35, tag("string")),
+            (35, 36, tag("punctuation")),
+        ],
+    );
+}
+
+#[test]
+fn test_rust_nested_block_comments_are_exactly_spanned() {
+    let mut buf = fixture_buffer(
+        "syntax-rust-nested-comment",
+        "rs",
+        "/* outer /* inner */ outer */",
+    );
+
+    let spans = buf
+        .syntax_spans_for_line(0)
+        .expect("comment line should exist");
+    assert_exact_spans(
+        &spans,
+        &[
+            (0, 2, tag("comment.block")),
+            (2, 9, tag("comment.block")),
+            (9, 11, tag("comment.block")),
+            (11, 18, tag("comment.block")),
+            (18, 20, tag("comment.block")),
+            (20, 27, tag("comment.block")),
+            (27, 29, tag("comment.block")),
+        ],
+    );
 }
 
 #[test]
@@ -671,6 +858,63 @@ fn test_rust_non_format_string_remains_plain() {
     assert!(!spans.iter().any(|span| span.style == tag("function.macro")));
     assert!(!spans.iter().any(|span| span.style == tag("variable")));
     assert!(!spans.iter().any(|span| span.style == tag("punctuation")));
+}
+
+#[test]
+fn test_rust_nested_block_comments_stay_in_comment_state() {
+    let source = "/* outer\n   /* inner */\n   still outer\n*/\nfn nested() {}\n";
+    let mut buf = fixture_buffer("syntax-rust-nested-block-comment", "rs", source);
+
+    let outer_line = buf
+        .line_at(0)
+        .expect("outer comment line should exist")
+        .to_string();
+    let inner_line = buf
+        .line_at(1)
+        .expect("nested comment line should exist")
+        .to_string();
+    let close_line = buf
+        .line_at(3)
+        .expect("comment close line should exist")
+        .to_string();
+    let code_line = buf
+        .line_at(4)
+        .expect("code after block comment should exist")
+        .to_string();
+    let outer = buf
+        .syntax_spans_for_line(0)
+        .expect("outer comment line should exist");
+    let inner = buf
+        .syntax_spans_for_line(1)
+        .expect("nested comment line should exist");
+    let body = buf
+        .syntax_spans_for_line(2)
+        .expect("comment body line should exist");
+    let close = buf
+        .syntax_spans_for_line(3)
+        .expect("comment close line should exist");
+    let code = buf
+        .syntax_spans_for_line(4)
+        .expect("code after block comment should exist");
+
+    assert_spans_include_exact_style(&outer, &outer_line, "/*", tag("comment.block"));
+    assert_spans_include_exact_style(&inner, &inner_line, "/*", tag("comment.block"));
+    assert_spans_include_style(&body, tag("comment.block"));
+    assert_spans_include_exact_style(&close, &close_line, "*/", tag("comment.block"));
+    assert_spans_include_exact_style(&code, &code_line, "fn", tag("keyword"));
+}
+
+#[test]
+fn test_rust_raw_strings_keep_inner_quotes_plain() {
+    let source = r###"fn main() { let raw = r##"raw "quotes" and # signs"##; }"###;
+    let mut buf = fixture_buffer("syntax-rust-raw-string-nesting", "rs", source);
+
+    let line = buf.line_at(0).expect("line should exist").to_string();
+    let spans = buf.syntax_spans_for_line(0).expect("line should exist");
+
+    assert_spans_include_exact_style(&spans, &line, "r##\"", tag("string"));
+    assert_spans_include_style(&spans, tag("string"));
+    assert_spans_include_exact_style(&spans, &line, "\"##", tag("string"));
 }
 
 #[test]

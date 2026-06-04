@@ -12,10 +12,10 @@ fn test_cmake_fixture_uses_grammar_rules() {
         .syntax_spans_for_line(1)
         .expect("keyword line should exist");
     let variables = buf
-        .syntax_spans_for_line(4)
+        .syntax_spans_for_line(12)
         .expect("variable line should exist");
     let bracket = buf
-        .syntax_spans_for_line(5)
+        .syntax_spans_for_line(15)
         .expect("bracket line should exist");
 
     assert_spans_include_comment_style(&comment);

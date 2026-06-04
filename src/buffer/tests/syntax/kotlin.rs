@@ -8,20 +8,46 @@ fn test_kotlin_fixture_uses_grammar_rules() {
     let comment = buf
         .syntax_spans_for_line(0)
         .expect("comment line should exist");
+    let block_comment = buf
+        .syntax_spans_for_line(2)
+        .expect("block comment line should exist");
+    let block_comment_text = buf
+        .line_at(2)
+        .expect("block comment line should exist")
+        .to_string();
+    let doc_comment = buf
+        .syntax_spans_for_line(3)
+        .expect("doc comment line should exist");
+    let doc_comment_text = buf
+        .line_at(3)
+        .expect("doc comment line should exist")
+        .to_string();
     let annotation = buf
-        .syntax_spans_for_line(1)
+        .syntax_spans_for_line(5)
         .expect("annotation line should exist");
     let class_line = buf
-        .syntax_spans_for_line(2)
+        .syntax_spans_for_line(6)
         .expect("class line should exist");
     let string_line = buf
-        .syntax_spans_for_line(3)
+        .syntax_spans_for_line(20)
         .expect("string line should exist");
     let constant_line = buf
-        .syntax_spans_for_line(6)
+        .syntax_spans_for_line(23)
         .expect("constant line should exist");
 
     assert_spans_include_comment_style(&comment);
+    assert_spans_include_exact_style(
+        &block_comment,
+        block_comment_text.as_str(),
+        " Block comment ",
+        tag("comment.block"),
+    );
+    assert_spans_include_exact_style(
+        &doc_comment,
+        doc_comment_text.as_str(),
+        " Doc comment ",
+        tag("comment.block"),
+    );
     assert_spans_include_style(&annotation, tag("keyword"));
     assert_spans_include_style(&class_line, tag("keyword"));
     assert_spans_include_style(&class_line, tag("type"));
@@ -37,6 +63,25 @@ fn test_kotlin_fixture_uses_grammar_rules() {
         .expect("number line should exist");
 
     assert_spans_include_style(&number_line, tag("number"));
+}
+
+#[test]
+fn test_kotlin_multiline_block_comment_styles_interior() {
+    let path =
+        AbsolutePath::from_path(temp_path_with_ext("syntax-kotlin-block-comment", "kt").as_path())
+            .unwrap();
+    let mut buf = Buffer::from_str_with_path("/* start\nbody text\nend */\nval value = 1", path);
+
+    let opener = buf.syntax_spans_for_line(0).expect("opener should exist");
+    let body = buf.syntax_spans_for_line(1).expect("body should exist");
+    let closer = buf.syntax_spans_for_line(2).expect("closer should exist");
+    let code = buf.syntax_spans_for_line(3).expect("code should exist");
+
+    assert_spans_include_exact_style(&opener, "/* start", " start", tag("comment.block"));
+    assert_spans_include_exact_style(&body, "body text", "body text", tag("comment.block"));
+    assert_spans_include_exact_style(&closer, "end */", "end ", tag("comment.block"));
+    assert_spans_include_style(&code, tag("keyword"));
+    assert_spans_include_style(&code, tag("number"));
 }
 
 #[test]

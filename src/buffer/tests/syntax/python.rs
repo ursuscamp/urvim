@@ -24,6 +24,20 @@ fn test_python_fixture_uses_grammar_rules() {
     assert_spans_include_style(&definition, tag("type"));
     assert_spans_include_style(&definition, tag("punctuation"));
     assert_spans_include_style(&definition, tag("operator"));
+    assert_exact_spans(
+        &buf.syntax_spans_for_line(12)
+            .expect("f-string line should exist"),
+        &[
+            (8, 14, tag("keyword")),
+            (15, 17, tag("string")),
+            (17, 22, tag("type")),
+            (22, 23, tag("punctuation")),
+            (24, 25, tag("punctuation")),
+            (25, 29, tag("variable")),
+            (29, 30, tag("punctuation")),
+            (30, 31, tag("string")),
+        ],
+    );
     assert_spans_include_style(&mapping, tag("punctuation"));
     assert_spans_include_style(&mapping, tag("constant"));
 }

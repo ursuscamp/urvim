@@ -53,6 +53,26 @@ fn assert_spans_include_exact_style(
     );
 }
 
+fn assert_exact_spans(
+    spans: &[crate::buffer::syntax::SyntaxSpan],
+    expected: &[(usize, usize, Tag)],
+) {
+    assert_eq!(
+        spans.len(),
+        expected.len(),
+        "expected exactly {} spans, got {}",
+        expected.len(),
+        spans.len()
+    );
+
+    for (span, (start, end, style)) in spans.iter().zip(expected.iter()) {
+        assert_eq!(
+            (span.start_byte, span.end_byte, &span.style),
+            (*start, *end, style)
+        );
+    }
+}
+
 fn assert_spans_include_comment_style(spans: &[crate::buffer::syntax::SyntaxSpan]) {
     assert!(
         spans.iter().any(|span| {

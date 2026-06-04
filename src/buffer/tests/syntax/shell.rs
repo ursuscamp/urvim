@@ -71,6 +71,29 @@ fn test_shell_fixture_highlights_substitutions_and_heredoc_marker() {
     assert_spans_include_style(&heredoc, tag("string.escape"));
     assert_spans_include_style(&heredoc_body, tag("string.heredoc"));
     assert_spans_include_style(&heredoc_end, tag("string.escape"));
+    assert_exact_spans(&heredoc, &[(4, 11, tag("string.escape"))]);
+    assert_exact_spans(&heredoc_body, &[(0, 12, tag("string.heredoc"))]);
+    assert_exact_spans(&heredoc_end, &[(0, 3, tag("string.escape"))]);
+    assert_exact_spans(
+        &buf.syntax_spans_for_line(30)
+            .expect("tabbed heredoc opener line should exist"),
+        &[(4, 10, tag("string.escape"))],
+    );
+    assert_exact_spans(
+        &buf.syntax_spans_for_line(31)
+            .expect("tabbed heredoc body line should exist"),
+        &[(0, 19, tag("string.heredoc"))],
+    );
+    assert_exact_spans(
+        &buf.syntax_spans_for_line(32)
+            .expect("tabbed heredoc terminator line should exist"),
+        &[(0, 4, tag("string.heredoc"))],
+    );
+    assert_exact_spans(
+        &buf.syntax_spans_for_line(33)
+            .expect("final heredoc terminator line should exist"),
+        &[(0, 3, tag("string.escape"))],
+    );
 }
 
 #[test]

@@ -6,25 +6,25 @@ fn test_go_fixture_uses_grammar_rules() {
     let mut buf = fixture_buffer("syntax-go-fixture", "go", fixture);
 
     let package_line = buf
-        .syntax_spans_for_line(1)
+        .syntax_spans_for_line(3)
         .expect("package line should exist");
     let raw_string = buf
-        .syntax_spans_for_line(6)
+        .syntax_spans_for_line(44)
         .expect("raw string line should exist");
     let raw_string_body = buf
-        .syntax_spans_for_line(7)
+        .syntax_spans_for_line(45)
         .expect("raw string body line should exist");
     let rune = buf
-        .syntax_spans_for_line(8)
+        .syntax_spans_for_line(46)
         .expect("rune line should exist");
     let number_line = buf
-        .syntax_spans_for_line(9)
+        .syntax_spans_for_line(47)
         .expect("number line should exist");
     let bool_line = buf
-        .syntax_spans_for_line(10)
+        .syntax_spans_for_line(54)
         .expect("bool line should exist");
     let call_line = buf
-        .syntax_spans_for_line(12)
+        .syntax_spans_for_line(59)
         .expect("call line should exist");
 
     assert_spans_include_style(&package_line, tag("keyword"));
