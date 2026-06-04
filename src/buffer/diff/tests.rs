@@ -10,7 +10,7 @@ fn cache_shifts_hunks_with_line_edits() {
     let mut cache = DiffCache::new();
     cache.replace_hunks(vec![DiffHunk::new(1, 3), DiffHunk::new(5, 6)]);
 
-    cache.apply_edit(LineEdit::new(0, 1));
+    cache.apply_edit(BufferEditEffect::from_line_delta(0, 1));
 
     assert_eq!(cache.hunks(), &[DiffHunk::new(2, 4), DiffHunk::new(6, 7)]);
 }

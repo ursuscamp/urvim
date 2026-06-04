@@ -128,39 +128,57 @@ pub struct TextObjectRange {
     pub end: Cursor,
 }
 
-/// A normalized line-based edit applied to buffer-owned caches.
+/// Structural line effect produced by a buffer text mutation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct LineEdit {
-    /// First line affected by the edit.
+pub struct BufferEditEffect {
+    /// First line affected by the edit in the pre-edit coordinate space.
     pub start_line: usize,
+    /// Number of old logical lines replaced by the edit.
+    pub old_line_count: usize,
+    /// Number of new logical lines produced by the edit.
+    pub new_line_count: usize,
     /// Net change in line count caused by the edit.
     pub line_delta: isize,
 }
 
-impl LineEdit {
-    /// Creates a new normalized line edit.
-    pub fn new(start_line: usize, line_delta: isize) -> Self {
+impl BufferEditEffect {
+    /// Creates a new structural line edit effect.
+    pub fn new(start_line: usize, old_line_count: usize, new_line_count: usize) -> Self {
         Self {
             start_line,
-            line_delta,
+            old_line_count,
+            new_line_count,
+            line_delta: new_line_count as isize - old_line_count as isize,
         }
     }
 
-    /// Returns the first line affected by the edit.
-    pub fn start_line(&self) -> usize {
-        self.start_line
+    /// Creates an effect for inserting text at a cursor.
+    pub fn insert(start_line: usize, text: &str) -> Self {
+        Self::new(start_line, 1, text.split('\n').count())
     }
 
-    /// Returns the net line-count delta caused by the edit.
-    pub fn line_delta(&self) -> isize {
-        self.line_delta
+    /// Creates an effect for deleting a cursor range.
+    pub fn delete(start: Cursor, end: Cursor) -> Self {
+        Self::new(start.line, end.line.saturating_sub(start.line) + 1, 1)
     }
-}
 
-/// Applies a normalized line-based edit.
-pub trait ApplyEdit {
-    /// Applies one normalized edit.
-    fn apply_edit(&mut self, edit: LineEdit);
+    /// Creates an effect for replacing a cursor range with text.
+    pub fn replace(start: Cursor, end: Cursor, text: &str) -> Self {
+        Self::new(
+            start.line,
+            end.line.saturating_sub(start.line) + 1,
+            text.split('\n').count(),
+        )
+    }
+
+    /// Creates an effect from a start line and net line delta.
+    pub fn from_line_delta(start_line: usize, line_delta: isize) -> Self {
+        if line_delta >= 0 {
+            Self::new(start_line, 1, 1 + line_delta.unsigned_abs())
+        } else {
+            Self::new(start_line, 1 + line_delta.unsigned_abs(), 1)
+        }
+    }
 }
 
 /// A single snapshot of buffer state (text, cursor, and syntax cache).

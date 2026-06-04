@@ -40,7 +40,12 @@ impl Buffer {
         );
         let edit = Self::insert_shape_for_char(cursor, ch);
         if let Some(change) = self.lines.insert_char(cursor, ch) {
-            self.apply_cache_edits(&[LineEdit::new(change.first_changed_line, change.line_delta)]);
+            let effect = BufferEditEffect::new(
+                change.first_changed_line,
+                1,
+                1usize.saturating_add_signed(change.line_delta),
+            );
+            self.apply_cache_edits(&[effect]);
         }
 
         self.markers.shift_insert(edit);
@@ -56,8 +61,10 @@ impl Buffer {
             return;
         }
 
+        let effect = BufferEditEffect::insert(cursor.line, text);
         if let Some(change) = self.insert_text_without_cache_invalidation(cursor, text) {
-            self.apply_cache_edits(&[LineEdit::new(change.first_changed_line, change.line_delta)]);
+            debug_assert_eq!(effect.line_delta, change.line_delta);
+            self.apply_cache_edits(&[effect]);
         }
     }
 
@@ -75,8 +82,10 @@ impl Buffer {
         if start.line > end.line || (start.line == end.line && start.col >= end.col) {
             return;
         }
+        let effect = BufferEditEffect::delete(start, end);
         if let Some(change) = self.remove_without_cache_invalidation(start, end) {
-            self.apply_cache_edits(&[LineEdit::new(change.first_changed_line, change.line_delta)]);
+            debug_assert_eq!(effect.line_delta, change.line_delta);
+            self.apply_cache_edits(&[effect]);
         }
     }
 
@@ -114,23 +123,18 @@ impl Buffer {
         let mut main_start = self.lines.byte_offset_for_cursor(range.start)?;
         let mut main_end = self.lines.byte_offset_for_cursor(range.end)?;
 
-        let mut edits: Vec<(usize, usize, usize, isize, &str)> =
+        let mut edits: Vec<(usize, usize, BufferEditEffect, &str)> =
             Vec::with_capacity(additional_text_edits.len() + 1);
-        let main_line_delta = replacement.split('\n').count().saturating_sub(1) as isize;
         edits.push((
             main_start,
             main_end,
-            range.start.line,
-            main_line_delta - (range.end.line as isize - range.start.line as isize),
+            BufferEditEffect::replace(range.start, range.end, replacement),
             replacement,
         ));
 
         for edit in additional_text_edits {
             let edit_start = self.lines.byte_offset_for_cursor(edit.range.start)?;
             let edit_end = self.lines.byte_offset_for_cursor(edit.range.end)?;
-            let edit_line_delta = edit.text.split('\n').count().saturating_sub(1) as isize
-                - (edit.range.end.line as isize - edit.range.start.line as isize);
-
             if edit_end <= main_start {
                 let delta = edit.text.len() as isize - (edit_end as isize - edit_start as isize);
                 main_start = offset_with_delta(main_start, delta);
@@ -142,19 +146,16 @@ impl Buffer {
             edits.push((
                 edit_start,
                 edit_end,
-                edit.range.start.line,
-                edit_line_delta,
+                BufferEditEffect::replace(edit.range.start, edit.range.end, edit.text.as_str()),
                 edit.text.as_str(),
             ));
         }
 
         edits.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| right.1.cmp(&left.1)));
-        let cache_edits: Vec<LineEdit> = edits
-            .iter()
-            .map(|(_, _, line, line_delta, _)| LineEdit::new(*line, *line_delta))
-            .collect();
+        let cache_edits: Vec<BufferEditEffect> =
+            edits.iter().map(|(_, _, effect, _)| *effect).collect();
 
-        for (edit_start, edit_end, _, _, text) in edits {
+        for (edit_start, edit_end, _, text) in edits {
             let start_cursor = self.lines.cursor_for_byte_offset(edit_start)?;
             let end_cursor = self.lines.cursor_for_byte_offset(edit_end)?;
             self.remove_without_cache_invalidation(start_cursor, end_cursor);
@@ -168,7 +169,6 @@ impl Buffer {
         let next_cursor = self
             .lines
             .cursor_for_byte_offset(main_start.saturating_add(cursor_offset))?;
-        self.warm_syntax_through_with_budget(next_cursor.line, std::time::Duration::from_millis(2));
         self.push_snapshot(next_cursor);
         Some(next_cursor)
     }
@@ -182,13 +182,9 @@ impl Buffer {
         let mut edits = edits.to_vec();
         edits.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| right.1.cmp(&left.1)));
 
-        let cache_edits: Vec<LineEdit> = edits
+        let cache_edits: Vec<BufferEditEffect> = edits
             .iter()
-            .map(|(start, end, text)| {
-                let line_delta = text.split('\n').count().saturating_sub(1) as isize
-                    - (end.line as isize - start.line as isize);
-                LineEdit::new(start.line, line_delta)
-            })
+            .map(|(start, end, text)| BufferEditEffect::replace(*start, *end, text))
             .collect();
 
         for (start, end, text) in &edits {

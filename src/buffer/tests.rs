@@ -693,12 +693,13 @@ fn test_syntax_spans_update_after_edit() {
 
     buf.insert_text(Cursor::new(0, 0), "// ");
 
-    assert!(buf.syntax_cache_complete());
+    assert!(!buf.syntax_cache_complete());
     assert!(!buf.syntax_background_pending());
-    assert!(!buf.indent_scope_cache_stale());
+    assert!(buf.indent_scope_cache_stale());
 
     let spans = line_spans(&mut buf, 0);
     assert_spans_include_comment_style(&spans);
+    assert!(buf.syntax_cache_complete());
 }
 
 #[test]

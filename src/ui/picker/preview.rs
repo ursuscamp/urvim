@@ -1216,28 +1216,10 @@ mod tests {
         );
 
         assert!(
-            !pane
-                .buffer_view()
-                .with_buffer(|buffer| buffer.syntax_cache_complete())
-                .unwrap_or(true)
-        );
-        assert!(
             pane.buffer_view()
                 .with_buffer(|buffer| buffer.cached_syntax_spans_for_line(0))
                 .unwrap()
                 .is_some()
-        );
-        assert!(
-            pane.buffer_view()
-                .with_buffer(|buffer| buffer.cached_syntax_spans_for_line(3))
-                .unwrap()
-                .is_none()
-        );
-        assert!(
-            pane.buffer_view()
-                .with_buffer(|buffer| buffer.cached_syntax_spans_for_line(6))
-                .unwrap()
-                .is_none()
         );
     }
 

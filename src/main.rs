@@ -70,7 +70,7 @@ fn main() -> io::Result<()> {
     urvim::session::set_enabled(cli.files.is_empty());
     globals::set_active_buffer_id(layout.active_buffer_view().buffer_id());
     globals::with_buffer_pool(|pool| {
-        pool.warmup_syntax_at_startup(
+        pool.request_syntax_refresh_at_startup(
             Some(layout.active_buffer_view().buffer_id()),
             layout.active_buffer_view().scroll_offset().row as usize,
             rows.saturating_sub(1) as usize,

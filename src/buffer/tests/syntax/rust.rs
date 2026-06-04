@@ -246,18 +246,9 @@ fn test_rust_keeps_prefix_highlight_after_lsp_completion_edits_then_insert_char(
         .expect("completion should apply");
     buf.insert_char(cursor, '_');
 
-    let inserted_use_text = buf
-        .line_at(0)
-        .expect("inserted use should exist")
-        .to_string();
-    let inserted_use_line = buf
-        .cached_syntax_spans_for_line(0)
-        .expect("inserted use line should remain cached after insert");
-    assert_spans_include_exact_style(
-        &inserted_use_line,
-        &inserted_use_text,
-        "use",
-        tag("keyword"),
+    assert!(
+        buf.cached_syntax_spans_for_line(0).is_none(),
+        "inserted use line should be explicitly missing before refresh"
     );
 
     let main_line_idx = line_containing(&buf, "fn completion_fixture");
@@ -269,6 +260,20 @@ fn test_rust_keeps_prefix_highlight_after_lsp_completion_edits_then_insert_char(
         .syntax_spans_for_line(main_line_idx)
         .expect("main line should highlight on demand after LSP completion and insert");
     assert_spans_include_exact_style(&main_line, &main_line_text, "fn", tag("keyword"));
+
+    let inserted_use_text = buf
+        .line_at(0)
+        .expect("inserted use should exist")
+        .to_string();
+    let inserted_use_line = buf
+        .cached_syntax_spans_for_line(0)
+        .expect("on-demand highlight should fill inserted use line");
+    assert_spans_include_exact_style(
+        &inserted_use_line,
+        &inserted_use_text,
+        "use",
+        tag("keyword"),
+    );
 }
 
 #[test]
@@ -310,20 +315,19 @@ fn test_rust_lsp_completion_top_edit_follow_up_char_drops_shifted_render_fallbac
         .expect("completion should apply");
     buf.insert_char(cursor, ';');
 
-    let rendered_filler_line = line_containing(&buf, "fn filler_1023()");
+    let edited_line = line_containing(&buf, "guard_handle");
     assert!(
-        buf.cached_syntax_spans_for_line(rendered_filler_line)
-            .is_none(),
-        "far line should be in the dirty suffix after follow-up edit"
+        buf.cached_syntax_spans_for_line(edited_line).is_none(),
+        "follow-up edited line should be missing before refresh"
     );
-    let rendered_line_text = buf
+    let rendered_filler_line = line_containing(&buf, "fn filler_1023()");
+    let rendered_line = buf
         .line_at(rendered_filler_line)
-        .expect("rendered filler line should exist")
-        .to_string();
+        .expect("line should exist");
     assert!(
-        buf.render_syntax_spans_for_line_ref(rendered_filler_line, &rendered_line_text)
-            .is_none(),
-        "far dirty line should not render with shifted stale spans after follow-up edit"
+        buf.render_syntax_spans_for_line_ref(rendered_filler_line, &rendered_line)
+            .is_some(),
+        "far unchanged matching line can render from its cached entry"
     );
 }
 
@@ -364,14 +368,11 @@ fn test_rust_lsp_completion_top_edit_does_not_force_full_cache_warm() {
     .expect("completion should apply");
 
     assert!(!buf.syntax_cache_complete());
-    assert!(
-        buf.cached_syntax_spans_for_line(buf.line_count() - 1)
-            .is_none()
-    );
+    assert!(buf.cached_syntax_spans_for_line(0).is_none());
 }
 
 #[test]
-fn test_rust_lsp_completion_keeps_dirty_viewport_highlighted() {
+fn test_rust_lsp_completion_line_shift_has_no_stale_render_fallback() {
     let body = (0..1024)
         .map(|idx| format!("fn filler_{idx}() {{ let value_{idx} = {idx}; }}"))
         .collect::<Vec<_>>()
@@ -406,24 +407,16 @@ fn test_rust_lsp_completion_keeps_dirty_viewport_highlighted() {
     )
     .expect("completion should apply");
 
-    let rendered_filler_line = line_containing(&buf, "fn filler_1023()");
-    let filler_line_text = buf
-        .line_at(rendered_filler_line)
-        .expect("filler line should exist")
-        .to_string();
-    let stale_spans = buf
-        .render_syntax_spans_for_line_ref(rendered_filler_line, &filler_line_text)
-        .expect("rendered line should keep stale syntax spans");
-
-    assert_spans_include_exact_style(stale_spans, &filler_line_text, "fn", tag("keyword"));
+    let inserted_use_line = buf.line_at(0).expect("inserted use should exist");
     assert!(
-        buf.cached_syntax_spans_for_line(rendered_filler_line)
-            .is_none()
+        buf.render_syntax_spans_for_line_ref(0, &inserted_use_line)
+            .is_none(),
+        "inserted lines should not render stale syntax spans before refresh"
     );
 }
 
 #[test]
-fn test_rust_render_fallback_rejects_mismatched_stale_line_text() {
+fn test_rust_line_shift_render_has_no_stale_fallback() {
     let body = (0..1024)
         .map(|idx| format!("fn filler_{idx}() {{ let value_{idx} = {idx}; }}"))
         .collect::<Vec<_>>()
@@ -434,21 +427,11 @@ fn test_rust_render_fallback_rejects_mismatched_stale_line_text() {
     buf.ensure_syntax_through(buf.line_count().saturating_sub(1));
     buf.insert_text(Cursor::new(0, 0), "use std::borrow::Cow;\n");
 
-    let shifted_filler_line = line_containing(&buf, "fn filler_1023()");
-    let shifted_filler_text = buf
-        .line_at(shifted_filler_line)
-        .expect("shifted filler line should exist")
-        .to_string();
-    let stale_spans = buf
-        .render_syntax_spans_for_line_ref(shifted_filler_line, &shifted_filler_text)
-        .expect("unchanged shifted line should keep stale syntax spans");
-    assert_spans_include_exact_style(stale_spans, &shifted_filler_text, "fn", tag("keyword"));
-
-    let mismatched_text = "    let guard = String::new();";
+    let inserted_use_line = buf.line_at(0).expect("inserted use should exist");
     assert!(
-        buf.render_syntax_spans_for_line_ref(shifted_filler_line, mismatched_text)
+        buf.render_syntax_spans_for_line_ref(0, &inserted_use_line)
             .is_none(),
-        "stale render fallback should not style different current line text"
+        "inserted lines should not render stale syntax spans before refresh"
     );
 }
 
@@ -477,15 +460,15 @@ fn test_rust_same_line_edit_keeps_dirty_viewport_highlighted() {
     assert!(!buf.syntax_cache_complete());
 
     let rendered_filler_line = line_containing(&buf, "fn filler_1023()");
-    let filler_line_text = buf
+    let filler_line = buf
         .line_at(rendered_filler_line)
-        .expect("filler line should exist")
-        .to_string();
-    let stale_spans = buf
-        .render_syntax_spans_for_line_ref(rendered_filler_line, &filler_line_text)
-        .expect("rendered line should keep stale syntax spans");
+        .expect("filler line should exist");
+    let filler_line_text = filler_line.to_string();
+    let dirty_spans = buf
+        .render_syntax_spans_for_line_ref(rendered_filler_line, &filler_line)
+        .expect("rendered line should keep dirty syntax spans");
 
-    assert_spans_include_exact_style(stale_spans, &filler_line_text, "fn", tag("keyword"));
+    assert_spans_include_exact_style(dirty_spans, &filler_line_text, "fn", tag("keyword"));
 }
 
 #[test]

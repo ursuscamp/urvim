@@ -643,18 +643,16 @@ impl BufferView {
             let horizontal_offset = self.scroll_offset.col as usize;
 
             if syntax_enabled && warm_syntax {
-                let visible_end_line = start_line + size.rows.saturating_sub(1) as usize;
-                let cached_line_count = buffer.cached_syntax_line_count();
-                let warmup_window = size.rows as usize + 32;
-                let near_cached_frontier =
-                    start_line <= cached_line_count.saturating_add(warmup_window);
-                if near_cached_frontier {
-                    buffer.ensure_syntax_through(visible_end_line);
-                }
+                let visible_end_line = start_line
+                    .saturating_add(size.rows.saturating_sub(1) as usize)
+                    .saturating_add(32);
+                buffer.warm_syntax_through_with_budget(
+                    visible_end_line,
+                    std::time::Duration::from_millis(3),
+                );
+
                 if self.buffer_id_opt().is_some()
-                    && (!buffer.syntax_cache_complete()
-                        || buffer.pending_syntax_dirty_suffix_start().is_some()
-                        || buffer.indent_scope_cache_stale())
+                    && (!buffer.syntax_cache_complete() || buffer.indent_scope_cache_stale())
                 {
                     request_cache_refresh = true;
                 }
@@ -671,16 +669,16 @@ impl BufferView {
                 0
             };
             loop {
-                if let Some(line_text) = buffer.line_at(buffer_line_idx) {
+                if let Some(line_ref) = buffer.line_at(buffer_line_idx) {
                     let mut line_scratch = String::new();
-                    let line_text = line_text.contiguous_text_with_scratch(&mut line_scratch);
                     let syntax_spans = if syntax_enabled {
                         buffer
-                            .render_syntax_spans_for_line_ref(buffer_line_idx, line_text)
+                            .render_syntax_spans_for_line_ref(buffer_line_idx, &line_ref)
                             .unwrap_or_default()
                     } else {
                         &[]
                     };
+                    let line_text = line_ref.contiguous_text_with_scratch(&mut line_scratch);
                     if wrap_enabled {
                         let mut annotations = buffer
                             .ghost_texts_for_line(buffer_line_idx)

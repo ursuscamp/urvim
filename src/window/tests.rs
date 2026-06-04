@@ -2063,7 +2063,7 @@ fn test_window_render_keeps_bottom_viewport_highlighted_after_completion_top_edi
 }
 
 #[test]
-fn test_window_render_keeps_top_viewport_syntax_warmup() {
+fn test_window_render_requests_async_syntax_without_warmup() {
     let _lock = syntax_worker_lock();
     let theme = syntax_themed_window();
     let _theme_guard = globals::set_test_active_theme(theme);
@@ -2085,16 +2085,11 @@ fn test_window_render_keeps_top_viewport_syntax_warmup() {
     let mut screen = crate::screen::Screen::new(4, 80);
     window.render(&mut screen, Position::new(0, 0), Size::new(4, 80));
 
-    let visible_prefix_cached = window
-        .buffer_view()
-        .with_buffer(|buffer| buffer.cached_syntax_spans_for_line(3).is_some())
-        .unwrap_or(false);
     let far_line_cached = window
         .buffer_view()
         .with_buffer(|buffer| buffer.cached_syntax_spans_for_line(120).is_some())
         .unwrap_or(true);
 
-    assert!(visible_prefix_cached);
     assert!(!far_line_cached);
 }
 

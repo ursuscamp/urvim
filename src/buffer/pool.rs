@@ -214,6 +214,19 @@ impl BufferPool {
 
         while let Some(event) = self.jobs.poll_event() {
             match event {
+                JobEvent::Chunk {
+                    payload: JobPayload::SyntaxRefresh(result),
+                    ..
+                } => {
+                    if self
+                        .with_buffer_mut(result.buffer_id, |buffer| {
+                            buffer.apply_syntax_refresh_result(result)
+                        })
+                        .unwrap_or(false)
+                    {
+                        accepted_redraw = true;
+                    }
+                }
                 JobEvent::Completed {
                     payload: Some(JobPayload::SyntaxRefresh(result)),
                     ..
@@ -221,6 +234,20 @@ impl BufferPool {
                     if self
                         .with_buffer_mut(result.buffer_id, |buffer| {
                             buffer.apply_syntax_refresh_result(result)
+                        })
+                        .unwrap_or(false)
+                    {
+                        accepted_redraw = true;
+                    }
+                }
+                JobEvent::Completed {
+                    kind: JobKind::SyntaxRefresh(buffer_id),
+                    token,
+                    payload: None,
+                } => {
+                    if self
+                        .with_buffer_mut(buffer_id, |buffer| {
+                            buffer.finish_syntax_refresh(token.generation())
                         })
                         .unwrap_or(false)
                     {
@@ -351,8 +378,8 @@ impl BufferPool {
         current_state != saved_state
     }
 
-    /// Warms syntax for all loaded buffers at startup using a visible/hidden split.
-    pub fn warmup_syntax_at_startup(
+    /// Warms the active buffer briefly, then queues asynchronous syntax refreshes for all buffers.
+    pub fn request_syntax_refresh_at_startup(
         &mut self,
         active_buffer_id: Option<BufferId>,
         active_scroll_row: usize,
@@ -363,21 +390,23 @@ impl BufferPool {
             return;
         }
 
-        let active_prefix_end = visible_rows.saturating_sub(1);
+        if let Some(active_buffer_id) = active_buffer_id
+            && visible_rows > 0
+            && let Some(buffer) = self.buffers.get_mut(&active_buffer_id)
+        {
+            let target_line = active_scroll_row
+                .saturating_add(visible_rows.saturating_sub(1))
+                .saturating_add(32);
+            buffer
+                .warm_syntax_through_with_budget(target_line, std::time::Duration::from_millis(10));
+        }
 
         for buffer_id in self.buffer_ids() {
-            let Some(buffer) = self.buffers.get_mut(&buffer_id) else {
+            if !self.buffers.contains_key(&buffer_id) {
                 continue;
             };
 
-            if Some(buffer_id) == active_buffer_id {
-                if active_scroll_row == 0 && visible_rows > 0 {
-                    buffer.ensure_syntax_through(active_prefix_end);
-                }
-                self.request_buffer_cache_refresh(buffer_id);
-            } else {
-                self.request_buffer_cache_refresh(buffer_id);
-            }
+            self.request_buffer_cache_refresh(buffer_id);
         }
     }
 
@@ -453,8 +482,7 @@ impl BufferPool {
             .get_mut(&buffer_id)
             .and_then(|buffer| {
                 let generation = buffer.syntax_generation();
-                let syntax_needed = (!buffer.syntax_cache_complete()
-                    || buffer.pending_syntax_dirty_suffix_start().is_some())
+                let syntax_needed = !buffer.syntax_cache_complete()
                     && buffer.generations.syntax_background != Some(generation);
                 let indent_needed = buffer.indent_scope_cache_stale()
                     && buffer.generations.indent_background != Some(generation);
@@ -831,13 +859,13 @@ mod tests {
             AbsolutePath::from_path(std::path::Path::new("/tmp/hidden.rs")).unwrap(),
         ));
 
-        pool.warmup_syntax_at_startup(Some(active_id), 0, 2, true);
+        pool.request_syntax_refresh_at_startup(Some(active_id), 0, 2, true);
 
         let active = pool.get(active_id).expect("active buffer should exist");
         let hidden = pool.get(hidden_id).expect("hidden buffer should exist");
 
         assert!(active.cached_syntax_spans_for_line(0).is_some());
-        assert!(active.syntax_background_pending());
+        assert!(!active.syntax_background_pending());
         assert!(hidden.syntax_background_pending());
         assert!(pool.buffer_ids().windows(2).all(|pair| pair[0] < pair[1]));
     }

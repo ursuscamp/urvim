@@ -1,4 +1,4 @@
-use super::{BufferId, LineEdit};
+use super::{BufferEditEffect, BufferId};
 use crate::path::AbsolutePath;
 use std::fs;
 use std::io;
@@ -343,13 +343,13 @@ impl DiffCache {
         self.generation = None;
     }
 
-    /// Applies one normalized line edit to the cache.
-    pub fn apply_edit(&mut self, edit: LineEdit) {
+    /// Applies one structural edit to the cache.
+    pub fn apply_edit(&mut self, edit: BufferEditEffect) {
         self.apply_edits(&[edit]);
     }
 
-    /// Applies a batch of normalized line edits to the cache.
-    pub fn apply_edits(&mut self, edits: &[LineEdit]) {
+    /// Applies structural edits to the cache.
+    pub fn apply_edits(&mut self, edits: &[BufferEditEffect]) {
         if edits.is_empty() {
             return;
         }
