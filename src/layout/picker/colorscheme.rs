@@ -17,6 +17,8 @@ impl Layout {
             names,
             self.jobs.clone(),
         ));
+        let mode = picker.source_mut().query_mode();
+        picker.set_query_prompt_segments(ColorschemePickerSource::query_prompt_segments(mode));
         picker.set_label("Colorschemes");
         picker.restart_search();
         self.dialogs.colorscheme_picker = Some(picker);

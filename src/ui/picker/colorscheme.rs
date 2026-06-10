@@ -1,10 +1,14 @@
 //! Colorscheme picker source and selection behavior.
 
 use crate::background::JobManager;
+use crate::ui::inputs::PromptSegment;
+use crate::ui::picker::query::{
+    PickerQueryMode, exact_matches, fuzzy_matches, query_prompt_segments,
+};
 use crate::ui::picker::{PickerPreviewEvent, PickerSearchEvent, PickerSource, PickerWidget};
 use crate::ui::{Command, Intent};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::Sender;
 
 static NEXT_COLORSCHEME_PICKER_GENERATION: AtomicU64 = AtomicU64::new(1);
@@ -14,8 +18,12 @@ static NEXT_COLORSCHEME_PICKER_GENERATION: AtomicU64 = AtomicU64::new(1);
 pub struct ColorschemePickerSource {
     names: Arc<Vec<String>>,
     current_generation: Arc<AtomicU64>,
+    fuzzy_mode: Arc<AtomicBool>,
     jobs: Arc<JobManager>,
 }
+
+/// Colorscheme picker query mode.
+pub type QueryMode = crate::ui::picker::query::PickerQueryMode;
 
 /// Concrete colorscheme picker widget.
 pub type ColorschemePickerWidget = PickerWidget<ColorschemePickerSource>;
@@ -33,8 +41,36 @@ impl ColorschemePickerSource {
             current_generation: Arc::new(AtomicU64::new(
                 NEXT_COLORSCHEME_PICKER_GENERATION.fetch_add(1, Ordering::SeqCst),
             )),
+            fuzzy_mode: Arc::new(AtomicBool::new(true)),
             jobs,
         }
+    }
+
+    /// Returns the current search mode.
+    pub fn query_mode(&self) -> QueryMode {
+        if self.fuzzy_mode.load(Ordering::SeqCst) {
+            QueryMode::Fuzzy
+        } else {
+            QueryMode::Exact
+        }
+    }
+
+    /// Updates the current search mode.
+    pub fn set_query_mode(&self, mode: QueryMode) {
+        self.fuzzy_mode
+            .store(matches!(mode, QueryMode::Fuzzy), Ordering::SeqCst);
+    }
+
+    /// Toggles between exact and fuzzy query mode.
+    pub fn toggle_query_mode(&self) -> QueryMode {
+        let next = self.query_mode().toggled();
+        self.set_query_mode(next);
+        next
+    }
+
+    /// Returns prompt segments for the colorscheme picker.
+    pub fn query_prompt_segments(mode: QueryMode) -> Vec<PromptSegment> {
+        query_prompt_segments(mode)
     }
 }
 
@@ -47,6 +83,14 @@ impl PickerSource for ColorschemePickerSource {
 
     fn job_manager(&self) -> Arc<JobManager> {
         Arc::clone(&self.jobs)
+    }
+
+    fn toggle_query_mode(&self) -> Option<PickerQueryMode> {
+        Some(ColorschemePickerSource::toggle_query_mode(self))
+    }
+
+    fn query_prompt_segments_for_mode(&self, mode: PickerQueryMode) -> Option<Vec<PromptSegment>> {
+        Some(Self::query_prompt_segments(mode))
     }
 
     fn start_search(
@@ -65,12 +109,20 @@ impl PickerSource for ColorschemePickerSource {
         let filtered: Vec<String> = if query.is_empty() {
             self.names.to_vec()
         } else {
-            let q = query.to_lowercase();
-            self.names
-                .iter()
-                .filter(|name| name.to_lowercase().contains(&q))
-                .cloned()
-                .collect()
+            match self.query_mode() {
+                QueryMode::Exact => self
+                    .names
+                    .iter()
+                    .filter(|name| exact_matches(query, name.as_str()))
+                    .cloned()
+                    .collect(),
+                QueryMode::Fuzzy => self
+                    .names
+                    .iter()
+                    .filter(|name| fuzzy_matches(query, name.as_str()))
+                    .cloned()
+                    .collect(),
+            }
         };
 
         if !filtered.is_empty() {
@@ -156,6 +208,52 @@ mod tests {
         }
 
         assert_eq!(results, vec!["Nord"]);
+    }
+
+    #[test]
+    fn colorscheme_picker_supports_exact_and_fuzzy_modes() {
+        let source = ColorschemePickerSource::new(sorted_theme_names());
+
+        let (sender, receiver) = std::sync::mpsc::channel();
+        source.set_query_mode(QueryMode::Exact);
+        source.start_search("night", 1, sender);
+
+        let mut exact_results = Vec::new();
+        while let Ok(event) = receiver.recv() {
+            match event {
+                PickerSearchEvent::PickerChunk { chunk, .. } => exact_results.extend(chunk),
+                PickerSearchEvent::PickerSearchComplete { .. } => break,
+                _ => {}
+            }
+        }
+
+        let (sender, receiver) = std::sync::mpsc::channel();
+        source.set_query_mode(QueryMode::Fuzzy);
+        source.start_search("tkn", 2, sender);
+
+        let mut fuzzy_results = Vec::new();
+        while let Ok(event) = receiver.recv() {
+            match event {
+                PickerSearchEvent::PickerChunk { chunk, .. } => fuzzy_results.extend(chunk),
+                PickerSearchEvent::PickerSearchComplete { .. } => break,
+                _ => {}
+            }
+        }
+
+        assert_eq!(exact_results, vec!["Friday Night", "Tokyo Night"]);
+        assert_eq!(fuzzy_results, vec!["Tokyo Night"]);
+    }
+
+    #[test]
+    fn colorscheme_picker_prompt_segments_include_mode_label() {
+        assert_eq!(
+            ColorschemePickerSource::query_prompt_segments(QueryMode::Exact)[0].text,
+            "Exact"
+        );
+        assert_eq!(
+            ColorschemePickerSource::query_prompt_segments(QueryMode::Fuzzy)[0].text,
+            "Fuzzy"
+        );
     }
 
     #[test]
