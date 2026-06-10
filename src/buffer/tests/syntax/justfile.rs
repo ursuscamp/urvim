@@ -24,3 +24,20 @@ fn test_justfile_fixture_uses_grammar_rules() {
     assert_spans_include_style(&call, tag("string"));
     assert_spans_include_style(&assignment, tag("operator"));
 }
+
+#[test]
+fn test_justfile_fixture_highlights_recipe_target_boundary() {
+    let fixture = include_str!("fixtures/justfile");
+    let mut buf = named_fixture_buffer("justfile", fixture);
+
+    let line = buf
+        .syntax_spans_for_line(33)
+        .expect("dependency recipe line should exist");
+    let text = fixture
+        .lines()
+        .nth(33)
+        .expect("dependency recipe line should exist")
+        .to_string();
+
+    assert_spans_include_exact_style(&line, text.as_str(), "release:", tag("keyword"));
+}

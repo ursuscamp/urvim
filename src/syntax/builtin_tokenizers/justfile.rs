@@ -237,9 +237,10 @@ fn match_recipe(line: &str) -> Option<usize> {
     }
 
     if bytes[i] == b' ' || bytes[i] == b'\t' {
+        let colon_end = i;
         i += 1;
         if i < len && bytes[i] != b'=' {
-            return Some(i + 1);
+            return Some(colon_end);
         }
     }
 

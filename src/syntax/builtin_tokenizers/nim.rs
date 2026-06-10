@@ -68,7 +68,21 @@ pub(crate) fn tokenize_nim_line(line: &str, state: SyntaxState) -> (Vec<SyntaxSp
                 index = end;
                 continue;
             }
-            // Fall through to top-level (no content rule)
+            // Rule 4 content: consume everything else as comment text.
+            let run = run_while(tail, |c| c != '#' && c != ']');
+            if run > 0 {
+                spans.push(SyntaxSpan::new(
+                    index,
+                    index + run,
+                    (*COMMENT_BLOCK).clone(),
+                ));
+                index += run;
+                continue;
+            }
+            let end = index + 1;
+            spans.push(SyntaxSpan::new(index, end, (*COMMENT_BLOCK).clone()));
+            index = end;
+            continue;
         }
 
         // ── Inside triple string ─────────────────────────────────────
@@ -134,19 +148,19 @@ pub(crate) fn tokenize_nim_line(line: &str, state: SyntaxState) -> (Vec<SyntaxSp
             continue;
         }
 
-        // Rule 2: Line comment #
-        if tail_bytes[0] == b'#' {
-            let end = line_len;
-            spans.push(SyntaxSpan::new(index, end, (*COMMENT_LINE).clone()));
-            index = end;
-            continue;
-        }
-
         // Rule 4: Block comment #[ (outside comment)
         if tail_bytes.len() >= 2 && tail_bytes[0] == b'#' && tail_bytes[1] == b'[' {
             let end = index + 2;
             spans.push(SyntaxSpan::new(index, end, (*COMMENT_BLOCK).clone()));
             ctx.push(NIM_BLOCK_COMMENT);
+            index = end;
+            continue;
+        }
+
+        // Rule 2: Line comment #
+        if tail_bytes[0] == b'#' {
+            let end = line_len;
+            spans.push(SyntaxSpan::new(index, end, (*COMMENT_LINE).clone()));
             index = end;
             continue;
         }
@@ -434,6 +448,42 @@ fn match_number(tail: &str, index: usize, full_bytes: &[u8]) -> Option<usize> {
     let bytes = tail.as_bytes();
     let len = bytes.len();
     let mut i = 0;
+
+    if len >= 3 && bytes[0] == b'0' && (bytes[1] | 0x20) == b'x' {
+        i = 2;
+        let start = i;
+        while i < len && (bytes[i].is_ascii_hexdigit() || bytes[i] == b'_') {
+            i += 1;
+        }
+        if i == start || (i < len && is_word_byte(bytes[i])) {
+            return None;
+        }
+        return Some(i);
+    }
+
+    if len >= 3 && bytes[0] == b'0' && (bytes[1] | 0x20) == b'b' {
+        i = 2;
+        let start = i;
+        while i < len && (bytes[i] == b'0' || bytes[i] == b'1' || bytes[i] == b'_') {
+            i += 1;
+        }
+        if i == start || (i < len && is_word_byte(bytes[i])) {
+            return None;
+        }
+        return Some(i);
+    }
+
+    if len >= 3 && bytes[0] == b'0' && (bytes[1] | 0x20) == b'o' {
+        i = 2;
+        let start = i;
+        while i < len && (matches!(bytes[i], b'0'..=b'7') || bytes[i] == b'_') {
+            i += 1;
+        }
+        if i == start || (i < len && is_word_byte(bytes[i])) {
+            return None;
+        }
+        return Some(i);
+    }
 
     if i >= len || !bytes[i].is_ascii_digit() {
         return None;

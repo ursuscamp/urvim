@@ -70,7 +70,21 @@ pub(crate) fn tokenize_fsharp_line(
                 index = end;
                 continue;
             }
-            // Fall through to top-level (no content rule)
+            // Rule 3 content: consume everything else as block-comment text.
+            let run = run_while(tail, |c| c != '(' && c != '*');
+            if run > 0 {
+                spans.push(SyntaxSpan::new(
+                    index,
+                    index + run,
+                    (*COMMENT_BLOCK).clone(),
+                ));
+                index += run;
+                continue;
+            }
+            let end = index + 1;
+            spans.push(SyntaxSpan::new(index, end, (*COMMENT_BLOCK).clone()));
+            index = end;
+            continue;
         }
 
         // ── Inside triple string ─────────────────────────────────────
@@ -469,6 +483,22 @@ fn match_number(tail: &str, index: usize, full_bytes: &[u8]) -> Option<usize> {
         }
         i += 1;
         while i < len && ((bytes[i] == b'0' || bytes[i] == b'1') || bytes[i] == b'_') {
+            i += 1;
+        }
+        if i < len && is_word_byte(bytes[i]) {
+            return None;
+        }
+        return Some(i);
+    }
+
+    // 0o...
+    if len >= 3 && bytes[0] == b'0' && (bytes[1] | 0x20) == b'o' {
+        let mut i = 2;
+        if i >= len || !(matches!(bytes[i], b'0'..=b'7') || bytes[i] == b'_') {
+            return None;
+        }
+        i += 1;
+        while i < len && (matches!(bytes[i], b'0'..=b'7') || bytes[i] == b'_') {
             i += 1;
         }
         if i < len && is_word_byte(bytes[i]) {
