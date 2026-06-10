@@ -3,6 +3,7 @@ name = "urvim"
 version = "0.1.0"
 edition = "2024"
 default-run = "urvim"
+license = "MIT"
 
 [dependencies]
 rustix = { version = "0.38", features = ["termios", "event", "fs"] }
