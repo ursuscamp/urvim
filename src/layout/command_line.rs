@@ -113,6 +113,7 @@ pub enum ParsedCommand {
     WriteAll,
     Edit { path: Option<String> },
     PickFile,
+    PickGit,
     PickGrep,
     PickColorscheme,
     PickDocumentSymbols,
@@ -261,6 +262,10 @@ impl Layout {
             ParsedCommand::Edit { path: Some(path) } => self.execute_edit_path(path.as_str()),
             ParsedCommand::PickFile => {
                 self.open_file_picker();
+                Ok(())
+            }
+            ParsedCommand::PickGit => {
+                self.open_git_picker();
                 Ok(())
             }
             ParsedCommand::PickGrep => {
@@ -536,6 +541,7 @@ pub fn parse_command_line(input: &str) -> Result<ParsedCommand, ParseCommandErro
     match command {
         "pick" => match args {
             [target] if target == "file" => Ok(ParsedCommand::PickFile),
+            [target] if target == "git" => Ok(ParsedCommand::PickGit),
             [target] if target == "grep" => Ok(ParsedCommand::PickGrep),
             [target] if target == "colorscheme" => Ok(ParsedCommand::PickColorscheme),
             [target] if target == "doc-symbols" => Ok(ParsedCommand::PickDocumentSymbols),
@@ -544,7 +550,7 @@ pub fn parse_command_line(input: &str) -> Result<ParsedCommand, ParseCommandErro
             [target, ..] => Err(ParseCommandError::UnknownCommand(format!("pick {target}"))),
             [] => Err(ParseCommandError::InvalidArity {
                 command: "pick".to_string(),
-                expected: "pick <file|grep|colorscheme|doc-symbols|references|code-actions>",
+                expected: "pick <file|git|grep|colorscheme|doc-symbols|references|code-actions>",
             }),
         },
         "lsp" => match args {
@@ -673,6 +679,10 @@ mod tests {
         assert_eq!(
             parse_command_line("pick file").expect("file picker should parse"),
             ParsedCommand::PickFile
+        );
+        assert_eq!(
+            parse_command_line("pick git").expect("git picker should parse"),
+            ParsedCommand::PickGit
         );
         assert_eq!(
             parse_command_line("pick grep").expect("grep picker should parse"),

@@ -4,6 +4,7 @@ use crate::buffer::{DiffRefreshResult, IndentScopeRefreshResult, SyntaxRefreshRe
 use crate::ui::completion::{CompletionCandidate, CompletionSourceKind};
 use crate::ui::picker::doc_symbols::DocSymbolsPickerItem;
 use crate::ui::picker::file::FilePickerItem;
+use crate::ui::picker::git::GitPickerItem;
 use crate::ui::picker::grep::GrepPickerItem;
 use crate::ui::picker::preview::PreviewSyntaxRefreshResult;
 use smol_str::SmolStr;
@@ -31,6 +32,8 @@ pub enum JobPayload {
     DiffRefresh(DiffRefreshResult),
     /// File picker ranked snapshot.
     FileSearchSnapshot(Vec<FilePickerItem>),
+    /// Git picker ranked snapshot.
+    GitSearchSnapshot(Vec<GitPickerItem>),
     /// Live grep ranked snapshot.
     GrepSearchSnapshot(Vec<GrepPickerItem>),
     /// Document symbol picker search result set.

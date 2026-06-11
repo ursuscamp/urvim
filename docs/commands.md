@@ -39,6 +39,9 @@ urvim supports a normal-mode command line opened with `:`.
 - `pick file`
   - Opens the file picker.
 
+- `pick git`
+  - Opens the git picker.
+
 - `pick grep`
   - Opens the live grep picker.
 

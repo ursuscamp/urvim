@@ -57,7 +57,7 @@ mod unicode;
 
 pub use diff::{
     DiffCache, DiffHunk, DiffInput, DiffMarkerKind, DiffProvider, DiffRefreshJob,
-    DiffRefreshResult, DiffSnapshot,
+    DiffRefreshResult, DiffSnapshot, merge_hunks, parse_unified_diff_hunk,
 };
 pub use indent::IndentDirection;
 pub use marker::{

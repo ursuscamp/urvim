@@ -239,7 +239,8 @@ impl GitDiffProvider {
     }
 }
 
-fn parse_unified_diff_hunk(line: &str) -> Option<DiffHunk> {
+/// Parses a unified diff hunk header into a diff hunk.
+pub fn parse_unified_diff_hunk(line: &str) -> Option<DiffHunk> {
     let mut parts = line.split_whitespace();
     let header = parts.next()?;
     if header != "@@" {
@@ -278,7 +279,8 @@ fn parse_range(range: &str) -> Option<(usize, usize)> {
     Some((start_line, len))
 }
 
-fn merge_hunks(mut hunks: Vec<DiffHunk>) -> Vec<DiffHunk> {
+/// Merges overlapping diff hunks into normalized ranges.
+pub fn merge_hunks(mut hunks: Vec<DiffHunk>) -> Vec<DiffHunk> {
     hunks.sort_by_key(|hunk| (hunk.start_line, hunk.end_line));
     let mut merged: Vec<DiffHunk> = Vec::with_capacity(hunks.len());
 

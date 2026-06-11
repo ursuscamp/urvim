@@ -31,6 +31,8 @@ pub enum JobKind {
     DiffRefresh(BufferId),
     /// File picker search.
     FilePickerSearch,
+    /// Git picker search.
+    GitPickerSearch,
     /// Live grep picker search.
     GrepPickerSearch,
     /// Document symbol picker search.
@@ -64,6 +66,7 @@ impl fmt::Display for JobKind {
             }
             Self::DiffRefresh(buffer_id) => write!(f, "diff-refresh:{}", buffer_id.get()),
             Self::FilePickerSearch => f.write_str("file-picker-search"),
+            Self::GitPickerSearch => f.write_str("git-picker-search"),
             Self::GrepPickerSearch => f.write_str("grep-picker-search"),
             Self::DocSymbolsPickerSearch => f.write_str("doc-symbols-picker-search"),
             Self::Completion(buffer_id, source) => {

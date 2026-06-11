@@ -2,6 +2,7 @@ mod code_actions;
 mod colorscheme;
 mod doc_symbols;
 mod file;
+mod git;
 mod grep;
 mod references;
 
@@ -28,6 +29,18 @@ impl Layout {
                 payload: JobPayload::FileSearchSnapshot(results),
             } if kind == crate::background::JobKind::FilePickerSearch => {
                 if let Some(picker) = self.dialogs.file_picker.as_mut() {
+                    picker.handle_search_event(PickerSearchEvent::PickerResults {
+                        generation: token.generation(),
+                        results,
+                    });
+                }
+            }
+            JobEvent::Chunk {
+                kind,
+                token,
+                payload: JobPayload::GitSearchSnapshot(results),
+            } if kind == crate::background::JobKind::GitPickerSearch => {
+                if let Some(picker) = self.dialogs.git_picker.as_mut() {
                     picker.handle_search_event(PickerSearchEvent::PickerResults {
                         generation: token.generation(),
                         results,
@@ -127,6 +140,15 @@ impl Layout {
                 self.dispatch_preview_syntax_failed(token.generation());
             }
             JobEvent::Completed { kind, token, .. }
+                if kind == crate::background::JobKind::GitPickerSearch =>
+            {
+                if let Some(picker) = self.dialogs.git_picker.as_mut() {
+                    picker.handle_search_event(PickerSearchEvent::PickerSearchComplete {
+                        generation: token.generation(),
+                    });
+                }
+            }
+            JobEvent::Completed { kind, token, .. }
                 if kind == crate::background::JobKind::FilePickerSearch =>
             {
                 if let Some(picker) = self.dialogs.file_picker.as_mut() {
@@ -144,6 +166,15 @@ impl Layout {
                     });
                 }
             }
+            JobEvent::Failed { kind, token, .. }
+                if kind == crate::background::JobKind::GitPickerSearch =>
+            {
+                if let Some(picker) = self.dialogs.git_picker.as_mut() {
+                    picker.handle_search_event(PickerSearchEvent::PickerSearchComplete {
+                        generation: token.generation(),
+                    });
+                }
+            }
             other => self.dispatch_grep_picker_job_event(other),
         }
     }
@@ -154,6 +185,8 @@ impl Layout {
         result: crate::ui::picker::preview::PreviewSyntaxRefreshResult,
     ) {
         if let Some(picker) = self.dialogs.file_picker.as_mut() {
+            picker.handle_preview_syntax_refresh_chunk(generation, result);
+        } else if let Some(picker) = self.dialogs.git_picker.as_mut() {
             picker.handle_preview_syntax_refresh_chunk(generation, result);
         } else if let Some(picker) = self.dialogs.grep_picker.as_mut() {
             picker.handle_preview_syntax_refresh_chunk(generation, result);
@@ -173,6 +206,8 @@ impl Layout {
     ) {
         if let Some(picker) = self.dialogs.file_picker.as_mut() {
             picker.handle_preview_syntax_refresh(generation, result);
+        } else if let Some(picker) = self.dialogs.git_picker.as_mut() {
+            picker.handle_preview_syntax_refresh(generation, result);
         } else if let Some(picker) = self.dialogs.grep_picker.as_mut() {
             picker.handle_preview_syntax_refresh(generation, result);
         } else if let Some(picker) = self.dialogs.doc_symbols_picker.as_mut() {
@@ -186,6 +221,8 @@ impl Layout {
 
     fn dispatch_preview_syntax_failed(&mut self, generation: u64) {
         if let Some(picker) = self.dialogs.file_picker.as_mut() {
+            picker.handle_preview_syntax_refresh_failed(generation);
+        } else if let Some(picker) = self.dialogs.git_picker.as_mut() {
             picker.handle_preview_syntax_refresh_failed(generation);
         } else if let Some(picker) = self.dialogs.grep_picker.as_mut() {
             picker.handle_preview_syntax_refresh_failed(generation);

@@ -7,6 +7,7 @@ pub mod code_actions;
 pub mod colorscheme;
 pub mod doc_symbols;
 pub mod file;
+pub mod git;
 pub mod grep;
 pub mod line;
 pub mod preview;
@@ -239,6 +240,16 @@ pub trait PickerSource: Send + 'static {
 
     /// Returns a stable key for preserving selection across result refreshes.
     fn result_key(&self, _item: &Self::Item) -> Option<String> {
+        None
+    }
+
+    /// Returns an intent for staging or unstaging the given item, if supported.
+    fn stage_intent(&self, _item: &Self::Item) -> Option<Intent> {
+        None
+    }
+
+    /// Returns an intent for discarding the given item, if supported.
+    fn discard_intent(&self, _item: &Self::Item) -> Option<Intent> {
         None
     }
 
@@ -927,6 +938,26 @@ impl<S: PickerSource> Widget for PickerWidget<S> {
                     }
                     KeyCode::Char('c') if key.modifiers.has_ctrl() => {
                         self.close();
+                    }
+                    KeyCode::Char('s') if key.modifiers.has_ctrl() => {
+                        let Some(item) = self.highlighted.and_then(|index| self.results.get(index))
+                        else {
+                            return UiEventResult::Handled(Vec::new());
+                        };
+                        let Some(intent) = self.source.stage_intent(item) else {
+                            return UiEventResult::Handled(Vec::new());
+                        };
+                        return UiEventResult::Handled(vec![intent]);
+                    }
+                    KeyCode::Char('d') if key.modifiers.has_ctrl() => {
+                        let Some(item) = self.highlighted.and_then(|index| self.results.get(index))
+                        else {
+                            return UiEventResult::Handled(Vec::new());
+                        };
+                        let Some(intent) = self.source.discard_intent(item) else {
+                            return UiEventResult::Handled(Vec::new());
+                        };
+                        return UiEventResult::Handled(vec![intent]);
                     }
                     _ => {
                         let before = self.query_input.text().to_string();

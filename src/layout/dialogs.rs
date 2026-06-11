@@ -8,6 +8,7 @@ use crate::ui::picker::code_actions::CodeActionsPickerWidget;
 use crate::ui::picker::colorscheme::ColorschemePickerWidget;
 use crate::ui::picker::doc_symbols::DocSymbolsPickerWidget;
 use crate::ui::picker::file::FilePickerWidget;
+use crate::ui::picker::git::GitPickerWidget;
 use crate::ui::picker::grep::GrepPickerWidget;
 use crate::ui::picker::references::ReferencesPickerWidget;
 
@@ -24,6 +25,7 @@ pub(in crate::layout) struct Dialogs {
     pub workspace_symbols_picker: Option<DocSymbolsPickerWidget>,
     pub references_picker: Option<ReferencesPickerWidget>,
     pub file_picker: Option<FilePickerWidget>,
+    pub git_picker: Option<GitPickerWidget>,
     pub grep_picker: Option<GrepPickerWidget>,
     pub confirmation_box: Option<ConfirmationBox>,
     pub hover: Option<HoverWidget>,
@@ -43,6 +45,7 @@ impl Default for Dialogs {
             workspace_symbols_picker: None,
             references_picker: None,
             file_picker: None,
+            git_picker: None,
             grep_picker: None,
             confirmation_box: None,
             hover: None,
@@ -69,6 +72,7 @@ impl Dialogs {
         self.workspace_symbols_picker = None;
         self.references_picker = None;
         self.file_picker = None;
+        self.git_picker = None;
         self.grep_picker = None;
         self.confirmation_box = None;
         self.hover = None;

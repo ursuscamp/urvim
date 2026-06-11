@@ -297,6 +297,15 @@ impl Layout {
 
         if let Some(position) = self
             .dialogs
+            .git_picker
+            .as_ref()
+            .and_then(|picker| picker.cursor())
+        {
+            return Some(position);
+        }
+
+        if let Some(position) = self
+            .dialogs
             .lsp_rename_prompt
             .as_ref()
             .and_then(|prompt| prompt.cursor())
@@ -444,6 +453,16 @@ impl Layout {
                 self.open_colorscheme_picker();
                 true
             }
+            Command::OpenGitPicker => {
+                self.open_git_picker();
+                true
+            }
+            Command::GitPickerToggleStage(action) => self.execute_git_picker_toggle_stage(action),
+            Command::GitPickerDiscard(action) => {
+                self.open_git_picker_discard_confirmation(action);
+                true
+            }
+            Command::GitPickerDiscardConfirmed(action) => self.execute_git_picker_discard(action),
             Command::LspCodeActions => {
                 if self.lsp_code_actions_supported() {
                     self.open_lsp_code_actions_picker();
@@ -697,35 +716,31 @@ impl Layout {
     /// Routes a UI event with overlay-first precedence.
     pub fn route_ui_event(&mut self, event: &UiEvent) -> UiEventResult {
         if matches!(event, UiEvent::Tick) {
+            let overlay = self.route_overlay_ui_event(event);
+            let overlay_handled = overlay.handled();
             let picker = self.route_picker_ui_event(event);
             let picker_handled = picker.handled();
-            let overlay = if picker_handled {
-                UiEventResult::NotHandled
-            } else {
-                self.route_overlay_ui_event(event)
-            };
-            let overlay_handled = overlay.handled();
             let base = self.route_base_ui_event(event);
             let base_handled = base.handled();
 
-            let mut intents = picker.into_intents();
-            intents.extend(overlay.into_intents());
+            let mut intents = overlay.into_intents();
+            intents.extend(picker.into_intents());
             intents.extend(base.into_intents());
-            if picker_handled || overlay_handled || base_handled {
+            if overlay_handled || picker_handled || base_handled {
                 return UiEventResult::Handled(intents);
             }
 
             return UiEventResult::NotHandled;
         }
 
-        let picker = self.route_picker_ui_event(event);
-        if picker.handled() {
-            return picker;
-        }
-
         let overlay = self.route_overlay_ui_event(event);
         if overlay.handled() {
             return overlay;
+        }
+
+        let picker = self.route_picker_ui_event(event);
+        if picker.handled() {
+            return picker;
         }
 
         let hover = self.route_hover_ui_event(event);
@@ -828,6 +843,10 @@ impl Layout {
 
         if self.grep_picker_is_open() {
             return self.handle_grep_picker_event(event);
+        }
+
+        if self.git_picker_is_open() {
+            return self.handle_git_picker_event(event);
         }
 
         if self.file_picker_is_open() {

@@ -294,6 +294,82 @@ fn test_layout_file_picker_opens_and_closes() {
 }
 
 #[test]
+fn test_layout_git_picker_opens_and_closes() {
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("one")]);
+
+    assert!(layout.dispatch_intent(&Intent::Command(Command::OpenGitPicker)));
+    assert!(layout.git_picker_is_open());
+
+    let mut screen = crate::screen::Screen::new(8, 40);
+    layout.render(&mut screen, Position::new(0, 0), Size::new(8, 40));
+    assert!(
+        layout.visual_cursor().is_some(),
+        "git picker prompt cursor should be visible"
+    );
+
+    let result = layout.route_ui_event(&UiEvent::Key(key(KeyCode::Esc)));
+    assert!(result.handled());
+    assert!(!layout.git_picker_is_open());
+}
+
+#[test]
+fn test_layout_git_picker_stage_and_discard_commands() {
+    let repo = temp_git_repo();
+    let tracked = repo.join("tracked.txt");
+    std::fs::write(&tracked, "one\ntwo\n").unwrap();
+    git(&repo, ["add", "tracked.txt"]);
+    git(
+        &repo,
+        [
+            "-c",
+            "user.name=urvim",
+            "-c",
+            "user.email=urvim@example.com",
+            "commit",
+            "-q",
+            "-m",
+            "init",
+        ],
+    );
+    std::fs::write(&tracked, "one\nTWO\n").unwrap();
+
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("one")]);
+    let action = crate::ui::picker::git::GitPickerAction {
+        path: tracked.clone(),
+        untracked: false,
+        staged: false,
+    };
+
+    assert!(
+        layout.dispatch_intent(&Intent::Command(Command::GitPickerToggleStage(
+            action.clone(),
+        )))
+    );
+    assert!(git_status(&repo).contains("M  tracked.txt"));
+
+    assert!(layout.dispatch_intent(&Intent::Command(Command::GitPickerDiscard(action,))));
+    assert!(layout.confirmation_box_is_open());
+
+    let result = layout.route_ui_event(&UiEvent::Key(key(KeyCode::Enter)));
+    assert!(result.handled());
+    for intent in result.into_intents() {
+        assert!(layout.dispatch_intent(&intent));
+    }
+    assert_eq!(std::fs::read_to_string(&tracked).unwrap(), "one\ntwo\n");
+}
+
+#[test]
+fn test_layout_confirmation_box_takes_precedence_over_git_picker() {
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("one")]);
+    assert!(layout.dispatch_intent(&Intent::Command(Command::OpenGitPicker)));
+    layout.open_confirmation_box("Confirm?", Command::Quit);
+
+    let result = layout.route_ui_event(&UiEvent::Key(key(KeyCode::Enter)));
+    assert!(result.handled());
+    assert_eq!(result.into_intents(), vec![Intent::Command(Command::Quit)]);
+}
+
+#[test]
 fn test_layout_completion_esc_closes_popup_and_exits_insert_mode() {
     let mut layout = layout_with_buffers(vec![Buffer::from_str("alpha")]);
     layout
@@ -321,6 +397,39 @@ fn test_layout_completion_esc_closes_popup_and_exits_insert_mode() {
         Intent::Action(action) => assert_eq!(action.to_mode, Some(ModeKind::Normal)),
         other => panic!("expected an action intent, got {other:?}"),
     }
+}
+
+fn temp_git_repo() -> std::path::PathBuf {
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let repo =
+        std::env::temp_dir().join(format!("urvim-layout-git-{}-{}", std::process::id(), stamp));
+    std::fs::create_dir_all(&repo).unwrap();
+    git(&repo, ["init", "-q"]);
+    repo
+}
+
+fn git<const N: usize>(dir: &std::path::Path, args: [&str; N]) {
+    let status = std::process::Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(args)
+        .status()
+        .expect("run git command");
+    assert!(status.success(), "git command failed");
+}
+
+fn git_status(repo: &std::path::Path) -> String {
+    let output = std::process::Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["status", "--porcelain=v1"])
+        .output()
+        .expect("run git status");
+    assert!(output.status.success(), "git status failed");
+    String::from_utf8(output.stdout).expect("utf8 status")
 }
 
 #[test]

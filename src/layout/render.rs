@@ -152,6 +152,7 @@ impl Layout {
         self.render_doc_symbols_picker_overlay(screen, origin, size);
         self.render_grep_picker_overlay(screen, origin, size);
         self.render_file_picker_overlay(screen, origin, size);
+        self.render_git_picker_overlay(screen, origin, size);
         self.render_command_line_overlay(screen, origin, size);
         self.render_completion_overlay(screen, origin, size);
         self.render_lsp_rename_overlay(screen, origin, size);
@@ -251,6 +252,16 @@ impl Layout {
 
     fn render_file_picker_overlay(&mut self, screen: &mut Screen, origin: Position, size: Size) {
         let Some(picker) = self.file_picker_mut() else {
+            return;
+        };
+
+        let ctx = UiContext;
+        let rect = UiRect::new(origin, size);
+        picker.render_widget(screen, rect, &ctx);
+    }
+
+    fn render_git_picker_overlay(&mut self, screen: &mut Screen, origin: Position, size: Size) {
+        let Some(picker) = self.git_picker_mut() else {
             return;
         };
 

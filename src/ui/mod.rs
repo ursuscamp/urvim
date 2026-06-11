@@ -118,6 +118,8 @@ pub enum Command {
     OpenCompletion,
     /// Open the file picker overlay.
     OpenFilePicker,
+    /// Open the git picker overlay.
+    OpenGitPicker,
     /// Open the colorscheme picker overlay.
     OpenColorschemePicker,
     /// Open the active-buffer document symbol picker overlay.
@@ -163,6 +165,12 @@ pub enum Command {
     OpenFile(PathBuf),
     /// Open a file and place the cursor at the provided position.
     OpenFileAtCursor(PathBuf, Cursor),
+    /// Toggle staging for a git picker selection.
+    GitPickerToggleStage(crate::ui::picker::git::GitPickerAction),
+    /// Request discarding a git picker selection.
+    GitPickerDiscard(crate::ui::picker::git::GitPickerAction),
+    /// Confirm discarding a git picker selection.
+    GitPickerDiscardConfirmed(crate::ui::picker::git::GitPickerAction),
     /// Shrink the focused pane horizontally by the provided count.
     ResizePaneLeft(usize),
     /// Grow the focused pane horizontally by the provided count.

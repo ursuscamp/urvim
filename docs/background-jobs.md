@@ -19,6 +19,7 @@ urvim includes a small internal job framework for deferred editor work that shou
 - buffer syntax cache refresh
 - buffer indent scope cache refresh
 - file picker search
+- git picker search
 - live grep search
 - picker preview syntax refresh
 

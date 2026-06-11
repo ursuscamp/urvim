@@ -10,7 +10,6 @@ impl Layout {
         query: impl Into<String>,
         positive_intent: impl Into<Intent>,
     ) {
-        self.close_all_dialogs();
         self.dialogs.confirmation_box = Some(ConfirmationBox::new(query, positive_intent));
     }
 

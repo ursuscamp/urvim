@@ -33,6 +33,7 @@ use crate::lsp::rename_job::LspRenameJob;
 use crate::ui::completion::CompletionJob;
 use crate::ui::picker::doc_symbols::{DocSymbolsPickerItem, DocSymbolsPickerSearchJob};
 use crate::ui::picker::file::PickerSearchJob;
+use crate::ui::picker::git::GitPickerSearchJob;
 use crate::ui::picker::grep::GrepPickerSearchJob;
 use crate::ui::picker::preview::PreviewSyntaxRefreshJob;
 
@@ -47,6 +48,8 @@ pub enum BackgroundJob {
     DiffRefresh(DiffRefreshJob),
     /// Streams file picker matches.
     FilePickerSearch(PickerSearchJob),
+    /// Streams git picker matches.
+    GitPickerSearch(GitPickerSearchJob),
     /// Streams live grep matches.
     GrepPickerSearch(GrepPickerSearchJob),
     /// Streams document symbol picker matches.
@@ -74,6 +77,7 @@ impl BackgroundJob {
             Self::IndentScopeRefresh(job) => job.run(context, event_tx),
             Self::DiffRefresh(job) => job.run(context, event_tx),
             Self::FilePickerSearch(job) => job.run(context, event_tx),
+            Self::GitPickerSearch(job) => job.run(context, event_tx),
             Self::GrepPickerSearch(job) => job.run(context, event_tx),
             Self::DocSymbolsPickerSearch(job) => job.run(context, event_tx),
             Self::Completion(job) => job.run(context, event_tx),
@@ -121,6 +125,12 @@ impl From<DiffRefreshJob> for BackgroundJob {
 impl From<PickerSearchJob> for BackgroundJob {
     fn from(value: PickerSearchJob) -> Self {
         Self::FilePickerSearch(value)
+    }
+}
+
+impl From<GitPickerSearchJob> for BackgroundJob {
+    fn from(value: GitPickerSearchJob) -> Self {
+        Self::GitPickerSearch(value)
     }
 }
 
@@ -181,5 +191,11 @@ impl From<DiffRefreshResult> for JobPayload {
 impl From<Vec<DocSymbolsPickerItem>> for JobPayload {
     fn from(value: Vec<DocSymbolsPickerItem>) -> Self {
         Self::DocSymbolsSearch(value)
+    }
+}
+
+impl From<Vec<crate::ui::picker::git::GitPickerItem>> for JobPayload {
+    fn from(value: Vec<crate::ui::picker::git::GitPickerItem>) -> Self {
+        Self::GitSearchSnapshot(value)
     }
 }

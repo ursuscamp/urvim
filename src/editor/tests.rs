@@ -198,6 +198,16 @@ fn test_picker_open_binding_is_available_in_modes() {
             if matches!(intent, crate::ui::Intent::Command(crate::ui::Command::OpenGrepPicker))
     ));
     assert!(matches!(
+        normal.handle_key(&Key::new(KeyCode::F3)),
+        HandleKeyResult::Complete(intent)
+            if matches!(intent, crate::ui::Intent::Command(crate::ui::Command::OpenGitPicker))
+    ));
+    assert!(matches!(
+        normal.handle_key(&Key::new(KeyCode::F4)),
+        HandleKeyResult::Complete(intent)
+            if matches!(intent, crate::ui::Intent::Command(crate::ui::Command::OpenColorschemePicker))
+    ));
+    assert!(matches!(
         normal.handle_key(&key('g')),
         HandleKeyResult::WaitForMore
     ));
@@ -256,6 +266,16 @@ fn test_picker_open_binding_is_available_in_modes() {
         insert.handle_key(&Key::new(KeyCode::F2)),
         HandleKeyResult::Complete(intent)
             if matches!(intent, crate::ui::Intent::Command(crate::ui::Command::OpenGrepPicker))
+    ));
+    assert!(matches!(
+        insert.handle_key(&Key::new(KeyCode::F3)),
+        HandleKeyResult::Complete(intent)
+            if matches!(intent, crate::ui::Intent::Command(crate::ui::Command::OpenGitPicker))
+    ));
+    assert!(matches!(
+        insert.handle_key(&Key::new(KeyCode::F4)),
+        HandleKeyResult::Complete(intent)
+            if matches!(intent, crate::ui::Intent::Command(crate::ui::Command::OpenColorschemePicker))
     ));
 }
 
