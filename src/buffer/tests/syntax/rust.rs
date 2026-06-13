@@ -1,7 +1,20 @@
 use super::*;
+use crate::buffer::SyntaxFoldRegion;
 
 fn rust_fixture_source() -> &'static str {
     include_str!("fixtures/rust.rs")
+}
+
+fn assert_fold_regions(buf: &mut Buffer, expected: &[(usize, usize)]) {
+    let regions: Vec<SyntaxFoldRegion> = buf.syntax_fold_regions().to_vec();
+    let actual: Vec<(usize, usize)> = regions
+        .iter()
+        .map(|region| (region.start_line, region.end_line))
+        .collect();
+    assert_eq!(
+        actual, expected,
+        "expected fold regions {expected:?}, got {actual:?}"
+    );
 }
 
 fn line_containing(buf: &Buffer, needle: &str) -> usize {
@@ -80,6 +93,178 @@ fn test_rust_fixture_uses_grammar_rules() {
             (48, 49, tag("punctuation")),
         ],
     );
+}
+
+#[test]
+fn test_rust_fold_regions_for_multiline_braces() {
+    let mut buf = syntax_buffer("rust-fold-braces", "rs", "fn main() {\n    let x = 1;\n}\n");
+    buf.ensure_syntax_through(buf.line_count().saturating_sub(1));
+
+    assert_fold_regions(&mut buf, &[(0, 2)]);
+}
+
+#[test]
+fn test_rust_fold_regions_include_parens_and_brackets() {
+    let mut buf = syntax_buffer(
+        "rust-fold-delimiters",
+        "rs",
+        "fn main(\n    x: i32,\n) -> [i32;\n    1\n] {\n}\n",
+    );
+    buf.ensure_syntax_through(buf.line_count().saturating_sub(1));
+
+    assert_fold_regions(&mut buf, &[(0, 2), (2, 4), (4, 5)]);
+}
+
+#[test]
+fn test_rust_fold_region_starting_at_prefers_longest_same_line_fold() {
+    let mut buf = syntax_buffer(
+        "rust-fold-same-start-longest",
+        "rs",
+        "fn main( {\n    arg\n)\n    body();\n}\n",
+    );
+    buf.ensure_syntax_through(buf.line_count().saturating_sub(1));
+
+    assert_fold_regions(&mut buf, &[(0, 2), (0, 4)]);
+    let region = buf
+        .syntax_fold_region_starting_at(0)
+        .expect("line 0 should start a syntax fold");
+    assert_eq!((region.start_line, region.end_line), (0, 4));
+}
+
+#[test]
+fn test_rust_same_line_folds_are_discarded() {
+    let mut buf = syntax_buffer("rust-fold-same-line", "rs", "fn main() { let x = 1; }\n");
+    buf.ensure_syntax_through(buf.line_count().saturating_sub(1));
+
+    assert_fold_regions(&mut buf, &[]);
+}
+
+#[test]
+fn test_rust_unmatched_close_is_ignored() {
+    let mut buf = syntax_buffer("rust-fold-unmatched-close", "rs", "}\nfn main() {\n}\n");
+    buf.ensure_syntax_through(buf.line_count().saturating_sub(1));
+
+    assert_fold_regions(&mut buf, &[(1, 2)]);
+}
+
+#[test]
+fn test_rust_unclosed_open_folds_to_eof() {
+    let mut buf = syntax_buffer("rust-fold-unclosed", "rs", "fn main() {\n    let x = 1;\n");
+    buf.ensure_syntax_through(buf.line_count().saturating_sub(1));
+
+    // EOF is line 1 because the file lacks a trailing newline.
+    assert_fold_regions(&mut buf, &[(0, 1)]);
+}
+
+#[test]
+fn test_rust_mismatched_delimiter_closes_nearest_matching() {
+    let mut buf = syntax_buffer("rust-fold-mismatched", "rs", "foo(\n    {\n)\n}\n");
+    buf.ensure_syntax_through(buf.line_count().saturating_sub(1));
+
+    // `)` closes `(`, leaving `{` open so `}` can close it later.
+    assert_fold_regions(&mut buf, &[(0, 2), (1, 3)]);
+}
+
+#[test]
+fn test_rust_attribute_brackets_emit_fold_regions() {
+    let mut buf = syntax_buffer(
+        "rust-fold-attribute",
+        "rs",
+        "#[derive(\n    Debug,\n)]\nstruct Thing;\n",
+    );
+    buf.ensure_syntax_through(buf.line_count().saturating_sub(1));
+
+    assert_fold_regions(&mut buf, &[(0, 2)]);
+}
+
+#[test]
+fn test_rust_format_macro_call_parentheses_emit_fold_region() {
+    let mut buf = syntax_buffer(
+        "rust-fold-format-macro",
+        "rs",
+        "fn main() {\n    format!(\n        \"{}\",\n        value,\n    );\n}\n",
+    );
+    buf.ensure_syntax_through(buf.line_count().saturating_sub(1));
+
+    assert_fold_regions(&mut buf, &[(1, 4), (0, 5)]);
+}
+
+#[test]
+fn test_rust_fold_regions_rebuild_after_edit_from_cached_prefix() {
+    let mut buf = syntax_buffer(
+        "rust-fold-edit-rebuild",
+        "rs",
+        "fn main() {\n    if value {\n        work();\n    }\n}\n",
+    );
+    buf.ensure_syntax_through(buf.line_count().saturating_sub(1));
+    assert_fold_regions(&mut buf, &[(1, 3), (0, 4)]);
+
+    buf.insert_text(Cursor::new(2, 8), "more_");
+    buf.ensure_syntax_through(buf.line_count().saturating_sub(1));
+
+    assert_fold_regions(&mut buf, &[(1, 3), (0, 4)]);
+}
+
+#[test]
+fn test_rust_fold_regions_below_inserted_line_are_rebuilt() {
+    let mut buf = syntax_buffer(
+        "rust-fold-line-insert-rebuild",
+        "rs",
+        "fn first() {\n}\n\nfn second() {\n    work();\n}\n",
+    );
+    buf.ensure_syntax_through(buf.line_count().saturating_sub(1));
+    assert_fold_regions(&mut buf, &[(0, 1), (3, 5)]);
+
+    buf.insert_lines_before(2, 1);
+
+    buf.ensure_syntax_through(buf.line_count().saturating_sub(1));
+    assert_fold_regions(&mut buf, &[(0, 1), (4, 6)]);
+
+    let region = buf
+        .syntax_fold_region_starting_at(4)
+        .expect("fold below inserted line should be rebuilt");
+    assert_eq!((region.start_line, region.end_line), (4, 6));
+}
+
+#[test]
+fn test_rust_fold_region_after_struct_survives_insert_above_function() {
+    let mut buf = syntax_buffer(
+        "rust-fold-main-after-struct-insert",
+        "rs",
+        "#[derive(Parser)]\nstruct Cli {\n    files: Vec<String>,\n}\n\nfn main() {\n    run();\n}\n",
+    );
+    buf.ensure_syntax_through(buf.line_count().saturating_sub(1));
+    assert_fold_regions(&mut buf, &[(1, 3), (5, 7)]);
+
+    buf.insert_lines_before(5, 1);
+
+    assert!(
+        buf.cached_syntax_fold_region_starting_at(6).is_some(),
+        "cached main fold should survive inserting above it"
+    );
+
+    let region = buf
+        .syntax_fold_region_starting_at(6)
+        .expect("main fold should be rebuilt after inserting above it");
+    assert_eq!((region.start_line, region.end_line), (6, 8));
+}
+
+#[test]
+fn test_rust_delimiters_in_comments_and_strings_do_not_fold() {
+    let mut buf = syntax_buffer(
+        "rust-fold-no-string-comment",
+        "rs",
+        "fn main() {\n    let s = \"{\";\n    // {\n}\n",
+    );
+    buf.ensure_syntax_through(buf.line_count().saturating_sub(1));
+
+    assert_fold_regions(&mut buf, &[(0, 3)]);
+}
+
+#[test]
+fn test_rust_syntax_supports_folding() {
+    let buf = syntax_buffer("rust-fold-support", "rs", "fn main() {}\n");
+    assert!(buf.syntax_supports_folding());
 }
 
 #[test]

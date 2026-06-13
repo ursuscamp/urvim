@@ -1,5 +1,23 @@
 use super::*;
 
+fn assert_cpp_folds(source: &str, expected: &[(usize, usize)]) {
+    let mut buf = fixture_buffer("syntax-cpp-folds", "cpp", source);
+    let actual: Vec<(usize, usize)> = buf
+        .syntax_fold_regions()
+        .iter()
+        .map(|region| (region.start_line, region.end_line))
+        .collect();
+    assert_eq!(actual, expected);
+}
+
+#[test]
+fn test_cpp_bracket_folds_ignore_strings_and_comments() {
+    assert_cpp_folds(
+        "int main() {\n  auto text = R\"tag({)tag\";\n  // {\n  if (!text.empty()) {\n    std::vector<int> values = {\n      1,\n    };\n  }\n}\n",
+        &[(4, 6), (3, 7), (0, 8)],
+    );
+}
+
 #[test]
 fn test_cpp_fixture_uses_grammar_rules() {
     let fixture = include_str!("fixtures/cpp.cpp");

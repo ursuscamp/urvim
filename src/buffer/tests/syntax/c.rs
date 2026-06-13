@@ -1,5 +1,23 @@
 use super::*;
 
+fn assert_c_folds(source: &str, expected: &[(usize, usize)]) {
+    let mut buf = fixture_buffer("syntax-c-folds", "c", source);
+    let actual: Vec<(usize, usize)> = buf
+        .syntax_fold_regions()
+        .iter()
+        .map(|region| (region.start_line, region.end_line))
+        .collect();
+    assert_eq!(actual, expected);
+}
+
+#[test]
+fn test_c_bracket_folds_ignore_strings_and_comments() {
+    assert_c_folds(
+        "int main(void) {\n  const char *text = \"{\";\n  // {\n  if (text) {\n    int values[] = {\n      1,\n    };\n  }\n}\n",
+        &[(4, 6), (3, 7), (0, 8)],
+    );
+}
+
 #[test]
 fn test_c_fixture_uses_grammar_rules() {
     let fixture = include_str!("fixtures/c.c");

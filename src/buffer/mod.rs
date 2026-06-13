@@ -67,7 +67,7 @@ pub use marker::{
 pub use pool::{BufferId, BufferPool};
 pub use syntax::{
     BufferCache, BufferCacheRefreshResult, IndentScope, IndentScopeId, IndentScopeRefreshJob,
-    IndentScopeRefreshResult, SyntaxRefreshJob, SyntaxRefreshResult, SyntaxSpan,
+    IndentScopeRefreshResult, SyntaxFoldRegion, SyntaxRefreshJob, SyntaxRefreshResult, SyntaxSpan,
 };
 pub use text::{
     PieceTable, PieceTableRef, TextChange, TextEncoding, TextPosition, TextRange, TextRef,

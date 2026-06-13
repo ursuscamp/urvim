@@ -732,9 +732,10 @@ impl BufferView {
                         }
                         let (byte_offset, width_offset, visible_text) =
                             Self::calculate_horizontal_offset(line_text, horizontal_offset);
+                        let line_text_len = line_text.len();
                         let chunks = Self::build_chunks_for_visible_line(
                             line_text,
-                            byte_offset..line_text.len(),
+                            byte_offset..line_text_len,
                             &visible_text,
                             syntax_spans,
                             &todo_markers,
@@ -747,12 +748,12 @@ impl BufferView {
                             .iter()
                             .find(|range| range.start_line == buffer_line_idx)
                             .map(|range| range.end_line.saturating_sub(range.start_line));
+                        let starts_open_fold = folded_line_count.is_none()
+                            && fold::cached_fold_range_starting_at(buffer, buffer_line_idx)
+                                .is_some();
                         let fold_glyph = folded_line_count
                             .map(|_| FoldGutterGlyph::Closed)
-                            .or_else(|| {
-                                fold::fold_range_starting_at(buffer, buffer_line_idx)
-                                    .map(|_| FoldGutterGlyph::Open)
-                            });
+                            .or_else(|| starts_open_fold.then_some(FoldGutterGlyph::Open));
                         let mut chunks = chunks;
                         if let Some(count) = folded_line_count {
                             chunks.push(RenderChunk::ghost_text(
@@ -763,7 +764,7 @@ impl BufferView {
                         let line_data = LineData {
                             buffer_line: buffer_line_idx,
                             byte_offset,
-                            end_byte: line_text.len(),
+                            end_byte: line_text_len,
                             width_offset,
                             show_gutter_line_number: true,
                             base_style: Style::default(),

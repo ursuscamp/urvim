@@ -1,5 +1,15 @@
 use super::*;
 
+fn assert_typescript_folds(source: &str, expected: &[(usize, usize)]) {
+    let mut buf = fixture_buffer("syntax-typescript-folds", "ts", source);
+    let actual: Vec<(usize, usize)> = buf
+        .syntax_fold_regions()
+        .iter()
+        .map(|region| (region.start_line, region.end_line))
+        .collect();
+    assert_eq!(actual, expected);
+}
+
 #[test]
 fn test_typescript_fixture_uses_grammar_rules() {
     let fixture = include_str!("fixtures/typescript.ts");
@@ -65,6 +75,14 @@ fn test_typescript_fixture_uses_grammar_rules() {
     assert_spans_include_style(&jsx_line, tag("markup.tag"));
     assert_spans_include_style(&jsx_line, tag("variable.property"));
     assert_spans_include_style(&jsx_line, tag("string"));
+}
+
+#[test]
+fn test_typescript_bracket_folds_ignore_strings_and_comments() {
+    assert_typescript_folds(
+        "type Item = {\n  value: string;\n};\nfunction demo(items: Item[]) {\n  const text = `)`;\n  // {\n  return items.map((item) => {\n    return item.value;\n  });\n}\n",
+        &[(0, 2), (6, 8), (3, 9)],
+    );
 }
 
 #[test]

@@ -1,5 +1,15 @@
 use super::*;
 
+fn assert_css_folds(source: &str, expected: &[(usize, usize)]) {
+    let mut buf = fixture_buffer("syntax-css-folds", "css", source);
+    let actual: Vec<(usize, usize)> = buf
+        .syntax_fold_regions()
+        .iter()
+        .map(|region| (region.start_line, region.end_line))
+        .collect();
+    assert_eq!(actual, expected);
+}
+
 #[test]
 fn test_css_fixture_uses_grammar_rules() {
     let fixture = include_str!("fixtures/css.css");
@@ -32,4 +42,17 @@ fn test_css_fixture_uses_grammar_rules() {
     assert_spans_include_style(&property, tag("constant"));
     assert_spans_include_style(&number_line, tag("number"));
     assert_spans_include_style(&string_line, tag("string"));
+}
+
+#[test]
+fn test_css_brace_and_paren_folds_ignore_strings_and_comments() {
+    assert_css_folds(
+        "/* { */\n@media screen {\n  .card {\n    background: linear-gradient(\n      red,\n      blue\n    );\n  }\n}\n",
+        &[(2, 7), (1, 8)],
+    );
+}
+
+#[test]
+fn test_css_same_line_blocks_are_discarded() {
+    assert_css_folds(".card { color: red; }\n", &[]);
 }

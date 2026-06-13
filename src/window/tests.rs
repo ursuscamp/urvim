@@ -1,6 +1,7 @@
 use super::*;
 use crate::action::ActionResult;
 use crate::background::{BackgroundJob, JobKind, JobToken};
+use crate::buffer::SyntaxFoldRegion;
 use crate::buffer::{BufferId, Cursor, DiffHunk, DiffMarkerKind, DiffRefreshResult, TextRef};
 use crate::config::{
     AdvancedGlyphCapability, AutoIndentMode, Config, DefaultRegisters, ScrollMargin, WrapMode,
@@ -1337,6 +1338,294 @@ fn test_window_render_collapses_indent_scope_fold() {
     assert!(rendered.contains("outer"));
     assert!(rendered.contains("... 2 lines folded"));
     assert_eq!(window.render_data().line_data[1].buffer_line, 3);
+}
+
+#[test]
+fn test_window_render_uses_syntax_folds_for_rust() {
+    let path = AbsolutePath::from_path(
+        std::env::temp_dir()
+            .join(format!("urvim-test-{}.rs", std::process::id()))
+            .as_path(),
+    )
+    .unwrap();
+    let mut buffer = Buffer::from_str_with_path("fn main() {\n    let x = 1;\n}\n", path);
+    buffer.ensure_syntax_through(buffer.line_count().saturating_sub(1));
+    let mut window = Window::from_owned_buffer(buffer);
+    window.set_cursor(Cursor::new(0, 0));
+
+    assert_eq!(
+        window.dispatch_action(&Action::new(ActionKind::CloseFold)),
+        ActionResult::Handled
+    );
+
+    let mut screen = crate::screen::Screen::new(3, 40);
+    window.render(&mut screen, Position::new(0, 0), Size::new(3, 40));
+
+    let rendered = window
+        .render_data()
+        .get_line(0)
+        .expect("folded start line should render")
+        .iter()
+        .map(|chunk| chunk.text.as_str())
+        .collect::<String>();
+
+    assert!(rendered.contains("fn main()"));
+    assert!(rendered.contains("... 2 lines folded"));
+}
+
+#[test]
+fn test_window_syntax_folds_take_precedence_over_indent_folds() {
+    let path = AbsolutePath::from_path(
+        std::env::temp_dir()
+            .join(format!("urvim-test-{}.rs", std::process::id()))
+            .as_path(),
+    )
+    .unwrap();
+    // The indentation-based fold would stop at line 2, but the syntax fold
+    // continues through the closing brace on line 3.
+    let mut buffer = Buffer::from_str_with_path("fn main() {\n    let x = 1;\n}\nafter\n", path);
+    buffer.ensure_syntax_through(buffer.line_count().saturating_sub(1));
+    let mut window = Window::from_owned_buffer(buffer);
+    window.set_cursor(Cursor::new(0, 0));
+
+    assert_eq!(
+        window.dispatch_action(&Action::new(ActionKind::CloseFold)),
+        ActionResult::Handled
+    );
+
+    let regions: Vec<SyntaxFoldRegion> = window
+        .buffer_view()
+        .with_buffer_mut(|buffer| buffer.syntax_fold_regions().to_vec())
+        .unwrap();
+    assert_eq!(
+        regions
+            .iter()
+            .map(|r| (r.start_line, r.end_line))
+            .collect::<Vec<_>>(),
+        vec![(0, 2)]
+    );
+
+    let mut screen = crate::screen::Screen::new(3, 40);
+    window.render(&mut screen, Position::new(0, 0), Size::new(3, 40));
+    assert_eq!(window.render_data().line_data[1].buffer_line, 3);
+}
+
+#[test]
+fn test_window_renders_syntax_fold_marker_without_indented_interior() {
+    let path = AbsolutePath::from_path(
+        std::env::temp_dir()
+            .join(format!("urvim-test-{}.rs", std::process::id()))
+            .as_path(),
+    )
+    .unwrap();
+    let mut buffer = Buffer::from_str_with_path("fn main() {\nlet x = 1;\n}\n", path);
+    buffer.ensure_syntax_through(buffer.line_count().saturating_sub(1));
+    let window = Window::from_owned_buffer(buffer);
+
+    let render_data = window
+        .buffer_view()
+        .build_render_data_with_style(Size::new(3, 40), Style::default());
+
+    assert_eq!(
+        render_data.line_data[0].fold_glyph,
+        Some(FoldGutterGlyph::Open)
+    );
+}
+
+#[test]
+fn test_window_renders_markdown_heading_fold_marker() {
+    let path = AbsolutePath::from_path(
+        std::env::temp_dir()
+            .join(format!(
+                "urvim-test-markdown-fold-{}.md",
+                std::process::id()
+            ))
+            .as_path(),
+    )
+    .unwrap();
+    let mut buffer = Buffer::from_str_with_path("# Heading\nbody\n", path);
+    buffer.ensure_syntax_through(buffer.line_count().saturating_sub(1));
+    let window = Window::from_owned_buffer(buffer);
+
+    let render_data = window
+        .buffer_view()
+        .build_render_data_with_style(Size::new(2, 40), Style::default());
+
+    assert_eq!(
+        render_data.line_data[0].fold_glyph,
+        Some(FoldGutterGlyph::Open)
+    );
+}
+
+#[test]
+fn test_window_keeps_markdown_fold_markers_after_body_line_insert() {
+    let path = AbsolutePath::from_path(
+        std::env::temp_dir()
+            .join(format!(
+                "urvim-test-markdown-fold-edit-{}.md",
+                std::process::id()
+            ))
+            .as_path(),
+    )
+    .unwrap();
+    let mut buffer = Buffer::from_str_with_path("# A\nintro\n## B\nbody\n# C\nend\n", path);
+    buffer.ensure_syntax_through(buffer.line_count().saturating_sub(1));
+    let mut window = Window::from_owned_buffer(buffer);
+    window.set_cursor(Cursor::new(1, 0));
+
+    let mut screen = crate::screen::Screen::new(8, 80);
+    window.render(&mut screen, Position::new(0, 0), Size::new(8, 80));
+    assert!(
+        window.render_data().line_data.iter().any(|line| {
+            line.buffer_line == 0 && line.fold_glyph == Some(FoldGutterGlyph::Open)
+        })
+    );
+    assert!(
+        window.render_data().line_data.iter().any(|line| {
+            line.buffer_line == 2 && line.fold_glyph == Some(FoldGutterGlyph::Open)
+        })
+    );
+
+    window
+        .buffer_view_mut()
+        .with_buffer_mut(|buffer| buffer.insert_text(Cursor::new(1, 0), "inserted\n"))
+        .unwrap();
+
+    window.render(&mut screen, Position::new(0, 0), Size::new(8, 80));
+    assert!(
+        window.render_data().line_data.iter().any(|line| {
+            line.buffer_line == 0 && line.fold_glyph == Some(FoldGutterGlyph::Open)
+        })
+    );
+    assert!(
+        window.render_data().line_data.iter().any(|line| {
+            line.buffer_line == 3 && line.fold_glyph == Some(FoldGutterGlyph::Open)
+        })
+    );
+}
+
+#[test]
+fn test_window_keeps_syntax_fold_marker_after_open_line_above_main() {
+    let path = AbsolutePath::from_path(
+        std::env::temp_dir()
+            .join(format!("urvim-test-main-fold-{}.rs", std::process::id()))
+            .as_path(),
+    )
+    .unwrap();
+    let mut buffer = Buffer::from_str_with_path(
+        "#[derive(Parser)]\nstruct Cli {\n    files: Vec<String>,\n}\n\nfn main() {\n    run();\n}\n",
+        path,
+    );
+    buffer.ensure_syntax_through(buffer.line_count().saturating_sub(1));
+    let mut window = Window::from_owned_buffer(buffer);
+    window.set_cursor(Cursor::new(5, 0));
+
+    let mut screen = crate::screen::Screen::new(10, 80);
+    window.render(&mut screen, Position::new(0, 0), Size::new(10, 80));
+    assert_eq!(
+        window.render_data().line_data[5].fold_glyph,
+        Some(FoldGutterGlyph::Open)
+    );
+
+    assert_eq!(
+        window.dispatch_action(&Action::new(ActionKind::OpenLineAbove)),
+        ActionResult::Handled
+    );
+
+    window.render(&mut screen, Position::new(0, 0), Size::new(10, 80));
+    let main_line = window
+        .render_data()
+        .line_data
+        .iter()
+        .find(|line| line.buffer_line == 6)
+        .expect("shifted main line should render");
+    assert_eq!(main_line.fold_glyph, Some(FoldGutterGlyph::Open));
+}
+
+#[test]
+fn test_window_keeps_syntax_fold_marker_after_open_line_above_main_in_scrolled_file() {
+    let path = AbsolutePath::from_path(
+        std::env::temp_dir()
+            .join(format!(
+                "urvim-test-main-fold-scrolled-{}.rs",
+                std::process::id()
+            ))
+            .as_path(),
+    )
+    .unwrap();
+    let mut source = String::new();
+    for index in 0..40 {
+        source.push_str(&format!("use crate::module_{index};\n"));
+    }
+    source.push_str(
+        "\n#[derive(Parser)]\nstruct Cli {\n    files: Vec<String>,\n}\n\nfn main() {\n    let cli = Cli { files: Vec::new() };\n    run(cli);\n}\n",
+    );
+    for index in 0..80 {
+        source.push_str(&format!("\nfn helper_{index}() {{\n    work();\n}}\n"));
+    }
+
+    let main_line = source
+        .lines()
+        .position(|line| line.starts_with("fn main"))
+        .expect("main line exists");
+    let mut buffer = Buffer::from_str_with_path(&source, path);
+    buffer.ensure_syntax_through(buffer.line_count().saturating_sub(1));
+    let mut window = Window::from_owned_buffer(buffer);
+    window.set_cursor(Cursor::new(main_line, 0));
+    window.reveal_cursor(Cursor::new(main_line, 0));
+
+    let mut screen = crate::screen::Screen::new(8, 80);
+    window.render(&mut screen, Position::new(0, 0), Size::new(8, 80));
+    assert!(window.render_data().line_data.iter().any(|line| {
+        line.buffer_line == main_line && line.fold_glyph == Some(FoldGutterGlyph::Open)
+    }));
+
+    assert_eq!(
+        window.dispatch_action(&Action::new(ActionKind::OpenLineAbove)),
+        ActionResult::Handled
+    );
+
+    window.render(&mut screen, Position::new(0, 0), Size::new(8, 80));
+    assert!(window.render_data().line_data.iter().any(|line| {
+        line.buffer_line == main_line + 1 && line.fold_glyph == Some(FoldGutterGlyph::Open)
+    }));
+}
+
+#[test]
+fn test_window_keeps_syntax_fold_marker_after_open_line_above_large_main() {
+    let path = AbsolutePath::from_path(std::path::Path::new("/tmp/urvim-main-fixture.rs")).unwrap();
+    let mut source = String::from(
+        "use clap::Parser;\n\n#[derive(Parser)]\nstruct Cli {\n    files: Vec<String>,\n}\n\nfn main() {\n",
+    );
+    for index in 0..160 {
+        source.push_str(&format!("    run_step_{index}();\n"));
+    }
+    source.push_str("}\n");
+    let main_line = source
+        .lines()
+        .position(|line| line.starts_with("fn main"))
+        .expect("main line exists");
+    let mut buffer = Buffer::from_str_with_path(&source, path);
+    buffer.ensure_syntax_through(buffer.line_count().saturating_sub(1));
+    let mut window = Window::from_owned_buffer(buffer);
+    window.set_cursor(Cursor::new(main_line, 0));
+    window.reveal_cursor(Cursor::new(main_line, 0));
+
+    let mut screen = crate::screen::Screen::new(12, 100);
+    window.render(&mut screen, Position::new(0, 0), Size::new(12, 100));
+    assert!(window.render_data().line_data.iter().any(|line| {
+        line.buffer_line == main_line && line.fold_glyph == Some(FoldGutterGlyph::Open)
+    }));
+
+    assert_eq!(
+        window.dispatch_action(&Action::new(ActionKind::OpenLineAbove)),
+        ActionResult::Handled
+    );
+
+    window.render(&mut screen, Position::new(0, 0), Size::new(12, 100));
+    assert!(window.render_data().line_data.iter().any(|line| {
+        line.buffer_line == main_line + 1 && line.fold_glyph == Some(FoldGutterGlyph::Open)
+    }));
 }
 
 #[test]

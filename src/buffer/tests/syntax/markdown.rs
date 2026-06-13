@@ -1,5 +1,89 @@
 use super::*;
 
+fn markdown_buffer(name: &str, text: &str) -> Buffer {
+    let path = AbsolutePath::from_path(temp_path_with_ext(name, "md").as_path()).unwrap();
+    Buffer::from_str_with_path(text, path)
+}
+
+fn assert_fold_regions(buf: &mut Buffer, expected: &[(usize, usize)]) {
+    let regions: Vec<SyntaxFoldRegion> = buf.syntax_fold_regions().to_vec();
+    let actual: Vec<(usize, usize)> = regions
+        .iter()
+        .map(|region| (region.start_line, region.end_line))
+        .collect();
+    assert_eq!(actual, expected);
+}
+
+#[test]
+fn test_markdown_syntax_supports_folding() {
+    let buf = markdown_buffer("markdown-fold-support", "# Title\n");
+
+    assert!(buf.syntax_supports_folding());
+}
+
+#[test]
+fn test_markdown_heading_fold_regions() {
+    let mut buf = markdown_buffer(
+        "markdown-fold-headings",
+        "# A\nintro\n## B\nbody\n## C\nbody\n# D\n",
+    );
+
+    assert_fold_regions(&mut buf, &[(2, 3), (4, 5), (0, 5)]);
+}
+
+#[test]
+fn test_markdown_nested_heading_fold_regions() {
+    let mut buf = markdown_buffer(
+        "markdown-fold-nested-headings",
+        "# A\nintro\n## B\ntext\n### C\ndeep\n# D\nend\n",
+    );
+
+    assert_fold_regions(&mut buf, &[(4, 5), (2, 5), (0, 5), (6, 7)]);
+}
+
+#[test]
+fn test_markdown_heading_without_body_does_not_fold() {
+    let mut buf = markdown_buffer("markdown-fold-empty-heading", "# A\n## B\n");
+
+    assert_fold_regions(&mut buf, &[(0, 1)]);
+}
+
+#[test]
+fn test_markdown_headings_inside_code_fence_do_not_fold() {
+    let mut buf = markdown_buffer(
+        "markdown-fold-code-fence-heading",
+        "# A\nintro\n```markdown\n# Not a heading\n```\n# B\nbody\n",
+    );
+
+    assert_fold_regions(&mut buf, &[(0, 4), (5, 6)]);
+}
+
+#[test]
+fn test_markdown_heading_folds_survive_body_text_edit() {
+    let mut buf = markdown_buffer(
+        "markdown-fold-body-text-edit",
+        "# A\nintro\n## B\nbody\n# C\nend\n",
+    );
+    assert_fold_regions(&mut buf, &[(2, 3), (0, 3), (4, 5)]);
+
+    buf.insert_text(Cursor::new(1, 0), "more ");
+
+    assert_fold_regions(&mut buf, &[(2, 3), (0, 3), (4, 5)]);
+}
+
+#[test]
+fn test_markdown_heading_folds_survive_body_line_insert() {
+    let mut buf = markdown_buffer(
+        "markdown-fold-body-line-insert",
+        "# A\nintro\n## B\nbody\n# C\nend\n",
+    );
+    assert_fold_regions(&mut buf, &[(2, 3), (0, 3), (4, 5)]);
+
+    buf.insert_text(Cursor::new(1, 0), "inserted\n");
+
+    assert_fold_regions(&mut buf, &[(3, 4), (0, 4), (5, 6)]);
+}
+
 #[test]
 fn test_markdown_code_fence_resolves_canonical_capture() {
     let path =

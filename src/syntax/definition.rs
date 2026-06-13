@@ -120,6 +120,8 @@ pub struct SyntaxSpec {
     pub metadata: SyntaxMetadataSpec,
     /// Builtin scanner for the syntax.
     pub tokenizer: SyntaxTokenizer,
+    /// Whether the syntax supports syntax-based folding.
+    pub supports_folding: bool,
 }
 
 /// A compiled syntax definition.
@@ -129,6 +131,8 @@ pub struct SyntaxDefinition {
     pub metadata: SyntaxMetadata,
     /// Builtin scanner used for highlighting.
     pub tokenizer: SyntaxTokenizer,
+    /// Whether the syntax supports syntax-based folding.
+    pub supports_folding: bool,
 }
 
 impl SyntaxDefinition {
@@ -137,6 +141,7 @@ impl SyntaxDefinition {
         Ok(Self {
             metadata: SyntaxMetadata::from_spec(&spec.metadata)?,
             tokenizer: spec.tokenizer,
+            supports_folding: spec.supports_folding,
         })
     }
 

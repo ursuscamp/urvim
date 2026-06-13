@@ -21,6 +21,7 @@ static BUILTIN_SYNTAX_SPECS: &[SyntaxSpec] = &[
             shebang: &[],
         },
         tokenizer: SyntaxTokenizer::Plaintext,
+        supports_folding: false,
     },
     SyntaxSpec {
         metadata: SyntaxMetadataSpec {
@@ -34,6 +35,7 @@ static BUILTIN_SYNTAX_SPECS: &[SyntaxSpec] = &[
             shebang: &[],
         },
         tokenizer: SyntaxTokenizer::Rust,
+        supports_folding: true,
     },
     SyntaxSpec {
         metadata: SyntaxMetadataSpec {
@@ -47,6 +49,7 @@ static BUILTIN_SYNTAX_SPECS: &[SyntaxSpec] = &[
             shebang: &["^#!.*\\bpython(?:[0-9.]+)?(?:\\s|$)"],
         },
         tokenizer: SyntaxTokenizer::Python,
+        supports_folding: false,
     },
     SyntaxSpec {
         metadata: SyntaxMetadataSpec {
@@ -60,6 +63,7 @@ static BUILTIN_SYNTAX_SPECS: &[SyntaxSpec] = &[
             shebang: &["^#!.*\\b(?:node(?:js)?|bun|deno)(?:\\s|$)"],
         },
         tokenizer: SyntaxTokenizer::Javascript,
+        supports_folding: true,
     },
     SyntaxSpec {
         metadata: SyntaxMetadataSpec {
@@ -73,6 +77,7 @@ static BUILTIN_SYNTAX_SPECS: &[SyntaxSpec] = &[
             shebang: &[],
         },
         tokenizer: SyntaxTokenizer::Typescript,
+        supports_folding: true,
     },
     SyntaxSpec {
         metadata: SyntaxMetadataSpec {
@@ -86,6 +91,7 @@ static BUILTIN_SYNTAX_SPECS: &[SyntaxSpec] = &[
             shebang: &["^#!.*\\bsh(?:\\s|$)"],
         },
         tokenizer: SyntaxTokenizer::Shell,
+        supports_folding: false,
     },
     SyntaxSpec {
         metadata: SyntaxMetadataSpec {
@@ -99,6 +105,7 @@ static BUILTIN_SYNTAX_SPECS: &[SyntaxSpec] = &[
             shebang: &["^#!.*\\bbash(?:\\s|$)", "^#!.*\\brbash(?:\\s|$)"],
         },
         tokenizer: SyntaxTokenizer::Bash,
+        supports_folding: false,
     },
     SyntaxSpec {
         metadata: SyntaxMetadataSpec {
@@ -112,6 +119,7 @@ static BUILTIN_SYNTAX_SPECS: &[SyntaxSpec] = &[
             shebang: &["^#!.*\\bzsh(?:\\s|$)"],
         },
         tokenizer: SyntaxTokenizer::Zsh,
+        supports_folding: false,
     },
     SyntaxSpec {
         metadata: SyntaxMetadataSpec {
@@ -125,6 +133,7 @@ static BUILTIN_SYNTAX_SPECS: &[SyntaxSpec] = &[
             shebang: &["^#!.*\\bfish(?:\\s|$)"],
         },
         tokenizer: SyntaxTokenizer::Fish,
+        supports_folding: false,
     },
     SyntaxSpec {
         metadata: SyntaxMetadataSpec {
@@ -138,6 +147,7 @@ static BUILTIN_SYNTAX_SPECS: &[SyntaxSpec] = &[
             shebang: &["^#!.*\\b(?:pwsh|powershell)(?:\\s|$)"],
         },
         tokenizer: SyntaxTokenizer::Powershell,
+        supports_folding: false,
     },
     SyntaxSpec {
         metadata: SyntaxMetadataSpec {
@@ -151,6 +161,7 @@ static BUILTIN_SYNTAX_SPECS: &[SyntaxSpec] = &[
             shebang: &["^#!.*\\bgo(?:\\s|$)"],
         },
         tokenizer: SyntaxTokenizer::Go,
+        supports_folding: false,
     },
     SyntaxSpec {
         metadata: SyntaxMetadataSpec {
@@ -164,6 +175,7 @@ static BUILTIN_SYNTAX_SPECS: &[SyntaxSpec] = &[
             shebang: &[],
         },
         tokenizer: SyntaxTokenizer::Java,
+        supports_folding: true,
     },
     SyntaxSpec {
         metadata: SyntaxMetadataSpec {
@@ -177,6 +189,7 @@ static BUILTIN_SYNTAX_SPECS: &[SyntaxSpec] = &[
             shebang: &[],
         },
         tokenizer: SyntaxTokenizer::C,
+        supports_folding: true,
     },
     SyntaxSpec {
         metadata: SyntaxMetadataSpec {
@@ -190,6 +203,7 @@ static BUILTIN_SYNTAX_SPECS: &[SyntaxSpec] = &[
             shebang: &[],
         },
         tokenizer: SyntaxTokenizer::Cpp,
+        supports_folding: true,
     },
     SyntaxSpec {
         metadata: SyntaxMetadataSpec {
@@ -203,6 +217,7 @@ static BUILTIN_SYNTAX_SPECS: &[SyntaxSpec] = &[
             shebang: &[],
         },
         tokenizer: SyntaxTokenizer::Csharp,
+        supports_folding: false,
     },
     SyntaxSpec {
         metadata: SyntaxMetadataSpec {
@@ -216,6 +231,7 @@ static BUILTIN_SYNTAX_SPECS: &[SyntaxSpec] = &[
             shebang: &["^#!.*\\bruby(?:[0-9.]+)?(?:\\s|$)"],
         },
         tokenizer: SyntaxTokenizer::Ruby,
+        supports_folding: false,
     },
     SyntaxSpec {
         metadata: SyntaxMetadataSpec {
@@ -229,6 +245,7 @@ static BUILTIN_SYNTAX_SPECS: &[SyntaxSpec] = &[
             shebang: &["^#!.*\\bphp(?:[0-9.]+)?(?:\\s|$)"],
         },
         tokenizer: SyntaxTokenizer::Php,
+        supports_folding: false,
     },
     SyntaxSpec {
         metadata: SyntaxMetadataSpec {
@@ -242,6 +259,7 @@ static BUILTIN_SYNTAX_SPECS: &[SyntaxSpec] = &[
             shebang: &["^#!.*\\bperl(?:[0-9.]+)?(?:\\s|$)"],
         },
         tokenizer: SyntaxTokenizer::Perl,
+        supports_folding: false,
     },
     SyntaxSpec {
         metadata: SyntaxMetadataSpec {
@@ -255,6 +273,7 @@ static BUILTIN_SYNTAX_SPECS: &[SyntaxSpec] = &[
             shebang: &["^#!.*\\b(?:ghci|runghc)(?:\\s|$)"],
         },
         tokenizer: SyntaxTokenizer::Haskell,
+        supports_folding: false,
     },
     SyntaxSpec {
         metadata: SyntaxMetadataSpec {
@@ -268,6 +287,7 @@ static BUILTIN_SYNTAX_SPECS: &[SyntaxSpec] = &[
             shebang: &["^#!.*\\b(?:elixir|iex)(?:\\s|$)"],
         },
         tokenizer: SyntaxTokenizer::Elixir,
+        supports_folding: false,
     },
     SyntaxSpec {
         metadata: SyntaxMetadataSpec {
@@ -281,6 +301,7 @@ static BUILTIN_SYNTAX_SPECS: &[SyntaxSpec] = &[
             shebang: &["^#!.*\\b(?:erl|escript)(?:\\s|$)"],
         },
         tokenizer: SyntaxTokenizer::Erlang,
+        supports_folding: false,
     },
     SyntaxSpec {
         metadata: SyntaxMetadataSpec {
@@ -294,6 +315,7 @@ static BUILTIN_SYNTAX_SPECS: &[SyntaxSpec] = &[
             shebang: &["^#!.*\\b(?:ocaml|utop)(?:\\s|$)"],
         },
         tokenizer: SyntaxTokenizer::Ocaml,
+        supports_folding: false,
     },
     SyntaxSpec {
         metadata: SyntaxMetadataSpec {
@@ -307,6 +329,7 @@ static BUILTIN_SYNTAX_SPECS: &[SyntaxSpec] = &[
             shebang: &["^#!.*\\b(?:fsharpi|fsi)(?:\\s|$)"],
         },
         tokenizer: SyntaxTokenizer::Fsharp,
+        supports_folding: false,
     },
     SyntaxSpec {
         metadata: SyntaxMetadataSpec {
@@ -320,6 +343,7 @@ static BUILTIN_SYNTAX_SPECS: &[SyntaxSpec] = &[
             shebang: &[],
         },
         tokenizer: SyntaxTokenizer::Kotlin,
+        supports_folding: false,
     },
     SyntaxSpec {
         metadata: SyntaxMetadataSpec {
@@ -333,6 +357,7 @@ static BUILTIN_SYNTAX_SPECS: &[SyntaxSpec] = &[
             shebang: &["^#!.*\\bscala(?:\\s|$)"],
         },
         tokenizer: SyntaxTokenizer::Scala,
+        supports_folding: false,
     },
     SyntaxSpec {
         metadata: SyntaxMetadataSpec {
@@ -346,6 +371,7 @@ static BUILTIN_SYNTAX_SPECS: &[SyntaxSpec] = &[
             shebang: &["^#!.*\\bswift(?:\\s|$)"],
         },
         tokenizer: SyntaxTokenizer::Swift,
+        supports_folding: false,
     },
     SyntaxSpec {
         metadata: SyntaxMetadataSpec {
@@ -359,6 +385,7 @@ static BUILTIN_SYNTAX_SPECS: &[SyntaxSpec] = &[
             shebang: &["^#!.*\\bdart(?:\\s|$)"],
         },
         tokenizer: SyntaxTokenizer::Dart,
+        supports_folding: false,
     },
     SyntaxSpec {
         metadata: SyntaxMetadataSpec {
@@ -372,6 +399,7 @@ static BUILTIN_SYNTAX_SPECS: &[SyntaxSpec] = &[
             shebang: &["^#!.*\\bzig(?:\\s|$)"],
         },
         tokenizer: SyntaxTokenizer::Zig,
+        supports_folding: false,
     },
     SyntaxSpec {
         metadata: SyntaxMetadataSpec {
@@ -385,6 +413,7 @@ static BUILTIN_SYNTAX_SPECS: &[SyntaxSpec] = &[
             shebang: &["^#!.*\\bnim(?:\\s|$)"],
         },
         tokenizer: SyntaxTokenizer::Nim,
+        supports_folding: false,
     },
     SyntaxSpec {
         metadata: SyntaxMetadataSpec {
@@ -398,6 +427,7 @@ static BUILTIN_SYNTAX_SPECS: &[SyntaxSpec] = &[
             shebang: &["^#!.*\\bjulia(?:\\s|$)"],
         },
         tokenizer: SyntaxTokenizer::Julia,
+        supports_folding: false,
     },
     SyntaxSpec {
         metadata: SyntaxMetadataSpec {
@@ -411,6 +441,7 @@ static BUILTIN_SYNTAX_SPECS: &[SyntaxSpec] = &[
             shebang: &["^#!.*\\brscript(?:\\s|$)"],
         },
         tokenizer: SyntaxTokenizer::R,
+        supports_folding: false,
     },
     SyntaxSpec {
         metadata: SyntaxMetadataSpec {
@@ -424,6 +455,7 @@ static BUILTIN_SYNTAX_SPECS: &[SyntaxSpec] = &[
             shebang: &[],
         },
         tokenizer: SyntaxTokenizer::Markdown,
+        supports_folding: true,
     },
     SyntaxSpec {
         metadata: SyntaxMetadataSpec {
@@ -437,6 +469,7 @@ static BUILTIN_SYNTAX_SPECS: &[SyntaxSpec] = &[
             shebang: &[],
         },
         tokenizer: SyntaxTokenizer::Json,
+        supports_folding: true,
     },
     SyntaxSpec {
         metadata: SyntaxMetadataSpec {
@@ -450,6 +483,7 @@ static BUILTIN_SYNTAX_SPECS: &[SyntaxSpec] = &[
             shebang: &[],
         },
         tokenizer: SyntaxTokenizer::Toml,
+        supports_folding: false,
     },
     SyntaxSpec {
         metadata: SyntaxMetadataSpec {
@@ -463,6 +497,7 @@ static BUILTIN_SYNTAX_SPECS: &[SyntaxSpec] = &[
             shebang: &[],
         },
         tokenizer: SyntaxTokenizer::Yaml,
+        supports_folding: false,
     },
     SyntaxSpec {
         metadata: SyntaxMetadataSpec {
@@ -476,6 +511,7 @@ static BUILTIN_SYNTAX_SPECS: &[SyntaxSpec] = &[
             shebang: &[],
         },
         tokenizer: SyntaxTokenizer::Html,
+        supports_folding: true,
     },
     SyntaxSpec {
         metadata: SyntaxMetadataSpec {
@@ -489,6 +525,7 @@ static BUILTIN_SYNTAX_SPECS: &[SyntaxSpec] = &[
             shebang: &[],
         },
         tokenizer: SyntaxTokenizer::Css,
+        supports_folding: true,
     },
     SyntaxSpec {
         metadata: SyntaxMetadataSpec {
@@ -502,6 +539,7 @@ static BUILTIN_SYNTAX_SPECS: &[SyntaxSpec] = &[
             shebang: &[],
         },
         tokenizer: SyntaxTokenizer::Makefile,
+        supports_folding: false,
     },
     SyntaxSpec {
         metadata: SyntaxMetadataSpec {
@@ -515,6 +553,7 @@ static BUILTIN_SYNTAX_SPECS: &[SyntaxSpec] = &[
             shebang: &[],
         },
         tokenizer: SyntaxTokenizer::Dockerfile,
+        supports_folding: false,
     },
     SyntaxSpec {
         metadata: SyntaxMetadataSpec {
@@ -528,6 +567,7 @@ static BUILTIN_SYNTAX_SPECS: &[SyntaxSpec] = &[
             shebang: &[],
         },
         tokenizer: SyntaxTokenizer::Cmake,
+        supports_folding: false,
     },
     SyntaxSpec {
         metadata: SyntaxMetadataSpec {
@@ -541,5 +581,6 @@ static BUILTIN_SYNTAX_SPECS: &[SyntaxSpec] = &[
             shebang: &[],
         },
         tokenizer: SyntaxTokenizer::Justfile,
+        supports_folding: false,
     },
 ];

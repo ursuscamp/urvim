@@ -1,5 +1,15 @@
 use super::*;
 
+fn assert_json_folds(source: &str, expected: &[(usize, usize)]) {
+    let mut buf = fixture_buffer("syntax-json-folds", "json", source);
+    let actual: Vec<(usize, usize)> = buf
+        .syntax_fold_regions()
+        .iter()
+        .map(|region| (region.start_line, region.end_line))
+        .collect();
+    assert_eq!(actual, expected);
+}
+
 #[test]
 fn test_json_fixture_uses_grammar_rules() {
     let fixture = include_str!("fixtures/json.json");
@@ -46,4 +56,17 @@ fn test_json_strings_use_escape_regions() {
     assert_spans_include_style(&spans, tag("string"));
     assert_spans_include_style(&spans, tag("punctuation"));
     assert_spans_include_style(&spans, tag("constant"));
+}
+
+#[test]
+fn test_json_object_and_array_folds_ignore_strings() {
+    assert_json_folds(
+        "{\n  \"text\": \"{\",\n  \"items\": [\n    {\n      \"value\": 1\n    }\n  ]\n}\n",
+        &[(3, 5), (2, 6), (0, 7)],
+    );
+}
+
+#[test]
+fn test_json_same_line_structures_are_discarded() {
+    assert_json_folds("{\"items\": [1, 2, 3]}\n", &[]);
 }

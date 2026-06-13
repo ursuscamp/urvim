@@ -1,5 +1,15 @@
 use super::*;
 
+fn assert_javascript_folds(source: &str, expected: &[(usize, usize)]) {
+    let mut buf = fixture_buffer("syntax-js-folds", "js", source);
+    let actual: Vec<(usize, usize)> = buf
+        .syntax_fold_regions()
+        .iter()
+        .map(|region| (region.start_line, region.end_line))
+        .collect();
+    assert_eq!(actual, expected);
+}
+
 #[test]
 fn test_javascript_types_use_type_rules() {
     let path =
@@ -9,6 +19,14 @@ fn test_javascript_types_use_type_rules() {
     let spans = buf.syntax_spans_for_line(0).expect("line should exist");
     assert_spans_include_style(&spans, tag("keyword"));
     assert_spans_include_style(&spans, tag("type"));
+}
+
+#[test]
+fn test_javascript_bracket_folds_ignore_strings_and_comments() {
+    assert_javascript_folds(
+        "function demo() {\n  const text = \"{\";\n  // {\n  if (text) {\n    return [\n      text,\n    ];\n  }\n}\n",
+        &[(4, 6), (3, 7), (0, 8)],
+    );
 }
 
 #[test]

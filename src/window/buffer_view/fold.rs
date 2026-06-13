@@ -1,5 +1,5 @@
 use super::BufferView;
-use crate::buffer::{Buffer, Cursor};
+use crate::buffer::{Buffer, Cursor, SyntaxFoldRegion};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FoldRange {
@@ -201,7 +201,7 @@ impl BufferView {
 
     fn fold_range_for_cursor(&self) -> Option<FoldRange> {
         let cursor_line = self.cursor.line;
-        self.with_buffer(|buffer| {
+        self.with_buffer_mut(|buffer| {
             if buffer.line_count() == 0 {
                 return None;
             }
@@ -212,20 +212,58 @@ impl BufferView {
     }
 
     fn fold_range_for_line(&self, line: usize) -> Option<FoldRange> {
-        self.with_buffer(|buffer| fold_range_for_line(buffer, line))
+        self.with_buffer_mut(|buffer| fold_range_for_line(buffer, line))
             .flatten()
     }
 }
 
-pub(super) fn fold_range_for_line(buffer: &Buffer, line: usize) -> Option<FoldRange> {
+pub(super) fn fold_range_for_line(buffer: &mut Buffer, line: usize) -> Option<FoldRange> {
     if buffer.line_count() == 0 {
         return None;
     }
 
-    fold_range_starting_at(buffer, line).or_else(|| containing_indent_fold_range(buffer, line))
+    if buffer.syntax_supports_folding() {
+        syntax_fold_range_for_line(buffer, line)
+            .or_else(|| containing_syntax_fold_range(buffer, line))
+    } else {
+        indent_fold_range_starting_at(buffer, line)
+            .or_else(|| containing_indent_fold_range(buffer, line))
+    }
 }
 
-pub(super) fn fold_range_starting_at(buffer: &Buffer, start_line: usize) -> Option<FoldRange> {
+fn syntax_fold_range_for_line(buffer: &mut Buffer, line: usize) -> Option<FoldRange> {
+    buffer
+        .syntax_fold_region_starting_at(line)
+        .map(fold_region_to_range)
+}
+
+fn containing_syntax_fold_range(buffer: &mut Buffer, line: usize) -> Option<FoldRange> {
+    buffer
+        .syntax_fold_region_containing(line)
+        .map(fold_region_to_range)
+}
+
+fn fold_region_to_range(region: SyntaxFoldRegion) -> FoldRange {
+    FoldRange {
+        start_line: region.start_line,
+        end_line: region.end_line,
+    }
+}
+
+pub(super) fn cached_fold_range_starting_at(
+    buffer: &Buffer,
+    start_line: usize,
+) -> Option<FoldRange> {
+    if buffer.syntax_supports_folding() {
+        buffer
+            .cached_syntax_fold_region_starting_at(start_line)
+            .map(fold_region_to_range)
+    } else {
+        indent_fold_range_starting_at(buffer, start_line)
+    }
+}
+
+fn indent_fold_range_starting_at(buffer: &Buffer, start_line: usize) -> Option<FoldRange> {
     if buffer
         .line_at(start_line)
         .is_some_and(|text| text.to_string().chars().all(char::is_whitespace))
@@ -268,6 +306,6 @@ fn containing_indent_fold_range(buffer: &Buffer, line: usize) -> Option<FoldRang
 
     (0..line)
         .rev()
-        .filter_map(|candidate| fold_range_starting_at(buffer, candidate))
+        .filter_map(|candidate| indent_fold_range_starting_at(buffer, candidate))
         .find(|range| range.contains_hidden_line(line))
 }

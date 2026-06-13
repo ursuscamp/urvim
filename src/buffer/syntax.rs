@@ -8,6 +8,7 @@ use crate::globals;
 use crate::syntax::{SyntaxDefinition, SyntaxTokenizer, builtin_syntax_registry};
 use crate::theme::Tag;
 use smol_str::SmolStr;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 const SYNTAX_REFRESH_UPDATE_LINES: usize = 512;
@@ -132,10 +133,75 @@ impl SyntaxSpan {
     }
 }
 
+/// Tokenizer-scoped identifier used to match syntax fold open and close events.
+pub type SyntaxFoldKind = u32;
+
+/// Direction of a fold event produced by a tokenizer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SyntaxFoldEventKind {
+    /// Opens a new fold region.
+    Open,
+    /// Closes the nearest matching open fold region.
+    Close,
+}
+
+/// A line-based fold event emitted by a tokenizer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SyntaxFoldEvent {
+    /// Whether this event opens or closes a fold region.
+    pub kind: SyntaxFoldEventKind,
+    /// Tokenizer-scoped kind used to match opens with closes.
+    pub fold_kind: SyntaxFoldKind,
+    /// Number of lines before the event line where a close should end.
+    pub close_line_offset: usize,
+}
+
+impl SyntaxFoldEvent {
+    /// Creates a new syntax fold event.
+    pub fn new(kind: SyntaxFoldEventKind, fold_kind: SyntaxFoldKind) -> Self {
+        Self {
+            kind,
+            fold_kind,
+            close_line_offset: 0,
+        }
+    }
+
+    /// Creates a close event whose region ends before the event line.
+    pub fn close_before_current_line(fold_kind: SyntaxFoldKind) -> Self {
+        Self {
+            kind: SyntaxFoldEventKind::Close,
+            fold_kind,
+            close_line_offset: 1,
+        }
+    }
+}
+
+/// Result of tokenizing one line with a builtin scanner.
+#[derive(Debug, Clone)]
+pub struct SyntaxLineResult {
+    /// Highlighted spans for the line.
+    pub spans: Vec<SyntaxSpan>,
+    /// Fold events emitted while scanning the line.
+    pub fold_events: Vec<SyntaxFoldEvent>,
+    /// State to pass to the next line.
+    pub state: SyntaxState,
+}
+
+impl From<(Vec<SyntaxSpan>, SyntaxState)> for SyntaxLineResult {
+    fn from((spans, state): (Vec<SyntaxSpan>, SyntaxState)) -> Self {
+        Self {
+            spans,
+            fold_events: Vec::new(),
+            state,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 struct SyntaxLine {
     fingerprint: LineFingerprint,
     spans: Vec<SyntaxSpan>,
+    fold_events: Vec<SyntaxFoldEvent>,
     state: SyntaxState,
 }
 
@@ -149,6 +215,22 @@ struct SyntaxLineView<'a> {
 pub struct SyntaxCache {
     syntax_name: SmolStr,
     lines: Vec<Option<SyntaxLine>>,
+    fold_regions: Vec<SyntaxFoldRegion>,
+}
+
+/// A contiguous line range produced by matching syntax fold events.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SyntaxFoldRegion {
+    /// Inclusive starting line index.
+    pub start_line: usize,
+    /// Inclusive ending line index.
+    pub end_line: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PendingFoldOpen {
+    line: usize,
+    fold_kind: SyntaxFoldKind,
 }
 
 impl SyntaxCache {
@@ -157,6 +239,7 @@ impl SyntaxCache {
         Self {
             syntax_name: syntax_name.into(),
             lines: Vec::new(),
+            fold_regions: Vec::new(),
         }
     }
 
@@ -166,6 +249,7 @@ impl SyntaxCache {
         if self.syntax_name != syntax_name {
             self.syntax_name = syntax_name;
             self.lines = Vec::new();
+            self.fold_regions = Vec::new();
         }
     }
 
@@ -182,6 +266,8 @@ impl SyntaxCache {
     }
 
     fn apply_edit_effect(&mut self, effect: BufferEditEffect) {
+        self.apply_fold_region_edit_effect(effect);
+
         if self.lines.len() < effect.start_line {
             self.lines.resize_with(effect.start_line, || None);
         }
@@ -199,6 +285,51 @@ impl SyntaxCache {
         }
     }
 
+    fn apply_fold_region_edit_effect(&mut self, effect: BufferEditEffect) {
+        if self.fold_regions.is_empty() {
+            return;
+        }
+
+        let start = effect.start_line;
+        let delta = effect.new_line_count as isize - effect.old_line_count as isize;
+        if delta == 0 && effect.old_line_count == 1 && effect.new_line_count == 1 {
+            self.fold_regions.retain(|region| {
+                let edit_touches_boundary = region.start_line == start || region.end_line == start;
+                let edit_is_inside_region = region.start_line < start && region.end_line > start;
+                !edit_touches_boundary || edit_is_inside_region
+            });
+            return;
+        }
+
+        if delta > 0 {
+            let delta = delta as usize;
+            for region in &mut self.fold_regions {
+                if region.start_line >= start {
+                    region.start_line = region.start_line.saturating_add(delta);
+                    region.end_line = region.end_line.saturating_add(delta);
+                } else if region.end_line >= start {
+                    region.end_line = region.end_line.saturating_add(delta);
+                }
+            }
+            return;
+        }
+
+        let old_end_exclusive = start.saturating_add(effect.old_line_count);
+        self.fold_regions.retain_mut(|region| {
+            if region.end_line < start {
+                return true;
+            }
+
+            if region.start_line >= old_end_exclusive {
+                region.start_line = region.start_line.saturating_add_signed(delta);
+                region.end_line = region.end_line.saturating_add_signed(delta);
+                return true;
+            }
+
+            false
+        });
+    }
+
     fn line_view(&self, line: usize) -> Option<SyntaxLineView<'_>> {
         self.lines
             .get(line)
@@ -212,6 +343,8 @@ impl SyntaxCache {
 
     fn truncate_cached_lines(&mut self, line_count: usize) {
         self.lines.truncate(line_count);
+        self.fold_regions
+            .retain(|region| region.end_line < line_count);
     }
 
     #[cfg(test)]
@@ -224,6 +357,7 @@ impl SyntaxCache {
         self.lines.push(Some(SyntaxLine {
             fingerprint: LineFingerprint::new(line.as_ref()),
             spans,
+            fold_events: Vec::new(),
             state,
         }));
     }
@@ -234,6 +368,7 @@ impl SyntaxCache {
             return;
         }
         self.lines[line] = None;
+        self.fold_regions.retain(|region| region.end_line < line);
     }
 
     /// Returns cached spans for a line without computing any missing prefix.
@@ -245,6 +380,32 @@ impl SyntaxCache {
     /// Returns cached spans for a line without cloning or computing missing prefix data.
     pub fn cached_spans_for_line_ref(&self, line: usize) -> Option<&[SyntaxSpan]> {
         self.line_view(line).map(|entry| entry.spans)
+    }
+
+    /// Returns all syntax fold regions derived from the current cache.
+    pub fn fold_regions(&self) -> &[SyntaxFoldRegion] {
+        &self.fold_regions
+    }
+
+    /// Returns the fold region starting at the requested line, if any.
+    pub fn fold_region_starting_at(&self, line: usize) -> Option<SyntaxFoldRegion> {
+        self.fold_regions
+            .iter()
+            .filter(|region| region.start_line == line)
+            .max_by_key(|region| region.end_line)
+            .copied()
+    }
+
+    /// Returns the innermost fold region containing the requested line.
+    ///
+    /// When multiple regions contain the line, the one with the largest start
+    /// line (i.e. the innermost nested region) is returned.
+    pub fn fold_region_containing(&self, line: usize) -> Option<SyntaxFoldRegion> {
+        self.fold_regions
+            .iter()
+            .filter(|region| region.start_line < line && region.end_line >= line)
+            .max_by_key(|region| region.start_line)
+            .copied()
     }
 
     /// Returns cached spans for rendering, falling back to the last stale snapshot.
@@ -365,6 +526,7 @@ impl SyntaxCache {
 
         if line_texts.line_count() == 0 {
             self.lines = Vec::new();
+            self.fold_regions = Vec::new();
             return;
         }
 
@@ -375,6 +537,11 @@ impl SyntaxCache {
         loop {
             let scan_start = self.first_missing_line().unwrap_or(self.lines.len());
             if scan_start > target_line || scan_start >= line_texts.line_count() {
+                if target_line >= line_texts.line_count().saturating_sub(1)
+                    && self.lines.iter().take(target_line + 1).all(Option::is_some)
+                {
+                    self.rebuild_fold_regions(line_texts.line_count());
+                }
                 break;
             }
 
@@ -397,11 +564,19 @@ impl SyntaxCache {
                 let line_ref = line_texts.line(current_line).expect("target line exists");
                 let fingerprint = LineFingerprint::from_text_ref(&line_ref);
                 let line_text = line_ref.contiguous_text_with_scratch(&mut scratch);
-                let (spans, next_state) =
-                    tokenize_line_definition(syntax_definition, line_text, state);
+                let SyntaxLineResult {
+                    spans,
+                    fold_events,
+                    state: next_state,
+                } = tokenize_line_definition(syntax_definition, line_text, state);
+
+                let fingerprint_changed = old_line
+                    .as_ref()
+                    .is_some_and(|old| old.fingerprint != fingerprint);
                 let next_line = SyntaxLine {
                     fingerprint,
                     spans,
+                    fold_events,
                     state: next_state.clone(),
                 };
                 let reconverged = old_line.as_ref().is_some_and(|old| {
@@ -422,11 +597,129 @@ impl SyntaxCache {
                 state = next_state;
                 current_line += 1;
 
-                if reconverged || current_line > target_line && self.first_missing_line().is_none()
+                if reconverged && !fingerprint_changed
+                    || current_line > target_line
+                        && self.first_missing_line().is_none()
+                        && target_line < line_texts.line_count().saturating_sub(1)
                 {
                     break;
                 }
             }
+
+            let reached_eof = current_line >= line_texts.line_count();
+            if reached_eof {
+                self.rebuild_fold_regions(line_texts.line_count());
+            } else if self.lines.iter().take(target_line + 1).all(Option::is_some) {
+                self.rebuild_fold_regions_through(target_line);
+            } else {
+                self.rebuild_fold_regions_through(current_line.saturating_sub(1));
+            }
+        }
+    }
+
+    fn rebuild_fold_regions(&mut self, line_count: usize) {
+        if line_count == 0 {
+            self.fold_regions = Vec::new();
+            return;
+        }
+
+        self.rebuild_fold_regions_inner(line_count - 1, true);
+    }
+
+    fn rebuild_fold_regions_through(&mut self, last_line: usize) {
+        self.rebuild_fold_regions_inner(last_line, false);
+    }
+
+    fn rebuild_fold_regions_inner(&mut self, last_line: usize, finalize_to_eof: bool) {
+        let retained_suffix_regions = if finalize_to_eof {
+            Vec::new()
+        } else {
+            self.fold_regions
+                .iter()
+                .copied()
+                .filter(|region| region.end_line > last_line)
+                .collect()
+        };
+        self.fold_regions = Vec::new();
+        let mut stack = Vec::new();
+
+        for line in 0..=last_line {
+            let Some(entry) = self.lines.get(line).and_then(Option::as_ref) else {
+                break;
+            };
+            apply_fold_events_for_line(
+                &mut self.fold_regions,
+                &mut stack,
+                line,
+                &entry.fold_events,
+            );
+        }
+
+        if finalize_to_eof {
+            finalize_fold_regions_to_eof(&mut self.fold_regions, &mut stack, last_line);
+        }
+
+        for region in retained_suffix_regions {
+            if !self.fold_regions.contains(&region) {
+                self.fold_regions.push(region);
+            }
+        }
+        self.fold_regions.dedup();
+    }
+}
+
+fn apply_fold_events_for_line(
+    regions: &mut Vec<SyntaxFoldRegion>,
+    stack: &mut Vec<PendingFoldOpen>,
+    line: usize,
+    events: &[SyntaxFoldEvent],
+) {
+    for event in events {
+        match event.kind {
+            SyntaxFoldEventKind::Open => stack.push(PendingFoldOpen {
+                line,
+                fold_kind: event.fold_kind,
+            }),
+            SyntaxFoldEventKind::Close => {
+                let close_line = line.saturating_sub(event.close_line_offset);
+                close_matching_fold(regions, stack, close_line, event.fold_kind);
+            }
+        }
+    }
+}
+
+fn close_matching_fold(
+    regions: &mut Vec<SyntaxFoldRegion>,
+    stack: &mut Vec<PendingFoldOpen>,
+    close_line: usize,
+    fold_kind: SyntaxFoldKind,
+) {
+    let Some(position) = stack.iter().rposition(|open| open.fold_kind == fold_kind) else {
+        return;
+    };
+
+    let start_line = stack[position].line;
+    stack.remove(position);
+
+    if start_line != close_line {
+        regions.push(SyntaxFoldRegion {
+            start_line,
+            end_line: close_line,
+        });
+    }
+}
+
+fn finalize_fold_regions_to_eof(
+    regions: &mut Vec<SyntaxFoldRegion>,
+    stack: &mut Vec<PendingFoldOpen>,
+    eof_line: usize,
+) {
+    while let Some(open) = stack.pop() {
+        if open.line != eof_line {
+            regions.push(SyntaxFoldRegion {
+                start_line: open.line,
+                end_line: eof_line,
+            });
         }
     }
 }
@@ -901,6 +1194,21 @@ impl BufferCache {
         *self = other;
     }
 
+    /// Returns all syntax fold regions derived from the current cache.
+    pub fn syntax_fold_regions(&self) -> &[SyntaxFoldRegion] {
+        self.syntax_cache.fold_regions()
+    }
+
+    /// Returns the syntax fold region starting at the requested line, if any.
+    pub fn syntax_fold_region_starting_at(&self, line: usize) -> Option<SyntaxFoldRegion> {
+        self.syntax_cache.fold_region_starting_at(line)
+    }
+
+    /// Returns the innermost syntax fold region containing the requested line.
+    pub fn syntax_fold_region_containing(&self, line: usize) -> Option<SyntaxFoldRegion> {
+        self.syntax_cache.fold_region_containing(line)
+    }
+
     /// Replaces only the syntax cache portion.
     pub fn replace_syntax_cache(&mut self, syntax_cache: SyntaxCache) {
         self.syntax_cache = syntax_cache;
@@ -1187,14 +1495,51 @@ pub(crate) enum SyntaxState {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum CodeState {
-    Normal {
-        contexts: ContextStack,
-    },
-    RuleList {
+    Scanner {
         contexts: ContextStack,
         injection: Option<TokenizerInjectionState>,
         parent_style: Option<Tag>,
+        tokenizer_state: SyntaxTokenizerState,
     },
+}
+
+/// Opaque tokenizer-owned state carried between tokenized lines.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SyntaxTokenizerState {
+    values: BTreeMap<String, SyntaxTokenizerStateValue>,
+}
+
+impl SyntaxTokenizerState {
+    /// Returns a stored unsigned integer value.
+    pub fn get_u32(&self, key: &str) -> Option<u32> {
+        match self.values.get(key) {
+            Some(SyntaxTokenizerStateValue::U32(value)) => Some(*value),
+            _ => None,
+        }
+    }
+
+    /// Sets or removes a stored unsigned integer value.
+    pub fn set_u32(&mut self, key: impl Into<String>, value: Option<u32>) {
+        let key = key.into();
+        if let Some(value) = value {
+            self.values
+                .insert(key, SyntaxTokenizerStateValue::U32(value));
+        } else {
+            self.values.remove(&key);
+        }
+    }
+}
+
+/// IPC-friendly scalar value carried in tokenizer-owned state.
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SyntaxTokenizerStateValue {
+    /// Boolean state value.
+    Bool(bool),
+    /// Unsigned 32-bit integer state value.
+    U32(u32),
+    /// String state value.
+    String(String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1329,13 +1674,8 @@ pub(crate) fn tokenize_line_definition(
     definition: &SyntaxDefinition,
     line: &str,
     state: SyntaxState,
-) -> (Vec<SyntaxSpan>, SyntaxState) {
-    crate::syntax::builtin_tokenizers::dispatch_builtin(
-        definition.tokenizer,
-        definition,
-        line,
-        state,
-    )
+) -> SyntaxLineResult {
+    crate::syntax::tokenizers::dispatch_builtin(definition.tokenizer, definition, line, state)
 }
 
 pub(crate) fn tokenize_nested_body(
@@ -1348,8 +1688,11 @@ pub(crate) fn tokenize_nested_body(
             syntax_definition,
             state,
         } => {
-            let (spans, next_state) =
-                tokenize_line_definition(syntax_definition.as_ref(), body, state.as_ref().clone());
+            let SyntaxLineResult {
+                spans,
+                fold_events: _,
+                state: next_state,
+            } = tokenize_line_definition(syntax_definition.as_ref(), body, state.as_ref().clone());
             **state = next_state;
             offset_spans(spans, offset)
         }
@@ -1365,7 +1708,7 @@ pub(crate) fn tokenize_injected_body(
     if let Some(ref mut nested) = inj.nested {
         let spans = tokenize_nested_body(nested, body, offset);
         let NestedState::Syntax { state, .. } = nested;
-        if let SyntaxState::Code(CodeState::RuleList {
+        if let SyntaxState::Code(CodeState::Scanner {
             parent_style: ps, ..
         }) = state.as_ref()
         {
@@ -1389,8 +1732,11 @@ fn offset_spans(spans: Vec<SyntaxSpan>, offset: usize) -> Vec<SyntaxSpan> {
 pub(crate) fn initial_state_for_definition(definition: &SyntaxDefinition) -> SyntaxState {
     match definition.tokenizer {
         SyntaxTokenizer::Plaintext => SyntaxState::Plain,
-        _ => SyntaxState::Code(CodeState::Normal {
+        _ => SyntaxState::Code(CodeState::Scanner {
             contexts: ContextStack::default(),
+            injection: None,
+            parent_style: None,
+            tokenizer_state: SyntaxTokenizerState::default(),
         }),
     }
 }
@@ -1691,6 +2037,43 @@ impl Buffer {
     pub fn buffer_cache_complete(&self) -> bool {
         self.buffer_cache
             .is_complete_for_line_count(self.line_count())
+    }
+
+    /// Returns true when the current syntax supports syntax-based folding.
+    pub fn syntax_supports_folding(&self) -> bool {
+        syntax_definition(self.syntax_name()).is_some_and(|definition| definition.supports_folding)
+    }
+
+    /// Returns all syntax fold regions for the current buffer.
+    pub fn syntax_fold_regions(&mut self) -> &[SyntaxFoldRegion] {
+        self.ensure_complete_syntax_folds();
+        self.buffer_cache.syntax_fold_regions()
+    }
+
+    /// Returns the syntax fold region starting at the requested line, if any.
+    pub fn syntax_fold_region_starting_at(&mut self, line: usize) -> Option<SyntaxFoldRegion> {
+        self.ensure_complete_syntax_folds();
+        self.buffer_cache.syntax_fold_region_starting_at(line)
+    }
+
+    /// Returns a cached syntax fold region starting at the requested line without warming syntax.
+    pub fn cached_syntax_fold_region_starting_at(&self, line: usize) -> Option<SyntaxFoldRegion> {
+        self.buffer_cache.syntax_fold_region_starting_at(line)
+    }
+
+    /// Returns the innermost syntax fold region containing the requested line.
+    pub fn syntax_fold_region_containing(&mut self, line: usize) -> Option<SyntaxFoldRegion> {
+        self.ensure_complete_syntax_folds();
+        self.buffer_cache.syntax_fold_region_containing(line)
+    }
+
+    fn ensure_complete_syntax_folds(&mut self) {
+        if !self.syntax_supports_folding() || self.line_count() == 0 || self.syntax_cache_complete()
+        {
+            return;
+        }
+
+        self.ensure_syntax_through(self.line_count().saturating_sub(1));
     }
 }
 

@@ -1,5 +1,23 @@
 use super::*;
 
+fn assert_java_folds(source: &str, expected: &[(usize, usize)]) {
+    let mut buf = fixture_buffer("syntax-java-folds", "java", source);
+    let actual: Vec<(usize, usize)> = buf
+        .syntax_fold_regions()
+        .iter()
+        .map(|region| (region.start_line, region.end_line))
+        .collect();
+    assert_eq!(actual, expected);
+}
+
+#[test]
+fn test_java_bracket_folds_ignore_strings_and_comments() {
+    assert_java_folds(
+        "class Demo {\n  void run() {\n    String text = \"{\";\n    // {\n    if (!text.isEmpty()) {\n      int[] values = {\n        1,\n      };\n    }\n  }\n}\n",
+        &[(5, 7), (4, 8), (1, 9), (0, 10)],
+    );
+}
+
 #[test]
 fn test_java_fixture_uses_grammar_rules() {
     let fixture = include_str!("fixtures/java.java");

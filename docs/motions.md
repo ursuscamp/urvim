@@ -30,9 +30,9 @@ Register behavior is documented separately in [docs/registers.md](docs/registers
 | `PageDown`  | Move down one page                                                                                    |
 | `Ctrl-U`    | Move up half a page                                                                                   |
 | `Ctrl-D`    | Move down half a page                                                                                 |
-| `za`        | Toggle the indent-scope fold containing the cursor                                                    |
-| `zo`        | Open the indent-scope fold containing the cursor                                                      |
-| `zc`        | Close the indent-scope fold containing the cursor                                                     |
+| `za`        | Toggle the fold containing the cursor                                                                 |
+| `zo`        | Open the fold containing the cursor                                                                   |
+| `zc`        | Close the fold containing the cursor                                                                  |
 | `[d` / `]d` | Move to previous / next diagnostic                                                                    |
 | `[e` / `]e` | Move to previous / next error diagnostic                                                              |
 | `[h` / `]h` | Move to previous / next diff hunk start                                                               |
@@ -578,11 +578,11 @@ Scrolls so the cursor line appears at the bottom of the viewport when possible.
 
 ## Code Folding
 
-Fold points are derived from indentation scopes. Fold state is local to the current window, so separate splits can show the same buffer with different folds.
+Fold points are derived from the syntax when the current language supports syntax-based folding; otherwise they fall back to indentation scopes. Fold state is local to the current window, so separate splits can show the same buffer with different folds.
 
 ### za - Toggle Fold
 
-Toggles the fold containing the cursor. Closing a fold keeps the scope's first line visible and replaces the hidden interior with a summary such as `... 2 lines folded`.
+Toggles the fold containing the cursor. Closing a fold keeps the fold's first line visible and replaces the hidden interior with a summary such as `... 2 lines folded`.
 
 ### zo - Open Fold
 
@@ -590,7 +590,7 @@ Opens the fold containing the cursor when it is currently closed.
 
 ### zc - Close Fold
 
-Closes the fold containing the cursor when an indentation scope is available.
+Closes the fold containing the cursor when a fold is available.
 
 ## Paging Motions
 

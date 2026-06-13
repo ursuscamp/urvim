@@ -1,5 +1,15 @@
 use super::*;
 
+fn assert_html_folds(source: &str, expected: &[(usize, usize)]) {
+    let mut buf = fixture_buffer("syntax-html-folds", "html", source);
+    let actual: Vec<(usize, usize)> = buf
+        .syntax_fold_regions()
+        .iter()
+        .map(|region| (region.start_line, region.end_line))
+        .collect();
+    assert_eq!(actual, expected);
+}
+
 #[test]
 fn test_html_fixture_uses_grammar_rules() {
     let fixture = include_str!("fixtures/html.html");
@@ -148,4 +158,44 @@ fn test_html_multiline_comment_body_uses_comment_style() {
     assert_spans_include_exact_style(&body, &body_text, "body text", tag("comment"));
     assert_spans_include_exact_style(&closer, &closer_text, "end ", tag("comment"));
     assert_spans_include_exact_style(&closer, &closer_text, "-->", tag("comment"));
+}
+
+#[test]
+fn test_html_tag_folds_nested_elements() {
+    assert_html_folds(
+        "<div>\n  <section>\n    text\n  </section>\n</div>\n",
+        &[(1, 3), (0, 4)],
+    );
+}
+
+#[test]
+fn test_html_tag_folds_match_nearest_same_tag() {
+    assert_html_folds(
+        "<div>\n  <div>\n    text\n  </div>\n</div>\n",
+        &[(1, 3), (0, 4)],
+    );
+}
+
+#[test]
+fn test_html_void_and_self_closing_tags_do_not_fold() {
+    assert_html_folds(
+        "<div>\n  <img src=\"x\">\n  <custom />\n  <custom\n    prop=\"x\"\n  />\n</div>\n",
+        &[(0, 6)],
+    );
+}
+
+#[test]
+fn test_html_tags_in_attributes_and_comments_do_not_fold() {
+    assert_html_folds(
+        "<div data-x=\"<section>\">\n  <!-- <section> -->\n</div>\n",
+        &[(0, 2)],
+    );
+}
+
+#[test]
+fn test_html_script_and_style_host_tags_fold() {
+    assert_html_folds(
+        "<html>\n<script>\nconst value = 1;\n</script>\n<style>\nbody { color: red; }\n</style>\n</html>\n",
+        &[(1, 3), (4, 6), (0, 7)],
+    );
 }
