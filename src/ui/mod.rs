@@ -14,6 +14,7 @@ pub mod lsp_rename;
 pub mod picker;
 pub mod text_width;
 
+use crate::buffer::BufferId;
 use crate::buffer::Cursor;
 use crate::editor::Action;
 use crate::notification::NotificationLevel;
@@ -116,6 +117,8 @@ pub enum Command {
     OpenCommandLine,
     /// Open the insert-mode completion popup.
     OpenCompletion,
+    /// Open the visible-buffer picker overlay.
+    OpenBufferPicker,
     /// Open the file picker overlay.
     OpenFilePicker,
     /// Open the git picker overlay.
@@ -165,6 +168,8 @@ pub enum Command {
     OpenFile(PathBuf),
     /// Open a file and place the cursor at the provided position.
     OpenFileAtCursor(PathBuf, Cursor),
+    /// Focus the first pane showing the selected buffer.
+    FocusBuffer(BufferId),
     /// Toggle staging for a git picker selection.
     GitPickerToggleStage(crate::ui::picker::git::GitPickerAction),
     /// Request discarding a git picker selection.

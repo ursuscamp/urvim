@@ -145,6 +145,7 @@ impl Layout {
         notification::render_active_banner(screen, origin, size, std::time::Instant::now());
         let mut progress_widget = notification::ProgressWidget::new();
         progress_widget.render_widget(screen, UiRect::new(origin, size), &UiContext);
+        self.render_buffer_picker_overlay(screen, origin, size);
         self.render_colorscheme_picker_overlay(screen, origin, size);
         self.render_code_actions_picker_overlay(screen, origin, size);
         self.render_workspace_symbols_picker_overlay(screen, origin, size);
@@ -163,6 +164,16 @@ impl Layout {
         if self.inlay_hint_request_pending() {
             self.request_active_buffer_inlay_hints();
         }
+    }
+
+    fn render_buffer_picker_overlay(&mut self, screen: &mut Screen, origin: Position, size: Size) {
+        let Some(picker) = self.buffer_picker_mut() else {
+            return;
+        };
+
+        let ctx = UiContext;
+        let rect = UiRect::new(origin, size);
+        picker.render_widget(screen, rect, &ctx);
     }
 
     fn render_colorscheme_picker_overlay(

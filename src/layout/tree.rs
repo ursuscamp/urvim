@@ -7,6 +7,7 @@ use crate::buffer::BufferId;
 use crate::window::Window;
 use crate::window::{Position, Size};
 use crate::window_group::WindowGroup;
+use std::collections::HashSet;
 use std::time::Instant;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -55,6 +56,33 @@ impl Layout {
         };
 
         self.focus_pane(next_focused);
+    }
+
+    /// Returns the open UI buffers in pane-tree order without duplicates.
+    pub(super) fn visible_buffer_items(&self) -> Vec<crate::ui::picker::buffer::BufferPickerItem> {
+        let mut items = Vec::new();
+        let mut seen = HashSet::new();
+        let Some(root) = self.root.as_ref() else {
+            return items;
+        };
+
+        Self::collect_visible_buffer_items(root, &mut seen, &mut items);
+        items
+    }
+
+    /// Focuses the first pane showing `buffer_id`.
+    pub(super) fn focus_buffer(&mut self, buffer_id: BufferId) -> bool {
+        let Some(root) = self.root.as_mut() else {
+            return false;
+        };
+
+        let Some(pane_id) = Self::activate_buffer_in_first_pane(root, buffer_id) else {
+            return false;
+        };
+
+        self.focused_pane = pane_id;
+        crate::session::mark_dirty();
+        true
     }
 
     pub(super) fn split_focused_pane(&mut self, axis: SplitAxis) -> bool {
@@ -487,6 +515,49 @@ impl Layout {
             LayoutNode::Pane(_) => None,
             LayoutNode::Split(split) => Self::find_pane_mut(&mut split.first, id)
                 .or_else(|| Self::find_pane_mut(&mut split.second, id)),
+        }
+    }
+
+    fn collect_visible_buffer_items(
+        node: &LayoutNode,
+        seen: &mut HashSet<BufferId>,
+        items: &mut Vec<crate::ui::picker::buffer::BufferPickerItem>,
+    ) {
+        match node {
+            LayoutNode::Pane(pane) => {
+                for buffer_id in pane.window_group.buffer_ids() {
+                    if !seen.insert(buffer_id) {
+                        continue;
+                    }
+
+                    if let Some(item) = crate::globals::with_buffer(buffer_id, |buffer| {
+                        crate::ui::picker::buffer::BufferPickerItem::from_buffer(buffer_id, buffer)
+                    }) {
+                        items.push(item);
+                    }
+                }
+            }
+            LayoutNode::Split(split) => {
+                Self::collect_visible_buffer_items(&split.first, seen, items);
+                Self::collect_visible_buffer_items(&split.second, seen, items);
+            }
+        }
+    }
+
+    fn activate_buffer_in_first_pane(node: &mut LayoutNode, buffer_id: BufferId) -> Option<PaneId> {
+        match node {
+            LayoutNode::Pane(pane) => {
+                if pane.window_group.buffer_ids().contains(&buffer_id) {
+                    pane.window_group.activate_or_open_buffer(buffer_id);
+                    Some(pane.id)
+                } else {
+                    None
+                }
+            }
+            LayoutNode::Split(split) => {
+                Self::activate_buffer_in_first_pane(&mut split.first, buffer_id)
+                    .or_else(|| Self::activate_buffer_in_first_pane(&mut split.second, buffer_id))
+            }
         }
     }
 

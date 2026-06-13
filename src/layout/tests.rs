@@ -294,6 +294,41 @@ fn test_layout_file_picker_opens_and_closes() {
 }
 
 #[test]
+fn test_layout_buffer_picker_opens_and_focuses_first_visible_pane() {
+    let _pool_guard = globals::buffer_pool_test_lock();
+    globals::with_buffer_pool(|pool| *pool = crate::buffer::BufferPool::new());
+
+    let alpha = Buffer::from_str("alpha");
+    let second_buffer_id =
+        globals::with_buffer_pool(|pool| pool.register_buffer(Buffer::from_str("beta")));
+    let mut layout = layout_with_buffers(vec![alpha]);
+    layout
+        .active_window_group_mut()
+        .activate_or_open_buffer(second_buffer_id);
+
+    assert!(layout.dispatch_intent(&Intent::Command(Command::OpenBufferPicker)));
+    assert!(layout.buffer_picker_is_open());
+
+    let result = layout.route_ui_event(&UiEvent::Tick);
+    assert!(result.handled());
+
+    let picker = layout
+        .dialogs
+        .buffer_picker
+        .as_ref()
+        .expect("buffer picker");
+    assert!(
+        picker
+            .results()
+            .iter()
+            .any(|item| item.buffer_id == second_buffer_id)
+    );
+
+    assert!(layout.dispatch_intent(&Intent::Command(Command::FocusBuffer(second_buffer_id,))));
+    assert_eq!(layout.active_buffer_view().buffer_id(), second_buffer_id);
+}
+
+#[test]
 fn test_layout_git_picker_opens_and_closes() {
     let mut layout = layout_with_buffers(vec![Buffer::from_str("one")]);
 

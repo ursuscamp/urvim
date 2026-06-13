@@ -3,6 +3,7 @@
 //! This module provides a generic overlay picker that can stream results from a
 //! background source and emit selection intents for different result types.
 
+pub mod buffer;
 pub mod code_actions;
 pub mod colorscheme;
 pub mod doc_symbols;

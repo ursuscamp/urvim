@@ -1,3 +1,4 @@
+mod buffer;
 mod code_actions;
 mod colorscheme;
 mod doc_symbols;

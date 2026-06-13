@@ -184,6 +184,14 @@ impl WindowGroup {
         self.active_window_mut().buffer_view_mut()
     }
 
+    /// Returns the buffer identifiers for every tab in this window group.
+    pub fn buffer_ids(&self) -> Vec<BufferId> {
+        self.tabs
+            .iter()
+            .map(|window| window.buffer_view().buffer_id())
+            .collect()
+    }
+
     /// Closes the active tab and returns true when the window group becomes empty.
     pub fn close_active_tab(&mut self) -> bool {
         if self.tabs.is_empty() {

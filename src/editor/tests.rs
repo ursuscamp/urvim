@@ -200,10 +200,15 @@ fn test_picker_open_binding_is_available_in_modes() {
     assert!(matches!(
         normal.handle_key(&Key::new(KeyCode::F3)),
         HandleKeyResult::Complete(intent)
-            if matches!(intent, crate::ui::Intent::Command(crate::ui::Command::OpenGitPicker))
+            if matches!(intent, crate::ui::Intent::Command(crate::ui::Command::OpenBufferPicker))
     ));
     assert!(matches!(
         normal.handle_key(&Key::new(KeyCode::F4)),
+        HandleKeyResult::Complete(intent)
+            if matches!(intent, crate::ui::Intent::Command(crate::ui::Command::OpenGitPicker))
+    ));
+    assert!(matches!(
+        normal.handle_key(&Key::new(KeyCode::F5)),
         HandleKeyResult::Complete(intent)
             if matches!(intent, crate::ui::Intent::Command(crate::ui::Command::OpenColorschemePicker))
     ));
@@ -270,10 +275,15 @@ fn test_picker_open_binding_is_available_in_modes() {
     assert!(matches!(
         insert.handle_key(&Key::new(KeyCode::F3)),
         HandleKeyResult::Complete(intent)
-            if matches!(intent, crate::ui::Intent::Command(crate::ui::Command::OpenGitPicker))
+            if matches!(intent, crate::ui::Intent::Command(crate::ui::Command::OpenBufferPicker))
     ));
     assert!(matches!(
         insert.handle_key(&Key::new(KeyCode::F4)),
+        HandleKeyResult::Complete(intent)
+            if matches!(intent, crate::ui::Intent::Command(crate::ui::Command::OpenGitPicker))
+    ));
+    assert!(matches!(
+        insert.handle_key(&Key::new(KeyCode::F5)),
         HandleKeyResult::Complete(intent)
             if matches!(intent, crate::ui::Intent::Command(crate::ui::Command::OpenColorschemePicker))
     ));

@@ -206,8 +206,9 @@ fn register_case_operator_bindings(trie_keymap: &mut TrieKeymap) {
 fn register_misc_bindings(trie_keymap: &mut TrieKeymap) {
     trie_keymap.insert_str("<F1>", Command::OpenFilePicker);
     trie_keymap.insert_str("<F2>", Command::OpenGrepPicker);
-    trie_keymap.insert_str("<F3>", Command::OpenGitPicker);
-    trie_keymap.insert_str("<F4>", Command::OpenColorschemePicker);
+    trie_keymap.insert_str("<F3>", Command::OpenBufferPicker);
+    trie_keymap.insert_str("<F4>", Command::OpenGitPicker);
+    trie_keymap.insert_str("<F5>", Command::OpenColorschemePicker);
     trie_keymap.insert_str("K", Command::LspHover);
     trie_keymap.insert_str("gd", Command::LspDefinition);
     trie_keymap.insert_str("gra", Command::LspCodeActions);

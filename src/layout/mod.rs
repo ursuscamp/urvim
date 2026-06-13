@@ -232,88 +232,7 @@ impl Layout {
 
     /// Returns the visual cursor for the focused pane, if any.
     pub fn visual_cursor(&self) -> Option<Position> {
-        if let Some(position) = self
-            .dialogs
-            .colorscheme_picker
-            .as_ref()
-            .and_then(|picker| picker.cursor())
-        {
-            return Some(position);
-        }
-
-        if let Some(position) = self
-            .dialogs
-            .grep_picker
-            .as_ref()
-            .and_then(|picker| picker.cursor())
-        {
-            return Some(position);
-        }
-
-        if let Some(position) = self
-            .dialogs
-            .code_actions_picker
-            .as_ref()
-            .and_then(|picker| picker.cursor())
-        {
-            return Some(position);
-        }
-
-        if let Some(position) = self
-            .dialogs
-            .doc_symbols_picker
-            .as_ref()
-            .and_then(|picker| picker.cursor())
-        {
-            return Some(position);
-        }
-
-        if let Some(position) = self
-            .dialogs
-            .workspace_symbols_picker
-            .as_ref()
-            .and_then(|picker| picker.cursor())
-        {
-            return Some(position);
-        }
-
-        if let Some(position) = self
-            .dialogs
-            .references_picker
-            .as_ref()
-            .and_then(|picker| picker.cursor())
-        {
-            return Some(position);
-        }
-
-        if let Some(position) = self
-            .dialogs
-            .file_picker
-            .as_ref()
-            .and_then(|picker| picker.cursor())
-        {
-            return Some(position);
-        }
-
-        if let Some(position) = self
-            .dialogs
-            .git_picker
-            .as_ref()
-            .and_then(|picker| picker.cursor())
-        {
-            return Some(position);
-        }
-
-        if let Some(position) = self
-            .dialogs
-            .lsp_rename_prompt
-            .as_ref()
-            .and_then(|prompt| prompt.cursor())
-        {
-            return Some(position);
-        }
-
-        if let Some(position) = self.dialogs.command_line.cursor() {
+        if let Some(position) = self.dialogs.visual_cursor() {
             return Some(position);
         }
 
@@ -447,6 +366,10 @@ impl Layout {
             }
             Command::OpenCompletion => {
                 self.open_completion();
+                true
+            }
+            Command::OpenBufferPicker => {
+                self.open_buffer_picker();
                 true
             }
             Command::OpenColorschemePicker => {
@@ -608,6 +531,7 @@ impl Layout {
                 )
             }
             Command::ApplyCompletion(apply_completion) => self.apply_completion(apply_completion),
+            Command::FocusBuffer(buffer_id) => self.focus_buffer(*buffer_id),
             Command::OpenFile(path) => {
                 match crate::globals::with_buffer_pool(|pool| pool.open_buffer(path)) {
                     Ok(buffer_id) => {
@@ -821,6 +745,10 @@ impl Layout {
     }
 
     fn route_picker_ui_event(&mut self, event: &UiEvent) -> UiEventResult {
+        if self.buffer_picker_is_open() {
+            return self.handle_buffer_picker_event(event);
+        }
+
         if self.colorscheme_picker_is_open() {
             return self.handle_colorscheme_picker_event(event);
         }
