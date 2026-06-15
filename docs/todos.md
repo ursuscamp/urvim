@@ -11,7 +11,15 @@ This is a list, in no particular order, of things that need to be addressed whic
 - quick jump
 - healthcheck
 
+## Command line refactor
+
+- highlighting
+- completion
+
 # Bugs
+
+- ignore blank lines at the end of an indented fold region
 
 # Refactors
 
+- workspace arrangment

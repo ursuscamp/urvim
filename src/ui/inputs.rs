@@ -284,6 +284,16 @@ impl InputWidget {
 
     /// Renders the prompt and visible text as styled segments.
     pub fn render_segments(&self, content_cols: u16, text_style: Style) -> (Vec<LineSegment>, u16) {
+        self.render_segments_with_text_segments(content_cols, text_style, None)
+    }
+
+    /// Renders the prompt and visible text using precomputed text segments.
+    pub fn render_segments_with_text_segments(
+        &self,
+        content_cols: u16,
+        text_style: Style,
+        text_segments: Option<&[LineSegment]>,
+    ) -> (Vec<LineSegment>, u16) {
         let prompt_width = self
             .prompt
             .iter()
@@ -296,9 +306,8 @@ impl InputWidget {
             .sum::<usize>() as u16;
         let visible_text_cols =
             content_cols.saturating_sub(prompt_width.saturating_add(right_prompt_width));
-        let (visible_text, cursor_col) =
-            self.visible_text_with_cursor(usize::from(visible_text_cols));
-        let visible_text_width = UnicodeWidthStr::width(visible_text.as_str()) as u16;
+        let (visible_start, visible_end, cursor_col) =
+            self.visible_text_range_with_cursor(usize::from(visible_text_cols));
 
         let mut segments = self
             .prompt
@@ -306,11 +315,37 @@ impl InputWidget {
             .cloned()
             .map(|segment| LineSegment::new(segment.text, text_style.accent(segment.style)))
             .collect::<Vec<_>>();
-        if !visible_text.is_empty() {
-            segments.push(LineSegment::new(visible_text, text_style));
+        let text_segments: &[LineSegment] = text_segments.unwrap_or(&[]);
+        if text_segments.is_empty() {
+            let visible_text = &self.text[visible_start..visible_end];
+            if !visible_text.is_empty() {
+                segments.push(LineSegment::new(visible_text, text_style));
+            }
+        } else {
+            let mut offset = 0usize;
+            for segment in text_segments {
+                let segment_start = offset;
+                let segment_end = offset + segment.text.len();
+                offset = segment_end;
+
+                let start = visible_start.max(segment_start);
+                let end = visible_end.min(segment_end);
+                if start >= end {
+                    continue;
+                }
+
+                let local_start = start - segment_start;
+                let local_end = end - segment_start;
+                segments.push(LineSegment::new(
+                    &segment.text[local_start..local_end],
+                    segment.style,
+                ));
+            }
         }
 
         if right_prompt_width > 0 {
+            let visible_text_width =
+                UnicodeWidthStr::width(&self.text[visible_start..visible_end]) as u16;
             let gap_width = visible_text_cols.saturating_sub(visible_text_width);
             if gap_width > 0 {
                 segments.push(LineSegment::new(
@@ -407,9 +442,9 @@ impl InputWidget {
         self.cursor = next_word_boundary(self.text.as_str(), self.cursor);
     }
 
-    fn visible_text_with_cursor(&self, max_cols: usize) -> (String, u16) {
+    fn visible_text_range_with_cursor(&self, max_cols: usize) -> (usize, usize, u16) {
         if self.text.is_empty() || max_cols == 0 {
-            return (String::new(), 0);
+            return (0, 0, 0);
         }
 
         let spans = grapheme_spans(self.text.as_str());
@@ -421,7 +456,7 @@ impl InputWidget {
             .sum::<usize>();
 
         if total_width <= max_cols {
-            return (self.text.clone(), cursor_width as u16);
+            return (0, self.text.len(), cursor_width as u16);
         }
 
         let max_start_col = if self.cursor == self.text.len() && max_cols > 1 {
@@ -440,9 +475,8 @@ impl InputWidget {
 
         let start_byte = byte_index_at_visual_col(&spans, start_col);
         let end_byte = byte_index_at_visual_col(&spans, start_col.saturating_add(max_cols));
-        let visible = self.text[start_byte..end_byte].to_string();
         let cursor_col = cursor_width.saturating_sub(start_col);
-        (visible, cursor_col as u16)
+        (start_byte, end_byte, cursor_col as u16)
     }
 }
 
@@ -454,12 +488,24 @@ impl InputWidget {
         rect: UiRect,
         _ctx: &UiContext,
     ) {
+        self.render_widget_with_text_segments(screen, rect, _ctx, None);
+    }
+
+    /// Renders the prompt and visible text using precomputed text segments.
+    pub fn render_widget_with_text_segments(
+        &mut self,
+        screen: &mut Screen,
+        rect: UiRect,
+        _ctx: &UiContext,
+        text_segments: Option<&[LineSegment]>,
+    ) {
         self.render_cursor = None;
         if rect.size.rows == 0 || rect.size.cols == 0 {
             return;
         }
 
-        let (segments, cursor_col) = self.render_segments(rect.size.cols, self.text_style);
+        let (segments, cursor_col) =
+            self.render_segments_with_text_segments(rect.size.cols, self.text_style, text_segments);
         let mut col = rect.origin.col;
         for segment in segments {
             if col >= rect.origin.col.saturating_add(rect.size.cols) {

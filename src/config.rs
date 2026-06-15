@@ -264,6 +264,8 @@ pub struct Config {
     pub indent_guides: bool,
     /// The configured comment todo markers used for highlighting.
     pub todo_markers: Vec<SmolStr>,
+    /// User-defined command aliases parsed into command-token prefixes.
+    pub aliases: BTreeMap<String, Vec<String>>,
     /// How insert mode should resolve indentation for newly created lines.
     pub auto_indent: AutoIndentMode,
     /// Whether insert-mode completion may trigger automatically.
@@ -310,6 +312,8 @@ pub struct PartialConfig {
     pub indent_guides: Option<bool>,
     /// The todo marker list stored in the config file.
     pub todo_markers: Option<Vec<String>>,
+    /// User-defined command aliases stored in the config file.
+    pub aliases: Option<BTreeMap<String, String>>,
     /// How insert mode should resolve indentation for newly created lines.
     pub auto_indent: Option<AutoIndentMode>,
     /// Whether insert-mode completion may trigger automatically.
@@ -405,6 +409,10 @@ impl Config {
             .and_then(|config| config.todo_markers.clone())
             .map(|markers| markers.into_iter().map(SmolStr::new).collect())
             .unwrap_or_else(default_todo_markers);
+        let aliases = file
+            .and_then(|config| config.aliases.as_ref())
+            .map(resolve_aliases)
+            .unwrap_or_default();
         let auto_indent = file
             .and_then(|config| config.auto_indent)
             .unwrap_or_default();
@@ -446,6 +454,7 @@ impl Config {
             relative_number,
             indent_guides,
             todo_markers,
+            aliases,
             auto_indent,
             completion_trigger,
             completion_sources,
@@ -521,6 +530,7 @@ impl Default for Config {
             relative_number: false,
             indent_guides: true,
             todo_markers: default_todo_markers(),
+            aliases: BTreeMap::new(),
             auto_indent: AutoIndentMode::default(),
             completion_trigger: CompletionTrigger::default(),
             completion_sources: default_completion_sources(),
@@ -630,6 +640,10 @@ fn validate_partial_config(config: &PartialConfig) -> Result<(), ConfigLoadError
         validate_todo_markers(markers)?;
     }
 
+    if let Some(aliases) = config.aliases.as_ref() {
+        validate_aliases(aliases)?;
+    }
+
     if let Some(sources) = config.completion_sources.as_ref() {
         validate_completion_sources(sources)?;
     }
@@ -643,6 +657,44 @@ fn validate_partial_config(config: &PartialConfig) -> Result<(), ConfigLoadError
     }
 
     Ok(())
+}
+
+fn validate_aliases(aliases: &BTreeMap<String, String>) -> Result<(), ConfigLoadError> {
+    for (name, expansion) in aliases {
+        if name.trim().is_empty() {
+            return Err(ConfigLoadError::invalid(
+                "config aliases must not contain empty names",
+            ));
+        }
+        if name.chars().any(char::is_whitespace) {
+            return Err(ConfigLoadError::invalid(format!(
+                "config alias {name:?} must not contain whitespace"
+            )));
+        }
+        if crate::command::is_canonical_command_root(name) {
+            return Err(ConfigLoadError::invalid(format!(
+                "config alias {name:?} conflicts with a canonical command root"
+            )));
+        }
+        crate::command::validate_alias_expansion(expansion).map_err(|error| {
+            ConfigLoadError::invalid(format!(
+                "config alias {name:?} must expand to a valid command prefix: {error}"
+            ))
+        })?;
+    }
+
+    Ok(())
+}
+
+fn resolve_aliases(aliases: &BTreeMap<String, String>) -> BTreeMap<String, Vec<String>> {
+    aliases
+        .iter()
+        .map(|(name, expansion)| {
+            let tokens = crate::command::parse_alias_expansion(expansion)
+                .expect("validated command alias expansion should parse");
+            (name.clone(), tokens)
+        })
+        .collect()
 }
 
 fn resolve_scroll_margin(scroll_margin: Option<&PartialScrollMargin>) -> ScrollMargin {
@@ -1519,6 +1571,65 @@ mod tests {
             ConfigLoadError::Parse { .. } => {}
             other => panic!("expected parse error, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn load_from_locations_loads_command_aliases() {
+        let home = unique_temp_dir("aliases-home");
+        write_config(
+            &home,
+            r#"
+[aliases]
+dl = "action edit delete-line"
+w = "write"
+"#,
+        );
+
+        let config = Config::load_from_locations(home, vec![], None, None).expect("should load");
+        assert_eq!(
+            config.aliases,
+            BTreeMap::from([
+                (
+                    "dl".to_string(),
+                    vec![
+                        "action".to_string(),
+                        "edit".to_string(),
+                        "delete-line".to_string()
+                    ],
+                ),
+                ("w".to_string(), vec!["write".to_string()]),
+            ])
+        );
+    }
+
+    #[test]
+    fn load_from_locations_rejects_alias_for_canonical_root() {
+        let home = unique_temp_dir("canonical-alias-home");
+        write_config(
+            &home,
+            r#"
+[aliases]
+buffer = "write"
+"#,
+        );
+
+        let error = Config::load_from_locations(home, vec![], None, None).expect_err("should fail");
+        assert!(matches!(error, ConfigLoadError::Invalid { .. }));
+    }
+
+    #[test]
+    fn load_from_locations_rejects_empty_alias_expansion() {
+        let home = unique_temp_dir("empty-alias-home");
+        write_config(
+            &home,
+            r#"
+[aliases]
+dl = ""
+"#,
+        );
+
+        let error = Config::load_from_locations(home, vec![], None, None).expect_err("should fail");
+        assert!(matches!(error, ConfigLoadError::Invalid { .. }));
     }
 
     #[test]

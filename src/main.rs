@@ -215,220 +215,24 @@ fn main() -> io::Result<()> {
                     .handle_key(&key);
 
                 match result {
-                    HandleKeyResult::Complete(intent) => {
-                        match intent {
-                            Intent::Action(action) => {
-                                let repeat_replay = action.resolve_dot_repeat();
-                                let dispatch_action = repeat_replay
-                                    .as_ref()
-                                    .map(|replay| replay.action.clone())
-                                    .unwrap_or_else(|| {
-                                        if action.is_repeat_command() {
-                                            Action::none()
-                                        } else {
-                                            action.clone()
-                                        }
-                                    });
-
-                                match action.kind.as_ref() {
-                                    Some(ActionKind::Undo) => {
-                                        if apply_undo_redo(&mut layout, false) {
-                                            needs_redraw = true;
-                                        }
-                                    }
-                                    Some(ActionKind::Redo) => {
-                                        if apply_undo_redo(&mut layout, true) {
-                                            needs_redraw = true;
-                                        }
-                                    }
-                                    _ => {
-                                        let mut handled = false;
-                                        if let Some(replay) = repeat_replay.as_ref() {
-                                            handled = replay_repeat_action(&mut layout, replay);
-                                            if handled
-                                                && replay.action.kind.is_some()
-                                                && let Some(to_mode) = replay.action.to_mode
-                                            {
-                                                let repeat_text = {
-                                                    let window = layout
-                                                        .active_window_group_mut()
-                                                        .active_window_mut();
-                                                    window.switch_mode(to_mode)
-                                                };
-                                                terminal.set_cursor_style(
-                                                    layout.active_window_cursor_style(),
-                                                )?;
-                                                if let Some(repeat_text) =
-                                                    repeat_text.filter(|text| !text.is_empty())
-                                                    && let Some(mut repeat_state) =
-                                                        globals::get_last_repeat()
-                                                {
-                                                    repeat_state.insert_text = Some(repeat_text);
-                                                    globals::set_last_repeat(repeat_state);
-                                                }
-                                            }
-                                        } else {
-                                            let handled_by_layout = process_intent_queue(
-                                                &mut layout,
-                                                vec![Intent::Action(dispatch_action.clone())],
-                                            );
-
-                                            if !handled_by_layout {
-                                                // Fall back to app-level handling
-                                                match dispatch_action {
-                                                    _ if matches!(
-                                                        dispatch_action.kind.as_ref(),
-                                                        Some(ActionKind::SaveBuffer(_))
-                                                    ) =>
-                                                    {
-                                                        handled = handle_save_buffer_action(
-                                                            &mut layout,
-                                                            dispatch_action.kind.as_ref().and_then(
-                                                                |kind| match kind {
-                                                                    ActionKind::SaveBuffer(
-                                                                        target,
-                                                                    ) => *target,
-                                                                    _ => None,
-                                                                },
-                                                            ),
-                                                            false,
-                                                        );
-                                                    }
-                                                    _ if dispatch_action.kind.is_none() => {
-                                                        handled = true;
-                                                    }
-                                                    _ => { /* Should have been handled by window */
-                                                    }
-                                                }
-                                            } else {
-                                                let pending_repeat_suffix =
-                                                    layout.take_pending_repeat_suffix();
-                                                if let Some(suffix) =
-                                                    pending_repeat_suffix.as_deref()
-                                                {
-                                                    layout
-                                                        .active_window_group_mut()
-                                                        .active_window_mut()
-                                                        .append_repeat_text(suffix);
-                                                }
-                                                handled = true;
-                                            }
-
-                                            if handled
-                                                && let Some(to_mode) = dispatch_action.to_mode
-                                            {
-                                                let repeat_text = {
-                                                    let window = layout
-                                                        .active_window_group_mut()
-                                                        .active_window_mut();
-                                                    window.switch_mode(to_mode)
-                                                };
-                                                terminal.set_cursor_style(
-                                                    layout.active_window_cursor_style(),
-                                                )?;
-                                                if let Some(repeat_text) =
-                                                    repeat_text.filter(|text| !text.is_empty())
-                                                    && let Some(mut repeat_state) =
-                                                        globals::get_last_repeat()
-                                                {
-                                                    repeat_state.insert_text = Some(repeat_text);
-                                                    globals::set_last_repeat(repeat_state);
-                                                }
-                                            }
-                                        }
-
-                                        if handled {
-                                            if (dispatch_action.from_mode == Some(ModeKind::Insert)
-                                                || dispatch_action.from_mode
-                                                    == Some(ModeKind::Replace))
-                                                && dispatch_action.to_mode == Some(ModeKind::Normal)
-                                            {
-                                                commit_insert_exit_snapshot(&mut layout);
-                                            }
-
-                                            if dispatch_action.is_snapshottable() {
-                                                let cursor = layout.active_buffer_view().cursor();
-                                                layout
-                                                    .active_buffer_view()
-                                                    .with_buffer_mut(|buffer| {
-                                                        buffer.push_snapshot(cursor)
-                                                    })
-                                                    .unwrap_or(());
-                                            }
-
-                                            if dispatch_action.updates_snapshot_cursor() {
-                                                let cursor = layout.active_buffer_view().cursor();
-                                                layout
-                                                    .active_buffer_view()
-                                                    .with_buffer_mut(|buffer| {
-                                                        buffer.update_cursor(cursor)
-                                                    })
-                                                    .unwrap_or(());
-                                            }
-
-                                            if dispatch_action.from_mode == Some(ModeKind::Insert) {
-                                                match dispatch_action.kind.as_ref() {
-                                                    Some(ActionKind::InsertChar(_))
-                                                    | Some(ActionKind::InsertText(_))
-                                                    | Some(ActionKind::InsertNewline)
-                                                    | Some(ActionKind::DeleteBackward)
-                                                    | Some(ActionKind::DeleteForward) => {
-                                                        layout.handle_insert_completion_change();
-                                                    }
-                                                    _ => layout.cancel_autocomplete(),
-                                                }
-                                            }
-
-                                            if let Some((repeat_action, repeat_count)) =
-                                                action.dot_repeat_source()
-                                            {
-                                                globals::set_last_repeat(globals::RepeatState {
-                                                    action: repeat_action,
-                                                    count: repeat_count,
-                                                    insert_text: None,
-                                                });
-                                            }
-
-                                            needs_redraw = true;
-                                        }
-                                    }
-                                }
-
-                                if layout.should_exit() {
-                                    break;
-                                }
-
+                    HandleKeyResult::Complete(intent) => match intent {
+                        Intent::Action(action) => {
+                            if execute_action_intent(&mut layout, action) {
+                                needs_redraw = true;
                                 terminal.set_cursor_style(layout.active_window_cursor_style())?;
                             }
-                            Intent::Command(command) => {
-                                if matches!(command, Command::Quit | Command::TryQuit) {
-                                    urvim::session::save_now(&layout);
-                                }
+                        }
+                        Intent::Command(command) => {
+                            if matches!(command, Command::Quit | Command::TryQuit) {
+                                urvim::session::save_now(&layout);
+                            }
 
-                                if matches!(command, Command::Quit) {
-                                    break;
-                                }
+                            if matches!(command, Command::Quit) {
+                                break;
+                            }
 
-                                if let Command::OverwriteBuffer(target) = &command {
-                                    let handled =
-                                        handle_save_buffer_action(&mut layout, *target, true);
-                                    if handled {
-                                        needs_redraw = true;
-                                    }
-
-                                    if layout.should_exit() {
-                                        break;
-                                    }
-
-                                    terminal
-                                        .set_cursor_style(layout.active_window_cursor_style())?;
-                                    continue;
-                                }
-
-                                let handled = process_intent_queue(
-                                    &mut layout,
-                                    vec![Intent::Command(command.clone())],
-                                );
+                            if let Command::OverwriteBuffer(target) = &command {
+                                let handled = handle_save_buffer_action(&mut layout, *target, true);
                                 if handled {
                                     needs_redraw = true;
                                 }
@@ -438,9 +242,24 @@ fn main() -> io::Result<()> {
                                 }
 
                                 terminal.set_cursor_style(layout.active_window_cursor_style())?;
+                                continue;
                             }
+
+                            let handled = process_intent_queue(
+                                &mut layout,
+                                vec![Intent::Command(command.clone())],
+                            );
+                            if handled {
+                                needs_redraw = true;
+                            }
+
+                            if layout.should_exit() {
+                                break;
+                            }
+
+                            terminal.set_cursor_style(layout.active_window_cursor_style())?;
                         }
-                    }
+                    },
                     HandleKeyResult::WaitForMore => {
                         // Continue waiting for more keys, no action taken
                     }
@@ -661,10 +480,146 @@ fn process_intent_queue(layout: &mut Layout, intents: Vec<Intent>) -> bool {
 
     while let Some(intent) = queue.pop_front() {
         saw_intent = true;
-        handled_all &= layout.dispatch_intent(&intent);
+        handled_all &= match intent {
+            Intent::Action(action) => execute_action_intent(layout, action),
+            Intent::Command(command) => layout.dispatch_intent(&Intent::Command(command)),
+        };
     }
 
     saw_intent && handled_all
+}
+
+fn execute_action_intent(layout: &mut Layout, action: Action) -> bool {
+    let repeat_replay = action.resolve_dot_repeat();
+    let dispatch_action = repeat_replay
+        .as_ref()
+        .map(|replay| replay.action.clone())
+        .unwrap_or_else(|| {
+            if action.is_repeat_command() {
+                Action::none()
+            } else {
+                action.clone()
+            }
+        });
+
+    match action.kind.as_ref() {
+        Some(ActionKind::Undo) => apply_undo_redo(layout, false),
+        Some(ActionKind::Redo) => apply_undo_redo(layout, true),
+        _ => {
+            let mut handled = false;
+            if let Some(replay) = repeat_replay.as_ref() {
+                handled = replay_repeat_action(layout, replay);
+                if handled
+                    && replay.action.kind.is_some()
+                    && let Some(to_mode) = replay.action.to_mode
+                {
+                    let repeat_text = {
+                        let window = layout.active_window_group_mut().active_window_mut();
+                        window.switch_mode(to_mode)
+                    };
+                    if let Some(repeat_text) = repeat_text.filter(|text| !text.is_empty())
+                        && let Some(mut repeat_state) = globals::get_last_repeat()
+                    {
+                        repeat_state.insert_text = Some(repeat_text);
+                        globals::set_last_repeat(repeat_state);
+                    }
+                }
+            } else {
+                let handled_by_layout = layout.dispatch_action(&dispatch_action);
+
+                if !handled_by_layout {
+                    match dispatch_action.kind.as_ref() {
+                        Some(ActionKind::SaveBuffer(_)) => {
+                            handled = handle_save_buffer_action(
+                                layout,
+                                dispatch_action.kind.as_ref().and_then(|kind| match kind {
+                                    ActionKind::SaveBuffer(target) => *target,
+                                    _ => None,
+                                }),
+                                false,
+                            );
+                        }
+                        None => {
+                            handled = true;
+                        }
+                        _ => {
+                            // Should have been handled by the window.
+                        }
+                    }
+                } else {
+                    let pending_repeat_suffix = layout.take_pending_repeat_suffix();
+                    if let Some(suffix) = pending_repeat_suffix.as_deref() {
+                        layout
+                            .active_window_group_mut()
+                            .active_window_mut()
+                            .append_repeat_text(suffix);
+                    }
+                    handled = true;
+                }
+
+                if handled && let Some(to_mode) = dispatch_action.to_mode {
+                    let repeat_text = {
+                        let window = layout.active_window_group_mut().active_window_mut();
+                        window.switch_mode(to_mode)
+                    };
+                    if let Some(repeat_text) = repeat_text.filter(|text| !text.is_empty())
+                        && let Some(mut repeat_state) = globals::get_last_repeat()
+                    {
+                        repeat_state.insert_text = Some(repeat_text);
+                        globals::set_last_repeat(repeat_state);
+                    }
+                }
+
+                if handled {
+                    if (dispatch_action.from_mode == Some(ModeKind::Insert)
+                        || dispatch_action.from_mode == Some(ModeKind::Replace))
+                        && dispatch_action.to_mode == Some(ModeKind::Normal)
+                    {
+                        commit_insert_exit_snapshot(layout);
+                    }
+
+                    if dispatch_action.is_snapshottable() {
+                        let cursor = layout.active_buffer_view().cursor();
+                        layout
+                            .active_buffer_view()
+                            .with_buffer_mut(|buffer| buffer.push_snapshot(cursor))
+                            .unwrap_or(());
+                    }
+
+                    if dispatch_action.updates_snapshot_cursor() {
+                        let cursor = layout.active_buffer_view().cursor();
+                        layout
+                            .active_buffer_view_mut()
+                            .with_buffer_mut(|buffer| buffer.update_cursor(cursor))
+                            .unwrap_or(());
+                    }
+
+                    if dispatch_action.from_mode == Some(ModeKind::Insert) {
+                        match dispatch_action.kind.as_ref() {
+                            Some(ActionKind::InsertChar(_))
+                            | Some(ActionKind::InsertText(_))
+                            | Some(ActionKind::InsertNewline)
+                            | Some(ActionKind::DeleteBackward)
+                            | Some(ActionKind::DeleteForward) => {
+                                layout.handle_insert_completion_change();
+                            }
+                            _ => layout.cancel_autocomplete(),
+                        }
+                    }
+
+                    if let Some((repeat_action, repeat_count)) = action.dot_repeat_source() {
+                        globals::set_last_repeat(globals::RepeatState {
+                            action: repeat_action,
+                            count: repeat_count,
+                            insert_text: None,
+                        });
+                    }
+                }
+            }
+
+            handled
+        }
+    }
 }
 
 fn handle_ui_result(layout: &mut Layout, result: urvim::ui::UiEventResult) -> bool {
@@ -980,6 +935,46 @@ mod tests {
             vec![Intent::Action(Action::new(ActionKind::NextTab))],
         ));
         assert_eq!(layout.window_group().active_tab_index(), 1);
+    }
+
+    #[test]
+    fn process_intent_queue_records_repeat_state_for_command_actions() {
+        let _guard = repeat_state_lock();
+        globals::set_last_repeat(globals::RepeatState {
+            action: Action::new(ActionKind::NextTab),
+            count: 99,
+            insert_text: Some("stale".to_string()),
+        });
+        let mut layout = Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str(
+            "alpha\nbeta",
+        )]));
+
+        assert!(process_intent_queue(
+            &mut layout,
+            vec![Intent::Action(Action::new(ActionKind::DeleteLine))],
+        ));
+
+        let repeat = globals::get_last_repeat().expect("repeat state should be recorded");
+        assert!(matches!(
+            repeat.action.kind.as_ref(),
+            Some(ActionKind::DeleteLine)
+        ));
+        assert_eq!(repeat.count, 1);
+        assert!(repeat.insert_text.is_none());
+
+        let cursor = layout
+            .active_buffer_view_mut()
+            .with_buffer_mut(|buffer| buffer.undo())
+            .flatten()
+            .expect("undo should restore the deleted line");
+        layout.active_buffer_view_mut().set_cursor_synced(cursor);
+        assert_eq!(
+            layout
+                .active_buffer_view()
+                .with_buffer(|buffer| buffer.as_str())
+                .expect("buffer should be available"),
+            "alpha\nbeta"
+        );
     }
 
     #[test]

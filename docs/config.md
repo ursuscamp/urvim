@@ -23,7 +23,7 @@ Command-line flags override config file values.
 
 ## Current Schema
 
-The canonical config values are `theme`, `insert_escape`, `default_registers`, `syntax`, `todo_markers`, `auto_close_pairs`, `active_line`, `relative_number`, `indent_guides`, `auto_indent`, `completion_trigger`, `completion_sources`, `advanced_glyphs`, `inlay_hints`, `tab_insertion`, `tab_behavior`, `tab_width`, `scroll_margin`, `wrap_mode`, and `lsp`.
+The canonical config values are `theme`, `insert_escape`, `default_registers`, `syntax`, `todo_markers`, `aliases`, `auto_close_pairs`, `active_line`, `relative_number`, `indent_guides`, `auto_indent`, `completion_trigger`, `completion_sources`, `advanced_glyphs`, `inlay_hints`, `tab_insertion`, `tab_behavior`, `tab_width`, `scroll_margin`, `wrap_mode`, and `lsp`.
 
 ```toml
 theme = "Friday Night"
@@ -44,6 +44,11 @@ tab_width = 4
 completion_sources = ["lsp", "paths", "buffer_words"]
 scroll_margin = { vertical = 5, horizontal = 5 }
 wrap_mode = "hard"
+
+[aliases]
+w = "write"
+q = "quit"
+dl = "action edit delete-line"
 
 [lsp.rust_analyzer]
 enabled = true
@@ -101,6 +106,17 @@ Sets the list of standalone marker tokens that receive comment-scoped todo highl
 - Styling: each marker is mapped to a marker-specific syntax tag such as `comment.todo`, `comment.fixme`, `comment.bug`, or `comment.note`
 - Validation: entries must be non-empty standalone word tokens that normalize to valid theme tags
 - Scope: rendered comments only
+
+### `aliases`
+
+Registers user-defined command aliases.
+
+- Type: TOML table from alias name to command expansion string
+- Default: empty
+- Behavior: the alias replaces the first command token, and any tokens after the alias are passed through unchanged
+- Examples: `w = "write"`, `q = "quit"`, `dl = "action edit delete-line"`
+- Validation: alias names must be non-empty, must not contain whitespace, and must not conflict with canonical command roots such as `buffer`, `action`, `pick`, `lsp`, `pane`, or `app`
+- Scope: command-line parsing and command-line highlighting
 
 ### `auto_close_pairs`
 

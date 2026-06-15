@@ -115,6 +115,8 @@ pub enum Command {
     },
     /// Open the command-line overlay.
     OpenCommandLine,
+    /// Open a new unnamed buffer in a new tab.
+    OpenUnnamedBuffer,
     /// Open the insert-mode completion popup.
     OpenCompletion,
     /// Open the visible-buffer picker overlay.
@@ -135,6 +137,8 @@ pub enum Command {
     OpenGrepPicker,
     /// Write all modified buffers in the pool.
     WriteAll,
+    /// Save the active buffer to a new path.
+    SaveBufferAs(PathBuf),
     /// Overwrite a file that changed on disk.
     OverwriteBuffer(Option<crate::buffer::BufferId>),
     /// Run an LSP hover query on the active buffer.

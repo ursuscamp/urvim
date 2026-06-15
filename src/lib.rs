@@ -2,6 +2,7 @@ pub mod action;
 pub mod background;
 pub mod buffer;
 pub mod cli;
+pub mod command;
 pub mod config;
 pub mod diagnostics;
 pub mod editor;

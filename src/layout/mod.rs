@@ -364,6 +364,10 @@ impl Layout {
                 self.open_command_line();
                 true
             }
+            Command::OpenUnnamedBuffer => {
+                self.active_window_group_mut().open_unnamed_buffer_tab();
+                true
+            }
             Command::OpenCompletion => {
                 self.open_completion();
                 true
@@ -428,6 +432,13 @@ impl Layout {
             Command::WriteAll => self.execute_write_all().map_or_else(
                 |error| {
                     crate::notify_error!("Write all failed: {}", error);
+                    true
+                },
+                |_| true,
+            ),
+            Command::SaveBufferAs(path) => self.execute_save_as(path.as_path()).map_or_else(
+                |error| {
+                    crate::notify_error!("Failed to write buffer to {:?}: {}", path, error);
                     true
                 },
                 |_| true,

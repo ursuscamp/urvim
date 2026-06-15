@@ -2,6 +2,7 @@
 
 use super::Layout;
 use crate::background::{JobKind, JobToken};
+use crate::command;
 use crate::lsp::rename_job::LspRenameJob;
 use crate::notification::NotificationLevel;
 use crate::terminal::{Key, KeyCode};
@@ -107,6 +108,7 @@ impl Default for CommandLineState {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ParsedCommand {
     Save { path: Option<String> },
@@ -125,6 +127,7 @@ pub enum ParsedCommand {
     LspRename { name: Option<String> },
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ParseCommandError {
     UnterminatedQuote,
@@ -135,6 +138,7 @@ pub enum ParseCommandError {
     },
 }
 
+#[allow(dead_code)]
 impl ParseCommandError {
     pub fn message(&self) -> String {
         match self {
@@ -186,7 +190,7 @@ impl Layout {
                 }
 
                 let intent = match self.execute_command_line(command.as_str()) {
-                    Ok(()) => None,
+                    Ok(intent) => Some(intent),
                     Err(message) => Some(Intent::Command(Command::EnqueueNotification {
                         level: NotificationLevel::Error,
                         message,
@@ -245,66 +249,11 @@ impl Layout {
         UiEventResult::Handled(Vec::new())
     }
 
-    fn execute_command_line(&mut self, input: &str) -> Result<(), String> {
-        let parsed = parse_command_line(input).map_err(|error| error.message())?;
-        self.execute_parsed_command(parsed)
+    fn execute_command_line(&mut self, input: &str) -> Result<Intent, String> {
+        command::parse(input).map_err(|error| error.to_string())
     }
 
-    fn execute_parsed_command(&mut self, command: ParsedCommand) -> Result<(), String> {
-        match command {
-            ParsedCommand::Save { path: None } => self.execute_save_current(),
-            ParsedCommand::Save { path: Some(path) } => self.execute_save_as(path.as_str()),
-            ParsedCommand::WriteAll => self.execute_write_all(),
-            ParsedCommand::Edit { path: None } => {
-                self.active_window_group_mut().open_unnamed_buffer_tab();
-                Ok(())
-            }
-            ParsedCommand::Edit { path: Some(path) } => self.execute_edit_path(path.as_str()),
-            ParsedCommand::PickFile => {
-                self.open_file_picker();
-                Ok(())
-            }
-            ParsedCommand::PickGit => {
-                self.open_git_picker();
-                Ok(())
-            }
-            ParsedCommand::PickGrep => {
-                self.open_grep_picker();
-                Ok(())
-            }
-            ParsedCommand::PickColorscheme => {
-                self.open_colorscheme_picker();
-                Ok(())
-            }
-            ParsedCommand::PickDocumentSymbols => {
-                self.open_doc_symbols_picker();
-                Ok(())
-            }
-            ParsedCommand::PickReferences => {
-                self.open_lsp_references_picker();
-                Ok(())
-            }
-            ParsedCommand::PickCodeActions => {
-                self.open_lsp_code_actions_picker();
-                Ok(())
-            }
-            ParsedCommand::LspHover => self.execute_lsp_hover(),
-            ParsedCommand::LspDefinition => self.execute_lsp_definition(),
-            ParsedCommand::LspReferences => {
-                self.open_lsp_references_picker();
-                Ok(())
-            }
-            ParsedCommand::LspRename { name: None } => {
-                if !self.lsp_rename_supported() {
-                    return Err("attached server does not support rename".to_string());
-                }
-                self.open_lsp_rename_prompt();
-                Ok(())
-            }
-            ParsedCommand::LspRename { name: Some(name) } => self.execute_lsp_rename(name),
-        }
-    }
-
+    #[allow(dead_code)]
     fn execute_save_current(&mut self) -> Result<(), String> {
         let buffer_id = self.active_buffer_view().buffer_id();
         if crate::globals::with_buffer_pool(|pool| {
@@ -323,14 +272,17 @@ impl Layout {
         }
     }
 
-    fn execute_save_as(&mut self, path: &str) -> Result<(), String> {
-        if Path::new(path).exists() {
-            return Err(format!("Cannot write: path already exists: {path}"));
+    pub(super) fn execute_save_as(&mut self, path: &Path) -> Result<(), String> {
+        if path.exists() {
+            return Err(format!(
+                "Cannot write: path already exists: {}",
+                path.display()
+            ));
         }
 
         let buffer_id = self.active_buffer_view().buffer_id();
         crate::globals::with_buffer_pool(|pool| pool.save_buffer_to_path(buffer_id, path))
-            .map_err(|error| format!("Failed to write buffer to {path}: {error}"))
+            .map_err(|error| format!("Failed to write buffer to {}: {error}", path.display()))
     }
 
     pub(super) fn execute_write_all(&mut self) -> Result<(), String> {
@@ -381,6 +333,7 @@ impl Layout {
         Ok(())
     }
 
+    #[allow(dead_code)]
     fn execute_edit_path(&mut self, path: &str) -> Result<(), String> {
         let buffer_id = crate::globals::with_buffer_pool(|pool| pool.open_buffer(path))
             .map_err(|error| format!("Failed to open {path}: {error}"))?;
@@ -527,6 +480,7 @@ impl Layout {
     }
 }
 
+#[allow(dead_code)]
 pub fn parse_command_line(input: &str) -> Result<ParsedCommand, ParseCommandError> {
     let tokens = tokenize_command_line(input)?;
     if tokens.is_empty() {
@@ -601,6 +555,7 @@ pub fn parse_command_line(input: &str) -> Result<ParsedCommand, ParseCommandErro
     }
 }
 
+#[allow(dead_code)]
 fn tokenize_command_line(input: &str) -> Result<Vec<String>, ParseCommandError> {
     let mut tokens = Vec::new();
     let mut current = String::new();

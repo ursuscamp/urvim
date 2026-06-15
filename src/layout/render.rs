@@ -4,6 +4,7 @@ use super::Layout;
 use super::geometry::FocusDirection;
 use super::geometry::PaneRegion;
 use super::node::{LayoutNode, SplitAxis, SplitSize};
+use crate::command;
 use crate::editor::ModeKind;
 use crate::globals;
 use crate::notification;
@@ -11,6 +12,7 @@ use crate::screen::Screen;
 use crate::status_bar::StatusBarContext;
 use crate::terminal::Style;
 use crate::ui::floating_window::{FloatingAnchor, FloatingWindowFrame, FloatingWindowFrameLabel};
+use crate::ui::inputs::LineSegment;
 use crate::ui::{UiContext, UiRect};
 use crate::widget::Widget;
 use crate::window::{Position, Size};
@@ -329,10 +331,40 @@ impl Layout {
         );
         let cursor = {
             input.set_text_style(body_style);
-            input.render_widget(
+            let segments = globals::with_active_theme(|theme| {
+                let text = input.text();
+                let mut segments = Vec::new();
+                let mut cursor = 0usize;
+
+                for span in command::highlight(text) {
+                    if cursor < span.range.start {
+                        segments.push(LineSegment::new(
+                            &text[cursor..span.range.start],
+                            body_style,
+                        ));
+                    }
+
+                    let style = theme
+                        .map(|theme| theme.highlight_style_for_name(span.kind.theme_name()))
+                        .unwrap_or(body_style);
+                    segments.push(LineSegment::new(
+                        &text[span.range.clone()],
+                        body_style.overlay(style),
+                    ));
+                    cursor = span.range.end;
+                }
+
+                if cursor < text.len() {
+                    segments.push(LineSegment::new(&text[cursor..], body_style));
+                }
+
+                segments
+            });
+            input.render_widget_with_text_segments(
                 screen,
                 UiRect::new(frame.content_origin, frame.content_size),
                 &UiContext,
+                Some(segments.as_slice()),
             );
             input.render_cursor()
         };
