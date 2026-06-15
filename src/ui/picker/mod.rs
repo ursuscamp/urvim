@@ -8,6 +8,7 @@ pub mod code_actions;
 pub mod colorscheme;
 pub mod doc_symbols;
 pub mod file;
+pub mod filetype;
 pub mod git;
 pub mod grep;
 pub mod line;

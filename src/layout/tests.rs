@@ -294,6 +294,64 @@ fn test_layout_file_picker_opens_and_closes() {
 }
 
 #[test]
+fn test_layout_filetype_picker_opens_and_closes() {
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("one")]);
+
+    assert!(layout.dispatch_intent(&Intent::Command(Command::OpenFiletypePicker)));
+    assert!(layout.filetype_picker_is_open());
+
+    let result = layout.route_ui_event(&UiEvent::Key(key(KeyCode::Esc)));
+    assert!(result.handled());
+    assert!(!layout.filetype_picker_is_open());
+}
+
+#[test]
+fn test_layout_set_buffer_filetype_defaults_to_active_buffer() {
+    let _pool_guard = globals::buffer_pool_test_lock();
+    globals::with_buffer_pool(|pool| *pool = crate::buffer::BufferPool::new());
+
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("one")]);
+    let active_id = layout.active_buffer_view().buffer_id();
+
+    assert!(
+        layout.dispatch_intent(&Intent::Command(Command::SetBufferFiletype(
+            None,
+            "rust".to_string(),
+        )))
+    );
+
+    let syntax = globals::with_buffer(active_id, |buffer| buffer.syntax_name().to_string())
+        .expect("active buffer");
+    assert_eq!(syntax, "rust");
+}
+
+#[test]
+fn test_layout_set_buffer_filetype_targets_explicit_buffer() {
+    let _pool_guard = globals::buffer_pool_test_lock();
+    globals::with_buffer_pool(|pool| *pool = crate::buffer::BufferPool::new());
+
+    let explicit_id =
+        globals::with_buffer_pool(|pool| pool.register_buffer(Buffer::from_str("two")));
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("one")]);
+    let active_id = layout.active_buffer_view().buffer_id();
+
+    assert!(
+        layout.dispatch_intent(&Intent::Command(Command::SetBufferFiletype(
+            Some(explicit_id),
+            "rust".to_string(),
+        )))
+    );
+
+    let active_syntax = globals::with_buffer(active_id, |buffer| buffer.syntax_name().to_string())
+        .expect("active buffer");
+    let explicit_syntax =
+        globals::with_buffer(explicit_id, |buffer| buffer.syntax_name().to_string())
+            .expect("explicit buffer");
+    assert_eq!(active_syntax, "plaintext");
+    assert_eq!(explicit_syntax, "rust");
+}
+
+#[test]
 fn test_layout_buffer_picker_opens_and_focuses_first_visible_pane() {
     let _pool_guard = globals::buffer_pool_test_lock();
     globals::with_buffer_pool(|pool| *pool = crate::buffer::BufferPool::new());

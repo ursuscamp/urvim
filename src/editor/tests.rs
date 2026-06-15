@@ -213,6 +213,11 @@ fn test_picker_open_binding_is_available_in_modes() {
             if matches!(intent, crate::ui::Intent::Command(crate::ui::Command::OpenColorschemePicker))
     ));
     assert!(matches!(
+        normal.handle_key(&Key::new(KeyCode::F6)),
+        HandleKeyResult::Complete(intent)
+            if matches!(intent, crate::ui::Intent::Command(crate::ui::Command::OpenFiletypePicker))
+    ));
+    assert!(matches!(
         normal.handle_key(&key('g')),
         HandleKeyResult::WaitForMore
     ));
@@ -286,6 +291,18 @@ fn test_picker_open_binding_is_available_in_modes() {
         insert.handle_key(&Key::new(KeyCode::F5)),
         HandleKeyResult::Complete(intent)
             if matches!(intent, crate::ui::Intent::Command(crate::ui::Command::OpenColorschemePicker))
+    ));
+    assert!(matches!(
+        insert.handle_key(&Key::new(KeyCode::F6)),
+        HandleKeyResult::Complete(intent)
+            if matches!(intent, crate::ui::Intent::Command(crate::ui::Command::OpenFiletypePicker))
+    ));
+
+    let mut replace = ReplaceMode::new();
+    assert!(matches!(
+        replace.handle_key(&Key::new(KeyCode::F6)),
+        HandleKeyResult::Complete(intent)
+            if matches!(intent, crate::ui::Intent::Command(crate::ui::Command::OpenFiletypePicker))
     ));
 }
 

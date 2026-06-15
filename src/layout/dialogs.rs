@@ -9,6 +9,7 @@ use crate::ui::picker::code_actions::CodeActionsPickerWidget;
 use crate::ui::picker::colorscheme::ColorschemePickerWidget;
 use crate::ui::picker::doc_symbols::DocSymbolsPickerWidget;
 use crate::ui::picker::file::FilePickerWidget;
+use crate::ui::picker::filetype::FiletypePickerWidget;
 use crate::ui::picker::git::GitPickerWidget;
 use crate::ui::picker::grep::GrepPickerWidget;
 use crate::ui::picker::references::ReferencesPickerWidget;
@@ -28,6 +29,7 @@ pub(in crate::layout) struct Dialogs {
     pub workspace_symbols_picker: Option<DocSymbolsPickerWidget>,
     pub references_picker: Option<ReferencesPickerWidget>,
     pub file_picker: Option<FilePickerWidget>,
+    pub filetype_picker: Option<FiletypePickerWidget>,
     pub git_picker: Option<GitPickerWidget>,
     pub grep_picker: Option<GrepPickerWidget>,
     pub confirmation_box: Option<ConfirmationBox>,
@@ -49,6 +51,7 @@ impl Default for Dialogs {
             workspace_symbols_picker: None,
             references_picker: None,
             file_picker: None,
+            filetype_picker: None,
             git_picker: None,
             grep_picker: None,
             confirmation_box: None,
@@ -94,6 +97,11 @@ impl Dialogs {
                     .and_then(|picker| picker.cursor())
             })
             .or_else(|| self.file_picker.as_ref().and_then(|picker| picker.cursor()))
+            .or_else(|| {
+                self.filetype_picker
+                    .as_ref()
+                    .and_then(|picker| picker.cursor())
+            })
             .or_else(|| self.git_picker.as_ref().and_then(|picker| picker.cursor()))
             .or_else(|| {
                 self.lsp_rename_prompt
@@ -117,6 +125,7 @@ impl Dialogs {
         self.workspace_symbols_picker = None;
         self.references_picker = None;
         self.file_picker = None;
+        self.filetype_picker = None;
         self.git_picker = None;
         self.grep_picker = None;
         self.confirmation_box = None;

@@ -209,6 +209,7 @@ fn register_misc_bindings(trie_keymap: &mut TrieKeymap) {
     trie_keymap.insert_str("<F3>", Command::OpenBufferPicker);
     trie_keymap.insert_str("<F4>", Command::OpenGitPicker);
     trie_keymap.insert_str("<F5>", Command::OpenColorschemePicker);
+    trie_keymap.insert_str("<F6>", Command::OpenFiletypePicker);
     trie_keymap.insert_str("K", Command::LspHover);
     trie_keymap.insert_str("gd", Command::LspDefinition);
     trie_keymap.insert_str("gra", Command::LspCodeActions);

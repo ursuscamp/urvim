@@ -125,6 +125,8 @@ pub enum Command {
     OpenGitPicker,
     /// Open the colorscheme picker overlay.
     OpenColorschemePicker,
+    /// Open the filetype picker overlay.
+    OpenFiletypePicker,
     /// Open the active-buffer document symbol picker overlay.
     OpenDocumentSymbolsPicker,
     /// Open the workspace symbol picker overlay.
@@ -170,6 +172,8 @@ pub enum Command {
     OpenFileAtCursor(PathBuf, Cursor),
     /// Focus the first pane showing the selected buffer.
     FocusBuffer(BufferId),
+    /// Set the filetype for a buffer, defaulting to the active buffer.
+    SetBufferFiletype(Option<BufferId>, String),
     /// Toggle staging for a git picker selection.
     GitPickerToggleStage(crate::ui::picker::git::GitPickerAction),
     /// Request discarding a git picker selection.

@@ -1774,9 +1774,6 @@ impl Buffer {
         self.generations.indent_background = None;
         self.generations.diff = self.generations.diff.wrapping_add(1);
         self.generations.diff_background = None;
-        if edits.iter().any(|edit| edit.start_line == 0) {
-            self.refresh_syntax();
-        }
 
         self.sync_undo_snapshot_cache_if_current();
     }

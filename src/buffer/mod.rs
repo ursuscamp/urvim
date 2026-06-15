@@ -441,6 +441,18 @@ impl Buffer {
             .to_string()
     }
 
+    /// Sets the resolved canonical syntax name for this buffer.
+    pub fn set_syntax_name(&mut self, syntax_name: impl Into<smol_str::SmolStr>) {
+        let syntax_name = syntax_name.into();
+        if self.syntax_name() != syntax_name {
+            self.buffer_cache.set_syntax_name(syntax_name);
+            self.buffer_cache.invalidate_from(0, 0);
+            self.generations.syntax = self.generations.syntax.wrapping_add(1);
+            self.generations.syntax_background = None;
+            self.generations.indent_background = None;
+        }
+    }
+
     /// Converts a protocol text position into a buffer cursor.
     pub fn cursor_for_position(
         &self,
@@ -557,6 +569,11 @@ impl Buffer {
     }
 
     fn refresh_syntax(&mut self) {
+        let current_syntax = self.syntax_name();
+        if current_syntax != crate::syntax::fallback_syntax_name() {
+            return;
+        }
+
         let first_line = self.lines.line(0);
         let new_syntax_name = crate::syntax::resolve_builtin_syntax(
             self.path.as_ref().map(|path| path.as_path()),
@@ -564,13 +581,15 @@ impl Buffer {
         )
         .unwrap_or_else(|| smol_str::SmolStr::new(crate::syntax::fallback_syntax_name()));
 
-        if self.syntax_name() != new_syntax_name {
-            self.buffer_cache.set_syntax_name(new_syntax_name);
-            self.buffer_cache.invalidate_from(0, 0);
-            self.generations.syntax = self.generations.syntax.wrapping_add(1);
-            self.generations.syntax_background = None;
-            self.generations.indent_background = None;
+        if new_syntax_name == crate::syntax::fallback_syntax_name() {
+            return;
         }
+
+        self.buffer_cache.set_syntax_name(new_syntax_name);
+        self.buffer_cache.invalidate_from(0, 0);
+        self.generations.syntax = self.generations.syntax.wrapping_add(1);
+        self.generations.syntax_background = None;
+        self.generations.indent_background = None;
     }
 
     /// Records the current text as the last saved baseline and refreshes syntax detection.

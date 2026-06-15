@@ -3,6 +3,7 @@ mod code_actions;
 mod colorscheme;
 mod doc_symbols;
 mod file;
+mod filetype;
 mod git;
 mod grep;
 mod references;

@@ -17,6 +17,7 @@ impl ReplaceMode {
         keymap.insert_str("<F3>", crate::ui::Command::OpenBufferPicker);
         keymap.insert_str("<F4>", crate::ui::Command::OpenGitPicker);
         keymap.insert_str("<F5>", crate::ui::Command::OpenColorschemePicker);
+        keymap.insert_str("<F6>", crate::ui::Command::OpenFiletypePicker);
         keymap.insert_str("<Esc>", Action::mode_transition(ModeKind::Normal));
         keymap.insert_str("<C-q>", crate::ui::Command::TryQuit);
         keymap.insert_str("<C-s>", Action::save_buffer(None));

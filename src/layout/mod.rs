@@ -376,6 +376,10 @@ impl Layout {
                 self.open_colorscheme_picker();
                 true
             }
+            Command::OpenFiletypePicker => {
+                self.open_filetype_picker();
+                true
+            }
             Command::OpenGitPicker => {
                 self.open_git_picker();
                 true
@@ -411,6 +415,10 @@ impl Layout {
             }
             Command::OpenFilePicker => {
                 self.open_file_picker();
+                true
+            }
+            Command::SetBufferFiletype(buffer_id, filetype) => {
+                self.execute_set_buffer_filetype(*buffer_id, filetype);
                 true
             }
             Command::OpenGrepPicker => {
@@ -613,6 +621,33 @@ impl Layout {
         }
     }
 
+    fn execute_set_buffer_filetype(&mut self, buffer_id: Option<BufferId>, filetype: &str) {
+        let Some(canonical) = crate::syntax::builtin_syntax_registry()
+            .ok()
+            .and_then(|registry| registry.resolve_label(filetype))
+        else {
+            crate::notify_error!("Unknown filetype: {}", filetype);
+            return;
+        };
+
+        let target_buffer_id = buffer_id.unwrap_or_else(|| self.active_buffer_view().buffer_id());
+        if crate::globals::with_buffer_mut(target_buffer_id, |buffer| {
+            buffer.set_syntax_name(canonical.clone())
+        })
+        .is_none()
+        {
+            crate::notify_error!("Missing buffer: {:?}", target_buffer_id);
+            return;
+        }
+
+        let label = crate::syntax::builtin_syntax_registry()
+            .ok()
+            .and_then(|registry| registry.display_name(canonical.as_str()))
+            .unwrap_or(canonical)
+            .to_string();
+        crate::notify_info!("filetype: {}", label);
+    }
+
     /// Dispatches an action intent through the layout tree.
     pub fn dispatch_action(&mut self, action: &Action) -> bool {
         self.close_hover();
@@ -779,6 +814,10 @@ impl Layout {
 
         if self.file_picker_is_open() {
             return self.handle_file_picker_event(event);
+        }
+
+        if self.filetype_picker_is_open() {
+            return self.handle_filetype_picker_event(event);
         }
 
         UiEventResult::NotHandled

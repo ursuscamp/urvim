@@ -288,7 +288,7 @@ fn test_syntax_name_shebang_takes_precedence_over_filename() {
 }
 
 #[test]
-fn test_syntax_name_updates_after_first_line_edit() {
+fn test_syntax_name_does_not_update_after_first_line_edit() {
     let mut buf = Buffer::from_str("#!/usr/bin/env python3\nprint('hello')");
 
     assert_eq!(buf.syntax_name(), "python");
@@ -297,9 +297,36 @@ fn test_syntax_name_updates_after_first_line_edit() {
     buf.remove(Cursor::new(0, 0), Cursor::new(0, shebang_len));
     buf.insert_text(Cursor::new(0, 0), "plain text");
 
+    assert_eq!(buf.syntax_name(), "python");
+    buf.mark_saved();
+    assert_eq!(buf.syntax_name(), "python");
+}
+
+#[test]
+fn test_manual_syntax_name_persists_through_edits_and_save() {
+    let mut buf = Buffer::from_str("hello");
+    assert_eq!(buf.syntax_name(), "plaintext");
+
+    buf.set_syntax_name("rust");
+    assert_eq!(buf.syntax_name(), "rust");
+
+    buf.insert_text(Cursor::new(0, 0), "plain text ");
+    assert_eq!(buf.syntax_name(), "rust");
+
+    buf.mark_saved();
+    assert_eq!(buf.syntax_name(), "rust");
+}
+
+#[test]
+fn test_plaintext_upgrades_to_detected_filetype_on_save() {
+    let path = AbsolutePath::from_path(temp_path_with_ext("upgrade-filetype", "rs").as_path())
+        .expect("absolute path");
+    let mut buf = Buffer::from_str_with_path("hello", path);
+
     assert_eq!(buf.syntax_name(), "plaintext");
     buf.mark_saved();
-    assert_eq!(buf.syntax_name(), "plaintext");
+
+    assert_eq!(buf.syntax_name(), "rust");
 }
 
 #[test]
