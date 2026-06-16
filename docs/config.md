@@ -23,7 +23,7 @@ Command-line flags override config file values.
 
 ## Current Schema
 
-The canonical config values are `theme`, `insert_escape`, `default_registers`, `syntax`, `todo_markers`, `aliases`, `auto_close_pairs`, `active_line`, `relative_number`, `indent_guides`, `auto_indent`, `completion_trigger`, `completion_sources`, `advanced_glyphs`, `inlay_hints`, `tab_insertion`, `tab_behavior`, `tab_width`, `scroll_margin`, `wrap_mode`, and `lsp`.
+The canonical config values are `theme`, `insert_escape`, `default_registers`, `syntax`, `todo_markers`, `aliases`, `scripts`, `auto_close_pairs`, `active_line`, `relative_number`, `indent_guides`, `auto_indent`, `completion_trigger`, `completion_sources`, `advanced_glyphs`, `inlay_hints`, `tab_insertion`, `tab_behavior`, `tab_width`, `scroll_margin`, `wrap_mode`, and `lsp`.
 
 ```toml
 theme = "Friday Night"
@@ -49,6 +49,10 @@ wrap_mode = "hard"
 w = "write"
 q = "quit"
 dl = "action edit delete-line"
+
+[scripts]
+wq = ["write", "quit"]
+save_rust = ["buffer write path={1}", "buffer filetype filetype=rust"]
 
 [lsp.rust_analyzer]
 enabled = true
@@ -116,6 +120,18 @@ Registers user-defined command aliases.
 - Behavior: the alias replaces the first command token, and any tokens after the alias are passed through unchanged
 - Examples: `w = "write"`, `q = "quit"`, `dl = "action edit delete-line"`
 - Validation: alias names must be non-empty, must not contain whitespace, and must not conflict with canonical command roots such as `buffer`, `action`, `pick`, `lsp`, `pane`, or `app`
+- Scope: command-line parsing and command-line highlighting
+
+### `scripts`
+
+Registers user-defined command scripts.
+
+- Type: TOML table from script name to an ordered array of command strings
+- Default: empty
+- Behavior: the script name becomes a custom command root; each command string is expanded and executed in order
+- Placeholders: `{1}`, `{2}`, and so on reference positional arguments passed to the script command; `{name}` references named arguments such as `name=value`
+- Examples: `wq = ["write", "quit"]`, `save_rust = ["buffer write path={1}", "buffer filetype filetype=rust"]`
+- Validation: script names must be non-empty, must not contain whitespace, must not conflict with canonical command roots, and must not reuse an alias name
 - Scope: command-line parsing and command-line highlighting
 
 ### `auto_close_pairs`

@@ -183,7 +183,7 @@ mod tests {
 
     #[test]
     fn highlights_configured_alias_roots() {
-        let _guard = crate::globals::set_test_config(crate::config::Config {
+        let config = crate::config::Config {
             aliases: std::collections::BTreeMap::from([(
                 "dl".to_string(),
                 vec![
@@ -193,7 +193,12 @@ mod tests {
                 ],
             )]),
             ..crate::config::Config::default()
-        });
+        };
+        let mut registry = crate::command::CommandRegistry::new();
+        registry
+            .register_configured_commands(&config)
+            .expect("configured commands should register");
+        let _guard = crate::command::set_test_registry(registry);
 
         assert_eq!(
             simplify(highlight("dl count=2")),
@@ -203,6 +208,27 @@ mod tests {
                 (8, 9, CommandHighlightKind::Operator),
                 (9, 10, CommandHighlightKind::Number),
             ]
+        );
+    }
+
+    #[test]
+    fn highlights_configured_script_roots() {
+        let config = crate::config::Config {
+            scripts: std::collections::BTreeMap::from([(
+                "wq".to_string(),
+                vec!["write".to_string(), "quit".to_string()],
+            )]),
+            ..crate::config::Config::default()
+        };
+        let mut registry = crate::command::CommandRegistry::new();
+        registry
+            .register_configured_commands(&config)
+            .expect("configured commands should register");
+        let _guard = crate::command::set_test_registry(registry);
+
+        assert_eq!(
+            simplify(highlight("wq")),
+            vec![(0, 2, CommandHighlightKind::Command)]
         );
     }
 

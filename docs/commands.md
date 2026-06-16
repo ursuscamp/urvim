@@ -28,8 +28,7 @@ In contrast, `left`, `find-forward`, `write`, and `rename` are operation selecto
 ## Aliases
 
 Aliases are registered commands that expand to canonical command prefixes before
-resolution. They are the first use of the custom command registry; future plugin
-commands should register through the same system.
+resolution.
 
 - `write` -> `buffer write`
 - `write-all` -> `buffer write-all`
@@ -42,6 +41,31 @@ commands should register through the same system.
 - `cursor` -> `action cursor`
 - `operator` -> `action operator`
 - `surround` -> `action surround`
+
+## Scripts
+
+Scripts are configured custom command roots that expand to a list of commands and execute them in order.
+
+Example config:
+
+```toml
+[scripts]
+wq = ["write", "quit"]
+save_rust = ["buffer write path={1}", "buffer filetype filetype=rust"]
+rename_write = ["lsp rename name={name}", "write"]
+```
+
+Script placeholders reference arguments from the original script command:
+
+- `{1}`, `{2}`, and so on reference positional arguments.
+- `{name}` references a named argument like `name=value`.
+- Missing placeholders are reported as command errors before any script command runs.
+
+Examples:
+
+- `wq`
+- `save_rust src/main.rs`
+- `rename_write name=new_name`
 
 ## Shared Arguments
 

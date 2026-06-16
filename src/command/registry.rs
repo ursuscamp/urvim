@@ -1,9 +1,22 @@
 use super::{CommandError, CommandInvocation};
-use crate::globals;
+use crate::config::Config;
 use std::collections::BTreeMap;
-use std::sync::LazyLock;
+
+#[cfg(test)]
+use std::cell::RefCell;
+#[cfg(not(test))]
+use std::sync::{LazyLock, RwLock};
 
 const MAX_ALIAS_EXPANSION_DEPTH: usize = 8;
+
+#[cfg(test)]
+thread_local! {
+    static TEST_REGISTRY: RefCell<CommandRegistry> = RefCell::new(CommandRegistry::default());
+}
+
+#[cfg(not(test))]
+static REGISTRY: LazyLock<RwLock<CommandRegistry>> =
+    LazyLock::new(|| RwLock::new(CommandRegistry::default()));
 
 /// Registered user-facing command entry.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -13,6 +26,107 @@ pub enum RegisteredCommand {
         /// Token-level command prefix used to replace the alias root.
         expands_to: Vec<String>,
     },
+    /// Expands the command root into ordered command lines.
+    Script {
+        /// Ordered command-line templates to execute.
+        commands: Vec<String>,
+    },
+}
+
+/// Runtime registry for user-facing command roots.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommandRegistry {
+    commands: BTreeMap<String, RegisteredCommand>,
+}
+
+impl CommandRegistry {
+    /// Creates a registry populated with built-in command entries.
+    pub fn new() -> Self {
+        Self {
+            commands: builtin_commands(),
+        }
+    }
+
+    /// Registers a command alias.
+    pub fn register_alias(
+        &mut self,
+        name: impl Into<String>,
+        expands_to: Vec<String>,
+    ) -> Result<(), CommandError> {
+        self.register(name, RegisteredCommand::Alias { expands_to })
+    }
+
+    /// Registers a command script.
+    pub fn register_script(
+        &mut self,
+        name: impl Into<String>,
+        commands: Vec<String>,
+    ) -> Result<(), CommandError> {
+        self.register(name, RegisteredCommand::Script { commands })
+    }
+
+    /// Registers all configured aliases and scripts.
+    pub fn register_configured_commands(&mut self, config: &Config) -> Result<(), CommandError> {
+        for (name, expands_to) in &config.aliases {
+            self.register_alias(name.clone(), expands_to.clone())?;
+        }
+        for (name, commands) in &config.scripts {
+            self.register_script(name.clone(), commands.clone())?;
+        }
+
+        Ok(())
+    }
+
+    /// Returns true if `name` is a registered command root.
+    pub fn is_registered_root(&self, name: &str) -> bool {
+        is_canonical_root(name) || self.commands.contains_key(name)
+    }
+
+    /// Returns true if `prefix` can still become a registered command root.
+    pub fn is_registered_root_prefix(&self, prefix: &str) -> bool {
+        canonical_roots()
+            .iter()
+            .any(|command| command.starts_with(prefix))
+            || self
+                .commands
+                .keys()
+                .any(|command| command.starts_with(prefix))
+    }
+
+    /// Returns the configured script command list for a command root.
+    pub fn script(&self, name: &str) -> Option<Vec<String>> {
+        match self.commands.get(name) {
+            Some(RegisteredCommand::Script { commands }) => Some(commands.clone()),
+            _ => None,
+        }
+    }
+
+    fn register(
+        &mut self,
+        name: impl Into<String>,
+        command: RegisteredCommand,
+    ) -> Result<(), CommandError> {
+        let name = name.into();
+        if is_canonical_root(&name) || self.commands.contains_key(&name) {
+            return Err(CommandError::CommandRegistrationConflict(name));
+        }
+
+        self.commands.insert(name, command);
+        Ok(())
+    }
+
+    fn alias_expansion(&self, name: &str) -> Option<Vec<String>> {
+        match self.commands.get(name) {
+            Some(RegisteredCommand::Alias { expands_to }) => Some(expands_to.clone()),
+            _ => None,
+        }
+    }
+}
+
+impl Default for CommandRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 /// Returns the canonical built-in command roots.
@@ -25,24 +139,60 @@ pub fn is_canonical_root(name: &str) -> bool {
     canonical_roots().contains(&name)
 }
 
+/// Installs a fresh registry containing built-ins and configured commands.
+pub fn install_configured_commands(config: &Config) -> Result<(), CommandError> {
+    let mut registry = CommandRegistry::new();
+    registry.register_configured_commands(config)?;
+    set_registry(registry);
+    Ok(())
+}
+
 /// Returns true if `name` is a registered command root.
 pub fn is_registered_root(name: &str) -> bool {
-    is_canonical_root(name) || config_alias_exists(name) || BUILTIN_REGISTRY.contains_key(name)
+    with_registry(|registry| registry.is_registered_root(name))
 }
 
 /// Returns true if `prefix` can still become a registered command root.
 pub fn is_registered_root_prefix(prefix: &str) -> bool {
-    canonical_roots()
-        .iter()
-        .any(|command| command.starts_with(prefix))
-        || config_alias_prefix_exists(prefix)
-        || BUILTIN_REGISTRY
-            .keys()
-            .any(|command| command.starts_with(prefix))
+    with_registry(|registry| registry.is_registered_root_prefix(prefix))
 }
 
 /// Expands registered aliases in the command root position.
 pub fn expand(invocation: &CommandInvocation) -> Result<CommandInvocation, CommandError> {
+    with_registry(|registry| expand_with_registry(registry, invocation))
+}
+
+/// Returns the registered script command list for a command root.
+pub fn script(name: &str) -> Option<Vec<String>> {
+    with_registry(|registry| registry.script(name))
+}
+
+#[cfg(test)]
+pub fn set_test_registry(registry: CommandRegistry) -> TestRegistryGuard {
+    TEST_REGISTRY.with(|slot| {
+        let previous = slot.replace(registry);
+        TestRegistryGuard { previous }
+    })
+}
+
+#[cfg(test)]
+pub struct TestRegistryGuard {
+    previous: CommandRegistry,
+}
+
+#[cfg(test)]
+impl Drop for TestRegistryGuard {
+    fn drop(&mut self) {
+        TEST_REGISTRY.with(|slot| {
+            slot.replace(self.previous.clone());
+        });
+    }
+}
+
+fn expand_with_registry(
+    registry: &CommandRegistry,
+    invocation: &CommandInvocation,
+) -> Result<CommandInvocation, CommandError> {
     let mut tokens = invocation.tokens.clone();
 
     for _ in 0..MAX_ALIAS_EXPANSION_DEPTH {
@@ -50,7 +200,7 @@ pub fn expand(invocation: &CommandInvocation) -> Result<CommandInvocation, Comma
             return Ok(CommandInvocation { tokens });
         };
 
-        let Some(expands_to) = alias_expansion(root) else {
+        let Some(expands_to) = registry.alias_expansion(root) else {
             return Ok(CommandInvocation { tokens });
         };
 
@@ -64,25 +214,35 @@ pub fn expand(invocation: &CommandInvocation) -> Result<CommandInvocation, Comma
     ))
 }
 
-fn alias_expansion(name: &str) -> Option<Vec<String>> {
-    globals::with_config(|config| config.aliases.get(name).cloned())
-        .flatten()
-        .or_else(|| match BUILTIN_REGISTRY.get(name) {
-            Some(RegisteredCommand::Alias { expands_to }) => Some(expands_to.clone()),
-            None => None,
-        })
+fn with_registry<R>(f: impl FnOnce(&CommandRegistry) -> R) -> R {
+    #[cfg(test)]
+    {
+        return TEST_REGISTRY.with(|slot| f(&slot.borrow()));
+    }
+
+    #[cfg(not(test))]
+    {
+        let registry = REGISTRY.read().unwrap();
+        f(&registry)
+    }
 }
 
-fn config_alias_exists(name: &str) -> bool {
-    globals::with_config(|config| config.aliases.contains_key(name)).unwrap_or(false)
+fn set_registry(registry: CommandRegistry) {
+    #[cfg(test)]
+    {
+        TEST_REGISTRY.with(|slot| {
+            slot.replace(registry);
+        });
+    }
+
+    #[cfg(not(test))]
+    {
+        let mut stored = REGISTRY.write().unwrap();
+        *stored = registry;
+    }
 }
 
-fn config_alias_prefix_exists(prefix: &str) -> bool {
-    globals::with_config(|config| config.aliases.keys().any(|name| name.starts_with(prefix)))
-        .unwrap_or(false)
-}
-
-static BUILTIN_REGISTRY: LazyLock<BTreeMap<String, RegisteredCommand>> = LazyLock::new(|| {
+fn builtin_commands() -> BTreeMap<String, RegisteredCommand> {
     [
         alias("write", &["buffer", "write"]),
         alias("write-all", &["buffer", "write-all"]),
@@ -98,7 +258,7 @@ static BUILTIN_REGISTRY: LazyLock<BTreeMap<String, RegisteredCommand>> = LazyLoc
     ]
     .into_iter()
     .collect()
-});
+}
 
 fn alias(name: &'static str, expands_to: &[&str]) -> (String, RegisteredCommand) {
     (
@@ -147,6 +307,31 @@ mod tests {
                 .expect("canonical command should be accepted")
                 .tokens,
             invocation.tokens
+        );
+    }
+
+    #[test]
+    fn rejects_configured_command_that_conflicts_with_builtin() {
+        let mut registry = CommandRegistry::new();
+
+        assert_eq!(
+            registry.register_alias("write", vec!["buffer".to_string()]),
+            Err(CommandError::CommandRegistrationConflict(
+                "write".to_string()
+            ))
+        );
+    }
+
+    #[test]
+    fn registers_configured_scripts() {
+        let mut registry = CommandRegistry::new();
+        registry
+            .register_script("wq", vec!["write".to_string(), "quit".to_string()])
+            .expect("script should register");
+
+        assert_eq!(
+            registry.script("wq"),
+            Some(vec!["write".to_string(), "quit".to_string()])
         );
     }
 }

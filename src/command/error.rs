@@ -9,8 +9,16 @@ pub enum CommandError {
     UnterminatedQuote,
     /// No command matched the first token.
     UnknownCommand(String),
+    /// A configured or plugin command conflicts with an existing command root.
+    CommandRegistrationConflict(String),
     /// Alias expansion exceeded the maximum allowed depth.
     AliasExpansionCycle(String),
+    /// Script expansion exceeded the maximum allowed depth.
+    ScriptExpansionCycle(String),
+    /// A script command referenced an argument that was not supplied.
+    MissingScriptArgument { script: String, name: String },
+    /// A script command contained malformed placeholder syntax.
+    InvalidScriptPlaceholder { script: String, placeholder: String },
     /// A command group matched, but the subcommand did not.
     UnknownSubcommand { command: String, subcommand: String },
     /// A required argument was missing.
@@ -34,9 +42,25 @@ impl fmt::Display for CommandError {
             Self::Empty => write!(f, "command must not be empty"),
             Self::UnterminatedQuote => write!(f, "command contains an unterminated quote"),
             Self::UnknownCommand(command) => write!(f, "Unknown command: {command}"),
+            Self::CommandRegistrationConflict(command) => {
+                write!(
+                    f,
+                    "Command registration conflicts with existing root: {command}"
+                )
+            }
             Self::AliasExpansionCycle(command) => {
                 write!(f, "Alias expansion cycle detected for command: {command}")
             }
+            Self::ScriptExpansionCycle(command) => {
+                write!(f, "Script expansion cycle detected for command: {command}")
+            }
+            Self::MissingScriptArgument { script, name } => {
+                write!(f, "Missing argument for script {script}: {name}")
+            }
+            Self::InvalidScriptPlaceholder {
+                script,
+                placeholder,
+            } => write!(f, "Invalid placeholder in script {script}: {placeholder}"),
             Self::UnknownSubcommand {
                 command,
                 subcommand,

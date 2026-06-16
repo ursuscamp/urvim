@@ -266,6 +266,8 @@ pub struct Config {
     pub todo_markers: Vec<SmolStr>,
     /// User-defined command aliases parsed into command-token prefixes.
     pub aliases: BTreeMap<String, Vec<String>>,
+    /// User-defined command scripts stored as ordered command lines.
+    pub scripts: BTreeMap<String, Vec<String>>,
     /// How insert mode should resolve indentation for newly created lines.
     pub auto_indent: AutoIndentMode,
     /// Whether insert-mode completion may trigger automatically.
@@ -314,6 +316,8 @@ pub struct PartialConfig {
     pub todo_markers: Option<Vec<String>>,
     /// User-defined command aliases stored in the config file.
     pub aliases: Option<BTreeMap<String, String>>,
+    /// User-defined command scripts stored in the config file.
+    pub scripts: Option<BTreeMap<String, Vec<String>>>,
     /// How insert mode should resolve indentation for newly created lines.
     pub auto_indent: Option<AutoIndentMode>,
     /// Whether insert-mode completion may trigger automatically.
@@ -413,6 +417,9 @@ impl Config {
             .and_then(|config| config.aliases.as_ref())
             .map(resolve_aliases)
             .unwrap_or_default();
+        let scripts = file
+            .and_then(|config| config.scripts.clone())
+            .unwrap_or_default();
         let auto_indent = file
             .and_then(|config| config.auto_indent)
             .unwrap_or_default();
@@ -455,6 +462,7 @@ impl Config {
             indent_guides,
             todo_markers,
             aliases,
+            scripts,
             auto_indent,
             completion_trigger,
             completion_sources,
@@ -531,6 +539,7 @@ impl Default for Config {
             indent_guides: true,
             todo_markers: default_todo_markers(),
             aliases: BTreeMap::new(),
+            scripts: BTreeMap::new(),
             auto_indent: AutoIndentMode::default(),
             completion_trigger: CompletionTrigger::default(),
             completion_sources: default_completion_sources(),
@@ -640,9 +649,7 @@ fn validate_partial_config(config: &PartialConfig) -> Result<(), ConfigLoadError
         validate_todo_markers(markers)?;
     }
 
-    if let Some(aliases) = config.aliases.as_ref() {
-        validate_aliases(aliases)?;
-    }
+    validate_configured_commands(config)?;
 
     if let Some(sources) = config.completion_sources.as_ref() {
         validate_completion_sources(sources)?;
@@ -661,26 +668,76 @@ fn validate_partial_config(config: &PartialConfig) -> Result<(), ConfigLoadError
 
 fn validate_aliases(aliases: &BTreeMap<String, String>) -> Result<(), ConfigLoadError> {
     for (name, expansion) in aliases {
-        if name.trim().is_empty() {
-            return Err(ConfigLoadError::invalid(
-                "config aliases must not contain empty names",
-            ));
-        }
-        if name.chars().any(char::is_whitespace) {
-            return Err(ConfigLoadError::invalid(format!(
-                "config alias {name:?} must not contain whitespace"
-            )));
-        }
-        if crate::command::is_canonical_command_root(name) {
-            return Err(ConfigLoadError::invalid(format!(
-                "config alias {name:?} conflicts with a canonical command root"
-            )));
-        }
+        validate_custom_command_name("alias", name)?;
         crate::command::validate_alias_expansion(expansion).map_err(|error| {
             ConfigLoadError::invalid(format!(
                 "config alias {name:?} must expand to a valid command prefix: {error}"
             ))
         })?;
+    }
+
+    Ok(())
+}
+
+fn validate_configured_commands(config: &PartialConfig) -> Result<(), ConfigLoadError> {
+    if let Some(aliases) = config.aliases.as_ref() {
+        validate_aliases(aliases)?;
+    }
+
+    if let Some(scripts) = config.scripts.as_ref() {
+        validate_scripts(scripts)?;
+    }
+
+    let resolved = Config {
+        aliases: config
+            .aliases
+            .as_ref()
+            .map(resolve_aliases)
+            .unwrap_or_default(),
+        scripts: config.scripts.clone().unwrap_or_default(),
+        ..Config::default()
+    };
+
+    crate::command::CommandRegistry::new()
+        .register_configured_commands(&resolved)
+        .map_err(|error| ConfigLoadError::invalid(format!("config command conflict: {error}")))
+}
+
+fn validate_scripts(scripts: &BTreeMap<String, Vec<String>>) -> Result<(), ConfigLoadError> {
+    for (name, commands) in scripts {
+        validate_custom_command_name("script", name)?;
+        if commands.is_empty() {
+            return Err(ConfigLoadError::invalid(format!(
+                "config script {name:?} must contain at least one command"
+            )));
+        }
+        for command in commands {
+            crate::command::validate_script_command(command).map_err(|error| {
+                ConfigLoadError::invalid(format!(
+                    "config script {name:?} contains an invalid command: {error}"
+                ))
+            })?;
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_custom_command_name(kind: &str, name: &str) -> Result<(), ConfigLoadError> {
+    if name.trim().is_empty() {
+        return Err(ConfigLoadError::invalid(format!(
+            "config {kind}s must not contain empty names"
+        )));
+    }
+    if name.chars().any(char::is_whitespace) {
+        return Err(ConfigLoadError::invalid(format!(
+            "config {kind} {name:?} must not contain whitespace"
+        )));
+    }
+    if crate::command::is_canonical_command_root(name) {
+        return Err(ConfigLoadError::invalid(format!(
+            "config {kind} {name:?} conflicts with a canonical command root"
+        )));
     }
 
     Ok(())
@@ -1603,6 +1660,70 @@ w = "write"
     }
 
     #[test]
+    fn load_from_locations_loads_command_scripts() {
+        let home = unique_temp_dir("scripts-home");
+        write_config(
+            &home,
+            r#"
+[scripts]
+wq = ["write", "quit"]
+save_rust = ["buffer write path={1}", "buffer filetype filetype=rust"]
+"#,
+        );
+
+        let config = Config::load_from_locations(home, vec![], None, None).expect("should load");
+        assert_eq!(
+            config.scripts,
+            BTreeMap::from([
+                (
+                    "save_rust".to_string(),
+                    vec![
+                        "buffer write path={1}".to_string(),
+                        "buffer filetype filetype=rust".to_string(),
+                    ],
+                ),
+                (
+                    "wq".to_string(),
+                    vec!["write".to_string(), "quit".to_string()],
+                ),
+            ])
+        );
+    }
+
+    #[test]
+    fn load_from_locations_rejects_alias_script_name_collision() {
+        let home = unique_temp_dir("alias-script-collision-home");
+        write_config(
+            &home,
+            r#"
+[aliases]
+wq = "write"
+
+[scripts]
+wq = ["write", "quit"]
+"#,
+        );
+
+        let error = Config::load_from_locations(home, vec![], None, None).expect_err("should fail");
+        assert!(matches!(error, ConfigLoadError::Invalid { .. }));
+    }
+
+    #[test]
+    fn load_from_locations_rejects_empty_script_command_list() {
+        let home = unique_temp_dir("empty-script-home");
+        write_config(
+            &home,
+            r#"
+[scripts]
+wq = []
+"#,
+        );
+
+        let error = Config::load_from_locations(home, vec![], None, None).expect_err("should fail");
+        assert!(matches!(error, ConfigLoadError::Invalid { .. }));
+    }
+
+    #[test]
     fn load_from_locations_rejects_alias_for_canonical_root() {
         let home = unique_temp_dir("canonical-alias-home");
         write_config(
@@ -1610,6 +1731,21 @@ w = "write"
             r#"
 [aliases]
 buffer = "write"
+"#,
+        );
+
+        let error = Config::load_from_locations(home, vec![], None, None).expect_err("should fail");
+        assert!(matches!(error, ConfigLoadError::Invalid { .. }));
+    }
+
+    #[test]
+    fn load_from_locations_rejects_alias_for_builtin_command_root() {
+        let home = unique_temp_dir("builtin-alias-home");
+        write_config(
+            &home,
+            r#"
+[aliases]
+write = "buffer write"
 "#,
         );
 

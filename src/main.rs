@@ -46,6 +46,10 @@ fn main() -> io::Result<()> {
             eprintln!("Error: {}", error);
             io::Error::new(io::ErrorKind::InvalidData, error.to_string())
         })?;
+    urvim::command::install_configured_commands(&config).map_err(|error| {
+        eprintln!("Error: {}", error);
+        io::Error::new(io::ErrorKind::InvalidData, error.to_string())
+    })?;
     globals::set_config(config.clone());
 
     let registry = urvim::theme::ThemeRegistry::load_builtin().map_err(|error| {

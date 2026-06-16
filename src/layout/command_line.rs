@@ -189,19 +189,15 @@ impl Layout {
                     return UiEventResult::Handled(Vec::new());
                 }
 
-                let intent = match self.execute_command_line(command.as_str()) {
-                    Ok(intent) => Some(intent),
-                    Err(message) => Some(Intent::Command(Command::EnqueueNotification {
+                let intents = match self.execute_command_line(command.as_str()) {
+                    Ok(intents) => intents,
+                    Err(message) => vec![Intent::Command(Command::EnqueueNotification {
                         level: NotificationLevel::Error,
                         message,
-                    })),
+                    })],
                 };
 
-                if let Some(intent) = intent {
-                    UiEventResult::Handled(vec![intent])
-                } else {
-                    UiEventResult::Handled(Vec::new())
-                }
+                UiEventResult::Handled(intents)
             }
             KeyCode::Backspace => {
                 self.dialogs
@@ -249,8 +245,8 @@ impl Layout {
         UiEventResult::Handled(Vec::new())
     }
 
-    fn execute_command_line(&mut self, input: &str) -> Result<Intent, String> {
-        command::parse(input).map_err(|error| error.to_string())
+    fn execute_command_line(&mut self, input: &str) -> Result<Vec<Intent>, String> {
+        command::parse_many(input).map_err(|error| error.to_string())
     }
 
     #[allow(dead_code)]
