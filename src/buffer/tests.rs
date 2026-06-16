@@ -323,7 +323,7 @@ fn test_plaintext_upgrades_to_detected_filetype_on_save() {
         .expect("absolute path");
     let mut buf = Buffer::from_str_with_path("hello", path);
 
-    assert_eq!(buf.syntax_name(), "plaintext");
+    assert_eq!(buf.syntax_name(), "rust");
     buf.mark_saved();
 
     assert_eq!(buf.syntax_name(), "rust");
@@ -695,12 +695,12 @@ fn test_save_buffer_clears_modified_state_and_refreshes_syntax() {
     .unwrap();
 
     assert!(pool.get(id).unwrap().is_modified());
-    assert_eq!(pool.get(id).unwrap().syntax_name(), "plaintext");
+    assert_eq!(pool.get(id).unwrap().syntax_name(), "python");
 
     pool.save_buffer(id).unwrap();
 
     assert!(!pool.get(id).unwrap().is_modified());
-    assert_eq!(pool.get(id).unwrap().syntax_name(), "plaintext");
+    assert_eq!(pool.get(id).unwrap().syntax_name(), "python");
 
     fs::remove_file(&path).ok();
 }

@@ -4,6 +4,7 @@ use super::text_object::{self, TextObjectScope};
 use super::{Action, ActionKind, HandleKeyResult, ModeKind, TrieKeymap};
 use crate::buffer::Boundary;
 use crate::editor::{Operator, OperatorTarget};
+use crate::globals;
 use crate::globals::{Direction, FindKind};
 use crate::register::RegisterName;
 use crate::terminal::{Key, KeyCode};
@@ -39,8 +40,20 @@ impl VisualModeState {
         switch_key: &str,
         switch_to: ModeKind,
     ) -> Self {
+        let mut keymap = build_visual_keymap(exit_key, switch_key, switch_to);
+        globals::with_opt_config(|config| {
+            if let Some(config) = config {
+                let mappings = match mode_kind {
+                    ModeKind::Visual => &config.keymaps.visual,
+                    ModeKind::VisualLine => &config.keymaps.visual_line,
+                    _ => unreachable!("visual mode state should only build visual modes"),
+                };
+                keymap.insert_configured(mappings);
+            }
+        });
+
         Self {
-            keymap: build_visual_keymap(exit_key, switch_key, switch_to),
+            keymap,
             state: VisualState::Idle,
             count: 0,
             register: None,

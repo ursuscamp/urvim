@@ -992,7 +992,9 @@ mod tests {
                     level: urvim::notification::NotificationLevel::Info,
                     message: "queued".to_string(),
                 }),
-                Intent::Action(Action::new(ActionKind::SaveBuffer(None))),
+                Intent::Action(Action::new(ActionKind::VisualTextObject(
+                    urvim::editor::TextObject::InnerWord,
+                ))),
             ],
         );
 

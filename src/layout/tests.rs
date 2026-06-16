@@ -108,7 +108,6 @@ fn border_config(unicode_borders: bool) -> Config {
 
     Config {
         theme: "demo".to_string(),
-        insert_escape: None,
         syntax: true,
         auto_close_pairs: true,
         active_line: false,
@@ -1708,7 +1707,6 @@ fn test_layout_render_keeps_syntax_label_when_syntax_disabled() {
     let _theme_guard = globals::set_test_active_theme(border_theme());
     let _config_guard = globals::set_test_config(Config {
         theme: "Friday Night".to_string(),
-        insert_escape: None,
         syntax: false,
         auto_close_pairs: true,
         advanced_glyphs: BTreeSet::new(),
@@ -2008,7 +2006,6 @@ fn test_layout_prunes_expired_yank_flash_during_tick() {
     let _theme_guard = globals::set_test_active_theme(theme);
     let _config_guard = globals::set_test_config(Config {
         theme: "demo".to_string(),
-        insert_escape: None,
         syntax: true,
         auto_close_pairs: true,
         auto_indent: crate::config::AutoIndentMode::Off,

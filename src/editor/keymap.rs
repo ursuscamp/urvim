@@ -67,6 +67,17 @@ impl TrieKeymap {
         current.intent = Some(intent.into());
     }
 
+    /// Inserts configured mappings from canonical key strings to command strings.
+    pub fn insert_configured(&mut self, mappings: &BTreeMap<String, String>) {
+        for (keys, command) in mappings {
+            let parsed_keys =
+                validate_key_string(keys).expect("validated configured keymap key should parse");
+            let intent = crate::command::parse(command)
+                .expect("validated configured keymap command should parse");
+            self.insert_sequence(parsed_keys, intent);
+        }
+    }
+
     /// Returns the intent bound to an exact key sequence.
     pub fn get_action(&self, keys: &[String]) -> Option<Intent> {
         let mut current = &self.root;

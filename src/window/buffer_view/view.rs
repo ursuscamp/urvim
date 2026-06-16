@@ -1693,7 +1693,6 @@ mod tests {
         let _theme_guard = globals::set_test_active_theme(theme);
         let _config_guard = globals::set_test_config(Config {
             theme: "comment-only".to_string(),
-            insert_escape: None,
             syntax: true,
             auto_close_pairs: true,
             auto_indent: crate::config::AutoIndentMode::Off,
@@ -1736,7 +1735,6 @@ mod tests {
         let _theme_guard = globals::set_test_active_theme(theme);
         let _config_guard = globals::set_test_config(Config {
             theme: "marker-demo".to_string(),
-            insert_escape: None,
             syntax: true,
             auto_close_pairs: true,
             auto_indent: crate::config::AutoIndentMode::Off,

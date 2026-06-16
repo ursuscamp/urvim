@@ -438,7 +438,6 @@ fn test_tab_bar_renders_glyph_when_enabled() {
     let _theme_guard = globals::set_test_active_theme(theme);
     let _config_guard = globals::set_test_config(Config {
         theme: "demo".to_string(),
-        insert_escape: None,
         syntax: true,
         auto_close_pairs: true,
         advanced_glyphs: BTreeSet::from([AdvancedGlyphCapability::Nerdfont]),

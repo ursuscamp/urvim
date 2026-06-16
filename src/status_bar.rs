@@ -544,7 +544,6 @@ mod tests {
         let mut screen = Screen::new(1, 48);
         let _config_guard = globals::set_test_config(Config {
             theme: "demo".to_string(),
-            insert_escape: None,
             syntax: true,
             auto_close_pairs: true,
             advanced_glyphs: BTreeSet::from([AdvancedGlyphCapability::Nerdfont]),
@@ -667,7 +666,6 @@ mod tests {
         let mut screen = Screen::new(1, 32);
         let _config_guard = globals::set_test_config(Config {
             theme: "demo".to_string(),
-            insert_escape: None,
             syntax: true,
             auto_close_pairs: true,
             advanced_glyphs: BTreeSet::from([AdvancedGlyphCapability::Nerdfont]),

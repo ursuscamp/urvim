@@ -1,7 +1,7 @@
 use super::*;
 use crate::buffer::{Buffer, Cursor};
 use crate::config::{AutoIndentMode, TabBehavior, TabInsertion};
-use crate::config::{Config, DefaultRegisters};
+use crate::config::{Config, DefaultRegisters, KeymapsConfig};
 use crate::editor::{ActionKind, DelimiterFamily};
 use crate::globals;
 use crate::globals::set_test_config;
@@ -43,10 +43,9 @@ fn complete_action_kind(mode_result: HandleKeyResult) -> ActionKind {
     }
 }
 
-fn configured_test_config(insert_escape: Option<&str>) -> Config {
+fn configured_test_config() -> Config {
     Config {
         theme: "test-theme".to_string(),
-        insert_escape: insert_escape.map(str::to_owned),
         syntax: true,
         auto_close_pairs: true,
         auto_indent: AutoIndentMode::Off,
@@ -55,13 +54,19 @@ fn configured_test_config(insert_escape: Option<&str>) -> Config {
     }
 }
 
-fn configured_test_config_with_pairs(
-    insert_escape: Option<&str>,
-    auto_close_pairs: bool,
-) -> Config {
+fn configured_test_config_with_insert_keymap(keys: &str, command: &str) -> Config {
+    Config {
+        keymaps: KeymapsConfig {
+            insert: std::collections::BTreeMap::from([(keys.to_string(), command.to_string())]),
+            ..Default::default()
+        },
+        ..configured_test_config()
+    }
+}
+
+fn configured_test_config_with_pairs(auto_close_pairs: bool) -> Config {
     Config {
         theme: "test-theme".to_string(),
-        insert_escape: insert_escape.map(str::to_owned),
         syntax: true,
         auto_close_pairs,
         auto_indent: AutoIndentMode::Off,
@@ -73,7 +78,6 @@ fn configured_test_config_with_pairs(
 fn configured_test_config_with_auto_indent(auto_indent: AutoIndentMode) -> Config {
     Config {
         theme: "test-theme".to_string(),
-        insert_escape: None,
         syntax: true,
         auto_close_pairs: true,
         auto_indent,
@@ -93,6 +97,22 @@ fn test_normal_mode_move_left() {
     assert_eq!(
         handle_and_unwrap(&mut mode, &key('h')),
         Action::new(ActionKind::MoveLeft)
+    );
+}
+
+#[test]
+fn test_normal_mode_configured_keymap_overrides_builtin() {
+    let mut config = configured_test_config();
+    config
+        .keymaps
+        .normal
+        .insert("h".to_string(), "action cursor right".to_string());
+    let _guard = set_test_config(config);
+    let mut mode = NormalMode::new();
+
+    assert_eq!(
+        handle_and_unwrap(&mut mode, &key('h')),
+        Action::new(ActionKind::MoveRight)
     );
 }
 
@@ -474,6 +494,23 @@ fn test_resizing_mode_key_bindings() {
 }
 
 #[test]
+fn test_resizing_mode_configured_keymap_overrides_builtin() {
+    let mut config = configured_test_config();
+    config
+        .keymaps
+        .resizing
+        .insert("h".to_string(), "pane resize-right count=1".to_string());
+    let _guard = set_test_config(config);
+    let mut mode = ResizingMode::new();
+
+    assert!(matches!(
+        mode.handle_key(&key('h')),
+        HandleKeyResult::Complete(intent)
+            if matches!(intent, crate::ui::Intent::Command(crate::ui::Command::ResizePaneRight(1)))
+    ));
+}
+
+#[test]
 fn test_visual_mode_motion_and_exit_bindings() {
     let mut mode = VisualMode::new();
 
@@ -514,6 +551,22 @@ fn test_visual_mode_motion_and_exit_bindings() {
     assert_eq!(
         handle_and_unwrap(&mut mode, &Key::new(crate::terminal::KeyCode::Esc)),
         Action::mode_transition(ModeKind::Normal)
+    );
+}
+
+#[test]
+fn test_visual_mode_configured_keymap_overrides_builtin() {
+    let mut config = configured_test_config();
+    config
+        .keymaps
+        .visual
+        .insert("l".to_string(), "action cursor left".to_string());
+    let _guard = set_test_config(config);
+    let mut mode = VisualMode::new();
+
+    assert_eq!(
+        handle_and_unwrap(&mut mode, &key('l')),
+        Action::new(ActionKind::MoveLeft)
     );
 }
 
@@ -613,6 +666,22 @@ fn test_visual_line_mode_motion_and_exit_bindings() {
 }
 
 #[test]
+fn test_visual_line_mode_configured_keymap_overrides_builtin() {
+    let mut config = configured_test_config();
+    config
+        .keymaps
+        .visual_line
+        .insert("l".to_string(), "action cursor left".to_string());
+    let _guard = set_test_config(config);
+    let mut mode = VisualLineMode::new();
+
+    assert_eq!(
+        handle_and_unwrap(&mut mode, &key('l')),
+        Action::new(ActionKind::MoveLeft)
+    );
+}
+
+#[test]
 fn test_visual_line_mode_surround_add_binding_accepts_closer() {
     let mut mode = VisualLineMode::new();
 
@@ -673,7 +742,7 @@ fn test_replace_mode_backspace_restores_last_replace() {
 
 #[test]
 fn test_insert_mode_shift_tab_binds_to_indent_decrease() {
-    let _guard = set_test_config(configured_test_config(None));
+    let _guard = set_test_config(configured_test_config());
     let mut mode = InsertMode::new();
 
     assert_eq!(
@@ -686,8 +755,11 @@ fn test_insert_mode_shift_tab_binds_to_indent_decrease() {
 }
 
 #[test]
-fn test_insert_mode_configured_escape_binding_switches_to_normal() {
-    let _guard = set_test_config(configured_test_config(Some("jk")));
+fn test_insert_mode_configured_keymap_switches_to_normal() {
+    let _guard = set_test_config(configured_test_config_with_insert_keymap(
+        "jk",
+        "mode normal",
+    ));
     let mut mode = InsertMode::new();
 
     assert!(matches!(
@@ -702,8 +774,11 @@ fn test_insert_mode_configured_escape_binding_switches_to_normal() {
 }
 
 #[test]
-fn test_insert_mode_configured_escape_binding_keeps_builtin_escape() {
-    let _guard = set_test_config(configured_test_config(Some("jk")));
+fn test_insert_mode_configured_keymap_keeps_builtin_escape() {
+    let _guard = set_test_config(configured_test_config_with_insert_keymap(
+        "jk",
+        "mode normal",
+    ));
     let mut mode = InsertMode::new();
 
     assert_eq!(
@@ -713,8 +788,11 @@ fn test_insert_mode_configured_escape_binding_keeps_builtin_escape() {
 }
 
 #[test]
-fn test_configured_escape_binding_does_not_affect_normal_mode() {
-    let _guard = set_test_config(configured_test_config(Some("jk")));
+fn test_insert_mode_configured_keymap_does_not_affect_normal_mode() {
+    let _guard = set_test_config(configured_test_config_with_insert_keymap(
+        "jk",
+        "mode normal",
+    ));
     let mut mode = NormalMode::new();
 
     assert_eq!(
@@ -773,7 +851,10 @@ fn test_insert_mode_enter_emits_plain_newline_when_disabled() {
 
 #[test]
 fn test_insert_mode_partial_escape_sequence_falls_back_to_literal_text() {
-    let _guard = set_test_config(configured_test_config(Some("jk")));
+    let _guard = set_test_config(configured_test_config_with_insert_keymap(
+        "jk",
+        "mode normal",
+    ));
     let mut mode = InsertMode::new();
 
     assert!(matches!(
@@ -789,7 +870,10 @@ fn test_insert_mode_partial_escape_sequence_falls_back_to_literal_text() {
 
 #[test]
 fn test_insert_mode_partial_escape_sequence_keeps_following_text() {
-    let _guard = set_test_config(configured_test_config(Some("jk")));
+    let _guard = set_test_config(configured_test_config_with_insert_keymap(
+        "jk",
+        "mode normal",
+    ));
     let mut mode = InsertMode::new();
 
     assert!(matches!(
@@ -805,7 +889,7 @@ fn test_insert_mode_partial_escape_sequence_keeps_following_text() {
 
 #[test]
 fn test_insert_mode_emits_pair_action_for_supported_opener() {
-    let _guard = set_test_config(configured_test_config(None));
+    let _guard = set_test_config(configured_test_config());
     let mut mode = InsertMode::new();
 
     assert_eq!(
@@ -816,7 +900,7 @@ fn test_insert_mode_emits_pair_action_for_supported_opener() {
 
 #[test]
 fn test_insert_mode_emits_skip_closer_action_for_supported_closer() {
-    let _guard = set_test_config(configured_test_config(None));
+    let _guard = set_test_config(configured_test_config());
     let mut mode = InsertMode::new();
 
     assert_eq!(
@@ -827,7 +911,7 @@ fn test_insert_mode_emits_skip_closer_action_for_supported_closer() {
 
 #[test]
 fn test_insert_mode_emits_skip_action_for_quote_closer() {
-    let _guard = set_test_config(configured_test_config(None));
+    let _guard = set_test_config(configured_test_config());
     let mut mode = InsertMode::new();
 
     assert_eq!(
@@ -838,7 +922,7 @@ fn test_insert_mode_emits_skip_action_for_quote_closer() {
 
 #[test]
 fn test_insert_mode_disabled_auto_close_keeps_plain_insertion() {
-    let _guard = set_test_config(configured_test_config_with_pairs(None, false));
+    let _guard = set_test_config(configured_test_config_with_pairs(false));
     let mut mode = InsertMode::new();
 
     assert_eq!(
@@ -849,7 +933,7 @@ fn test_insert_mode_disabled_auto_close_keeps_plain_insertion() {
 
 #[test]
 fn test_insert_mode_tab_simple_uses_configured_insertion_setting() {
-    let mut config = configured_test_config(None);
+    let mut config = configured_test_config();
     config.tab_insertion = TabInsertion::Spaces;
     config.tab_behavior = TabBehavior::Simple;
     config.tab_width = 4;
@@ -870,7 +954,7 @@ fn test_insert_mode_tab_simple_uses_configured_insertion_setting() {
 
 #[test]
 fn test_insert_mode_tab_smart_infers_tabs_from_buffer_contents() {
-    let mut config = configured_test_config(None);
+    let mut config = configured_test_config();
     config.tab_insertion = TabInsertion::Spaces;
     config.tab_behavior = TabBehavior::Smart;
     config.tab_width = 4;
@@ -889,7 +973,7 @@ fn test_insert_mode_tab_smart_infers_tabs_from_buffer_contents() {
 
 #[test]
 fn test_insert_mode_tab_smart_falls_back_to_configured_insertion_setting() {
-    let mut config = configured_test_config(None);
+    let mut config = configured_test_config();
     config.tab_insertion = TabInsertion::Tabs;
     config.tab_behavior = TabBehavior::Smart;
     config.tab_width = 4;
@@ -2231,7 +2315,7 @@ fn test_register_prefix_uses_configured_default_and_named_registers() {
             delete: 'n',
             change: 'o',
         },
-        ..configured_test_config(None)
+        ..configured_test_config()
     });
     let mut mode = NormalMode::new();
 
@@ -2280,7 +2364,7 @@ fn test_visual_mode_register_prefix_applies_to_yank() {
             delete: 'n',
             change: 'o',
         },
-        ..configured_test_config(None)
+        ..configured_test_config()
     });
     let mut mode = VisualMode::new();
 
@@ -2314,7 +2398,7 @@ fn test_visual_line_mode_register_prefix_applies_to_yank() {
             delete: 'n',
             change: 'o',
         },
-        ..configured_test_config(None)
+        ..configured_test_config()
     });
     let mut mode = VisualLineMode::new();
 

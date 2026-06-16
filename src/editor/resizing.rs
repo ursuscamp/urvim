@@ -1,9 +1,14 @@
-use super::{Action, HandleKeyResult, Mode, ModeKind};
+use super::{Action, HandleKeyResult, Mode, ModeKind, TrieKeymap};
+use crate::globals;
 use crate::terminal::{CursorStyle, Key};
 use crate::ui::Command;
 
 /// Pane resizing mode for split-layout adjustments.
-pub struct ResizingMode;
+pub struct ResizingMode {
+    keymap: TrieKeymap,
+    buffer: Vec<String>,
+    waiting: bool,
+}
 
 impl Default for ResizingMode {
     fn default() -> Self {
@@ -14,35 +19,54 @@ impl Default for ResizingMode {
 impl ResizingMode {
     /// Creates a new resizing mode.
     pub fn new() -> Self {
-        Self
+        let mut keymap = TrieKeymap::new();
+        keymap.insert_str("h", Command::ResizePaneLeft(1));
+        keymap.insert_str("H", Command::ResizePaneLeft(5));
+        keymap.insert_str("l", Command::ResizePaneRight(1));
+        keymap.insert_str("L", Command::ResizePaneRight(5));
+        keymap.insert_str("j", Command::ResizePaneDown(1));
+        keymap.insert_str("J", Command::ResizePaneDown(5));
+        keymap.insert_str("k", Command::ResizePaneUp(1));
+        keymap.insert_str("K", Command::ResizePaneUp(5));
+        keymap.insert_str("=", Command::EqualizeSplits);
+        keymap.insert_str("<Esc>", Action::mode_transition(ModeKind::Normal));
+        globals::with_opt_config(|config| {
+            if let Some(config) = config {
+                keymap.insert_configured(&config.keymaps.resizing);
+            }
+        });
+
+        Self {
+            keymap,
+            buffer: Vec::new(),
+            waiting: false,
+        }
     }
 
-    fn command_for_key(&self, key: &Key) -> HandleKeyResult {
-        let intent = match key.canonical_string().as_str() {
-            "h" => Command::ResizePaneLeft(1),
-            "H" => Command::ResizePaneLeft(5),
-            "l" => Command::ResizePaneRight(1),
-            "L" => Command::ResizePaneRight(5),
-            "j" => Command::ResizePaneDown(1),
-            "J" => Command::ResizePaneDown(5),
-            "k" => Command::ResizePaneUp(1),
-            "K" => Command::ResizePaneUp(5),
-            "=" => Command::EqualizeSplits,
-            "<Esc>" => {
-                return HandleKeyResult::complete(
-                    Action::mode_transition(ModeKind::Normal).with_from_mode(ModeKind::Resizing),
-                );
-            }
-            _ => return HandleKeyResult::InvalidSequence,
-        };
-
-        HandleKeyResult::complete(intent)
+    fn reset(&mut self) {
+        self.buffer.clear();
+        self.waiting = false;
     }
 }
 
 impl Mode for ResizingMode {
     fn handle_key(&mut self, key: &Key) -> HandleKeyResult {
-        self.command_for_key(key)
+        self.buffer.push(key.canonical_string());
+        if let Some(intent) = self.keymap.get_action(&self.buffer) {
+            self.reset();
+            if let Some(action) = intent.as_action().cloned() {
+                return HandleKeyResult::complete(action.with_from_mode(ModeKind::Resizing));
+            }
+            return HandleKeyResult::complete(intent);
+        }
+
+        if self.keymap.is_prefix(&self.buffer) {
+            self.waiting = true;
+            return HandleKeyResult::WaitForMore;
+        }
+
+        self.reset();
+        HandleKeyResult::InvalidSequence
     }
 
     fn cursor_style(&self) -> CursorStyle {
@@ -50,10 +74,12 @@ impl Mode for ResizingMode {
     }
 
     fn is_waiting(&self) -> bool {
-        false
+        self.waiting
     }
 
-    fn clear_buffer(&mut self) {}
+    fn clear_buffer(&mut self) {
+        self.reset();
+    }
 
     fn kind(&self) -> ModeKind {
         ModeKind::Resizing

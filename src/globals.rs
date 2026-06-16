@@ -824,7 +824,6 @@ mod tests {
     fn themed_config(theme: &str) -> Config {
         Config {
             theme: theme.to_string(),
-            insert_escape: None,
             syntax: true,
             auto_close_pairs: true,
             active_line: false,

@@ -203,6 +203,37 @@ pub struct LspServerConfig {
     pub settings: Value,
 }
 
+/// Resolved custom keymaps loaded from startup config.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct KeymapsConfig {
+    /// Normal-mode mappings from canonical key strings to command strings.
+    pub normal: BTreeMap<String, String>,
+    /// Insert-mode mappings from canonical key strings to command strings.
+    pub insert: BTreeMap<String, String>,
+    /// Visual-mode mappings from canonical key strings to command strings.
+    pub visual: BTreeMap<String, String>,
+    /// Linewise visual-mode mappings from canonical key strings to command strings.
+    pub visual_line: BTreeMap<String, String>,
+    /// Resize-mode mappings from canonical key strings to command strings.
+    pub resizing: BTreeMap<String, String>,
+}
+
+/// TOML-backed custom keymap tables stored in the config file.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct PartialKeymapsConfig {
+    /// Normal-mode mappings from canonical key strings to command strings.
+    pub normal: Option<BTreeMap<String, String>>,
+    /// Insert-mode mappings from canonical key strings to command strings.
+    pub insert: Option<BTreeMap<String, String>>,
+    /// Visual-mode mappings from canonical key strings to command strings.
+    pub visual: Option<BTreeMap<String, String>>,
+    /// Linewise visual-mode mappings from canonical key strings to command strings.
+    pub visual_line: Option<BTreeMap<String, String>>,
+    /// Resize-mode mappings from canonical key strings to command strings.
+    pub resizing: Option<BTreeMap<String, String>>,
+}
+
 /// The TOML-backed config table for a single LSP server.
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -248,8 +279,8 @@ impl Default for LspServerConfig {
 pub struct Config {
     /// The active theme name selected after merging file and CLI inputs.
     pub theme: String,
-    /// The optional insert-mode escape binding loaded from config.
-    pub insert_escape: Option<String>,
+    /// Custom editor mode keymaps loaded from config.
+    pub keymaps: KeymapsConfig,
     /// The resolved default register selectors for yank, delete, and change.
     pub default_registers: DefaultRegisters,
     /// Whether syntax highlighting is enabled for rendered buffers.
@@ -298,8 +329,8 @@ pub struct Config {
 pub struct PartialConfig {
     /// The theme name stored in the config file.
     pub theme: Option<String>,
-    /// The optional insert-mode escape binding stored in the config file.
-    pub insert_escape: Option<String>,
+    /// Custom editor mode keymaps stored in the config file.
+    pub keymaps: Option<PartialKeymapsConfig>,
     /// The default register table stored in the config file.
     pub default_registers: Option<PartialDefaultRegisters>,
     /// Whether syntax highlighting is enabled in the config file.
@@ -393,7 +424,10 @@ impl Config {
             .map(ToOwned::to_owned)
             .or_else(|| file.and_then(|config| config.theme.clone()))
             .unwrap_or_else(|| DEFAULT_THEME.to_string());
-        let insert_escape = file.and_then(|config| config.insert_escape.clone());
+        let keymaps = file
+            .and_then(|config| config.keymaps.as_ref())
+            .map(resolve_keymaps)
+            .unwrap_or_default();
         let default_registers = file
             .and_then(|config| config.default_registers.as_ref())
             .map(resolve_default_registers)
@@ -453,7 +487,7 @@ impl Config {
 
         Self {
             theme,
-            insert_escape,
+            keymaps,
             default_registers,
             syntax,
             auto_close_pairs,
@@ -530,7 +564,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             theme: DEFAULT_THEME.to_string(),
-            insert_escape: None,
+            keymaps: KeymapsConfig::default(),
             default_registers: DefaultRegisters::default(),
             syntax: true,
             auto_close_pairs: true,
@@ -625,14 +659,6 @@ fn validate_partial_config(config: &PartialConfig) -> Result<(), ConfigLoadError
         ));
     }
 
-    if let Some(insert_escape) = config.insert_escape.as_ref() {
-        validate_key_string(insert_escape).map_err(|error| {
-            ConfigLoadError::invalid(format!(
-                "config insert_escape must be a valid canonical key string: {error}"
-            ))
-        })?;
-    }
-
     if let Some(default_registers) = config.default_registers.as_ref() {
         validate_default_registers(default_registers)?;
     }
@@ -651,6 +677,10 @@ fn validate_partial_config(config: &PartialConfig) -> Result<(), ConfigLoadError
 
     validate_configured_commands(config)?;
 
+    if let Some(keymaps) = config.keymaps.as_ref() {
+        validate_keymaps(keymaps)?;
+    }
+
     if let Some(sources) = config.completion_sources.as_ref() {
         validate_completion_sources(sources)?;
     }
@@ -661,6 +691,46 @@ fn validate_partial_config(config: &PartialConfig) -> Result<(), ConfigLoadError
 
     if let Some(lsp) = config.lsp.as_ref() {
         validate_partial_lsp_config(lsp)?;
+    }
+
+    Ok(())
+}
+
+fn validate_keymaps(keymaps: &PartialKeymapsConfig) -> Result<(), ConfigLoadError> {
+    if let Some(normal) = keymaps.normal.as_ref() {
+        validate_keymap_table("normal", normal)?;
+    }
+    if let Some(insert) = keymaps.insert.as_ref() {
+        validate_keymap_table("insert", insert)?;
+    }
+    if let Some(visual) = keymaps.visual.as_ref() {
+        validate_keymap_table("visual", visual)?;
+    }
+    if let Some(visual_line) = keymaps.visual_line.as_ref() {
+        validate_keymap_table("visual_line", visual_line)?;
+    }
+    if let Some(resizing) = keymaps.resizing.as_ref() {
+        validate_keymap_table("resizing", resizing)?;
+    }
+
+    Ok(())
+}
+
+fn validate_keymap_table(
+    mode: &str,
+    mappings: &BTreeMap<String, String>,
+) -> Result<(), ConfigLoadError> {
+    for (keys, command) in mappings {
+        validate_key_string(keys).map_err(|error| {
+            ConfigLoadError::invalid(format!(
+                "config keymaps.{mode} key {keys:?} must be a valid canonical key string: {error}"
+            ))
+        })?;
+        crate::command::parse(command).map_err(|error| {
+            ConfigLoadError::invalid(format!(
+                "config keymaps.{mode} mapping {keys:?} must target a valid command: {error}"
+            ))
+        })?;
     }
 
     Ok(())
@@ -752,6 +822,16 @@ fn resolve_aliases(aliases: &BTreeMap<String, String>) -> BTreeMap<String, Vec<S
             (name.clone(), tokens)
         })
         .collect()
+}
+
+fn resolve_keymaps(keymaps: &PartialKeymapsConfig) -> KeymapsConfig {
+    KeymapsConfig {
+        normal: keymaps.normal.clone().unwrap_or_default(),
+        insert: keymaps.insert.clone().unwrap_or_default(),
+        visual: keymaps.visual.clone().unwrap_or_default(),
+        visual_line: keymaps.visual_line.clone().unwrap_or_default(),
+        resizing: keymaps.resizing.clone().unwrap_or_default(),
+    }
 }
 
 fn resolve_scroll_margin(scroll_margin: Option<&PartialScrollMargin>) -> ScrollMargin {
@@ -1233,7 +1313,28 @@ mod tests {
     fn resolve_prefers_cli_then_file_then_default() {
         let file = PartialConfig {
             theme: Some("file-theme".to_string()),
-            insert_escape: Some("jk".to_string()),
+            keymaps: Some(PartialKeymapsConfig {
+                normal: Some(BTreeMap::from([(
+                    "<Space>w".to_string(),
+                    "write".to_string(),
+                )])),
+                insert: Some(BTreeMap::from([(
+                    "jk".to_string(),
+                    "mode normal".to_string(),
+                )])),
+                visual: Some(BTreeMap::from([(
+                    "x".to_string(),
+                    "mode normal".to_string(),
+                )])),
+                visual_line: Some(BTreeMap::from([(
+                    "x".to_string(),
+                    "mode normal".to_string(),
+                )])),
+                resizing: Some(BTreeMap::from([(
+                    "x".to_string(),
+                    "pane equalize".to_string(),
+                )])),
+            }),
             default_registers: Some(default_register_strings(Some("a"), Some("b"), Some("c"))),
             syntax: Some(false),
             auto_close_pairs: Some(false),
@@ -1264,9 +1365,11 @@ mod tests {
         assert_eq!(Config::resolve(Some(&file), None, None).theme, "file-theme");
         assert_eq!(
             Config::resolve(Some(&file), None, None)
-                .insert_escape
-                .as_deref(),
-            Some("jk")
+                .keymaps
+                .insert
+                .get("jk")
+                .map(String::as_str),
+            Some("mode normal")
         );
         assert_eq!(
             Config::resolve(Some(&file), None, None).default_registers,
@@ -1311,7 +1414,10 @@ mod tests {
             CompletionTrigger::Manual
         );
         assert_eq!(Config::resolve(None, None, None).theme, DEFAULT_THEME);
-        assert_eq!(Config::resolve(None, None, None).insert_escape, None);
+        assert_eq!(
+            Config::resolve(None, None, None).keymaps,
+            KeymapsConfig::default()
+        );
         assert_eq!(
             Config::resolve(None, None, None).default_registers,
             DefaultRegisters::default()
@@ -1928,13 +2034,35 @@ enabled = true
     }
 
     #[test]
-    fn load_from_locations_loads_insert_escape_binding() {
-        let home = unique_temp_dir("insert-escape-home");
-        write_config(&home, "insert_escape = \"jk\"");
+    fn load_from_locations_loads_keymaps() {
+        let home = unique_temp_dir("keymaps-home");
+        write_config(
+            &home,
+            "[keymaps.normal]\n\"<Space>w\" = \"write\"\n[keymaps.insert]\njk = \"mode normal\"\n[keymaps.visual]\nx = \"mode normal\"\n[keymaps.visual_line]\nx = \"mode normal\"\n[keymaps.resizing]\nx = \"pane equalize\"",
+        );
 
         let config = Config::load_from_locations(home, vec![], None, None).expect("should load");
 
-        assert_eq!(config.insert_escape.as_deref(), Some("jk"));
+        assert_eq!(
+            config.keymaps.normal.get("<Space>w").map(String::as_str),
+            Some("write")
+        );
+        assert_eq!(
+            config.keymaps.insert.get("jk").map(String::as_str),
+            Some("mode normal")
+        );
+        assert_eq!(
+            config.keymaps.visual.get("x").map(String::as_str),
+            Some("mode normal")
+        );
+        assert_eq!(
+            config.keymaps.visual_line.get("x").map(String::as_str),
+            Some("mode normal")
+        );
+        assert_eq!(
+            config.keymaps.resizing.get("x").map(String::as_str),
+            Some("pane equalize")
+        );
     }
 
     #[test]
@@ -2175,15 +2303,30 @@ enabled = true
     }
 
     #[test]
-    fn load_from_locations_rejects_invalid_insert_escape_binding() {
-        let home = unique_temp_dir("invalid-insert-escape-home");
-        write_config(&home, "insert_escape = \"   \"");
+    fn load_from_locations_rejects_invalid_keymap_key() {
+        let home = unique_temp_dir("invalid-keymap-key-home");
+        write_config(&home, "[keymaps.insert]\n\"   \" = \"mode normal\"");
 
         let error = Config::load_from_locations(home, vec![], None, None).expect_err("should fail");
 
         match error {
             ConfigLoadError::Invalid { message } => {
-                assert!(message.contains("insert_escape"));
+                assert!(message.contains("keymaps.insert"));
+            }
+            other => panic!("expected validation error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn load_from_locations_rejects_invalid_keymap_command() {
+        let home = unique_temp_dir("invalid-keymap-command-home");
+        write_config(&home, "[keymaps.normal]\nq = \"unknown command\"");
+
+        let error = Config::load_from_locations(home, vec![], None, None).expect_err("should fail");
+
+        match error {
+            ConfigLoadError::Invalid { message } => {
+                assert!(message.contains("keymaps.normal"));
             }
             other => panic!("expected validation error, got {other:?}"),
         }

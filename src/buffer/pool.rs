@@ -843,7 +843,6 @@ mod tests {
     fn test_warmup_syntax_at_startup_warms_active_buffer_and_queues_hidden_buffers() {
         let _config_guard = globals::set_test_config(Config {
             theme: "demo".to_string(),
-            insert_escape: None,
             syntax: true,
             auto_close_pairs: true,
             ..Default::default()

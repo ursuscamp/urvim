@@ -80,6 +80,11 @@ impl NormalMode {
     pub fn new() -> Self {
         let mut keymap = TrieKeymap::new();
         bindings::register(&mut keymap);
+        globals::with_opt_config(|config| {
+            if let Some(config) = config {
+                keymap.insert_configured(&config.keymaps.normal);
+            }
+        });
 
         NormalMode {
             keymap,

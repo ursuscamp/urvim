@@ -612,7 +612,6 @@ fn tag(value: &str) -> Tag {
 fn pairing_test_config(auto_close_pairs: bool) -> Config {
     Config {
         theme: "demo-syntax".to_string(),
-        insert_escape: None,
         syntax: true,
         auto_close_pairs,
         auto_indent: AutoIndentMode::Off,
@@ -624,7 +623,6 @@ fn pairing_test_config(auto_close_pairs: bool) -> Config {
 fn auto_indent_test_config(auto_indent: AutoIndentMode) -> Config {
     Config {
         theme: "demo-syntax".to_string(),
-        insert_escape: None,
         syntax: true,
         auto_close_pairs: true,
         auto_indent,
@@ -638,7 +636,6 @@ fn visual_test_setup() -> (impl Drop, impl Drop) {
     let theme_guard = globals::set_test_active_theme(theme);
     let config_guard = globals::set_test_config(Config {
         theme: "demo".to_string(),
-        insert_escape: None,
         syntax: true,
         auto_close_pairs: true,
         auto_indent: AutoIndentMode::Off,
@@ -2171,7 +2168,6 @@ fn test_window_render_omits_syntax_styles_when_disabled() {
     let _theme_guard = globals::set_test_active_theme(theme);
     let _config_guard = globals::set_test_config(Config {
         theme: "demo-syntax".to_string(),
-        insert_escape: None,
         syntax: false,
         auto_close_pairs: true,
         advanced_glyphs: BTreeSet::new(),
@@ -2204,7 +2200,6 @@ fn test_window_render_does_not_force_full_syntax_warmup_on_bottom_jump() {
     let _theme_guard = globals::set_test_active_theme(theme);
     let _config_guard = globals::set_test_config(Config {
         theme: "demo-syntax".to_string(),
-        insert_escape: None,
         syntax: true,
         auto_close_pairs: true,
         auto_indent: AutoIndentMode::Off,
@@ -2258,7 +2253,6 @@ fn test_window_render_keeps_bottom_viewport_highlighted_after_completion_top_edi
     let _theme_guard = globals::set_test_active_theme(theme);
     let _config_guard = globals::set_test_config(Config {
         theme: "demo-syntax".to_string(),
-        insert_escape: None,
         syntax: true,
         auto_close_pairs: true,
         auto_indent: AutoIndentMode::Off,
@@ -2358,7 +2352,6 @@ fn test_window_render_requests_async_syntax_without_warmup() {
     let _theme_guard = globals::set_test_active_theme(theme);
     let _config_guard = globals::set_test_config(Config {
         theme: "demo-syntax".to_string(),
-        insert_escape: None,
         syntax: true,
         auto_close_pairs: true,
         auto_indent: AutoIndentMode::Off,
@@ -2420,7 +2413,6 @@ fn test_window_render_uses_background_syntax_after_tick() {
     let _theme_guard = globals::set_test_active_theme(theme.clone());
     let _config_guard = globals::set_test_config(Config {
         theme: "demo-syntax".to_string(),
-        insert_escape: None,
         syntax: true,
         auto_close_pairs: true,
         auto_indent: AutoIndentMode::Off,
@@ -2556,7 +2548,6 @@ fn test_window_render_highlights_todo_markers_inside_comments() {
     let _theme_guard = globals::set_test_active_theme(theme);
     let _config_guard = globals::set_test_config(Config {
         theme: "demo-syntax".to_string(),
-        insert_escape: None,
         syntax: true,
         auto_close_pairs: true,
         auto_indent: AutoIndentMode::Off,
@@ -2600,7 +2591,6 @@ fn test_window_render_skips_todo_markers_when_syntax_is_disabled() {
     let _theme_guard = globals::set_test_active_theme(theme);
     let _config_guard = globals::set_test_config(Config {
         theme: "demo-syntax".to_string(),
-        insert_escape: None,
         syntax: false,
         auto_close_pairs: true,
         auto_indent: AutoIndentMode::Off,
@@ -4099,7 +4089,6 @@ fn test_visual_selection_is_rendered() {
     let _theme_guard = globals::set_test_active_theme(theme);
     let _config_guard = globals::set_test_config(Config {
         theme: "demo".to_string(),
-        insert_escape: None,
         syntax: true,
         auto_close_pairs: true,
         auto_indent: AutoIndentMode::Off,
@@ -4135,7 +4124,6 @@ fn test_visual_line_selection_is_rendered() {
     let _theme_guard = globals::set_test_active_theme(theme);
     let _config_guard = globals::set_test_config(Config {
         theme: "demo".to_string(),
-        insert_escape: None,
         syntax: true,
         auto_close_pairs: true,
         auto_indent: AutoIndentMode::Off,
@@ -5348,7 +5336,6 @@ fn test_ciw_keeps_syntax_styled_above_changed_line() {
     let _theme_guard = globals::set_test_active_theme(syntax_themed_window());
     let _config_guard = globals::set_test_config(Config {
         theme: "demo-syntax".to_string(),
-        insert_escape: None,
         syntax: true,
         auto_close_pairs: true,
         auto_indent: AutoIndentMode::Off,
@@ -5443,7 +5430,6 @@ fn test_open_line_after_ciw_keeps_prefix_styled() {
     let _theme_guard = globals::set_test_active_theme(syntax_themed_window());
     let _config_guard = globals::set_test_config(Config {
         theme: "demo-syntax".to_string(),
-        insert_escape: None,
         syntax: true,
         auto_close_pairs: true,
         auto_indent: AutoIndentMode::Off,

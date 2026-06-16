@@ -2,7 +2,6 @@ use super::{Action, ActionKind, HandleKeyResult, Mode, ModeKind, TrieKeymap};
 use crate::buffer::{Buffer, Cursor, IndentDirection};
 use crate::config::{DEFAULT_TAB_WIDTH, TabBehavior, TabInsertion};
 use crate::editor::pairs;
-use crate::editor::validate_key_string;
 use crate::globals;
 use crate::terminal::{CursorStyle, Key, KeyCode};
 use crate::ui::Command;
@@ -47,10 +46,8 @@ impl InsertMode {
         keymap.insert_str("<Backspace>", Action::new(ActionKind::DeleteBackward));
         keymap.insert_str("<Delete>", Action::new(ActionKind::DeleteForward));
         globals::with_opt_config(|config| {
-            if let Some(insert_escape) = config.and_then(|config| config.insert_escape.as_deref()) {
-                let parsed = validate_key_string(insert_escape)
-                    .expect("invalid canonical insert escape binding in resolved config");
-                keymap.insert_sequence(parsed, Action::mode_transition(ModeKind::Normal));
+            if let Some(config) = config {
+                keymap.insert_configured(&config.keymaps.insert);
             }
         });
         let auto_close_pairs =

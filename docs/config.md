@@ -23,11 +23,10 @@ Command-line flags override config file values.
 
 ## Current Schema
 
-The canonical config values are `theme`, `insert_escape`, `default_registers`, `syntax`, `todo_markers`, `aliases`, `scripts`, `auto_close_pairs`, `active_line`, `relative_number`, `indent_guides`, `auto_indent`, `completion_trigger`, `completion_sources`, `advanced_glyphs`, `inlay_hints`, `tab_insertion`, `tab_behavior`, `tab_width`, `scroll_margin`, `wrap_mode`, and `lsp`.
+The canonical config values are `theme`, `keymaps`, `default_registers`, `syntax`, `todo_markers`, `aliases`, `scripts`, `auto_close_pairs`, `active_line`, `relative_number`, `indent_guides`, `auto_indent`, `completion_trigger`, `completion_sources`, `advanced_glyphs`, `inlay_hints`, `tab_insertion`, `tab_behavior`, `tab_width`, `scroll_margin`, `wrap_mode`, and `lsp`.
 
 ```toml
 theme = "Friday Night"
-insert_escape = "jk"
 default_registers = { yank = "y", delete = "d", change = "c" }
 syntax = true
 todo_markers = ["TODO", "FIXME", "BUG", "NOTE"]
@@ -54,6 +53,25 @@ dl = "action edit delete-line"
 wq = ["write", "quit"]
 save_rust = ["buffer write path={1}", "buffer filetype filetype=rust"]
 
+[keymaps.normal]
+"<Space>f" = "pick file"
+"<Space>w" = "write"
+"<Space>q" = "quit"
+
+[keymaps.insert]
+jk = "mode normal"
+"<C-s>" = "write"
+
+[keymaps.visual]
+"<Space>y" = "action edit yank-selection"
+
+[keymaps.visual_line]
+"<Space>y" = "action edit yank-selection"
+
+[keymaps.resizing]
+h = "pane resize-left count=5"
+l = "pane resize-right count=5"
+
 [lsp.rust_analyzer]
 enabled = true
 command = "rust-analyzer"
@@ -70,15 +88,19 @@ Sets the active editor theme by name.
 - Override: `--theme <name>`
 - Built-in themes: Friday Night, Saturday Morning, Rose Pine, Dracula, Tokyo Night, Catppuccin, Nord, OneDark, Gruvbox, and Gruvbox Light
 
-### `insert_escape`
+### `keymaps`
 
-Sets an optional alternate insert-mode escape binding using urvim's canonical key string format.
+Defines custom key bindings for supported editor modes.
 
-- Type: string
-- Default: not set
-- Behavior: adds an additional insert-mode binding alongside `<Esc>`
-- Examples: `jk`, `<C-[>`
-- Validation: empty, whitespace-only, or malformed key strings are rejected at startup
+- Type: TOML tables under `[keymaps.normal]`, `[keymaps.insert]`, `[keymaps.visual]`, `[keymaps.visual_line]`, and `[keymaps.resizing]`
+- Default: no custom mappings
+- Behavior: mappings are applied after built-in bindings, so configured mappings replace built-ins with the same key sequence
+- Keys: use urvim's canonical key string format, such as `jk`, `<Space>f`, `<C-s>`, or `<Esc>`
+- Values: command strings parsed the same way as command-line input, such as `write`, `pick file`, `mode normal`, or `action cursor right`
+- Multi-command mappings: map to a configured script name; direct multi-command keymap values are not supported
+- Supported modes: `normal`, `insert`, `visual`, `visual_line`, `resizing`
+- Validation: malformed key strings, invalid commands, and unknown keymap mode tables are rejected at startup
+- Example: `jk = "mode normal"` under `[keymaps.insert]` adds a custom insert-mode exit binding while keeping built-in `<Esc>`
 
 ### `default_registers`
 
