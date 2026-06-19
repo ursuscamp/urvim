@@ -2,8 +2,54 @@ use std::fmt;
 use std::ops::Deref;
 use std::path::PathBuf;
 
+/// Returns the user's home directory from the process environment.
+pub fn home_dir() -> Option<PathBuf> {
+    std::env::var_os("HOME").map(PathBuf::from)
+}
+
+/// Expands a leading `~` or `~/` using the user's home directory when available.
+pub fn expand_home_path(path: &str) -> PathBuf {
+    if path == "~" {
+        if let Some(home) = home_dir() {
+            return home;
+        }
+    }
+    if let Some(rest) = path.strip_prefix("~/")
+        && let Some(home) = home_dir()
+    {
+        return home.join(rest);
+    }
+
+    PathBuf::from(path)
+}
+
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct AbsolutePath(PathBuf);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn expand_home_path_leaves_non_home_path_unchanged() {
+        assert_eq!(
+            expand_home_path("plugins/demo"),
+            PathBuf::from("plugins/demo")
+        );
+    }
+
+    #[test]
+    fn expand_home_path_expands_home_prefix_when_home_is_available() {
+        let Some(home) = home_dir() else {
+            return;
+        };
+
+        assert_eq!(
+            expand_home_path("~/plugins/demo"),
+            home.join("plugins/demo")
+        );
+    }
+}
 
 impl AbsolutePath {
     pub fn new(path: PathBuf) -> Option<Self> {

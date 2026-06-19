@@ -1,5 +1,6 @@
 use super::{CommandError, CommandInvocation};
 use crate::config::Config;
+use crate::plugin::{PluginCommand, PluginRegistry};
 use std::collections::BTreeMap;
 
 #[cfg(test)]
@@ -37,6 +38,8 @@ pub enum RegisteredCommand {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommandRegistry {
     commands: BTreeMap<String, RegisteredCommand>,
+    plugin_scripts: BTreeMap<String, BTreeMap<String, Vec<String>>>,
+    plugin_commands: BTreeMap<String, BTreeMap<String, PluginCommand>>,
 }
 
 impl CommandRegistry {
@@ -44,6 +47,8 @@ impl CommandRegistry {
     pub fn new() -> Self {
         Self {
             commands: builtin_commands(),
+            plugin_scripts: BTreeMap::new(),
+            plugin_commands: BTreeMap::new(),
         }
     }
 
@@ -77,6 +82,48 @@ impl CommandRegistry {
         Ok(())
     }
 
+    /// Registers scripts contributed by loaded plugins.
+    pub fn register_plugin_scripts(&mut self, plugins: &PluginRegistry) {
+        for (plugin_name, plugin) in plugins.iter() {
+            self.plugin_scripts
+                .insert(plugin_name.to_string(), plugin.scripts().clone());
+            self.plugin_commands
+                .insert(plugin_name.to_string(), plugin.commands().clone());
+        }
+    }
+
+    #[cfg(test)]
+    pub fn register_test_plugin_script(
+        &mut self,
+        plugin: impl Into<String>,
+        script: impl Into<String>,
+        commands: Vec<String>,
+    ) {
+        self.plugin_scripts
+            .entry(plugin.into())
+            .or_default()
+            .insert(script.into(), commands);
+    }
+
+    #[cfg(test)]
+    pub fn register_test_plugin_command(
+        &mut self,
+        plugin: impl Into<String>,
+        command: impl Into<String>,
+        request: impl Into<String>,
+    ) {
+        self.plugin_commands
+            .entry(plugin.into())
+            .or_default()
+            .insert(
+                command.into(),
+                PluginCommand {
+                    description: None,
+                    request: request.into(),
+                },
+            );
+    }
+
     /// Returns true if `name` is a registered command root.
     pub fn is_registered_root(&self, name: &str) -> bool {
         is_canonical_root(name) || self.commands.contains_key(name)
@@ -99,6 +146,27 @@ impl CommandRegistry {
             Some(RegisteredCommand::Script { commands }) => Some(commands.clone()),
             _ => None,
         }
+    }
+
+    /// Returns true when the plugin namespace is registered.
+    pub fn has_plugin(&self, plugin: &str) -> bool {
+        self.plugin_scripts.contains_key(plugin) || self.plugin_commands.contains_key(plugin)
+    }
+
+    /// Returns the registered script command list for a namespaced plugin script.
+    pub fn plugin_script(&self, plugin: &str, script: &str) -> Option<Vec<String>> {
+        self.plugin_scripts
+            .get(plugin)
+            .and_then(|scripts| scripts.get(script))
+            .cloned()
+    }
+
+    /// Returns the registered process command for a namespaced plugin command.
+    pub fn plugin_command(&self, plugin: &str, command: &str) -> Option<PluginCommand> {
+        self.plugin_commands
+            .get(plugin)
+            .and_then(|commands| commands.get(command))
+            .cloned()
     }
 
     fn register(
@@ -131,7 +199,7 @@ impl Default for CommandRegistry {
 
 /// Returns the canonical built-in command roots.
 pub fn canonical_roots() -> &'static [&'static str] {
-    &["buffer", "action", "pick", "lsp", "pane", "app"]
+    &["buffer", "action", "pick", "lsp", "pane", "app", "plugin"]
 }
 
 /// Returns true if `name` is a canonical command root.
@@ -143,6 +211,18 @@ pub fn is_canonical_root(name: &str) -> bool {
 pub fn install_configured_commands(config: &Config) -> Result<(), CommandError> {
     let mut registry = CommandRegistry::new();
     registry.register_configured_commands(config)?;
+    set_registry(registry);
+    Ok(())
+}
+
+/// Installs a fresh registry containing built-ins, configured commands, and plugin scripts.
+pub fn install_configured_commands_with_plugins(
+    config: &Config,
+    plugins: &PluginRegistry,
+) -> Result<(), CommandError> {
+    let mut registry = CommandRegistry::new();
+    registry.register_configured_commands(config)?;
+    registry.register_plugin_scripts(plugins);
     set_registry(registry);
     Ok(())
 }
@@ -165,6 +245,21 @@ pub fn expand(invocation: &CommandInvocation) -> Result<CommandInvocation, Comma
 /// Returns the registered script command list for a command root.
 pub fn script(name: &str) -> Option<Vec<String>> {
     with_registry(|registry| registry.script(name))
+}
+
+/// Returns true when the plugin namespace is registered.
+pub fn has_plugin(plugin: &str) -> bool {
+    with_registry(|registry| registry.has_plugin(plugin))
+}
+
+/// Returns the registered script command list for a namespaced plugin script.
+pub fn plugin_script(plugin: &str, script: &str) -> Option<Vec<String>> {
+    with_registry(|registry| registry.plugin_script(plugin, script))
+}
+
+/// Returns the registered process command for a namespaced plugin command.
+pub fn plugin_command(plugin: &str, command: &str) -> Option<PluginCommand> {
+    with_registry(|registry| registry.plugin_command(plugin, command))
 }
 
 #[cfg(test)]
@@ -333,5 +428,45 @@ mod tests {
             registry.script("wq"),
             Some(vec!["write".to_string(), "quit".to_string()])
         );
+    }
+
+    #[test]
+    fn registers_plugin_scripts_without_top_level_roots() {
+        let root =
+            std::env::temp_dir().join(format!("urvim-command-plugin-{}", std::process::id()));
+        std::fs::create_dir_all(&root).expect("plugin dir should exist");
+        std::fs::write(
+            root.join(crate::plugin::MANIFEST_FILE_NAME),
+            r#"
+name = "tools"
+version = "0.1.0"
+
+[scripts]
+wq = ["write", "quit"]
+"#,
+        )
+        .expect("manifest should write");
+        let config = Config {
+            plugins: BTreeMap::from([(
+                "tools".to_string(),
+                crate::config::PluginConfig {
+                    enabled: true,
+                    path: root.clone(),
+                },
+            )]),
+            ..Config::default()
+        };
+        let plugins = PluginRegistry::load_from_config(&config).expect("plugin should load");
+        let mut registry = CommandRegistry::new();
+
+        registry.register_plugin_scripts(&plugins);
+
+        assert_eq!(
+            registry.plugin_script("tools", "wq"),
+            Some(vec!["write".to_string(), "quit".to_string()])
+        );
+        assert_eq!(registry.script("wq"), None);
+
+        std::fs::remove_dir_all(root).ok();
     }
 }

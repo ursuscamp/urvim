@@ -9,10 +9,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fmt;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::editor::validate_key_string;
 use crate::lsp::builtin::builtin_lsp_config;
+use crate::path::expand_home_path;
 use crate::theme::Tag;
 use smol_str::SmolStr;
 use toml::Value;
@@ -20,6 +21,7 @@ use toml::Value;
 const DEFAULT_THEME: &str = "Friday Night";
 const DEFAULT_TODO_MARKERS: [&str; 4] = ["TODO", "FIXME", "BUG", "NOTE"];
 const CONFIG_RELATIVE_PATH: &str = "urvim/config.toml";
+const PLUGINS_RELATIVE_PATH: &str = "urvim/plugins";
 const DEFAULT_XDG_CONFIG_DIRS: &str = "/etc/xdg";
 
 /// Advanced glyph capabilities that can be enabled through configuration.
@@ -203,6 +205,25 @@ pub struct LspServerConfig {
     pub settings: Value,
 }
 
+/// The resolved configuration for a single explicitly enabled plugin.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PluginConfig {
+    /// Whether the plugin should be loaded.
+    pub enabled: bool,
+    /// The resolved plugin directory.
+    pub path: PathBuf,
+}
+
+/// TOML-backed plugin config table stored in the config file.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct PartialPluginConfig {
+    /// Whether the plugin should be loaded.
+    pub enabled: Option<bool>,
+    /// Optional plugin directory override.
+    pub path: Option<String>,
+}
+
 /// Resolved custom keymaps loaded from startup config.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct KeymapsConfig {
@@ -321,6 +342,8 @@ pub struct Config {
     pub wrap_mode: WrapMode,
     /// The resolved LSP server configuration.
     pub lsp: LspConfig,
+    /// Explicitly configured plugins keyed by plugin id.
+    pub plugins: BTreeMap<String, PluginConfig>,
 }
 
 /// The TOML-backed config file schema.
@@ -371,6 +394,8 @@ pub struct PartialConfig {
     pub wrap_mode: Option<WrapMode>,
     /// The LSP config table stored in the config file.
     pub lsp: Option<PartialLspConfig>,
+    /// Explicit plugin config tables stored in the config file.
+    pub plugins: Option<BTreeMap<String, PartialPluginConfig>>,
 }
 
 /// Errors that can occur while loading or resolving startup configuration.
@@ -410,8 +435,13 @@ impl Config {
         cli_theme: Option<&str>,
         cli_syntax: Option<bool>,
     ) -> Result<Self, ConfigLoadError> {
-        let file = load_config_file(config_home, config_dirs)?;
-        Ok(Self::resolve(file.as_ref(), cli_theme, cli_syntax))
+        let file = load_config_file(config_home.clone(), config_dirs)?;
+        Ok(Self::resolve_with_config_home(
+            file.as_ref(),
+            cli_theme,
+            cli_syntax,
+            &config_home,
+        ))
     }
 
     /// Resolves the final config by applying CLI overrides on top of file values.
@@ -419,6 +449,17 @@ impl Config {
         file: Option<&PartialConfig>,
         cli_theme: Option<&str>,
         cli_syntax: Option<bool>,
+    ) -> Self {
+        let config_home = xdg_config_home().unwrap_or_else(|_| default_config_home_fallback());
+        Self::resolve_with_config_home(file, cli_theme, cli_syntax, &config_home)
+    }
+
+    /// Resolves the final config with an explicit XDG config home.
+    pub fn resolve_with_config_home(
+        file: Option<&PartialConfig>,
+        cli_theme: Option<&str>,
+        cli_syntax: Option<bool>,
+        config_home: &PathBuf,
     ) -> Self {
         let theme = cli_theme
             .map(ToOwned::to_owned)
@@ -484,6 +525,7 @@ impl Config {
             resolve_scroll_margin(file.and_then(|config| config.scroll_margin.as_ref()));
         let wrap_mode = file.and_then(|config| config.wrap_mode).unwrap_or_default();
         let lsp = resolve_lsp(file.and_then(|config| config.lsp.as_ref()));
+        let plugins = resolve_plugins(file.and_then(|config| config.plugins.as_ref()), config_home);
 
         Self {
             theme,
@@ -508,6 +550,7 @@ impl Config {
             scroll_margin,
             wrap_mode,
             lsp,
+            plugins,
         }
     }
 
@@ -585,6 +628,7 @@ impl Default for Config {
             scroll_margin: ScrollMargin::default(),
             wrap_mode: WrapMode::default(),
             lsp: LspConfig::default(),
+            plugins: BTreeMap::new(),
         }
     }
 }
@@ -691,6 +735,47 @@ fn validate_partial_config(config: &PartialConfig) -> Result<(), ConfigLoadError
 
     if let Some(lsp) = config.lsp.as_ref() {
         validate_partial_lsp_config(lsp)?;
+    }
+
+    if let Some(plugins) = config.plugins.as_ref() {
+        validate_plugins(plugins)?;
+    }
+
+    Ok(())
+}
+
+fn validate_plugins(
+    plugins: &BTreeMap<String, PartialPluginConfig>,
+) -> Result<(), ConfigLoadError> {
+    for (name, plugin) in plugins {
+        validate_plugin_id(name)?;
+        if let Some(path) = plugin.path.as_ref()
+            && path.trim().is_empty()
+        {
+            return Err(ConfigLoadError::invalid(format!(
+                "config plugin {name:?} path must not be empty"
+            )));
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_plugin_id(name: &str) -> Result<(), ConfigLoadError> {
+    if name.trim().is_empty() {
+        return Err(ConfigLoadError::invalid(
+            "config plugins must not contain empty names",
+        ));
+    }
+    if name.chars().any(char::is_whitespace) {
+        return Err(ConfigLoadError::invalid(format!(
+            "config plugin {name:?} must not contain whitespace"
+        )));
+    }
+    if name.contains('/') || name.contains('\\') {
+        return Err(ConfigLoadError::invalid(format!(
+            "config plugin {name:?} must not contain path separators"
+        )));
     }
 
     Ok(())
@@ -844,6 +929,34 @@ fn resolve_scroll_margin(scroll_margin: Option<&PartialScrollMargin>) -> ScrollM
             .and_then(|margin| margin.horizontal)
             .unwrap_or(default_margin.horizontal),
     }
+}
+
+fn resolve_plugins(
+    plugins: Option<&BTreeMap<String, PartialPluginConfig>>,
+    config_home: &Path,
+) -> BTreeMap<String, PluginConfig> {
+    plugins
+        .into_iter()
+        .flat_map(BTreeMap::iter)
+        .map(|(name, plugin)| {
+            let path = plugin
+                .path
+                .as_ref()
+                .map(|path| expand_home_path(path))
+                .unwrap_or_else(|| default_plugin_path(config_home, name));
+            (
+                name.clone(),
+                PluginConfig {
+                    enabled: plugin.enabled.unwrap_or(true),
+                    path,
+                },
+            )
+        })
+        .collect()
+}
+
+fn default_plugin_path(config_home: &Path, plugin_id: &str) -> PathBuf {
+    config_home.join(PLUGINS_RELATIVE_PATH).join(plugin_id)
 }
 
 fn resolve_lsp(file: Option<&PartialLspConfig>) -> LspConfig {
@@ -1169,6 +1282,12 @@ fn xdg_config_home() -> Result<PathBuf, ConfigLoadError> {
 
     let home = env::var_os("HOME").ok_or(ConfigLoadError::MissingHomeDir)?;
     Ok(PathBuf::from(home).join(".config"))
+}
+
+fn default_config_home_fallback() -> PathBuf {
+    env::var_os("HOME")
+        .map(|home| PathBuf::from(home).join(".config"))
+        .unwrap_or_else(|| PathBuf::from(".config"))
 }
 
 fn xdg_config_dirs() -> Vec<PathBuf> {
@@ -1621,6 +1740,76 @@ mod tests {
     }
 
     #[test]
+    fn resolve_defaults_plugins_to_empty_map() {
+        assert!(Config::resolve(None, None, None).plugins.is_empty());
+    }
+
+    #[test]
+    fn resolve_plugins_default_missing_enabled_to_true() {
+        let config_home = PathBuf::from("/tmp/urvim-config-home");
+        let file = PartialConfig {
+            plugins: Some(BTreeMap::from([(
+                "demo-plugin".to_string(),
+                PartialPluginConfig::default(),
+            )])),
+            ..Default::default()
+        };
+
+        let config = Config::resolve_with_config_home(Some(&file), None, None, &config_home);
+        let plugin = config
+            .plugins
+            .get("demo-plugin")
+            .expect("plugin should resolve");
+
+        assert!(plugin.enabled);
+        assert_eq!(
+            plugin.path,
+            PathBuf::from("/tmp/urvim-config-home/urvim/plugins/demo-plugin")
+        );
+    }
+
+    #[test]
+    fn resolve_plugins_honors_disabled_flag() {
+        let config_home = PathBuf::from("/tmp/urvim-config-home");
+        let file = PartialConfig {
+            plugins: Some(BTreeMap::from([(
+                "demo-plugin".to_string(),
+                PartialPluginConfig {
+                    enabled: Some(false),
+                    path: None,
+                },
+            )])),
+            ..Default::default()
+        };
+
+        let config = Config::resolve_with_config_home(Some(&file), None, None, &config_home);
+
+        assert!(!config.plugins["demo-plugin"].enabled);
+    }
+
+    #[test]
+    fn resolve_plugins_explicit_path_overrides_default() {
+        let config_home = PathBuf::from("/tmp/urvim-config-home");
+        let file = PartialConfig {
+            plugins: Some(BTreeMap::from([(
+                "demo-plugin".to_string(),
+                PartialPluginConfig {
+                    enabled: None,
+                    path: Some("/opt/urvim/plugins/demo-plugin".to_string()),
+                },
+            )])),
+            ..Default::default()
+        };
+
+        let config = Config::resolve_with_config_home(Some(&file), None, None, &config_home);
+
+        assert_eq!(
+            config.plugins["demo-plugin"].path,
+            PathBuf::from("/opt/urvim/plugins/demo-plugin")
+        );
+    }
+
+    #[test]
     fn resolve_honors_explicit_inlay_hint_capabilities() {
         let file = PartialConfig {
             inlay_hints: Some(vec![InlayHintCapability::Parameter]),
@@ -1734,6 +1923,100 @@ mod tests {
             ConfigLoadError::Parse { .. } => {}
             other => panic!("expected parse error, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn load_from_locations_loads_plugins_with_default_path() {
+        let home = unique_temp_dir("plugins-default-home");
+        write_config(&home, "[plugins.demo-plugin]\n");
+
+        let config =
+            Config::load_from_locations(home.clone(), vec![], None, None).expect("should load");
+        let plugin = config
+            .plugins
+            .get("demo-plugin")
+            .expect("plugin should resolve");
+
+        assert!(plugin.enabled);
+        assert_eq!(plugin.path, home.join("urvim/plugins/demo-plugin"));
+    }
+
+    #[test]
+    fn load_from_locations_loads_plugins_with_explicit_path() {
+        let home = unique_temp_dir("plugins-explicit-home");
+        write_config(
+            &home,
+            r#"
+[plugins.demo-plugin]
+enabled = true
+path = "/tmp/custom-demo-plugin"
+"#,
+        );
+
+        let config = Config::load_from_locations(home, vec![], None, None).expect("should load");
+        let plugin = config
+            .plugins
+            .get("demo-plugin")
+            .expect("plugin should resolve");
+
+        assert!(plugin.enabled);
+        assert_eq!(plugin.path, PathBuf::from("/tmp/custom-demo-plugin"));
+    }
+
+    #[test]
+    fn load_from_locations_loads_disabled_plugins() {
+        let home = unique_temp_dir("plugins-disabled-home");
+        write_config(
+            &home,
+            r#"
+[plugins.demo-plugin]
+enabled = false
+"#,
+        );
+
+        let config = Config::load_from_locations(home, vec![], None, None).expect("should load");
+
+        assert!(!config.plugins["demo-plugin"].enabled);
+    }
+
+    #[test]
+    fn load_from_locations_rejects_empty_plugin_path() {
+        let home = unique_temp_dir("plugins-empty-path-home");
+        write_config(
+            &home,
+            r#"
+[plugins.demo-plugin]
+path = " "
+"#,
+        );
+
+        let error = Config::load_from_locations(home, vec![], None, None).expect_err("should fail");
+
+        assert!(error.to_string().contains("path must not be empty"));
+    }
+
+    #[test]
+    fn load_from_locations_rejects_plugin_id_with_whitespace() {
+        let home = unique_temp_dir("plugins-whitespace-home");
+        write_config(&home, "[plugins.\"bad name\"]\n");
+
+        let error = Config::load_from_locations(home, vec![], None, None).expect_err("should fail");
+
+        assert!(error.to_string().contains("must not contain whitespace"));
+    }
+
+    #[test]
+    fn load_from_locations_rejects_plugin_id_with_path_separator() {
+        let home = unique_temp_dir("plugins-separator-home");
+        write_config(&home, "[plugins.\"bad/name\"]\n");
+
+        let error = Config::load_from_locations(home, vec![], None, None).expect_err("should fail");
+
+        assert!(
+            error
+                .to_string()
+                .contains("must not contain path separators")
+        );
     }
 
     #[test]

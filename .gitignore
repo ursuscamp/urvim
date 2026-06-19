@@ -3,3 +3,5 @@ debug.log
 demo.log
 TODO.md
 /lsp.log
+/examples/plugins/demo-plugin/src/demo_plugin/__pycache__
+/examples/plugins/demo-plugin/src/urvim_demo_plugin.egg-info

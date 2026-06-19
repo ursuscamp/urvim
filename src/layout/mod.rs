@@ -468,6 +468,7 @@ impl Layout {
                 }
                 true
             }
+            Command::PluginRequest { .. } | Command::PluginStatus => false,
             Command::LspHover => {
                 if !self.lsp_hover_supported() {
                     return true;

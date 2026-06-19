@@ -15,6 +15,7 @@ pub mod lsp;
 pub mod motion;
 pub mod notification;
 pub mod path;
+pub mod plugin;
 pub mod register;
 pub mod screen;
 pub mod session;

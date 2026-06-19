@@ -15,6 +15,10 @@ pub enum CommandError {
     AliasExpansionCycle(String),
     /// Script expansion exceeded the maximum allowed depth.
     ScriptExpansionCycle(String),
+    /// No plugin matched a requested plugin command namespace.
+    UnknownPlugin(String),
+    /// No script matched a requested namespaced plugin script.
+    UnknownPluginScript { plugin: String, script: String },
     /// A script command referenced an argument that was not supplied.
     MissingScriptArgument { script: String, name: String },
     /// A script command contained malformed placeholder syntax.
@@ -53,6 +57,10 @@ impl fmt::Display for CommandError {
             }
             Self::ScriptExpansionCycle(command) => {
                 write!(f, "Script expansion cycle detected for command: {command}")
+            }
+            Self::UnknownPlugin(plugin) => write!(f, "Unknown plugin: {plugin}"),
+            Self::UnknownPluginScript { plugin, script } => {
+                write!(f, "Unknown script for plugin {plugin}: {script}")
             }
             Self::MissingScriptArgument { script, name } => {
                 write!(f, "Missing argument for script {script}: {name}")

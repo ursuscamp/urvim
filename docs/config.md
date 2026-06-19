@@ -23,7 +23,7 @@ Command-line flags override config file values.
 
 ## Current Schema
 
-The canonical config values are `theme`, `keymaps`, `default_registers`, `syntax`, `todo_markers`, `aliases`, `scripts`, `auto_close_pairs`, `active_line`, `relative_number`, `indent_guides`, `auto_indent`, `completion_trigger`, `completion_sources`, `advanced_glyphs`, `inlay_hints`, `tab_insertion`, `tab_behavior`, `tab_width`, `scroll_margin`, `wrap_mode`, and `lsp`.
+The canonical config values are `theme`, `keymaps`, `default_registers`, `syntax`, `todo_markers`, `aliases`, `scripts`, `plugins`, `auto_close_pairs`, `active_line`, `relative_number`, `indent_guides`, `auto_indent`, `completion_trigger`, `completion_sources`, `advanced_glyphs`, `inlay_hints`, `tab_insertion`, `tab_behavior`, `tab_width`, `scroll_margin`, `wrap_mode`, and `lsp`.
 
 ```toml
 theme = "Friday Night"
@@ -52,6 +52,12 @@ dl = "action edit delete-line"
 [scripts]
 wq = ["write", "quit"]
 save_rust = ["buffer write path={1}", "buffer filetype filetype=rust"]
+
+[plugins.demo-plugin]
+enabled = true
+
+[plugins.local-tools]
+path = "~/src/urvim-local-tools"
 
 [keymaps.normal]
 "<Space>f" = "pick file"
@@ -155,6 +161,22 @@ Registers user-defined command scripts.
 - Examples: `wq = ["write", "quit"]`, `save_rust = ["buffer write path={1}", "buffer filetype filetype=rust"]`
 - Validation: script names must be non-empty, must not contain whitespace, must not conflict with canonical command roots, and must not reuse an alias name
 - Scope: command-line parsing and command-line highlighting
+
+### `plugins`
+
+Registers explicitly enabled plugins.
+
+- Type: TOML tables under `[plugins.<plugin-id>]`
+- Default: empty
+- Behavior: each configured plugin id is loaded from a plugin directory in a later plugin-loading phase
+- `enabled`: optional boolean, defaults to `true`; when `false`, the plugin entry is retained in config but skipped by plugin loading
+- `path`: optional plugin directory override
+- Default path: when `path` is omitted, urvim resolves the plugin directory to `$XDG_CONFIG_HOME/urvim/plugins/<plugin-id>`
+- Explicit path: when `path` is provided, it may use `~` for the user's home directory
+- Validation: plugin ids must be non-empty and must not contain whitespace or path separators; explicit paths must not be empty
+- Scope: plugin manifest loading, plugin themes, and plugin scripts
+- Example: `[plugins.demo-plugin]` loads `$XDG_CONFIG_HOME/urvim/plugins/demo-plugin` by default
+- See: `docs/plugins.md` for manifest schema, plugin themes, plugin scripts, and local development setup
 
 ### `auto_close_pairs`
 

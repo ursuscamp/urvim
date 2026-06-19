@@ -9,9 +9,17 @@ use urvim::editor::{Action, ActionKind, HandleKeyResult, ModeKind, RepeatReplay}
 use urvim::globals;
 use urvim::screen::Screen;
 use urvim::terminal::{Terminal, size::get_terminal_size};
-use urvim::theme::ThemeRegistry;
+use urvim::theme::{Theme, ThemeRegistry};
 use urvim::ui::{Command, Intent, UiEvent};
 use urvim::window::{Position, Size};
+
+struct StartupPluginsAndThemes {
+    #[cfg(test)]
+    plugin_registry: urvim::plugin::PluginRegistry,
+    plugin_runtime: urvim::plugin::PluginRuntime,
+    theme_registry: ThemeRegistry,
+    active_theme: Theme,
+}
 
 #[derive(Parser)]
 #[command(name = "urvim")]
@@ -46,24 +54,26 @@ fn main() -> io::Result<()> {
             eprintln!("Error: {}", error);
             io::Error::new(io::ErrorKind::InvalidData, error.to_string())
         })?;
-    urvim::command::install_configured_commands(&config).map_err(|error| {
-        eprintln!("Error: {}", error);
-        io::Error::new(io::ErrorKind::InvalidData, error.to_string())
-    })?;
     globals::set_config(config.clone());
 
-    let registry = urvim::theme::ThemeRegistry::load_builtin().map_err(|error| {
+    let StartupPluginsAndThemes {
+        #[cfg(test)]
+            plugin_registry: _,
+        plugin_runtime,
+        theme_registry: registry,
+        active_theme,
+    } = load_startup_plugins_and_themes(&config).map_err(|error| {
         eprintln!("Error: {}", error);
-        io::Error::new(io::ErrorKind::InvalidData, error.to_string())
+        io::Error::new(io::ErrorKind::InvalidData, error)
     })?;
-
-    let active_theme =
-        select_active_theme(&registry, Some(config.theme.as_str())).map_err(|error| {
-            eprintln!("Error: {}", error);
-            io::Error::new(io::ErrorKind::InvalidInput, error)
-        })?;
+    for failure in plugin_runtime.failures() {
+        if let urvim::plugin::PluginProcessState::Failed(error) = failure.state {
+            urvim::notify_warn!("Plugin process {} failed: {}", failure.plugin, error);
+        }
+    }
     globals::set_active_theme(active_theme);
     globals::set_theme_registry(registry);
+    let mut plugin_runtime = plugin_runtime;
 
     let mut terminal = Terminal::new(stdin, stdout)?;
 
@@ -98,6 +108,15 @@ fn main() -> io::Result<()> {
 
         globals::try_with_lsp_runtime_mut(|runtime| runtime.sync());
 
+        while let Some(event) = plugin_runtime.poll_event() {
+            if let urvim::plugin::PluginRuntimeEvent::RequestReceived { plugin, request } = &event {
+                handle_plugin_editor_request(&mut plugin_runtime, &mut layout, plugin, request);
+            }
+            urvim::plugin::runtime::handle_runtime_event(&event);
+            tracing::debug!(?event, "plugin runtime event");
+            needs_redraw = true;
+        }
+
         if background_requested_redraw {
             needs_redraw = true;
         }
@@ -128,7 +147,8 @@ fn main() -> io::Result<()> {
         match ui_event {
             UiEvent::Tick => {
                 let ui_result = layout.route_ui_event(&UiEvent::Tick);
-                if handle_ui_result(&mut layout, ui_result) {
+                if handle_ui_result_with_plugin_runtime(&mut layout, &mut plugin_runtime, ui_result)
+                {
                     needs_redraw = true;
                     if layout.should_exit() {
                         break;
@@ -139,7 +159,11 @@ fn main() -> io::Result<()> {
             }
             UiEvent::Paste(text) => {
                 let overlay_result = layout.route_ui_event(&UiEvent::Paste(text.clone()));
-                if handle_ui_result(&mut layout, overlay_result) {
+                if handle_ui_result_with_plugin_runtime(
+                    &mut layout,
+                    &mut plugin_runtime,
+                    overlay_result,
+                ) {
                     needs_redraw = true;
                     if layout.should_exit() {
                         break;
@@ -204,7 +228,11 @@ fn main() -> io::Result<()> {
             }
             UiEvent::Key(key) => {
                 let overlay_result = layout.route_ui_event(&UiEvent::Key(key));
-                if handle_ui_result(&mut layout, overlay_result) {
+                if handle_ui_result_with_plugin_runtime(
+                    &mut layout,
+                    &mut plugin_runtime,
+                    overlay_result,
+                ) {
                     needs_redraw = true;
                     if layout.should_exit() {
                         break;
@@ -249,8 +277,9 @@ fn main() -> io::Result<()> {
                                 continue;
                             }
 
-                            let handled = process_intent_queue(
+                            let handled = process_intent_queue_with_plugin_runtime(
                                 &mut layout,
+                                Some(&mut plugin_runtime),
                                 vec![Intent::Command(command.clone())],
                             );
                             if handled {
@@ -276,10 +305,246 @@ fn main() -> io::Result<()> {
     }
 
     globals::shutdown_lsp_runtime();
+    plugin_runtime.shutdown();
     urvim::session::save_now(&layout);
     terminal.reset_style()?;
 
     Ok(())
+}
+
+fn handle_plugin_editor_request(
+    plugin_runtime: &mut urvim::plugin::PluginRuntime,
+    layout: &mut Layout,
+    plugin: &str,
+    request: &urvim::plugin::PluginRequest,
+) {
+    let response = resolve_plugin_editor_request(layout, request);
+    if let Err(error) = plugin_runtime.send_response(plugin, response) {
+        tracing::warn!(plugin, request_id = request.id, error = %error, "failed to send plugin editor response");
+    }
+}
+
+fn resolve_plugin_editor_request(
+    layout: &mut Layout,
+    request: &urvim::plugin::PluginRequest,
+) -> urvim::plugin::PluginResponse {
+    match request.method.as_str() {
+        "editor/getActiveBuffer" => plugin_active_buffer_response(layout, request.id),
+        "editor/getBufferText" => plugin_buffer_text_response(layout, request),
+        "editor/getConfig" => plugin_config_response(request.id),
+        "editor/applyEdit" => plugin_apply_edit_response(layout, request),
+        method => urvim::plugin::PluginResponse::error(
+            request.id,
+            format!("unsupported editor request method: {method}"),
+        ),
+    }
+}
+
+fn plugin_active_buffer_response(
+    layout: &Layout,
+    request_id: u64,
+) -> urvim::plugin::PluginResponse {
+    let view = layout.active_buffer_view();
+    let buffer_id = view.buffer_id();
+    let cursor = view.cursor();
+    match view.with_buffer(|buffer| {
+        serde_json::json!({
+            "id": buffer_id.get(),
+            "path": buffer.path().map(|path| path.as_path().to_string_lossy().into_owned()),
+            "file_name": buffer.file_name().map(|name| name.to_string_lossy().into_owned()),
+            "filetype": buffer.syntax_name(),
+            "line_count": buffer.line_count(),
+            "modified": buffer.is_modified(),
+            "cursor": {
+                "line": cursor.line,
+                "col": cursor.col,
+            },
+        })
+    }) {
+        Some(result) => urvim::plugin::PluginResponse::success(request_id, result),
+        None => urvim::plugin::PluginResponse::error(request_id, "active buffer is missing"),
+    }
+}
+
+fn plugin_buffer_text_response(
+    _layout: &Layout,
+    request: &urvim::plugin::PluginRequest,
+) -> urvim::plugin::PluginResponse {
+    let Some(buffer_id) = request
+        .params
+        .get("buffer_id")
+        .or_else(|| request.params.get("id"))
+        .and_then(|value| value.as_u64())
+    else {
+        return urvim::plugin::PluginResponse::error(
+            request.id,
+            "editor/getBufferText requires buffer_id",
+        );
+    };
+    let buffer_id = urvim::buffer::BufferId::new(buffer_id as usize);
+
+    match globals::with_buffer(buffer_id, |buffer| {
+        serde_json::json!({
+            "buffer_id": buffer_id.get(),
+            "text": buffer.as_str(),
+        })
+    }) {
+        Some(result) => urvim::plugin::PluginResponse::success(request.id, result),
+        None => urvim::plugin::PluginResponse::error(
+            request.id,
+            format!("unknown buffer_id {}", buffer_id.get()),
+        ),
+    }
+}
+
+fn plugin_config_response(request_id: u64) -> urvim::plugin::PluginResponse {
+    let config = globals::with_config(Clone::clone).unwrap_or_default();
+    urvim::plugin::PluginResponse::success(
+        request_id,
+        serde_json::json!({
+            "theme": config.theme,
+            "syntax": config.syntax,
+            "active_line": config.active_line,
+            "relative_number": config.relative_number,
+            "indent_guides": config.indent_guides,
+            "auto_close_pairs": config.auto_close_pairs,
+            "tab_width": config.tab_width,
+            "plugins": config.plugins.keys().cloned().collect::<Vec<_>>(),
+        }),
+    )
+}
+
+fn plugin_apply_edit_response(
+    layout: &mut Layout,
+    request: &urvim::plugin::PluginRequest,
+) -> urvim::plugin::PluginResponse {
+    match parse_plugin_edit_request(&request.params)
+        .and_then(|edit| apply_plugin_edit(layout, edit))
+    {
+        Ok(result) => urvim::plugin::PluginResponse::success(request.id, result),
+        Err(error) => {
+            tracing::warn!(
+                request_id = request.id,
+                error,
+                "invalid plugin edit request"
+            );
+            urvim::plugin::PluginResponse::error(request.id, error)
+        }
+    }
+}
+
+#[derive(Debug)]
+struct PluginEditRequest {
+    buffer_id: urvim::buffer::BufferId,
+    kind: PluginEditKind,
+    start: Cursor,
+    end: Cursor,
+    text: String,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum PluginEditKind {
+    Insert,
+    Delete,
+    Replace,
+}
+
+fn parse_plugin_edit_request(params: &serde_json::Value) -> Result<PluginEditRequest, String> {
+    let buffer_id = params
+        .get("buffer_id")
+        .or_else(|| params.get("id"))
+        .and_then(|value| value.as_u64())
+        .ok_or_else(|| "editor/applyEdit requires buffer_id".to_string())?;
+    let kind = match params
+        .get("kind")
+        .or_else(|| params.get("operation"))
+        .and_then(|value| value.as_str())
+        .ok_or_else(|| "editor/applyEdit requires kind".to_string())?
+    {
+        "insert" => PluginEditKind::Insert,
+        "delete" => PluginEditKind::Delete,
+        "replace" => PluginEditKind::Replace,
+        other => return Err(format!("unsupported edit kind: {other}")),
+    };
+    let start = parse_plugin_cursor(params.get("start"), "start")?;
+    let end = match kind {
+        PluginEditKind::Insert => start,
+        PluginEditKind::Delete | PluginEditKind::Replace => {
+            parse_plugin_cursor(params.get("end"), "end")?
+        }
+    };
+    let text_value = params.get("text").and_then(|value| value.as_str());
+    if matches!(kind, PluginEditKind::Insert | PluginEditKind::Replace) && text_value.is_none() {
+        return Err("insert and replace edits require text".to_string());
+    }
+    let text = text_value.unwrap_or("").to_string();
+
+    Ok(PluginEditRequest {
+        buffer_id: urvim::buffer::BufferId::new(buffer_id as usize),
+        kind,
+        start,
+        end,
+        text,
+    })
+}
+
+fn parse_plugin_cursor(value: Option<&serde_json::Value>, name: &str) -> Result<Cursor, String> {
+    let value = value.ok_or_else(|| format!("editor/applyEdit requires {name}"))?;
+    let line = value
+        .get("line")
+        .and_then(|value| value.as_u64())
+        .ok_or_else(|| format!("{name}.line must be an unsigned integer"))?;
+    let col = value
+        .get("col")
+        .or_else(|| value.get("column"))
+        .and_then(|value| value.as_u64())
+        .ok_or_else(|| format!("{name}.col must be an unsigned integer"))?;
+    Ok(Cursor::new(line as usize, col as usize))
+}
+
+fn apply_plugin_edit(
+    layout: &mut Layout,
+    edit: PluginEditRequest,
+) -> Result<serde_json::Value, String> {
+    let active_buffer_id = layout.active_buffer_view().buffer_id();
+    let applied = globals::with_buffer_mut(edit.buffer_id, |buffer| {
+        if !buffer.is_valid_cursor(edit.start) {
+            return Err(format!(
+                "invalid start cursor {}:{}",
+                edit.start.line, edit.start.col
+            ));
+        }
+        if !buffer.is_valid_cursor(edit.end) {
+            return Err(format!(
+                "invalid end cursor {}:{}",
+                edit.end.line, edit.end.col
+            ));
+        }
+        if edit.start > edit.end {
+            return Err("edit start must be before or equal to end".to_string());
+        }
+
+        match edit.kind {
+            PluginEditKind::Insert => buffer.insert_text(edit.start, edit.text.as_str()),
+            PluginEditKind::Delete => buffer.remove(edit.start, edit.end),
+            PluginEditKind::Replace => {
+                buffer.remove(edit.start, edit.end);
+                buffer.insert_text(edit.start, edit.text.as_str());
+            }
+        }
+        buffer.push_snapshot(edit.start);
+        Ok(serde_json::json!({
+            "buffer_id": edit.buffer_id.get(),
+            "applied": true,
+            "text": buffer.as_str(),
+        }))
+    })
+    .ok_or_else(|| format!("unknown buffer_id {}", edit.buffer_id.get()))??;
+
+    if edit.buffer_id == active_buffer_id {
+        layout.active_buffer_view_mut().set_cursor(edit.start);
+    }
+    Ok(applied)
 }
 
 fn handle_resize<I: io::Read + AsFd, O: io::Write + AsFd>(
@@ -302,6 +567,27 @@ fn select_active_theme(
             "unknown theme {theme_name:?}; available themes: {}",
             registry.names().join(", ")
         )
+    })
+}
+
+fn load_startup_plugins_and_themes(config: &Config) -> Result<StartupPluginsAndThemes, String> {
+    let plugin_registry = urvim::plugin::PluginRegistry::load_from_config(config)
+        .map_err(|error| error.to_string())?;
+    urvim::command::install_configured_commands_with_plugins(config, &plugin_registry)
+        .map_err(|error| error.to_string())?;
+    let plugin_runtime = urvim::plugin::PluginRuntime::start_from_registry(&plugin_registry);
+
+    let mut theme_registry = ThemeRegistry::load_builtin().map_err(|error| error.to_string())?;
+    urvim::plugin::load_plugin_themes(&mut theme_registry, &plugin_registry)
+        .map_err(|error| error.to_string())?;
+    let active_theme = select_active_theme(&theme_registry, Some(config.theme.as_str()))?;
+
+    Ok(StartupPluginsAndThemes {
+        #[cfg(test)]
+        plugin_registry,
+        plugin_runtime,
+        theme_registry,
+        active_theme,
     })
 }
 
@@ -478,6 +764,14 @@ fn cursor_after_text(mut cursor: Cursor, text: &str) -> Cursor {
 }
 
 fn process_intent_queue(layout: &mut Layout, intents: Vec<Intent>) -> bool {
+    process_intent_queue_with_plugin_runtime(layout, None, intents)
+}
+
+fn process_intent_queue_with_plugin_runtime(
+    layout: &mut Layout,
+    mut plugin_runtime: Option<&mut urvim::plugin::PluginRuntime>,
+    intents: Vec<Intent>,
+) -> bool {
     let mut queue: std::collections::VecDeque<Intent> = intents.into();
     let mut handled_all = true;
     let mut saw_intent = false;
@@ -486,11 +780,90 @@ fn process_intent_queue(layout: &mut Layout, intents: Vec<Intent>) -> bool {
         saw_intent = true;
         handled_all &= match intent {
             Intent::Action(action) => execute_action_intent(layout, action),
-            Intent::Command(command) => layout.dispatch_intent(&Intent::Command(command)),
+            Intent::Command(command) => {
+                execute_command_intent(layout, plugin_runtime.as_deref_mut(), command)
+            }
         };
     }
 
     saw_intent && handled_all
+}
+
+fn execute_command_intent(
+    layout: &mut Layout,
+    plugin_runtime: Option<&mut urvim::plugin::PluginRuntime>,
+    command: Command,
+) -> bool {
+    if let Command::PluginRequest {
+        plugin,
+        command,
+        method,
+        params,
+    } = command
+    {
+        let Some(plugin_runtime) = plugin_runtime else {
+            tracing::warn!(plugin, command, method, "plugin command has no runtime");
+            urvim::notify_warn!("Plugin command {plugin} {command} could not run: no runtime");
+            return true;
+        };
+
+        match plugin_runtime.send_request(&plugin, method.as_str(), params) {
+            Ok(request_id) => {
+                tracing::debug!(
+                    plugin,
+                    command,
+                    method,
+                    request_id,
+                    "sent plugin command request"
+                );
+            }
+            Err(error) => {
+                tracing::warn!(plugin, command, method, error = %error, "failed to send plugin command request");
+                urvim::notify_warn!("Plugin command {plugin} {command} failed: {error}");
+            }
+        }
+        return true;
+    }
+
+    if matches!(command, Command::PluginStatus) {
+        if let Some(plugin_runtime) = plugin_runtime {
+            notify_plugin_statuses(plugin_runtime.status_entries());
+        } else {
+            urvim::notify_info!("No plugin runtime is available");
+        }
+        return true;
+    }
+
+    layout.dispatch_intent(&Intent::Command(command))
+}
+
+fn notify_plugin_statuses(statuses: Vec<urvim::plugin::PluginStatusEntry>) {
+    if statuses.is_empty() {
+        urvim::notify_info!("No plugins loaded");
+        return;
+    }
+
+    let summary = statuses
+        .into_iter()
+        .map(|status| {
+            let state = match &status.state {
+                urvim::plugin::PluginProcessState::NotConfigured => "not configured".to_string(),
+                urvim::plugin::PluginProcessState::Starting => "starting".to_string(),
+                urvim::plugin::PluginProcessState::Running => {
+                    if status.capabilities.is_empty() {
+                        "running".to_string()
+                    } else {
+                        format!("running [{}]", status.capabilities.join(", "))
+                    }
+                }
+                urvim::plugin::PluginProcessState::Failed(error) => format!("failed: {error}"),
+                urvim::plugin::PluginProcessState::Stopped => "stopped".to_string(),
+            };
+            format!("{}: {}", status.plugin, state)
+        })
+        .collect::<Vec<_>>()
+        .join("; ");
+    urvim::notify_info!("Plugins: {}", summary);
 }
 
 fn execute_action_intent(layout: &mut Layout, action: Action) -> bool {
@@ -626,14 +999,24 @@ fn execute_action_intent(layout: &mut Layout, action: Action) -> bool {
     }
 }
 
+#[cfg(test)]
 fn handle_ui_result(layout: &mut Layout, result: urvim::ui::UiEventResult) -> bool {
+    let mut plugin_runtime = urvim::plugin::PluginRuntime::default();
+    handle_ui_result_with_plugin_runtime(layout, &mut plugin_runtime, result)
+}
+
+fn handle_ui_result_with_plugin_runtime(
+    layout: &mut Layout,
+    plugin_runtime: &mut urvim::plugin::PluginRuntime,
+    result: urvim::ui::UiEventResult,
+) -> bool {
     if !result.handled() {
         return false;
     }
 
     let intents = result.into_intents();
     if !intents.is_empty() {
-        process_intent_queue(layout, intents);
+        process_intent_queue_with_plugin_runtime(layout, Some(plugin_runtime), intents);
     }
 
     true
@@ -825,6 +1208,216 @@ mod tests {
     }
 
     #[test]
+    fn plugin_active_buffer_request_returns_metadata() {
+        let mut layout = Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("hello")]));
+        layout
+            .active_buffer_view_mut()
+            .with_buffer_mut(|buffer| buffer.set_syntax_name("rust"));
+        let buffer_id = layout.active_buffer_view().buffer_id().get();
+        let request =
+            urvim::plugin::PluginRequest::new(7, "editor/getActiveBuffer", serde_json::json!({}));
+
+        let response = resolve_plugin_editor_request(&mut layout, &request);
+
+        assert_eq!(response.id, 7);
+        assert!(response.error.is_none());
+        let result = response.result.expect("response should include result");
+        assert_eq!(result["id"], serde_json::json!(buffer_id));
+        assert_eq!(result["filetype"], serde_json::json!("rust"));
+        assert_eq!(result["line_count"], serde_json::json!(1));
+    }
+
+    #[test]
+    fn plugin_buffer_text_request_returns_content() {
+        let mut layout = Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str(
+            "one\ntwo",
+        )]));
+        let buffer_id = layout.active_buffer_view().buffer_id().get();
+        let request = urvim::plugin::PluginRequest::new(
+            8,
+            "editor/getBufferText",
+            serde_json::json!({ "buffer_id": buffer_id }),
+        );
+
+        let response = resolve_plugin_editor_request(&mut layout, &request);
+
+        assert_eq!(response.id, 8);
+        assert!(response.error.is_none());
+        let result = response.result.expect("response should include result");
+        assert_eq!(result["buffer_id"], serde_json::json!(buffer_id));
+        assert_eq!(result["text"], serde_json::json!("one\ntwo"));
+    }
+
+    #[test]
+    fn plugin_config_request_returns_safe_subset() {
+        let mut layout = Layout::new(WindowGroup::from_buffers(vec![Buffer::new()]));
+        let config = Config {
+            theme: "Demo Night".to_string(),
+            syntax: false,
+            tab_width: 2,
+            ..Config::default()
+        };
+        globals::set_config(config);
+        let request =
+            urvim::plugin::PluginRequest::new(9, "editor/getConfig", serde_json::json!({}));
+
+        let response = resolve_plugin_editor_request(&mut layout, &request);
+
+        assert_eq!(response.id, 9);
+        assert!(response.error.is_none());
+        let result = response.result.expect("response should include result");
+        assert_eq!(result["theme"], serde_json::json!("Demo Night"));
+        assert_eq!(result["syntax"], serde_json::json!(false));
+        assert_eq!(result["tab_width"], serde_json::json!(2));
+        assert!(result.get("keymaps").is_none());
+    }
+
+    #[test]
+    fn plugin_buffer_text_request_errors_for_unknown_buffer() {
+        let mut layout = Layout::new(WindowGroup::from_buffers(vec![Buffer::new()]));
+        let request = urvim::plugin::PluginRequest::new(
+            10,
+            "editor/getBufferText",
+            serde_json::json!({ "buffer_id": 999999 }),
+        );
+
+        let response = resolve_plugin_editor_request(&mut layout, &request);
+
+        assert_eq!(response.id, 10);
+        assert!(response.error.unwrap().contains("unknown buffer_id"));
+    }
+
+    #[test]
+    fn plugin_editor_request_errors_for_unsupported_method() {
+        let mut layout = Layout::new(WindowGroup::from_buffers(vec![Buffer::new()]));
+        let request = urvim::plugin::PluginRequest::new(11, "editor/mutate", serde_json::json!({}));
+
+        let response = resolve_plugin_editor_request(&mut layout, &request);
+
+        assert_eq!(response.id, 11);
+        assert!(
+            response
+                .error
+                .unwrap()
+                .contains("unsupported editor request")
+        );
+    }
+
+    #[test]
+    fn plugin_apply_edit_inserts_text() {
+        let mut layout = Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("world")]));
+        let buffer_id = layout.active_buffer_view().buffer_id().get();
+        let request = urvim::plugin::PluginRequest::new(
+            12,
+            "editor/applyEdit",
+            serde_json::json!({
+                "buffer_id": buffer_id,
+                "kind": "insert",
+                "start": { "line": 0, "col": 0 },
+                "text": "hello ",
+            }),
+        );
+
+        let response = resolve_plugin_editor_request(&mut layout, &request);
+
+        assert!(response.error.is_none());
+        assert_eq!(
+            layout
+                .active_buffer_view()
+                .with_buffer(|buffer| buffer.as_str()),
+            Some("hello world".to_string())
+        );
+    }
+
+    #[test]
+    fn plugin_apply_edit_replaces_text() {
+        let mut layout = Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str(
+            "hello old",
+        )]));
+        let buffer_id = layout.active_buffer_view().buffer_id().get();
+        let request = urvim::plugin::PluginRequest::new(
+            13,
+            "editor/applyEdit",
+            serde_json::json!({
+                "buffer_id": buffer_id,
+                "kind": "replace",
+                "start": { "line": 0, "col": 6 },
+                "end": { "line": 0, "col": 9 },
+                "text": "new",
+            }),
+        );
+
+        let response = resolve_plugin_editor_request(&mut layout, &request);
+
+        assert!(response.error.is_none());
+        assert_eq!(
+            layout
+                .active_buffer_view()
+                .with_buffer(|buffer| buffer.as_str()),
+            Some("hello new".to_string())
+        );
+    }
+
+    #[test]
+    fn plugin_apply_edit_rejects_invalid_range_without_mutating() {
+        let mut layout = Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("hello")]));
+        let buffer_id = layout.active_buffer_view().buffer_id().get();
+        let request = urvim::plugin::PluginRequest::new(
+            14,
+            "editor/applyEdit",
+            serde_json::json!({
+                "buffer_id": buffer_id,
+                "kind": "delete",
+                "start": { "line": 0, "col": 99 },
+                "end": { "line": 0, "col": 100 },
+            }),
+        );
+
+        let response = resolve_plugin_editor_request(&mut layout, &request);
+
+        assert!(response.error.unwrap().contains("invalid start cursor"));
+        assert_eq!(
+            layout
+                .active_buffer_view()
+                .with_buffer(|buffer| buffer.as_str()),
+            Some("hello".to_string())
+        );
+    }
+
+    #[test]
+    fn plugin_apply_edit_participates_in_undo() {
+        let mut layout = Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("hello")]));
+        let buffer_id = layout.active_buffer_view().buffer_id().get();
+        let request = urvim::plugin::PluginRequest::new(
+            15,
+            "editor/applyEdit",
+            serde_json::json!({
+                "buffer_id": buffer_id,
+                "kind": "insert",
+                "start": { "line": 0, "col": 5 },
+                "text": "!",
+            }),
+        );
+
+        let response = resolve_plugin_editor_request(&mut layout, &request);
+
+        assert!(response.error.is_none());
+        assert_eq!(
+            layout
+                .active_buffer_view_mut()
+                .with_buffer_mut(|buffer| buffer.undo())
+                .flatten(),
+            Some(Cursor::new(0, 0))
+        );
+        assert_eq!(
+            layout
+                .active_buffer_view()
+                .with_buffer(|buffer| buffer.as_str()),
+            Some("hello".to_string())
+        );
+    }
+
+    #[test]
     fn insert_exit_commits_single_undo_snapshot_when_text_changes() {
         let mut layout = Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("world")]));
 
@@ -903,6 +1496,59 @@ mod tests {
 
         assert!(error.contains("missing"));
         assert!(error.contains("Friday Night"));
+    }
+
+    #[test]
+    fn load_startup_plugins_and_themes_loads_example_plugin_theme_and_scripts() {
+        let config = Config {
+            theme: "Demo Night".to_string(),
+            plugins: std::collections::BTreeMap::from([(
+                "demo-plugin".to_string(),
+                urvim::config::PluginConfig {
+                    enabled: true,
+                    path: std::path::PathBuf::from(concat!(
+                        env!("CARGO_MANIFEST_DIR"),
+                        "/examples/plugins/demo-plugin"
+                    )),
+                },
+            )]),
+            ..Config::default()
+        };
+
+        let startup =
+            load_startup_plugins_and_themes(&config).expect("startup plugins should load");
+
+        assert_eq!(startup.active_theme.name(), "Demo Night");
+        assert!(startup.theme_registry.get("Demo Night").is_some());
+        assert!(startup.plugin_registry.get("demo-plugin").is_some());
+
+        assert_eq!(
+            startup
+                .plugin_registry
+                .script("demo-plugin", "wq")
+                .map(|script| script.len()),
+            Some(2)
+        );
+    }
+
+    #[test]
+    fn load_startup_plugins_and_themes_skips_disabled_missing_plugins() {
+        let config = Config {
+            plugins: std::collections::BTreeMap::from([(
+                "missing-demo".to_string(),
+                urvim::config::PluginConfig {
+                    enabled: false,
+                    path: std::path::PathBuf::from("/tmp/urvim-missing-disabled-plugin"),
+                },
+            )]),
+            ..Config::default()
+        };
+
+        let startup = load_startup_plugins_and_themes(&config)
+            .expect("disabled missing plugin should not fail startup");
+
+        assert_eq!(startup.active_theme.name(), "Friday Night");
+        assert!(startup.plugin_registry.is_empty());
     }
 
     #[test]

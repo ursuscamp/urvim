@@ -6,7 +6,7 @@ use super::sources::current_word_prefix;
 use super::sources::paths::path_completion_candidates;
 use crate::background::{JobContext, JobEvent, JobPayload};
 use crate::buffer::{BufferId, Cursor};
-use std::path::PathBuf;
+use crate::path::home_dir;
 use std::sync::mpsc::Sender;
 
 /// A background completion request.
@@ -44,7 +44,7 @@ impl CompletionJob {
             CompletionSourceKind::Paths | CompletionSourceKind::BufferWords => {
                 crate::globals::with_buffer(buffer_id, |buffer| {
                     let cwd = std::env::current_dir().ok();
-                    let home = home_directory_path();
+                    let home = home_dir();
                     match source {
                         CompletionSourceKind::Paths => path_completion_candidates(
                             buffer,
@@ -78,8 +78,4 @@ impl CompletionJob {
             })
             .ok();
     }
-}
-
-fn home_directory_path() -> Option<PathBuf> {
-    std::env::var_os("HOME").map(PathBuf::from)
 }

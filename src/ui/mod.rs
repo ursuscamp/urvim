@@ -141,6 +141,19 @@ pub enum Command {
     SaveBufferAs(PathBuf),
     /// Overwrite a file that changed on disk.
     OverwriteBuffer(Option<crate::buffer::BufferId>),
+    /// Send a request to a process-backed plugin command.
+    PluginRequest {
+        /// Plugin namespace.
+        plugin: String,
+        /// Manifest command name.
+        command: String,
+        /// Process request method.
+        method: String,
+        /// Structured request parameters.
+        params: serde_json::Value,
+    },
+    /// Show loaded plugin runtime statuses.
+    PluginStatus,
     /// Run an LSP hover query on the active buffer.
     LspHover,
     /// Run an LSP go-to-definition query on the active buffer.
