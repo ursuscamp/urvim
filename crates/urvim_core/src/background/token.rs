@@ -1,0 +1,67 @@
+use crate::buffer::BufferId;
+use crate::ui::completion::CompletionSourceKind;
+use std::fmt;
+
+/// Identifies the kind of work a job performs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum JobKind {
+    /// Syntax cache refresh for a specific buffer.
+    SyntaxRefresh(BufferId),
+    /// Indent scope cache refresh for a specific buffer.
+    IndentScopeRefresh(BufferId),
+    /// Diff cache refresh for a specific buffer.
+    DiffRefresh(BufferId),
+    /// File picker search.
+    FilePickerSearch,
+    /// Git picker search.
+    GitPickerSearch,
+    /// Live grep picker search.
+    GrepPickerSearch,
+    /// Document symbol picker search.
+    DocSymbolsPickerSearch,
+    /// Insert-mode completion.
+    Completion(BufferId, CompletionSourceKind),
+    /// Workspace symbol picker search.
+    WorkspaceSymbolsPickerSearch,
+    /// Picker preview syntax refresh.
+    PickerPreviewSyntax,
+    /// LSP rename.
+    LspRename(BufferId),
+    /// LSP inlay hints.
+    LspInlayHints(BufferId),
+    /// Test-only gate job.
+    #[cfg(test)]
+    TestGate,
+    /// Test-only picker preview syntax refresh.
+    #[cfg(test)]
+    TestPickerPreviewSyntax,
+}
+
+impl fmt::Display for JobKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::SyntaxRefresh(buffer_id) => {
+                write!(f, "syntax-refresh:{}", buffer_id.get())
+            }
+            Self::IndentScopeRefresh(buffer_id) => {
+                write!(f, "indent-scope-refresh:{}", buffer_id.get())
+            }
+            Self::DiffRefresh(buffer_id) => write!(f, "diff-refresh:{}", buffer_id.get()),
+            Self::FilePickerSearch => f.write_str("file-picker-search"),
+            Self::GitPickerSearch => f.write_str("git-picker-search"),
+            Self::GrepPickerSearch => f.write_str("grep-picker-search"),
+            Self::DocSymbolsPickerSearch => f.write_str("doc-symbols-picker-search"),
+            Self::Completion(buffer_id, source) => {
+                write!(f, "completion:{}:{}", buffer_id.get(), source.as_str())
+            }
+            Self::WorkspaceSymbolsPickerSearch => f.write_str("workspace-symbols-picker-search"),
+            Self::PickerPreviewSyntax => f.write_str("picker-preview-syntax"),
+            Self::LspRename(buffer_id) => write!(f, "lsp-rename:{}", buffer_id.get()),
+            Self::LspInlayHints(buffer_id) => write!(f, "lsp-inlay-hints:{}", buffer_id.get()),
+            #[cfg(test)]
+            Self::TestGate => f.write_str("gate"),
+            #[cfg(test)]
+            Self::TestPickerPreviewSyntax => f.write_str("test-picker-preview-syntax"),
+        }
+    }
+}

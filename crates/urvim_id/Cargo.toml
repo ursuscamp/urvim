@@ -1,0 +1,5 @@
+[package]
+name = "urvim_id"
+version.workspace = true
+edition.workspace = true
+license.workspace = true

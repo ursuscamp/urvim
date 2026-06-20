@@ -1,0 +1,65 @@
+[package]
+name = "urvim_core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+urvim_terminal = { path = "../urvim_terminal" }
+urvim_json_rpc = { path = "../urvim_json_rpc" }
+urvim_theme = { path = "../urvim_theme" }
+urvim_syntax = { path = "../urvim_syntax" }
+urvim_plugin = { path = "../urvim_plugin" }
+urvim_text = { path = "../urvim_text" }
+urvim_diff = { path = "../urvim_diff" }
+urvim_unicode = { path = "../urvim_unicode" }
+urvim_path = { path = "../urvim_path" }
+urvim_background = { path = "../urvim_background" }
+urvim_id = { path = "../urvim_id" }
+urvim_lsp = { path = "../urvim_lsp" }
+rustix = { version = "0.38", features = ["termios", "event", "fs"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-appender = "0.2"
+smol_str = "0.3"
+unicode-width = "0.2"
+unicode-segmentation = "1.11"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+regex = "1"
+ignore = "0.4"
+lsp-types = "0.97"
+url = "2"
+
+[dev-dependencies]
+criterion = "0.5"
+is-terminal = "0.4"
+
+[[bench]]
+name = "text_storage"
+harness = false
+
+[[bench]]
+name = "indent_scope_index"
+harness = false
+
+[[bench]]
+name = "syntax_cache_compare"
+harness = false
+
+[[bench]]
+name = "syntax_highlighter"
+harness = false
+
+[[bench]]
+name = "marker_store"
+harness = false
+
+[[bench]]
+name = "syntax_tokenizer_html"
+harness = false
+
+[[bench]]
+name = "syntax_tokenizer_rust"
+harness = false

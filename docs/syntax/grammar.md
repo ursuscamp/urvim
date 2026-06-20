@@ -6,15 +6,15 @@ Tag names are described in [tags.md](tags.md).
 
 ## File Layout
 
-| File                                            | Purpose                                                    |
-| ----------------------------------------------- | ---------------------------------------------------------- |
-| `src/syntax/builtin.rs`                         | Builtin syntax metadata catalog.                           |
-| `src/syntax/definition.rs`                      | `SyntaxDefinition`, metadata types, and `SyntaxTokenizer`. |
-| `src/syntax/registry.rs`                        | Registry construction and syntax resolution.               |
-| `src/syntax/builtin_tokenizers/mod.rs`          | Tokenizer module declarations and dispatch.                |
-| `src/syntax/builtin_tokenizers/<name>.rs`       | One line tokenizer for a syntax.                           |
-| `src/buffer/tests/syntax/<name>.rs`             | Syntax regression tests.                                   |
-| `src/buffer/tests/syntax/fixtures/<name>.<ext>` | Fixture text used by syntax tests.                         |
+| File                                        | Purpose                                                    |
+| ------------------------------------------- | ---------------------------------------------------------- |
+| `src/syntax/builtin.rs`                     | Builtin syntax metadata catalog.                           |
+| `src/syntax/definition.rs`                  | `SyntaxDefinition`, metadata types, and `SyntaxTokenizer`. |
+| `src/syntax/registry.rs`                    | Registry construction and syntax resolution.               |
+| `src/syntax/builtin_tokenizers/mod.rs`      | Tokenizer module declarations and dispatch.                |
+| `src/syntax/builtin_tokenizers/<name>.rs`   | One line tokenizer for a syntax.                           |
+| `src/buffer/tests/syntax/<name>.rs`         | Syntax regression tests.                                   |
+| `crates/urvim_syntax/fixtures/<name>.<ext>` | Fixture text used by syntax tests.                         |
 
 ## Metadata
 
@@ -112,7 +112,7 @@ Tokenizers should use semantic tags such as `keyword`, `string`, `comment.block`
 
 When adding or changing a tokenizer:
 
-1. Update or add a fixture in `src/buffer/tests/syntax/fixtures/`.
+1. Update or add a fixture in `crates/urvim_syntax/fixtures/`.
 2. Add exact-span tests in `src/buffer/tests/syntax/<name>.rs` for bug-prone forms.
 3. Run the focused test, for example `cargo test buffer::tests::syntax::ruby`.
 4. Run `cargo check`.

@@ -1,0 +1,200 @@
+//! Internal job framework for deferred editor work.
+//!
+//! The job framework runs deferred work on a pool of background worker threads
+//! and returns job events to the main thread through a completion queue. It is
+//! intentionally small so future deferred tasks can reuse the same scheduling,
+//! cancellation, and shutdown behavior.
+
+mod error;
+mod event;
+mod handle;
+mod manager;
+mod token;
+
+pub use error::JobError;
+pub use event::{JobEvent, JobPayload, LspInlayHint, LspInlayHintsChunk};
+pub use handle::JobHandle;
+pub use manager::JobManager;
+pub use token::JobKind;
+pub use urvim_background::{BackgroundRunnable, JobSubmissionMode, JobSubmitError, JobToken};
+
+/// Concrete editor background job context.
+pub type JobContext = urvim_background::JobContext<JobKind>;
+
+use std::sync::mpsc::Sender;
+
+use crate::buffer::{
+    DiffRefreshJob, DiffRefreshResult, IndentScopeRefreshJob, IndentScopeRefreshResult,
+    SyntaxRefreshJob, SyntaxRefreshResult,
+};
+use crate::lsp::inlay_hint_job::LspInlayHintJob;
+use crate::lsp::rename_job::LspRenameJob;
+use crate::ui::completion::CompletionJob;
+use crate::ui::picker::doc_symbols::{DocSymbolsPickerItem, DocSymbolsPickerSearchJob};
+use crate::ui::picker::file::PickerSearchJob;
+use crate::ui::picker::git::GitPickerSearchJob;
+use crate::ui::picker::grep::GrepPickerSearchJob;
+use crate::ui::picker::preview::PreviewSyntaxRefreshJob;
+
+/// Concrete background jobs known to the editor.
+#[derive(Debug)]
+pub enum BackgroundJob {
+    /// Refreshes the syntax cache for a buffer.
+    SyntaxRefresh(SyntaxRefreshJob),
+    /// Refreshes the indent scope cache for a buffer.
+    IndentScopeRefresh(IndentScopeRefreshJob),
+    /// Refreshes the diff cache for a buffer.
+    DiffRefresh(DiffRefreshJob),
+    /// Streams file picker matches.
+    FilePickerSearch(PickerSearchJob),
+    /// Streams git picker matches.
+    GitPickerSearch(GitPickerSearchJob),
+    /// Streams live grep matches.
+    GrepPickerSearch(GrepPickerSearchJob),
+    /// Streams document symbol picker matches.
+    DocSymbolsPickerSearch(DocSymbolsPickerSearchJob),
+    /// Runs insert-mode completion.
+    Completion(CompletionJob),
+    /// Refreshes preview syntax for picker panes.
+    PickerPreviewSyntax(PreviewSyntaxRefreshJob),
+    /// Runs an LSP rename on a background thread.
+    LspRename(LspRenameJob),
+    /// Streams LSP inlay hints on a background thread.
+    LspInlayHints(LspInlayHintJob),
+    /// Test-only gate job used to block the worker thread.
+    #[cfg(test)]
+    Gate {
+        gate: std::sync::Arc<(std::sync::Mutex<bool>, std::sync::Condvar)>,
+    },
+}
+
+impl BackgroundRunnable<JobKind, JobEvent> for BackgroundJob {
+    /// Runs this job and emits lifecycle events.
+    fn run(self, context: &JobContext, event_tx: &Sender<JobEvent>) {
+        match self {
+            Self::SyntaxRefresh(job) => job.run(context, event_tx),
+            Self::IndentScopeRefresh(job) => job.run(context, event_tx),
+            Self::DiffRefresh(job) => job.run(context, event_tx),
+            Self::FilePickerSearch(job) => job.run(context, event_tx),
+            Self::GitPickerSearch(job) => job.run(context, event_tx),
+            Self::GrepPickerSearch(job) => job.run(context, event_tx),
+            Self::DocSymbolsPickerSearch(job) => job.run(context, event_tx),
+            Self::Completion(job) => job.run(context, event_tx),
+            Self::PickerPreviewSyntax(job) => job.run(context, event_tx),
+            Self::LspRename(job) => job.run(context, event_tx),
+            Self::LspInlayHints(job) => job.run(context, event_tx),
+            #[cfg(test)]
+            Self::Gate { gate } => {
+                let (lock, cvar) = &*gate;
+                let mut open = lock.lock().unwrap();
+                while !*open {
+                    open = cvar.wait(open).unwrap();
+                }
+
+                event_tx
+                    .send(JobEvent::Completed {
+                        kind: context.kind().clone(),
+                        token: context.token(),
+                        payload: None,
+                    })
+                    .ok();
+            }
+        }
+    }
+}
+
+impl From<SyntaxRefreshJob> for BackgroundJob {
+    fn from(value: SyntaxRefreshJob) -> Self {
+        Self::SyntaxRefresh(value)
+    }
+}
+
+impl From<IndentScopeRefreshJob> for BackgroundJob {
+    fn from(value: IndentScopeRefreshJob) -> Self {
+        Self::IndentScopeRefresh(value)
+    }
+}
+
+impl From<DiffRefreshJob> for BackgroundJob {
+    fn from(value: DiffRefreshJob) -> Self {
+        Self::DiffRefresh(value)
+    }
+}
+
+impl From<PickerSearchJob> for BackgroundJob {
+    fn from(value: PickerSearchJob) -> Self {
+        Self::FilePickerSearch(value)
+    }
+}
+
+impl From<GitPickerSearchJob> for BackgroundJob {
+    fn from(value: GitPickerSearchJob) -> Self {
+        Self::GitPickerSearch(value)
+    }
+}
+
+impl From<GrepPickerSearchJob> for BackgroundJob {
+    fn from(value: GrepPickerSearchJob) -> Self {
+        Self::GrepPickerSearch(value)
+    }
+}
+
+impl From<DocSymbolsPickerSearchJob> for BackgroundJob {
+    fn from(value: DocSymbolsPickerSearchJob) -> Self {
+        Self::DocSymbolsPickerSearch(value)
+    }
+}
+
+impl From<CompletionJob> for BackgroundJob {
+    fn from(value: CompletionJob) -> Self {
+        Self::Completion(value)
+    }
+}
+
+impl From<PreviewSyntaxRefreshJob> for BackgroundJob {
+    fn from(value: PreviewSyntaxRefreshJob) -> Self {
+        Self::PickerPreviewSyntax(value)
+    }
+}
+
+impl From<LspRenameJob> for BackgroundJob {
+    fn from(value: LspRenameJob) -> Self {
+        Self::LspRename(value)
+    }
+}
+
+impl From<LspInlayHintJob> for BackgroundJob {
+    fn from(value: LspInlayHintJob) -> Self {
+        Self::LspInlayHints(value)
+    }
+}
+
+impl From<SyntaxRefreshResult> for JobPayload {
+    fn from(value: SyntaxRefreshResult) -> Self {
+        Self::SyntaxRefresh(value)
+    }
+}
+
+impl From<IndentScopeRefreshResult> for JobPayload {
+    fn from(value: IndentScopeRefreshResult) -> Self {
+        Self::IndentScopeRefresh(value)
+    }
+}
+
+impl From<DiffRefreshResult> for JobPayload {
+    fn from(value: DiffRefreshResult) -> Self {
+        Self::DiffRefresh(value)
+    }
+}
+
+impl From<Vec<DocSymbolsPickerItem>> for JobPayload {
+    fn from(value: Vec<DocSymbolsPickerItem>) -> Self {
+        Self::DocSymbolsSearch(value)
+    }
+}
+
+impl From<Vec<crate::ui::picker::git::GitPickerItem>> for JobPayload {
+    fn from(value: Vec<crate::ui::picker::git::GitPickerItem>) -> Self {
+        Self::GitSearchSnapshot(value)
+    }
+}

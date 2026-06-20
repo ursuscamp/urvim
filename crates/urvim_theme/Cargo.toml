@@ -1,0 +1,11 @@
+[package]
+name = "urvim_theme"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+urvim_terminal = { path = "../urvim_terminal" }
+serde = { version = "1", features = ["derive"] }
+smol_str = "0.3"
+toml = "0.8"

@@ -1,0 +1,17 @@
+[package]
+name = "urvim"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+default-run = "urvim"
+
+[dependencies]
+urvim_core = { path = "../urvim_core" }
+urvim_terminal = { path = "../urvim_terminal" }
+urvim_theme = { path = "../urvim_theme" }
+urvim_plugin = { path = "../urvim_plugin" }
+clap = { version = "4", features = ["derive"] }
+rustix = "0.38"
+is-terminal = "0.4"
+tracing = "0.1"
+serde_json = "1"

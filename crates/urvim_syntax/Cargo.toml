@@ -1,0 +1,11 @@
+[package]
+name = "urvim_syntax"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+urvim_terminal = { path = "../urvim_terminal" }
+urvim_theme = { path = "../urvim_theme" }
+regex = "1"
+smol_str = "0.3"

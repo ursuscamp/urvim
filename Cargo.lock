@@ -968,26 +968,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "signal-hook"
-version = "0.3.18"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d881a16cf4426aa584979d30bd82cb33429027e42122b169753d6ef1085ed6e2"
-dependencies = [
- "libc",
- "signal-hook-registry",
-]
-
-[[package]]
-name = "signal-hook-registry"
-version = "1.4.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c4db69cba1110affc0e9f7bcd48bbf87b3f4fc7c61fc9155afd4c469eb3d6c1b"
-dependencies = [
- "errno",
- "libc",
-]
-
-[[package]]
 name = "slab"
 version = "0.4.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1281,20 +1261,37 @@ dependencies = [
 name = "urvim"
 version = "0.1.0"
 dependencies = [
- "base64",
  "clap",
+ "is-terminal",
+ "rustix 0.38.44",
+ "serde_json",
+ "tracing",
+ "urvim_core",
+ "urvim_plugin",
+ "urvim_terminal",
+ "urvim_theme",
+]
+
+[[package]]
+name = "urvim_background"
+version = "0.1.0"
+dependencies = [
+ "tracing",
+]
+
+[[package]]
+name = "urvim_core"
+version = "0.1.0"
+dependencies = [
  "criterion",
  "ignore",
  "is-terminal",
  "lsp-types",
  "regex",
- "rmp-serde",
  "rustix 0.38.44",
  "serde",
  "serde_json",
- "signal-hook",
  "smol_str",
- "terminal_size",
  "toml",
  "tracing",
  "tracing-appender",
@@ -1302,6 +1299,110 @@ dependencies = [
  "unicode-segmentation",
  "unicode-width",
  "url",
+ "urvim_background",
+ "urvim_diff",
+ "urvim_id",
+ "urvim_json_rpc",
+ "urvim_lsp",
+ "urvim_path",
+ "urvim_plugin",
+ "urvim_syntax",
+ "urvim_terminal",
+ "urvim_text",
+ "urvim_theme",
+ "urvim_unicode",
+]
+
+[[package]]
+name = "urvim_diff"
+version = "0.1.0"
+
+[[package]]
+name = "urvim_id"
+version = "0.1.0"
+
+[[package]]
+name = "urvim_json_rpc"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "urvim_lsp"
+version = "0.1.0"
+dependencies = [
+ "lsp-types",
+ "serde",
+ "serde_json",
+ "tracing",
+ "url",
+ "urvim_id",
+ "urvim_json_rpc",
+ "urvim_text",
+]
+
+[[package]]
+name = "urvim_path"
+version = "0.1.0"
+
+[[package]]
+name = "urvim_plugin"
+version = "0.1.0"
+dependencies = [
+ "rmp-serde",
+ "serde",
+ "serde_json",
+ "toml",
+ "tracing",
+ "urvim_theme",
+]
+
+[[package]]
+name = "urvim_syntax"
+version = "0.1.0"
+dependencies = [
+ "regex",
+ "smol_str",
+ "urvim_terminal",
+ "urvim_theme",
+]
+
+[[package]]
+name = "urvim_terminal"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "is-terminal",
+ "rustix 0.38.44",
+ "terminal_size",
+ "tracing",
+]
+
+[[package]]
+name = "urvim_text"
+version = "0.1.0"
+dependencies = [
+ "unicode-segmentation",
+]
+
+[[package]]
+name = "urvim_theme"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "smol_str",
+ "toml",
+ "urvim_terminal",
+]
+
+[[package]]
+name = "urvim_unicode"
+version = "0.1.0"
+dependencies = [
+ "unicode-segmentation",
+ "unicode-width",
 ]
 
 [[package]]

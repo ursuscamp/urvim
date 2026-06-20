@@ -1,0 +1,8 @@
+[package]
+name = "urvim_text"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+unicode-segmentation = "1.11"
