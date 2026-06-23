@@ -272,16 +272,12 @@ fn indent_fold_range_starting_at(buffer: &Buffer, start_line: usize) -> Option<F
     }
 
     let base_indent = buffer.line_leading_whitespace_width(start_line)?;
-    let mut saw_more_indented_line = false;
     let mut end_line = None;
     for line in start_line + 1..buffer.line_count() {
         if buffer
             .line_at(line)
             .is_some_and(|text| text.to_string().chars().all(char::is_whitespace))
         {
-            if saw_more_indented_line {
-                end_line = Some(line);
-            }
             continue;
         }
 
@@ -289,7 +285,6 @@ fn indent_fold_range_starting_at(buffer: &Buffer, start_line: usize) -> Option<F
         if width <= base_indent {
             break;
         }
-        saw_more_indented_line = true;
         end_line = Some(line);
     }
 

@@ -1705,6 +1705,33 @@ fn test_window_render_does_not_fold_blank_only_suffix() {
 }
 
 #[test]
+fn test_window_indent_fold_excludes_trailing_blank_lines() {
+    let mut window = Window::new(Buffer::from_str(
+        "def foo():\n    x = 1\n    y = 2\n\ndef bar():\n    z = 3",
+    ));
+    window.set_cursor(Cursor::new(0, 0));
+
+    assert_eq!(
+        window.dispatch_action(&Action::new(ActionKind::CloseFold)),
+        ActionResult::Handled
+    );
+    let mut screen = crate::screen::Screen::new(5, 40);
+    window.render(&mut screen, Position::new(0, 0), Size::new(5, 40));
+
+    let rendered = window
+        .render_data()
+        .get_line(0)
+        .expect("folded start line should render")
+        .iter()
+        .map(|chunk| chunk.text.as_str())
+        .collect::<String>();
+
+    assert!(rendered.contains("... 2 lines folded"));
+    assert_eq!(window.render_data().line_data[1].buffer_line, 3);
+    assert_eq!(window.render_data().line_data[2].buffer_line, 4);
+}
+
+#[test]
 fn test_window_fold_state_is_window_local() {
     let buffer = Buffer::from_str("outer\n  inner1\n  inner2\nafter");
     let mut folded = Window::from_owned_buffer(buffer.clone());
