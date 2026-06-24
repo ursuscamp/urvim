@@ -6392,6 +6392,187 @@ fn test_paste_after_uses_explicit_named_register() {
     assert_eq!(buffer_text(window.buffer_view()), "hiab".to_string());
 }
 
+// ── Unnamed register tests ──────────────────────────────────────────────
+
+#[test]
+fn test_yank_line_writes_to_unnamed_register() {
+    let _register_guard = globals::set_test_register_store(RegisterStore::new());
+    let buffer = Buffer::from_str("hello\nworld");
+    let mut window = Window::new(buffer);
+
+    window.dispatch_action(&Action::new(ActionKind::YankLine));
+
+    let content = globals::with_register_store(|store| store.get(RegisterName::UNNAMED))
+        .expect("unnamed register should have content");
+    assert_eq!(content.text, "hello");
+    assert_eq!(content.kind, RegisterContentKind::Linewise);
+}
+
+#[test]
+fn test_delete_line_writes_to_unnamed_register() {
+    let _register_guard = globals::set_test_register_store(RegisterStore::new());
+    let buffer = Buffer::from_str("hello\nworld");
+    let mut window = Window::new(buffer);
+
+    window.dispatch_action(&Action::new(ActionKind::DeleteLine));
+
+    let content = globals::with_register_store(|store| store.get(RegisterName::UNNAMED))
+        .expect("unnamed register should have content");
+    assert_eq!(content.text, "hello");
+    assert_eq!(content.kind, RegisterContentKind::Linewise);
+}
+
+#[test]
+fn test_yank_selection_writes_to_unnamed_register() {
+    let _register_guard = globals::set_test_register_store(RegisterStore::new());
+    let buffer = Buffer::from_str("hello");
+    let mut window = Window::new(buffer);
+    window
+        .buffer_view_mut()
+        .begin_visual_selection(VisualSelectionKind::Character);
+    window.buffer_view_mut().set_cursor(Cursor::new(0, 0));
+
+    let action = Action::new(ActionKind::YankSelection)
+        .with_from_mode(ModeKind::Visual)
+        .with_to_mode(ModeKind::Normal);
+    window.dispatch_action(&action);
+
+    let content = globals::with_register_store(|store| store.get(RegisterName::UNNAMED))
+        .expect("unnamed register should have content");
+    assert_eq!(content.kind, RegisterContentKind::Characterwise);
+}
+
+#[test]
+fn test_explicit_named_register_also_writes_to_unnamed() {
+    let _register_guard = globals::set_test_register_store(RegisterStore::new());
+    let buffer = Buffer::from_str("hello\nworld");
+    let mut window = Window::new(buffer);
+
+    let action = Action::new(ActionKind::YankLine).with_register(RegisterName('a'));
+    window.dispatch_action(&action);
+
+    let named = globals::with_register_store(|store| store.get(RegisterName('a')))
+        .expect("register 'a' should have content");
+    let unnamed = globals::with_register_store(|store| store.get(RegisterName::UNNAMED))
+        .expect("unnamed register should have content");
+
+    assert_eq!(named.text, "hello");
+    assert_eq!(unnamed.text, "hello");
+    assert_eq!(named.kind, RegisterContentKind::Linewise);
+    assert_eq!(unnamed.kind, RegisterContentKind::Linewise);
+}
+
+#[test]
+fn test_paste_after_reads_from_unnamed_register() {
+    let _register_guard = globals::set_test_register_store(RegisterStore::new());
+    globals::with_register_store_mut(|store| {
+        store.set(
+            RegisterName::UNNAMED,
+            RegisterContent::new("pasted".to_string(), RegisterContentKind::Characterwise),
+        );
+    });
+
+    let buffer = Buffer::from_str("ab");
+    let mut window = Window::new(buffer);
+
+    window.dispatch_action(&Action::paste_after());
+
+    assert_eq!(buffer_text(window.buffer_view()), "pastedab");
+}
+
+#[test]
+fn test_paste_before_reads_from_unnamed_register() {
+    let _register_guard = globals::set_test_register_store(RegisterStore::new());
+    globals::with_register_store_mut(|store| {
+        store.set(
+            RegisterName::UNNAMED,
+            RegisterContent::new("pasted".to_string(), RegisterContentKind::Characterwise),
+        );
+    });
+
+    let buffer = Buffer::from_str("ab");
+    let mut window = Window::new(buffer);
+
+    window.dispatch_action(&Action::paste_before());
+
+    assert_eq!(buffer_text(window.buffer_view()), "pastedab");
+}
+
+#[test]
+fn test_paste_with_explicit_register_bypasses_unnamed() {
+    let _register_guard = globals::set_test_register_store(RegisterStore::new());
+    globals::with_register_store_mut(|store| {
+        store.set(
+            RegisterName::UNNAMED,
+            RegisterContent::new(
+                "from-unnamed".to_string(),
+                RegisterContentKind::Characterwise,
+            ),
+        );
+        store.set(
+            RegisterName('z'),
+            RegisterContent::new("from-z".to_string(), RegisterContentKind::Characterwise),
+        );
+    });
+
+    let buffer = Buffer::from_str("ab");
+    let mut window = Window::new(buffer);
+
+    window.dispatch_action(&Action::paste_after().with_register(RegisterName('z')));
+
+    assert_eq!(buffer_text(window.buffer_view()), "from-zab");
+}
+
+#[test]
+fn test_yank_then_paste_uses_unnamed_register() {
+    let _register_guard = globals::set_test_register_store(RegisterStore::new());
+    let buffer = Buffer::from_str("hello\nworld");
+    let mut window = Window::new(buffer);
+
+    window.dispatch_action(&Action::new(ActionKind::YankLine));
+
+    window.dispatch_action(&Action::paste_after());
+
+    assert_eq!(
+        buffer_text(window.buffer_view()),
+        "hello\nhello\nworld"
+    );
+}
+
+#[test]
+fn test_delete_then_paste_uses_unnamed_register() {
+    let _register_guard = globals::set_test_register_store(RegisterStore::new());
+    let buffer = Buffer::from_str("hello\nworld");
+    let mut window = Window::new(buffer);
+
+    window.dispatch_action(&Action::new(ActionKind::DeleteLine));
+
+    window.dispatch_action(&Action::paste_before());
+
+    assert_eq!(buffer_text(window.buffer_view()), "hello\nworld");
+}
+
+#[test]
+fn test_unnamed_register_overwritten_by_subsequent_operation() {
+    let _register_guard = globals::set_test_register_store(RegisterStore::new());
+    let buffer = Buffer::from_str("first\nsecond\nthird");
+    let mut window = Window::new(buffer);
+
+    window.dispatch_action(&Action::new(ActionKind::YankLine));
+
+    window.buffer_view_mut().set_cursor(Cursor::new(1, 0));
+    window.dispatch_action(&Action::new(ActionKind::DeleteLine));
+
+    window.dispatch_action(&Action::paste_before());
+
+    // Unnamed register was overwritten from "first" to "second" by DeleteLine,
+    // so paste_before inserts "second" before the current line ("third").
+    assert_eq!(
+        buffer_text(window.buffer_view()),
+        "first\nsecond\nthird"
+    );
+}
+
 // ── Paste cursor-position regression tests ───────────────────────────────
 
 #[test]
@@ -6399,7 +6580,7 @@ fn paste_after_characterwise_puts_cursor_at_end_of_pasted_text() {
     let _register_guard = globals::set_test_register_store(RegisterStore::new());
     globals::with_register_store_mut(|store| {
         store.set(
-            RegisterName('y'),
+            RegisterName::UNNAMED,
             RegisterContent::new("hello".to_string(), RegisterContentKind::Characterwise),
         );
     });
@@ -6420,7 +6601,7 @@ fn paste_before_characterwise_puts_cursor_at_start_of_pasted_text() {
     let _register_guard = globals::set_test_register_store(RegisterStore::new());
     globals::with_register_store_mut(|store| {
         store.set(
-            RegisterName('y'),
+            RegisterName::UNNAMED,
             RegisterContent::new("hello".to_string(), RegisterContentKind::Characterwise),
         );
     });
@@ -6441,7 +6622,7 @@ fn paste_after_characterwise_multiline_puts_cursor_at_end() {
     let _register_guard = globals::set_test_register_store(RegisterStore::new());
     globals::with_register_store_mut(|store| {
         store.set(
-            RegisterName('y'),
+            RegisterName::UNNAMED,
             RegisterContent::new("hi\nthere".to_string(), RegisterContentKind::Characterwise),
         );
     });
@@ -6462,7 +6643,7 @@ fn paste_after_linewise_puts_cursor_at_end_of_last_pasted_line() {
     let _register_guard = globals::set_test_register_store(RegisterStore::new());
     globals::with_register_store_mut(|store| {
         store.set(
-            RegisterName('y'),
+            RegisterName::UNNAMED,
             RegisterContent::new("hello".to_string(), RegisterContentKind::Linewise),
         );
     });
@@ -6483,7 +6664,7 @@ fn paste_before_linewise_puts_cursor_at_start_of_first_pasted_line() {
     let _register_guard = globals::set_test_register_store(RegisterStore::new());
     globals::with_register_store_mut(|store| {
         store.set(
-            RegisterName('y'),
+            RegisterName::UNNAMED,
             RegisterContent::new("hello".to_string(), RegisterContentKind::Linewise),
         );
     });
@@ -6504,7 +6685,7 @@ fn paste_after_linewise_multiline_puts_cursor_at_end_of_last_line() {
     let _register_guard = globals::set_test_register_store(RegisterStore::new());
     globals::with_register_store_mut(|store| {
         store.set(
-            RegisterName('y'),
+            RegisterName::UNNAMED,
             RegisterContent::new("one\ntwo".to_string(), RegisterContentKind::Linewise),
         );
     });
@@ -6525,7 +6706,7 @@ fn paste_before_linewise_multiline_puts_cursor_at_start_of_first_line() {
     let _register_guard = globals::set_test_register_store(RegisterStore::new());
     globals::with_register_store_mut(|store| {
         store.set(
-            RegisterName('y'),
+            RegisterName::UNNAMED,
             RegisterContent::new("one\ntwo".to_string(), RegisterContentKind::Linewise),
         );
     });
@@ -6546,7 +6727,7 @@ fn paste_after_characterwise_inserts_at_cursor_not_after_character() {
     let _register_guard = globals::set_test_register_store(RegisterStore::new());
     globals::with_register_store_mut(|store| {
         store.set(
-            RegisterName('y'),
+            RegisterName::UNNAMED,
             RegisterContent::new("hello".to_string(), RegisterContentKind::Characterwise),
         );
     });
@@ -6567,7 +6748,7 @@ fn paste_after_linewise_multiple_lines_inserts_all_content() {
     let _register_guard = globals::set_test_register_store(RegisterStore::new());
     globals::with_register_store_mut(|store| {
         store.set(
-            RegisterName('y'),
+            RegisterName::UNNAMED,
             RegisterContent::new(
                 "one\ntwo\nthree\nfour".to_string(),
                 RegisterContentKind::Linewise,
@@ -6594,7 +6775,7 @@ fn paste_before_linewise_multiple_lines_inserts_all_content() {
     let _register_guard = globals::set_test_register_store(RegisterStore::new());
     globals::with_register_store_mut(|store| {
         store.set(
-            RegisterName('y'),
+            RegisterName::UNNAMED,
             RegisterContent::new(
                 "one\ntwo\nthree\nfour".to_string(),
                 RegisterContentKind::Linewise,

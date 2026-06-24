@@ -6,6 +6,10 @@ use std::collections::BTreeMap;
 pub struct RegisterName(pub char);
 
 impl RegisterName {
+    /// The unnamed register (`""`). Automatically mirrors every yank, delete, and change
+    /// operation, and is the default source for paste when no explicit register is specified.
+    pub const UNNAMED: Self = Self('"');
+
     /// Creates a register name from a concrete selector character.
     pub fn new(selector: char) -> Self {
         Self(selector)

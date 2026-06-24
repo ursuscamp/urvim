@@ -29,8 +29,10 @@ impl Window {
         kind: RegisterContentKind,
     ) {
         let register = Self::resolved_register_name(explicit, role);
+        let content = RegisterContent::new(text, kind);
         globals::with_register_store_mut(|store| {
-            store.set(register, RegisterContent::new(text, kind));
+            store.set(register, content.clone());
+            store.set(RegisterName::UNNAMED, content);
         });
     }
 
@@ -206,10 +208,9 @@ impl Window {
     pub(super) fn paste_register_content(
         &mut self,
         explicit: Option<RegisterName>,
-        role: DefaultRegisterRole,
         after: bool,
     ) -> ActionResult {
-        let register = Self::resolved_register_name(explicit, role);
+        let register = explicit.unwrap_or(RegisterName::UNNAMED);
         let Some(content) = globals::with_register_store(|store| store.get(register)) else {
             return ActionResult::Handled;
         };

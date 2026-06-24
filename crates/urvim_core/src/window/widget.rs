@@ -446,10 +446,10 @@ impl Window {
                     ActionResult::Handled
                 }
                 Some(ActionKind::PasteAfter) => {
-                    self.paste_register_content(action.register, DefaultRegisterRole::Yank, true)
+                    self.paste_register_content(action.register, true)
                 }
                 Some(ActionKind::PasteBefore) => {
-                    self.paste_register_content(action.register, DefaultRegisterRole::Yank, false)
+                    self.paste_register_content(action.register, false)
                 }
                 Some(ActionKind::OpenLineBelow) => {
                     let cursor = self.buffer_view.cursor();
