@@ -44,7 +44,7 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     const EXAMPLE_PLUGIN_ROOT: &str =
-        concat!(env!("CARGO_MANIFEST_DIR"), "/examples/plugins/demo-plugin");
+        concat!(env!("CARGO_MANIFEST_DIR"), "/../../examples/plugins/demo-plugin");
 
     fn unique_temp_dir(name: &str) -> PathBuf {
         let stamp = SystemTime::now()

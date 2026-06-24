@@ -28,7 +28,7 @@ impl JobManager {
     pub fn new() -> Self {
         #[cfg(test)]
         {
-            return Self::with_workers(1);
+            return Self::with_workers(0);
         }
 
         #[cfg(not(test))]
@@ -117,4 +117,16 @@ impl JobManager {
     pub fn shutdown(&self) {
         self.inner.shutdown();
     }
+}
+
+/// Returns a process-wide shared `JobManager` for tests.
+///
+/// Tests that don't submit background jobs should use this instead of
+/// `Arc::new(JobManager::new())` to avoid spawning unnecessary worker threads
+/// when tests run in parallel.
+#[cfg(test)]
+pub fn shared_test_manager() -> std::sync::Arc<JobManager> {
+    use std::sync::{Arc, OnceLock};
+    static INSTANCE: OnceLock<Arc<JobManager>> = OnceLock::new();
+    INSTANCE.get_or_init(|| Arc::new(JobManager::new())).clone()
 }

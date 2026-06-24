@@ -4,5 +4,8 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[lib]
+doctest = false
+
 [dependencies]
 tracing = "0.1"

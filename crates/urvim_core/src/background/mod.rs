@@ -15,6 +15,8 @@ pub use error::JobError;
 pub use event::{JobEvent, JobPayload, LspInlayHint, LspInlayHintsChunk};
 pub use handle::JobHandle;
 pub use manager::JobManager;
+#[cfg(test)]
+pub use manager::shared_test_manager;
 pub use token::JobKind;
 pub use urvim_background::{BackgroundRunnable, JobSubmissionMode, JobSubmitError, JobToken};
 

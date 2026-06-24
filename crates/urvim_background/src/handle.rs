@@ -4,6 +4,7 @@ use std::sync::{
 };
 use std::thread::{self, JoinHandle};
 
+use super::context::JobContext;
 use super::queue::QueuedJob;
 use super::shared::JobShared;
 use super::worker::worker_loop;
@@ -55,8 +56,13 @@ where
     }
 
     /// Creates a new job handle with `num_workers` worker threads.
+    ///
+    /// When `num_workers` is 0, no threads are spawned. Jobs are queued and
+    /// processed lazily on the calling thread inside [`poll_event`] and
+    /// [`process_events`](Self::process_events). This mode is used by tests to
+    /// avoid thread starvation when the test runner already occupies every CPU
+    /// core.
     pub fn with_workers(num_workers: usize) -> Self {
-        assert!(num_workers > 0, "JobHandle requires at least one worker");
         let (event_tx, event_rx) = mpsc::channel();
         let shared = Arc::new(JobShared::new(event_tx));
         let workers: Vec<_> = (0..num_workers)
@@ -91,12 +97,26 @@ where
     }
 
     /// Polls the completion queue for the next job event.
+    ///
+    /// In zero-worker mode (created via `with_workers(0)`), this method
+    /// processes one pending job inline before checking the event channel.
+    /// This keeps the API identical while avoiding OS thread spawning.
     pub fn poll_event(&self) -> Option<E> {
         let receiver = self.event_rx.lock().unwrap();
         match receiver.try_recv() {
-            Ok(event) => Some(event),
-            Err(TryRecvError::Empty) | Err(TryRecvError::Disconnected) => None,
+            Ok(event) => return Some(event),
+            Err(TryRecvError::Disconnected) => return None,
+            Err(TryRecvError::Empty) => {}
         }
+
+        // Zero-worker mode: process a job on the calling thread.
+        if self.workers.is_empty() {
+            drop(receiver);
+            self.process_one_job();
+            return self.event_rx.lock().unwrap().try_recv().ok();
+        }
+
+        None
     }
 
     /// Marks a job generation as aborted.
@@ -118,6 +138,28 @@ where
         self.shared.available.notify_all();
         // Cannot take ownership from &self, so we signal and rely on workers
         // to exit gracefully. The `workers` vec is joined in Drop.
+    }
+
+    /// Pops and runs one job from the queue on the calling thread.
+    ///
+    /// Used in zero-worker mode to process jobs lazily inside [`poll_event`].
+    fn process_one_job(&self) {
+        let job = {
+            let mut queues = self.shared.queues.lock().unwrap();
+            queues.pop_next()
+        };
+        if let Some(job) = job {
+            let kind = job.kind.clone();
+            let token = job.token;
+            let context = JobContext::new(
+                kind,
+                token,
+                Arc::clone(&self.shared.stopping),
+                Arc::clone(&self.shared.latest_generations),
+                Arc::clone(&self.shared.aborted_generations),
+            );
+            job.job.run(&context, &self.shared.event_tx);
+        }
     }
 
     fn submit_internal(

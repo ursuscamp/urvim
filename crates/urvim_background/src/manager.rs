@@ -46,7 +46,7 @@ where
     pub fn new() -> Self {
         #[cfg(test)]
         {
-            return Self::with_workers(1);
+            return Self::with_workers(0);
         }
 
         #[cfg(not(test))]

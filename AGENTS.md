@@ -3,6 +3,7 @@ urvim is a terminal based text editor.
 ## Guidelines
 
 - Write units tests whenever applicable.
+- Tests that require a `JobManager` but do not submit background jobs should use `crate::background::shared_test_manager()` instead of `Arc::new(JobManager::new())` to avoid spawning unnecessary worker threads during parallel test execution.
 - Use `cargo check` to check builds and warnings.
 - Avoid `unsafe`.
 - Do not use `let _ = result();` when dealing with patterns. Use `result().ok();` instead.

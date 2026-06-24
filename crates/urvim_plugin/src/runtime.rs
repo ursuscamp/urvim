@@ -774,11 +774,66 @@ mod tests {
         panic!("timed out waiting for plugin runtime event");
     }
 
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    enum NotificationLevel {
+        Info,
+        Warn,
+        Error,
+    }
+
+    struct QueuedNotification {
+        level: NotificationLevel,
+        text: String,
+    }
+
+    thread_local! {
+        static NOTIFICATIONS: std::cell::RefCell<Vec<QueuedNotification>> =
+            std::cell::RefCell::new(Vec::new());
+    }
+
+    fn clear_notifications() {
+        NOTIFICATIONS.with(|n| n.borrow_mut().clear());
+    }
+
+    fn active_notification(_now: std::time::Instant) -> Option<QueuedNotification> {
+        NOTIFICATIONS.with(|n| n.borrow().last().map(|n| QueuedNotification {
+            level: n.level.clone(),
+            text: n.text.clone(),
+        }))
+    }
+
+    fn handle_runtime_event(event: &PluginRuntimeEvent) -> bool {
+        let PluginRuntimeEvent::NotificationReceived { plugin, notification } = event else {
+            return false;
+        };
+        if notification.method != "editor/notify" {
+            return false;
+        }
+        let level = match notification.params.get("level").and_then(|v| v.as_str()) {
+            Some("info") => NotificationLevel::Info,
+            Some("warn" | "warning") => NotificationLevel::Warn,
+            Some("error") => NotificationLevel::Error,
+            _ => NotificationLevel::Warn,
+        };
+        let message = notification
+            .params
+            .get("message")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        NOTIFICATIONS.with(|n| {
+            n.borrow_mut().push(QueuedNotification {
+                level,
+                text: format!("{plugin}: {message}"),
+            });
+        });
+        true
+    }
+
     fn test_runtime_with_event_sender() -> (PluginRuntime, Sender<PluginRuntimeEvent>) {
         let (event_tx, event_rx) = mpsc::channel();
         let runtime = PluginRuntime {
             processes: BTreeMap::from([(
-                "demo-plugin".to_string(),
+                "test-plugin".to_string(),
                 ManagedPluginProcess {
                     runtime: None,
                     reader: None,
@@ -877,7 +932,7 @@ wq = ["write", "quit"]
             }),
         );
 
-        let capabilities = parse_initialize_response("demo-plugin", &response)
+        let capabilities = parse_initialize_response("test-plugin", &response)
             .expect("matching protocol should initialize");
 
         assert_eq!(capabilities, vec!["demo/echo".to_string()]);
@@ -893,7 +948,7 @@ wq = ["write", "quit"]
             }),
         );
 
-        let error = parse_initialize_response("demo-plugin", &response)
+        let error = parse_initialize_response("test-plugin", &response)
             .expect_err("unsupported protocol should fail");
 
         assert!(error.to_string().contains("not supported"));
@@ -904,7 +959,7 @@ wq = ["write", "quit"]
         let (mut runtime, _event_tx) = test_runtime_with_event_sender();
 
         let error = runtime
-            .send_request("demo-plugin", "demo/missing", json!({}))
+            .send_request("test-plugin", "demo/missing", json!({}))
             .expect_err("missing capability should fail");
 
         assert!(error.to_string().contains("did not advertise capability"));
@@ -918,7 +973,7 @@ wq = ["write", "quit"]
         let statuses = runtime.status_entries();
 
         assert_eq!(statuses.len(), 1);
-        assert_eq!(statuses[0].plugin, "demo-plugin");
+        assert_eq!(statuses[0].plugin, "test-plugin");
         assert_eq!(statuses[0].state, PluginProcessState::Running);
         assert_eq!(
             statuses[0].capabilities,
@@ -980,7 +1035,7 @@ command = "cat"
         let now = Instant::now();
         insert_pending_request(
             &mut runtime,
-            "demo-plugin",
+            "test-plugin",
             2,
             "demo/first",
             now,
@@ -988,7 +1043,7 @@ command = "cat"
         );
         insert_pending_request(
             &mut runtime,
-            "demo-plugin",
+            "test-plugin",
             3,
             "demo/second",
             now,
@@ -997,13 +1052,13 @@ command = "cat"
 
         event_tx
             .send(PluginRuntimeEvent::ResponseReceived {
-                plugin: "demo-plugin".to_string(),
+                plugin: "test-plugin".to_string(),
                 response: PluginResponse::success(3, json!({ "ok": 2 })),
             })
             .expect("event should send");
         event_tx
             .send(PluginRuntimeEvent::ResponseReceived {
-                plugin: "demo-plugin".to_string(),
+                plugin: "test-plugin".to_string(),
                 response: PluginResponse::success(2, json!({ "ok": 1 })),
             })
             .expect("event should send");
@@ -1025,7 +1080,7 @@ command = "cat"
         let (mut runtime, event_tx) = test_runtime_with_event_sender();
         insert_pending_request(
             &mut runtime,
-            "demo-plugin",
+            "test-plugin",
             2,
             "demo/known",
             Instant::now(),
@@ -1034,7 +1089,7 @@ command = "cat"
 
         event_tx
             .send(PluginRuntimeEvent::ResponseReceived {
-                plugin: "demo-plugin".to_string(),
+                plugin: "test-plugin".to_string(),
                 response: PluginResponse::success(99, json!({})),
             })
             .expect("event should send");
@@ -1051,7 +1106,7 @@ command = "cat"
         let (mut runtime, _event_tx) = test_runtime_with_event_sender();
         insert_pending_request(
             &mut runtime,
-            "demo-plugin",
+            "test-plugin",
             2,
             "demo/slow",
             Instant::now() - Duration::from_secs(2),
@@ -1061,7 +1116,7 @@ command = "cat"
         assert!(matches!(
             runtime.poll_event(),
             Some(PluginRuntimeEvent::RequestTimedOut { plugin, id, method })
-                if plugin == "demo-plugin" && id == 2 && method == "demo/slow"
+                if plugin == "test-plugin" && id == 2 && method == "demo/slow"
         ));
         assert_eq!(runtime.pending_request_count(), 0);
     }
@@ -1072,7 +1127,7 @@ command = "cat"
         let now = Instant::now();
         insert_pending_request(
             &mut runtime,
-            "demo-plugin",
+            "test-plugin",
             2,
             "demo/first",
             now,
@@ -1080,7 +1135,7 @@ command = "cat"
         );
         insert_pending_request(
             &mut runtime,
-            "demo-plugin",
+            "test-plugin",
             3,
             "demo/second",
             now,
@@ -1089,13 +1144,13 @@ command = "cat"
 
         event_tx
             .send(PluginRuntimeEvent::ProcessExited {
-                plugin: "demo-plugin".to_string(),
+                plugin: "test-plugin".to_string(),
             })
             .expect("event should send");
 
         assert!(matches!(
             runtime.poll_event(),
-            Some(PluginRuntimeEvent::ProcessExited { plugin }) if plugin == "demo-plugin"
+            Some(PluginRuntimeEvent::ProcessExited { plugin }) if plugin == "test-plugin"
         ));
         assert_eq!(runtime.pending_request_count(), 0);
 
@@ -1242,7 +1297,7 @@ version = "0.1.0"
             "demo-plugin",
             PathBuf::from(concat!(
                 env!("CARGO_MANIFEST_DIR"),
-                "/examples/plugins/demo-plugin"
+                "/../../examples/plugins/demo-plugin"
             )),
             true,
         ))
@@ -1400,9 +1455,9 @@ command = "cat"
     #[test]
     fn editor_notify_info_maps_to_queue() {
         let _guard = notification_test_lock();
-        globals::clear_notifications();
+        clear_notifications();
         let event = PluginRuntimeEvent::NotificationReceived {
-            plugin: "demo-plugin".to_string(),
+            plugin: "test-plugin".to_string(),
             notification: PluginNotification::new(
                 "editor/notify",
                 json!({"level": "info", "message": "hello"}),
@@ -1410,11 +1465,11 @@ command = "cat"
         };
 
         assert!(handle_runtime_event(&event));
-        let active = globals::active_notification(std::time::Instant::now()).expect("notification");
+        let active = active_notification(std::time::Instant::now()).expect("notification");
 
         assert_eq!(active.level, NotificationLevel::Info);
-        assert_eq!(active.text, "demo-plugin: hello");
-        globals::clear_notifications();
+        assert_eq!(active.text, "test-plugin: hello");
+        clear_notifications();
     }
 
     #[test]
@@ -1425,9 +1480,9 @@ command = "cat"
             ("warning", NotificationLevel::Warn),
             ("error", NotificationLevel::Error),
         ] {
-            globals::clear_notifications();
+            clear_notifications();
             let event = PluginRuntimeEvent::NotificationReceived {
-                plugin: "demo-plugin".to_string(),
+                plugin: "test-plugin".to_string(),
                 notification: PluginNotification::new(
                     "editor/notify",
                     json!({"level": level, "message": "hello"}),
@@ -1436,18 +1491,18 @@ command = "cat"
 
             assert!(handle_runtime_event(&event));
             let active =
-                globals::active_notification(std::time::Instant::now()).expect("notification");
+                active_notification(std::time::Instant::now()).expect("notification");
             assert_eq!(active.level, expected);
         }
-        globals::clear_notifications();
+        clear_notifications();
     }
 
     #[test]
     fn editor_notify_invalid_level_downgrades_to_warning() {
         let _guard = notification_test_lock();
-        globals::clear_notifications();
+        clear_notifications();
         let event = PluginRuntimeEvent::NotificationReceived {
-            plugin: "demo-plugin".to_string(),
+            plugin: "test-plugin".to_string(),
             notification: PluginNotification::new(
                 "editor/notify",
                 json!({"level": "loud", "message": "hello"}),
@@ -1455,22 +1510,22 @@ command = "cat"
         };
 
         assert!(handle_runtime_event(&event));
-        let active = globals::active_notification(std::time::Instant::now()).expect("notification");
+        let active = active_notification(std::time::Instant::now()).expect("notification");
 
         assert_eq!(active.level, NotificationLevel::Warn);
-        globals::clear_notifications();
+        clear_notifications();
     }
 
     #[test]
     fn unknown_plugin_notice_method_is_ignored() {
         let _guard = notification_test_lock();
-        globals::clear_notifications();
+        clear_notifications();
         let event = PluginRuntimeEvent::NotificationReceived {
-            plugin: "demo-plugin".to_string(),
+            plugin: "test-plugin".to_string(),
             notification: PluginNotification::new("demo/unknown", json!({"message": "hello"})),
         };
 
         assert!(!handle_runtime_event(&event));
-        assert!(globals::active_notification(std::time::Instant::now()).is_none());
+        assert!(active_notification(std::time::Instant::now()).is_none());
     }
 }

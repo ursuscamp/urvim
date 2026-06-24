@@ -166,7 +166,7 @@ mod tests {
     use urvim_theme::resolve_theme_from_str;
 
     const EXAMPLE_PLUGIN_ROOT: &str =
-        concat!(env!("CARGO_MANIFEST_DIR"), "/examples/plugins/demo-plugin");
+        concat!(env!("CARGO_MANIFEST_DIR"), "/../../examples/plugins/demo-plugin");
 
     fn unique_temp_dir(name: &str) -> PathBuf {
         let stamp = SystemTime::now()
@@ -199,13 +199,19 @@ mod tests {
         }
     }
 
+    fn config_with_plugins(
+        plugins: BTreeMap<String, PluginConfigEntry>,
+    ) -> BTreeMap<String, PluginConfigEntry> {
+        plugins
+    }
+
     #[test]
     fn enabled_plugin_loads_from_configured_directory() {
         let root = unique_temp_dir("enabled");
         write_manifest(
             &root,
             r#"
-name = "demo-plugin"
+name = "test-plugin"
 version = "0.1.0"
 themes = ["themes/demo.toml"]
 
@@ -216,23 +222,23 @@ wq = ["write", "quit"]
 request = "demo/echo"
 "#,
         );
-        let config = BTreeMap::from([("demo-plugin".to_string(), enabled(root.clone()))]);
+        let config = BTreeMap::from([("test-plugin".to_string(), enabled(root.clone()))]);
 
         let registry = PluginRegistry::load_from_config(&config).expect("plugin should load");
 
         assert_eq!(registry.len(), 1);
         let plugin = registry
-            .get("demo-plugin")
+            .get("test-plugin")
             .expect("plugin should be registered");
         assert_eq!(plugin.root(), root.as_path());
         assert_eq!(plugin.themes(), &[root.join("themes/demo.toml")]);
         assert_eq!(
-            registry.script("demo-plugin", "wq"),
+            registry.script("test-plugin", "wq"),
             Some(&["write".to_string(), "quit".to_string()][..])
         );
         assert_eq!(
             registry
-                .command("demo-plugin", "echo")
+                .command("test-plugin", "echo")
                 .map(|command| command.request.as_str()),
             Some("demo/echo")
         );
@@ -243,7 +249,7 @@ request = "demo/echo"
     #[test]
     fn disabled_plugin_is_skipped_and_path_is_not_read() {
         let missing = unique_temp_dir("disabled-missing");
-        let config = BTreeMap::from([("demo-plugin".to_string(), disabled(missing))]);
+        let config = BTreeMap::from([("test-plugin".to_string(), disabled(missing))]);
 
         let registry = PluginRegistry::load_from_config(&config).expect("disabled plugin skips IO");
 
@@ -261,14 +267,14 @@ version = "0.1.0"
 "#,
         );
         let config = config_with_plugins(BTreeMap::from([(
-            "demo-plugin".to_string(),
+            "test-plugin".to_string(),
             enabled(root.clone()),
         )]));
 
         let error = PluginRegistry::load_from_config(&config).expect_err("mismatch should fail");
 
         assert!(error.to_string().contains("does not match manifest name"));
-        assert!(error.to_string().contains("demo-plugin"));
+        assert!(error.to_string().contains("test-plugin"));
         assert!(error.to_string().contains(root.to_string_lossy().as_ref()));
 
         std::fs::remove_dir_all(root).ok();
@@ -358,13 +364,13 @@ format = ["buffer filetype filetype=rust"]
     fn load_error_includes_plugin_id_and_path_context() {
         let missing = unique_temp_dir("missing");
         let config = config_with_plugins(BTreeMap::from([(
-            "demo-plugin".to_string(),
+            "test-plugin".to_string(),
             enabled(missing.clone()),
         )]));
 
         let error = PluginRegistry::load_from_config(&config).expect_err("missing should fail");
 
-        assert!(error.to_string().contains("demo-plugin"));
+        assert!(error.to_string().contains("test-plugin"));
         assert!(
             error
                 .to_string()

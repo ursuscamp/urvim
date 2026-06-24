@@ -193,9 +193,8 @@ fn build_search_text(number: usize, title: &str, kind: Option<&str>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::background::JobManager;
+    use crate::background::shared_test_manager;
     use crate::lsp::runtime::CodeActionApplication;
-    use std::sync::Arc;
     use std::sync::mpsc::channel;
 
     #[test]
@@ -219,7 +218,7 @@ mod tests {
         let source = CodeActionsPickerSource::new(
             crate::buffer::BufferId::new(7),
             actions,
-            Arc::new(JobManager::new()),
+            shared_test_manager(),
         );
         let (sender, receiver) = channel();
 

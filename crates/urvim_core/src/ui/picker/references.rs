@@ -242,6 +242,7 @@ fn location_style() -> Style {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::background::shared_test_manager;
     use urvim_terminal::Style;
 
     fn test_item() -> ReferencesPickerItem {
@@ -260,7 +261,7 @@ mod tests {
                 cursor: Cursor::new(2, 4),
                 line_text: "let value = example();".to_string(),
             }],
-            Arc::new(JobManager::new()),
+            shared_test_manager(),
         );
 
         assert!(matches!(
@@ -293,7 +294,7 @@ mod tests {
 
     #[test]
     fn references_picker_supports_fuzzy_query_mode() {
-        let source = ReferencesPickerSource::new(Vec::new(), Arc::new(JobManager::new()));
+        let source = ReferencesPickerSource::new(Vec::new(), shared_test_manager());
         assert_eq!(source.query_mode(), QueryMode::Fuzzy);
         assert_eq!(source.toggle_query_mode(), QueryMode::Exact);
         assert_eq!(source.query_mode(), QueryMode::Exact);

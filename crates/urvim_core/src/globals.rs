@@ -1052,6 +1052,7 @@ mod tests {
         let _guard = lsp_runtime_test_lock();
         use std::sync::mpsc;
         use std::thread;
+        use std::time::{Duration, Instant};
 
         let config = themed_config("demo");
         set_lsp_runtime(crate::lsp::runtime::LspRuntime::new(&config));
@@ -1062,11 +1063,15 @@ mod tests {
         let handle = thread::spawn(move || {
             let _ = with_lsp_runtime_mut(|_| {
                 ready_tx.send(()).expect("ready signal");
-                release_rx.recv().expect("release signal");
+                let _ = release_rx.recv_timeout(Duration::from_secs(5));
             });
         });
 
-        ready_rx.recv().expect("worker should lock runtime");
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while ready_rx.try_recv().is_err() {
+            assert!(Instant::now() < deadline, "timed out waiting for worker to lock runtime");
+            thread::sleep(Duration::from_millis(5));
+        }
         assert!(try_with_lsp_runtime_mut(|_| ()).is_none());
         release_tx.send(()).expect("release worker");
         handle.join().expect("worker should finish");

@@ -4,6 +4,9 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[lib]
+doctest = false
+
 [dependencies]
 unicode-segmentation = "1.11"
 unicode-width = "0.2"

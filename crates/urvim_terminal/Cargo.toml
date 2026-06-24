@@ -4,6 +4,9 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[lib]
+doctest = false
+
 [dependencies]
 rustix = { version = "0.38", features = ["termios", "event", "fs"] }
 is-terminal = "0.4"

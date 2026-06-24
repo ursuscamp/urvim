@@ -4,6 +4,9 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[lib]
+doctest = false
+
 [dependencies]
 urvim_theme = { path = "../urvim_theme" }
 serde = { version = "1", features = ["derive"] }

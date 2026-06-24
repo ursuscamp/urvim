@@ -6,3 +6,5 @@ TODO.md
 /crates/urvim_core/examples/plugins/demo-plugin/src/demo_plugin/__pycache__
 /crates/urvim_core/examples/plugins/demo-plugin/src/urvim_demo_plugin.egg-info
 /crates/urvim_core/lsp.log
+/examples/plugins/demo-plugin/src/demo_plugin/__pycache__
+/examples/plugins/demo-plugin/src/urvim_demo_plugin.egg-info

@@ -618,7 +618,7 @@ fn symbol_kind_glyph(kind: SymbolKind) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::background::{JobEvent, JobKind, JobManager, JobPayload, JobToken};
+    use crate::background::{JobEvent, JobKind, JobManager, JobPayload, JobToken, shared_test_manager};
     use crate::buffer::Cursor;
     use crate::config::Config;
     use crate::globals;
@@ -655,7 +655,7 @@ mod tests {
     fn doc_symbols_picker_selects_open_file_at_cursor_intent() {
         let source = DocSymbolsPickerSource::with_document_jobs(
             crate::buffer::BufferId::new(1),
-            Arc::new(JobManager::new()),
+            shared_test_manager(),
         );
         let intent = source.select(&test_item());
 
@@ -815,7 +815,7 @@ mod tests {
     fn doc_symbols_picker_toggles_query_mode() {
         let source = DocSymbolsPickerSource::with_document_jobs(
             crate::buffer::BufferId::new(1),
-            Arc::new(JobManager::new()),
+            shared_test_manager(),
         );
 
         assert_eq!(source.query_mode(), QueryMode::Fuzzy);

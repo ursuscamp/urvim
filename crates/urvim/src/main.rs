@@ -1581,7 +1581,7 @@ mod tests {
                     enabled: true,
                     path: std::path::PathBuf::from(concat!(
                         env!("CARGO_MANIFEST_DIR"),
-                        "/../urvim_core/examples/plugins/demo-plugin"
+                        "/../../examples/plugins/demo-plugin"
                     )),
                 },
             )]),
