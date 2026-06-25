@@ -618,7 +618,9 @@ fn symbol_kind_glyph(kind: SymbolKind) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::background::{JobEvent, JobKind, JobManager, JobPayload, JobToken, shared_test_manager};
+    use crate::background::{
+        JobEvent, JobKind, JobManager, JobPayload, JobToken, shared_test_manager,
+    };
     use crate::buffer::Cursor;
     use crate::config::Config;
     use crate::globals;

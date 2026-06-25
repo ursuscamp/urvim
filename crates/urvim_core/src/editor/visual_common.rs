@@ -51,6 +51,7 @@ impl VisualModeState {
                 keymap.insert_configured(mappings);
             }
         });
+        keymap.insert_intents(&globals::plugin_keymap_intents_for_mode(mode_kind));
 
         Self {
             keymap,

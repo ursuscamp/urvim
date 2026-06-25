@@ -483,13 +483,7 @@ impl LspServerSession {
     }
 
     pub fn request_raw(&self, method: &str, params: Option<Value>) -> io::Result<Option<Value>> {
-        let id = RequestId::Number(self.next_request_id.fetch_add(1, Ordering::SeqCst));
-        let request = Message::Request(Request::new(id.clone(), method, params));
-        let (tx, rx) = mpsc::channel();
-        if let Ok(mut pending) = self.pending.lock() {
-            pending.insert(id.clone(), tx);
-        }
-        self.write_message(&request)?;
+        let (id, rx) = self.request_raw_async_with_id(method, params)?;
         match rx.recv_timeout(std::time::Duration::from_secs(10)) {
             Ok(Message::Response(Response::Success(SuccessResponse { result, .. }))) => {
                 Ok(Some(result))
@@ -508,6 +502,30 @@ impl LspServerSession {
                 ))
             }
         }
+    }
+
+    pub fn request_raw_async(
+        &self,
+        method: &str,
+        params: Option<Value>,
+    ) -> io::Result<mpsc::Receiver<Message>> {
+        self.request_raw_async_with_id(method, params)
+            .map(|(_, receiver)| receiver)
+    }
+
+    fn request_raw_async_with_id(
+        &self,
+        method: &str,
+        params: Option<Value>,
+    ) -> io::Result<(RequestId, mpsc::Receiver<Message>)> {
+        let id = RequestId::Number(self.next_request_id.fetch_add(1, Ordering::SeqCst));
+        let request = Message::Request(Request::new(id.clone(), method, params));
+        let (tx, rx) = mpsc::channel();
+        if let Ok(mut pending) = self.pending.lock() {
+            pending.insert(id.clone(), tx);
+        }
+        self.write_message(&request)?;
+        Ok((id, rx))
     }
 
     fn notify(&self, method: &str, params: Option<Value>) -> io::Result<()> {

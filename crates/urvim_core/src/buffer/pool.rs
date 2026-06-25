@@ -11,6 +11,8 @@ use super::diff::DiffRefreshJob;
 use super::syntax::{IndentScopeRefreshJob, SyntaxRefreshJob};
 use crate::background::JobPayload;
 use crate::background::{BackgroundJob, JobEvent, JobKind, JobManager, JobSubmitError, JobToken};
+use crate::event::{BufferEventSnapshot, EditorEvent};
+use crate::globals;
 use crate::path::AbsolutePath;
 use std::collections::HashMap;
 use std::io;
@@ -148,11 +150,20 @@ impl BufferPool {
     }
 
     /// Removes a buffer from the pool and returns it when present.
+    ///
+    /// Removing a buffer enqueues a [`EditorEvent::BufferUnloaded`] event with
+    /// a snapshot of the buffer's metadata so plugin hooks can observe the
+    /// unload after the buffer is no longer live in the pool.
     pub fn remove_buffer(&mut self, id: BufferId) -> Option<Buffer> {
         let buffer = self.buffers.remove(&id)?;
         if let Some(path) = buffer.path().cloned() {
             self.paths.remove(&path);
         }
+        let snapshot = BufferEventSnapshot::from_buffer(id, &buffer);
+        globals::enqueue_editor_event(EditorEvent::BufferUnloaded {
+            buffer_id: id,
+            snapshot,
+        });
         Some(buffer)
     }
 
@@ -574,6 +585,7 @@ impl BufferPool {
             self.paths.insert(path, id);
         }
         self.buffers.insert(id, buffer);
+        globals::enqueue_editor_event(EditorEvent::BufferLoaded { buffer_id: id });
         id
     }
 }
@@ -929,5 +941,124 @@ mod tests {
         }
 
         assert_eq!(peak_readers.load(Ordering::SeqCst), 2);
+    }
+
+    fn drain_loaded_events() -> Vec<BufferId> {
+        let mut ids = Vec::new();
+        let mut retained = Vec::new();
+        while let Some(event) = globals::take_editor_event() {
+            match event {
+                crate::event::EditorEvent::BufferLoaded { buffer_id } => ids.push(buffer_id),
+                event => retained.push(event),
+            }
+        }
+        for event in retained {
+            globals::enqueue_editor_event(event);
+        }
+        ids
+    }
+
+    fn drain_unloaded_events() -> Vec<(BufferId, crate::event::BufferEventSnapshot)> {
+        let mut ids = Vec::new();
+        let mut retained = Vec::new();
+        while let Some(event) = globals::take_editor_event() {
+            match event {
+                crate::event::EditorEvent::BufferUnloaded {
+                    buffer_id,
+                    snapshot,
+                } => ids.push((buffer_id, snapshot)),
+                event => retained.push(event),
+            }
+        }
+        for event in retained {
+            globals::enqueue_editor_event(event);
+        }
+        ids
+    }
+
+    #[test]
+    fn test_create_buffer_enqueues_buffer_loaded_event() {
+        globals::clear_editor_events_for_tests();
+        let mut pool = BufferPool::new();
+        let id = pool.create_buffer();
+        let loaded = drain_loaded_events();
+        assert_eq!(loaded, vec![id]);
+    }
+
+    #[test]
+    fn test_create_buffer_with_path_enqueues_buffer_loaded_for_new_path() {
+        globals::clear_editor_events_for_tests();
+        let path = temp_file("pool-new-path.txt");
+        let mut pool = BufferPool::new();
+        let id = pool.create_buffer_with_path(&path).unwrap();
+        let loaded = drain_loaded_events();
+        assert_eq!(loaded, vec![id]);
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn test_create_buffer_with_path_does_not_enqueue_when_reusing_path() {
+        globals::clear_editor_events_for_tests();
+        let path = temp_file("pool-reuse-path.txt");
+        let mut pool = BufferPool::new();
+        let first = pool.create_buffer_with_path(&path).unwrap();
+        drain_loaded_events();
+        let reused = pool.create_buffer_with_path(&path).unwrap();
+        assert_eq!(first, reused);
+        assert!(drain_loaded_events().is_empty());
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn test_open_buffer_enqueues_buffer_loaded_for_new_path() {
+        globals::clear_editor_events_for_tests();
+        let path = temp_file("pool-open-new.txt");
+        std::fs::write(&path, "alpha").unwrap();
+        let mut pool = BufferPool::new();
+        let id = pool.open_buffer(&path).unwrap();
+        let loaded = drain_loaded_events();
+        assert_eq!(loaded, vec![id]);
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn test_open_buffer_does_not_enqueue_when_reusing_path() {
+        globals::clear_editor_events_for_tests();
+        let path = temp_file("pool-open-reuse.txt");
+        std::fs::write(&path, "alpha").unwrap();
+        let mut pool = BufferPool::new();
+        let first = pool.open_buffer(&path).unwrap();
+        drain_loaded_events();
+        let reused = pool.open_buffer(&path).unwrap();
+        assert_eq!(first, reused);
+        assert!(drain_loaded_events().is_empty());
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn test_remove_buffer_enqueues_buffer_unloaded_with_snapshot() {
+        globals::clear_editor_events_for_tests();
+        let path = temp_file("pool-unload.txt");
+        let mut pool = BufferPool::new();
+        let id = pool.create_buffer_with_path(&path).unwrap();
+        drain_loaded_events();
+
+        assert!(pool.remove_buffer(id).is_some());
+        let unloaded = drain_unloaded_events();
+        assert_eq!(unloaded.len(), 1);
+        let (event_id, snapshot) = &unloaded[0];
+        assert_eq!(*event_id, id);
+        assert_eq!(snapshot.buffer_id, id);
+        assert_eq!(snapshot.path.as_deref(), Some(path.as_path()));
+        assert!(!snapshot.modified);
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn test_remove_buffer_does_not_enqueue_for_missing_id() {
+        globals::clear_editor_events_for_tests();
+        let mut pool = BufferPool::new();
+        assert!(pool.remove_buffer(BufferId::new(999)).is_none());
+        assert!(drain_unloaded_events().is_empty());
     }
 }

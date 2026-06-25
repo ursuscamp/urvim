@@ -11,6 +11,20 @@ pub(super) fn builtin_syntax_definitions() -> Result<Vec<SyntaxDefinition>, Synt
 static BUILTIN_SYNTAX_SPECS: &[SyntaxSpec] = &[
     SyntaxSpec {
         metadata: SyntaxMetadataSpec {
+            name: "bearscript",
+            display_name: "BearScript",
+            alias: &["bear"],
+            comment_prefix: Some("#"),
+            glyph: None,
+            glyph_color: None,
+            filename: &["\\.bear$"],
+            shebang: &[],
+        },
+        tokenizer: SyntaxTokenizer::Bearscript,
+        supports_folding: false,
+    },
+    SyntaxSpec {
+        metadata: SyntaxMetadataSpec {
             name: "plaintext",
             display_name: "Plain Text",
             alias: &["text"],

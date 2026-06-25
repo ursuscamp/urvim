@@ -34,6 +34,8 @@ fn resolve_buffer(tokens: &[String]) -> Result<Intent, CommandError> {
         "write" => resolve_write(&tokens[1..]),
         "write-all" | "write_all" | "writeall" => resolve_write_all(&tokens[1..]),
         "edit" => resolve_edit(&tokens[1..]),
+        "close" => resolve_buffer_close(&tokens[1..]),
+        "unload" => resolve_buffer_unload(&tokens[1..]),
         "filetype" | "set-filetype" => {
             let mut args = ArgCursor::from_tokens("buffer filetype", &tokens[1..])?;
             let filetype = args.require_string("filetype")?;
@@ -42,6 +44,22 @@ fn resolve_buffer(tokens: &[String]) -> Result<Intent, CommandError> {
         }
         other => Err(unknown_subcommand("buffer", other)),
     }
+}
+
+fn resolve_buffer_close(tokens: &[String]) -> Result<Intent, CommandError> {
+    let args = ArgCursor::from_tokens("buffer close", tokens)?;
+    args.finish()?;
+    Ok(Intent::Command(Command::CloseBuffer(None)))
+}
+
+fn resolve_buffer_unload(tokens: &[String]) -> Result<Intent, CommandError> {
+    let mut args = ArgCursor::from_tokens("buffer unload", tokens)?;
+    let force = args.take_bool("force")?.unwrap_or(false);
+    args.finish()?;
+    Ok(Intent::Command(Command::UnloadBuffer {
+        buffer_id: None,
+        force,
+    }))
 }
 
 fn resolve_write(tokens: &[String]) -> Result<Intent, CommandError> {
@@ -687,6 +705,12 @@ impl ArgCursor {
         Ok(None)
     }
 
+    fn take_bool(&mut self, name: &str) -> Result<Option<bool>, CommandError> {
+        self.take_named(name)
+            .map(|value| parse_bool(&self.command, name, &value))
+            .transpose()
+    }
+
     fn take_register(&mut self) -> Result<Option<RegisterName>, CommandError> {
         if let Some(value) = self.take_named("register") {
             return Ok(Some(parse_register(&self.command, &value)?));
@@ -768,6 +792,19 @@ fn parse_usize(command: &str, name: &str, value: &str) -> Result<usize, CommandE
         value: value.to_string(),
         expected: "positive integer",
     })
+}
+
+fn parse_bool(command: &str, name: &str, value: &str) -> Result<bool, CommandError> {
+    match value {
+        "true" | "yes" | "1" => Ok(true),
+        "false" | "no" | "0" => Ok(false),
+        _ => Err(CommandError::InvalidArgument {
+            command: command.to_string(),
+            name: name.to_string(),
+            value: value.to_string(),
+            expected: "true or false",
+        }),
+    }
 }
 
 fn parse_char(command: &str, name: &str, value: &str) -> Result<char, CommandError> {

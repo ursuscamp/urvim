@@ -139,18 +139,25 @@ pub enum Command {
     WriteAll,
     /// Save the active buffer to a new path.
     SaveBufferAs(PathBuf),
+    /// Close a buffer from the current pane.
+    CloseBuffer(Option<BufferId>),
+    /// Unload a buffer from every pane and the buffer pool.
+    UnloadBuffer {
+        /// Buffer to unload, defaulting to the active buffer.
+        buffer_id: Option<BufferId>,
+        /// Whether modified buffers should be unloaded.
+        force: bool,
+    },
     /// Overwrite a file that changed on disk.
     OverwriteBuffer(Option<crate::buffer::BufferId>),
     /// Send a request to a process-backed plugin command.
     PluginRequest {
         /// Plugin namespace.
         plugin: String,
-        /// Manifest command name.
+        /// Plugin command or script name.
         command: String,
-        /// Process request method.
-        method: String,
-        /// Structured request parameters.
-        params: serde_json::Value,
+        /// Raw command arguments.
+        args: Vec<String>,
     },
     /// Show loaded plugin runtime statuses.
     PluginStatus,

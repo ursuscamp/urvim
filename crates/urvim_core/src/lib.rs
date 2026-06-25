@@ -6,6 +6,7 @@ pub mod command;
 pub mod config;
 pub mod diagnostics;
 pub mod editor;
+pub mod event;
 pub mod globals;
 pub mod icon;
 pub mod layout;

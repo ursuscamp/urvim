@@ -16,8 +16,12 @@ pub(crate) mod effects;
 pub(crate) mod symbols;
 
 use std::path::PathBuf;
+use std::sync::mpsc;
+use std::time::{Duration, Instant};
 
 use lsp_types::{CodeActionOrCommand, PositionEncodingKind, WorkspaceSymbolResponse};
+use serde_json::json;
+use urvim_json_rpc::{ErrorResponse, Message, Response, SuccessResponse};
 
 use crate::config::Config;
 use crate::globals;
@@ -72,6 +76,114 @@ pub struct CodeActionApplication {
     pub edit: Option<lsp_types::WorkspaceEdit>,
     pub command: Option<String>,
     pub command_arguments_json: Option<String>,
+}
+
+/// A non-blocking LSP request owned by the editor loop until the server responds.
+#[derive(Debug)]
+pub struct PendingLspRequest {
+    kind: PendingLspRequestKind,
+    cursor: Cursor,
+    started_at: Instant,
+    timeout: Duration,
+    receiver: mpsc::Receiver<Message>,
+    snapshot_text: PieceTable,
+    position_encoding: PositionEncodingKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PendingLspRequestKind {
+    Hover,
+    Definition,
+    Completion,
+}
+
+/// Result of polling a pending LSP request without blocking.
+#[derive(Debug)]
+pub enum PendingLspPoll {
+    Pending(PendingLspRequest),
+    Ready(Result<serde_json::Value, String>),
+}
+
+impl PendingLspRequest {
+    fn new(
+        kind: PendingLspRequestKind,
+        cursor: Cursor,
+        receiver: mpsc::Receiver<Message>,
+        snapshot_text: PieceTable,
+        position_encoding: PositionEncodingKind,
+    ) -> Self {
+        Self {
+            kind,
+            cursor,
+            started_at: Instant::now(),
+            timeout: Duration::from_secs(10),
+            receiver,
+            snapshot_text,
+            position_encoding,
+        }
+    }
+
+    #[cfg(test)]
+    pub fn new_for_test(
+        receiver: mpsc::Receiver<Message>,
+        kind: &str,
+        lines: &str,
+        cursor: Cursor,
+    ) -> Self {
+        let kind = match kind {
+            "hover" => PendingLspRequestKind::Hover,
+            "definition" => PendingLspRequestKind::Definition,
+            "completion" => PendingLspRequestKind::Completion,
+            other => panic!("unknown pending LSP request kind {other}"),
+        };
+        Self {
+            kind,
+            cursor,
+            started_at: Instant::now(),
+            timeout: Duration::from_secs(10),
+            receiver,
+            snapshot_text: PieceTable::from_text(lines),
+            position_encoding: PositionEncodingKind::UTF16,
+        }
+    }
+
+    /// Polls this request once and returns immediately.
+    pub fn poll(self) -> PendingLspPoll {
+        if self.started_at.elapsed() >= self.timeout {
+            return PendingLspPoll::Ready(Err("timed out waiting for LSP response".to_string()));
+        }
+
+        match self.receiver.try_recv() {
+            Ok(message) => PendingLspPoll::Ready(self.resolve_message(message)),
+            Err(mpsc::TryRecvError::Empty) => PendingLspPoll::Pending(self),
+            Err(mpsc::TryRecvError::Disconnected) => PendingLspPoll::Ready(Err(
+                "LSP response channel disconnected before a response was received".to_string(),
+            )),
+        }
+    }
+
+    fn resolve_message(self, message: Message) -> Result<serde_json::Value, String> {
+        match message {
+            Message::Response(Response::Success(SuccessResponse { result, .. })) => {
+                self.resolve_success(result)
+            }
+            Message::Response(Response::Error(ErrorResponse { error, .. })) => Err(error.message),
+            _ => Err("LSP request resolved with an unexpected message".to_string()),
+        }
+    }
+
+    fn resolve_success(self, result: serde_json::Value) -> Result<serde_json::Value, String> {
+        match self.kind {
+            PendingLspRequestKind::Hover => resolve_hover_value(result),
+            PendingLspRequestKind::Definition => resolve_definition_value(result),
+            PendingLspRequestKind::Completion => resolve_completion_value(
+                result,
+                &self.snapshot_text,
+                self.cursor,
+                self.position_encoding,
+            ),
+        }
+    }
 }
 
 /// LSP runtime state and session management.
@@ -134,6 +246,24 @@ impl LspRuntime {
         self.runtime.hover_document(&snapshot, cursor)
     }
 
+    pub fn request_hover_buffer_async(
+        &mut self,
+        buffer_id: BufferId,
+        cursor: Cursor,
+    ) -> Result<PendingLspRequest, String> {
+        self.sync();
+        let snapshot = build_document_snapshot(buffer_id)?;
+        let encoding = self.runtime.position_encoding_for_buffer(buffer_id);
+        let receiver = self.runtime.hover_document_async(&snapshot, cursor)?;
+        Ok(PendingLspRequest::new(
+            PendingLspRequestKind::Hover,
+            cursor,
+            receiver,
+            snapshot.text,
+            encoding,
+        ))
+    }
+
     pub fn hover_document(
         &mut self,
         snapshot: &LspDocumentSnapshot,
@@ -162,6 +292,24 @@ impl LspRuntime {
                 self.runtime.position_encoding_for_buffer(buffer_id),
             )
         }))
+    }
+
+    pub fn request_completion_buffer_async(
+        &mut self,
+        buffer_id: BufferId,
+        cursor: Cursor,
+    ) -> Result<PendingLspRequest, String> {
+        self.sync();
+        let snapshot = build_document_snapshot(buffer_id)?;
+        let encoding = self.runtime.position_encoding_for_buffer(buffer_id);
+        let receiver = self.runtime.completion_document_async(&snapshot, cursor)?;
+        Ok(PendingLspRequest::new(
+            PendingLspRequestKind::Completion,
+            cursor,
+            receiver,
+            snapshot.text,
+            encoding,
+        ))
     }
 
     pub fn completion_document(
@@ -270,6 +418,24 @@ impl LspRuntime {
         self.sync();
         let snapshot = build_document_snapshot(buffer_id)?;
         self.definition_document(&snapshot, cursor)
+    }
+
+    pub fn request_definition_buffer_async(
+        &mut self,
+        buffer_id: BufferId,
+        cursor: Cursor,
+    ) -> Result<PendingLspRequest, String> {
+        self.sync();
+        let snapshot = build_document_snapshot(buffer_id)?;
+        let encoding = self.runtime.position_encoding_for_buffer(buffer_id);
+        let receiver = self.runtime.definition_document_async(&snapshot, cursor)?;
+        Ok(PendingLspRequest::new(
+            PendingLspRequestKind::Definition,
+            cursor,
+            receiver,
+            snapshot.text,
+            encoding,
+        ))
     }
 
     pub fn definition_document(
@@ -713,6 +879,135 @@ fn position_to_cursor(
     )
 }
 
+fn resolve_hover_value(result: serde_json::Value) -> Result<serde_json::Value, String> {
+    let hover = serde_json::from_value::<Option<lsp_types::Hover>>(result)
+        .map_err(|error| error.to_string())?;
+    Ok(json!({
+        "contents": hover.map(|hover| format_lsp_hover_contents(&hover.contents)),
+    }))
+}
+
+fn resolve_definition_value(result: serde_json::Value) -> Result<serde_json::Value, String> {
+    let response = serde_json::from_value::<Option<lsp_types::GotoDefinitionResponse>>(result)
+        .map_err(|error| error.to_string())?;
+    let Some(response) = response else {
+        return Ok(json!({ "target": null }));
+    };
+    let Some((uri, position)) = first_definition_target(response) else {
+        return Ok(json!({ "target": null }));
+    };
+
+    let path = uri_to_file_path(&uri)?;
+    let buffer_id = globals::open_buffer(&path).map_err(|error| error.to_string())?;
+    let encoding = globals::try_with_lsp_runtime_mut(|runtime| {
+        runtime.runtime.position_encoding_for_buffer(buffer_id)
+    })
+    .unwrap_or(PositionEncodingKind::UTF16);
+    let lines = globals::with_buffer(buffer_id, |buffer| buffer.text_snapshot())
+        .ok_or_else(|| "failed to read definition target buffer".to_string())?;
+    let cursor = position_to_cursor(&lines, position, encoding)
+        .ok_or_else(|| "failed to convert definition location".to_string())?;
+
+    Ok(json!({
+        "target": {
+            "path": path,
+            "buffer_id": buffer_id.get(),
+            "line": cursor.line,
+            "col": cursor.col,
+        }
+    }))
+}
+
+fn resolve_completion_value(
+    result: serde_json::Value,
+    lines: &PieceTable,
+    cursor: Cursor,
+    encoding: PositionEncodingKind,
+) -> Result<serde_json::Value, String> {
+    let response = serde_json::from_value::<Option<lsp_types::CompletionResponse>>(result)
+        .map_err(|error| error.to_string())?;
+    let items = response
+        .map(|response| completion_response_to_candidates(response, lines, cursor, encoding))
+        .unwrap_or_default()
+        .into_iter()
+        .map(completion_candidate_json)
+        .collect::<Vec<_>>();
+    Ok(json!({ "items": items }))
+}
+
+fn completion_candidate_json(
+    candidate: crate::ui::completion::CompletionCandidate,
+) -> serde_json::Value {
+    json!({
+        "label": candidate.label,
+        "replacement": candidate.replacement,
+        "range": text_range_json(candidate.range),
+        "symbol": candidate.symbol,
+        "kind": candidate.kind.and_then(|kind| serde_json::to_value(kind).ok()),
+        "detail": candidate.detail,
+        "labelDetail": candidate.label_detail,
+        "labelDescription": candidate.label_description,
+        "insertFormat": candidate.insert_format.map(|format| match format {
+            crate::ui::completion::CompletionInsertFormat::PlainText => "plainText",
+            crate::ui::completion::CompletionInsertFormat::Snippet => "snippet",
+        }),
+        "additionalTextEdits": candidate.additional_text_edits.into_iter().map(|edit| json!({
+            "range": text_range_json(edit.range),
+            "text": edit.text,
+        })).collect::<Vec<_>>(),
+        "lspCompletionItem": candidate.lsp_completion_item,
+        "deprecated": candidate.deprecated,
+        "preselect": candidate.preselect,
+    })
+}
+
+fn text_range_json(range: crate::buffer::TextObjectRange) -> serde_json::Value {
+    json!({
+        "start": { "line": range.start.line, "col": range.start.col },
+        "end": { "line": range.end.line, "col": range.end.col },
+    })
+}
+
+fn format_lsp_hover_contents(contents: &lsp_types::HoverContents) -> String {
+    match contents {
+        lsp_types::HoverContents::Scalar(marked) => marked_string_text(marked),
+        lsp_types::HoverContents::Array(items) => items
+            .iter()
+            .map(marked_string_text)
+            .filter(|text| !text.trim().is_empty())
+            .collect::<Vec<_>>()
+            .join("\n\n"),
+        lsp_types::HoverContents::Markup(markup) => markup.value.clone(),
+    }
+}
+
+fn marked_string_text(marked: &lsp_types::MarkedString) -> String {
+    match marked {
+        lsp_types::MarkedString::String(text) => text.clone(),
+        lsp_types::MarkedString::LanguageString(value) => value.value.clone(),
+    }
+}
+
+fn first_definition_target(
+    response: lsp_types::GotoDefinitionResponse,
+) -> Option<(String, lsp_types::Position)> {
+    match response {
+        lsp_types::GotoDefinitionResponse::Scalar(location) => {
+            Some((location.uri.to_string(), location.range.start))
+        }
+        lsp_types::GotoDefinitionResponse::Array(locations) => locations
+            .into_iter()
+            .next()
+            .map(|location| (location.uri.to_string(), location.range.start)),
+        lsp_types::GotoDefinitionResponse::Link(links) => links.into_iter().next().map(|link| {
+            (
+                link.target_uri.to_string(),
+                link.target_selection_range.start,
+            )
+        }),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -722,6 +1017,7 @@ mod tests {
     use super::*;
     use crate::config::{Config, LspConfig, LspServerConfig};
     use std::collections::BTreeMap;
+    use urvim_json_rpc::{Message, RequestId, Response, SuccessResponse};
     use urvim_text::TextRef;
 
     fn temp_dir(label: &str) -> PathBuf {
@@ -859,6 +1155,59 @@ mod tests {
             .err()
             .expect("no session should error");
         assert!(error.contains("no attached LSP server"));
+    }
+
+    #[test]
+    fn pending_hover_request_converts_lsp_response() {
+        let (tx, rx) = mpsc::channel();
+        let pending =
+            PendingLspRequest::new_for_test(rx, "hover", "fn main() {}", Cursor::new(0, 0));
+        tx.send(Message::Response(Response::Success(SuccessResponse {
+            jsonrpc: "2.0".to_string(),
+            id: RequestId::Number(1),
+            result: serde_json::to_value(Some(lsp_types::Hover {
+                contents: lsp_types::HoverContents::Markup(lsp_types::MarkupContent {
+                    kind: lsp_types::MarkupKind::Markdown,
+                    value: "hover docs".to_string(),
+                }),
+                range: None,
+            }))
+            .expect("hover json"),
+        })))
+        .expect("send response");
+
+        let PendingLspPoll::Ready(Ok(result)) = pending.poll() else {
+            panic!("pending hover should be ready");
+        };
+
+        assert_eq!(result["contents"], "hover docs");
+    }
+
+    #[test]
+    fn pending_completion_request_converts_lsp_response() {
+        let (tx, rx) = mpsc::channel();
+        let pending = PendingLspRequest::new_for_test(rx, "completion", "cl", Cursor::new(0, 2));
+        tx.send(Message::Response(Response::Success(SuccessResponse {
+            jsonrpc: "2.0".to_string(),
+            id: RequestId::Number(1),
+            result: serde_json::to_value(Some(lsp_types::CompletionResponse::Array(vec![
+                lsp_types::CompletionItem {
+                    label: "clone".to_string(),
+                    insert_text: Some("clone".to_string()),
+                    detail: Some("fn clone".to_string()),
+                    ..Default::default()
+                },
+            ])))
+            .expect("completion json"),
+        })))
+        .expect("send response");
+
+        let PendingLspPoll::Ready(Ok(result)) = pending.poll() else {
+            panic!("pending completion should be ready");
+        };
+
+        assert_eq!(result["items"][0]["label"], "clone");
+        assert_eq!(result["items"][0]["replacement"], "clone");
     }
 
     #[test]

@@ -1,0 +1,127 @@
+fn init() {
+    urvim.filetypes.register("simplelang")
+    urvim.filetypes.detect_extension(".simple", "simplelang")
+    urvim.commands.register("simplelang", set_simplelang, "Set the active buffer filetype to simplelang")
+    urvim.syntax.register("simplelang", highlight_simplelang)
+}
+
+fn set_simplelang(args) {
+    let buffer = urvim.buffers.active()
+    if buffer == null {
+        urvim.ui.show_message("no active buffer", { "level": "warn" })
+        return null
+    }
+    urvim.buffers.set_filetype(buffer, "simplelang")
+    urvim.syntax.refresh(buffer)
+    urvim.ui.show_message("filetype set to simplelang", { "level": "info" })
+}
+
+fn highlight_simplelang(snapshot) {
+    let spans = []
+    let row = 0
+    while row < len(snapshot["lines"]) {
+        spans = highlight_line(spans, row, snapshot["lines"][row])
+        row = row + 1
+    }
+    return spans
+}
+
+fn highlight_line(spans, row, line) {
+    let comment = urvim.strings.find(line, "#", 0)
+    let limit = urvim.strings.byte_len(line)
+    if comment >= 0 {
+        spans = add_span(spans, row, comment, limit, "syntax.comment")
+        limit = comment
+    }
+
+    let index = 0
+    while index < limit {
+        let ch = urvim.strings.char_at(line, index)
+        if ch == "\"" {
+            let end = urvim.strings.find(line, "\"", index + 1)
+            if end < 0 {
+                end = limit
+            }
+            if end > limit {
+                end = limit
+            }
+            if end < limit {
+                end = end + 1
+            }
+            spans = add_span(spans, row, index, end, "syntax.string")
+            index = end
+        } else if is_word_char(ch) {
+            let start = index
+            while index < limit {
+                let word_ch = urvim.strings.char_at(line, index)
+                if !is_word_char(word_ch) {
+                    break
+                }
+                index = index + 1
+            }
+            let word = byte_slice(line, start, index)
+            if is_keyword(word) {
+                spans = add_span(spans, row, start, index, "syntax.keyword")
+            } else if is_number(word) {
+                spans = add_span(spans, row, start, index, "syntax.constant.integer")
+            } else if is_upper_word(word) {
+                spans = add_span(spans, row, start, index, "syntax.constant")
+            }
+        } else {
+            index = index + 1
+        }
+    }
+    return spans
+}
+
+fn add_span(spans, row, start_col, end_col, tag) {
+    if start_col == end_col {
+        return spans
+    }
+    return urvim.lists.push(spans, {
+        "range": {
+            "start": { "row": row, "col": start_col },
+            "end": { "row": row, "col": end_col }
+        },
+        "tag": tag
+    })
+}
+
+fn is_keyword(word) {
+    if word == "fn" { return true }
+    if word == "let" { return true }
+    if word == "if" { return true }
+    if word == "else" { return true }
+    if word == "return" { return true }
+    return false
+}
+
+fn is_word_char(ch) {
+    if ch == "_" { return true }
+    if urvim.strings.contains("abcdefghijklmnopqrstuvwxyz", ch) { return true }
+    if urvim.strings.contains("ABCDEFGHIJKLMNOPQRSTUVWXYZ", ch) { return true }
+    if urvim.strings.contains("0123456789", ch) { return true }
+    return false
+}
+
+fn is_number(word) {
+    let index = 0
+    while index < urvim.strings.byte_len(word) {
+        let ch = urvim.strings.char_at(word, index)
+        if !urvim.strings.contains("0123456789", ch) { return false }
+        index = index + 1
+    }
+    return urvim.strings.byte_len(word) > 0
+}
+
+fn is_upper_word(word) {
+    let has_letter = false
+    let index = 0
+    while index < urvim.strings.byte_len(word) {
+        let ch = urvim.strings.char_at(word, index)
+        if urvim.strings.contains("abcdefghijklmnopqrstuvwxyz", ch) { return false }
+        if urvim.strings.contains("ABCDEFGHIJKLMNOPQRSTUVWXYZ", ch) { has_letter = true }
+        index = index + 1
+    }
+    return has_letter
+}

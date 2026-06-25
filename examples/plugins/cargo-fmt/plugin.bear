@@ -1,0 +1,40 @@
+fn init() {
+    urvim.register_event_hook(urvim.events.BufferSaved, on_buffer_saved)
+}
+
+fn on_buffer_saved(event) {
+    let buffer = event["buffer_id"]
+    if urvim.buffers.filetype(buffer) != "rust" {
+        return
+    }
+
+    let path = urvim.buffers.path(buffer)
+    if path == null or !urvim.strings.ends_with(path, ".rs") {
+        return
+    }
+
+    urvim.jobs.spawn({
+        "cmd": "cargo",
+        "args": ["fmt", "--", path],
+        "timeout_ms": 30000,
+        "on_stderr": on_cargo_fmt_stderr,
+        "on_exit": on_cargo_fmt_exit
+    })
+}
+
+fn on_cargo_fmt_stderr(event) {
+    let text = event["text"]
+    if text != "" {
+        urvim.ui.show_message(text, { "level": "warn" })
+    }
+}
+
+fn on_cargo_fmt_exit(event) {
+    let status = event["status"]
+    let code = event["code"]
+    if status == "exited" and code == 0 {
+        return
+    }
+
+    urvim.ui.show_message("cargo fmt failed: " + status + " (code " + code + ")", { "level": "warn" })
+}

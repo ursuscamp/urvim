@@ -1,10 +1,9 @@
 //! Plugin manifest parsing and validation.
 
-use std::collections::BTreeMap;
 use std::fs;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 use super::PluginLoadError;
 
@@ -21,61 +20,8 @@ pub struct RawPluginManifest {
     pub version: String,
     /// Optional human-readable description.
     pub description: Option<String>,
-    /// Relative theme file paths provided by the plugin.
-    #[serde(default)]
-    pub themes: Vec<PathBuf>,
-    /// Manifest-provided command scripts.
-    #[serde(default)]
-    pub scripts: BTreeMap<String, Vec<String>>,
-    /// Manifest-provided process commands.
-    #[serde(default)]
-    pub commands: BTreeMap<String, RawPluginCommand>,
-    /// Optional process plugin launch configuration.
-    pub process: Option<RawPluginProcess>,
-}
-
-/// A raw process command table as represented in TOML.
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct RawPluginCommand {
-    /// Optional human-readable description.
-    pub description: Option<String>,
-    /// Process request method sent when the command runs.
-    pub request: String,
-}
-
-/// A validated process command contribution.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PluginCommand {
-    /// Optional human-readable description.
-    pub description: Option<String>,
-    /// Process request method sent when the command runs.
-    pub request: String,
-}
-
-/// A raw process plugin launch table as represented in TOML.
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct RawPluginProcess {
-    /// Executable command used to launch the plugin process.
-    pub command: String,
-    /// Command-line arguments passed to the process.
-    #[serde(default)]
-    pub args: Vec<String>,
-    /// Environment variables passed to the process.
-    #[serde(default)]
-    pub env: BTreeMap<String, String>,
-}
-
-/// A validated process plugin launch configuration.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PluginProcess {
-    /// Executable command used to launch the plugin process.
-    pub command: String,
-    /// Command-line arguments passed to the process.
-    pub args: Vec<String>,
-    /// Environment variables passed to the process.
-    pub env: BTreeMap<String, String>,
+    /// BearScript entry point relative to the plugin root.
+    pub entry: String,
 }
 
 /// A validated plugin manifest with paths resolved against its plugin root.
@@ -89,14 +35,8 @@ pub struct PluginManifest {
     pub description: Option<String>,
     /// Absolute plugin root directory.
     pub root: PathBuf,
-    /// Resolved theme file paths provided by the plugin.
-    pub themes: Vec<PathBuf>,
-    /// Manifest-provided command scripts.
-    pub scripts: BTreeMap<String, Vec<String>>,
-    /// Manifest-provided process commands.
-    pub commands: BTreeMap<String, PluginCommand>,
-    /// Optional process plugin launch configuration.
-    pub process: Option<PluginProcess>,
+    /// BearScript entry point relative to the plugin root.
+    pub entry: PathBuf,
 }
 
 impl PluginManifest {
@@ -136,88 +76,16 @@ impl PluginManifest {
         validate_plugin_name(&raw.name)?;
         validate_version(&raw.version)?;
 
-        let themes = raw
-            .themes
-            .iter()
-            .map(|path| resolve_manifest_relative_path(&root, "theme", path))
-            .collect::<Result<Vec<_>, _>>()?;
-
-        for name in raw.scripts.keys() {
-            validate_script_name(name)?;
-        }
-        let mut commands = BTreeMap::new();
-        for (name, command) in raw.commands {
-            validate_script_name(&name)?;
-            if raw.scripts.contains_key(&name) {
-                return Err(PluginLoadError::invalid(format!(
-                    "plugin command {name:?} conflicts with a script of the same name"
-                )));
-            }
-            commands.insert(name, validate_command(command)?);
-        }
-        let process = raw.process.map(validate_process).transpose()?;
+        let entry = validate_entry(&raw.entry)?;
 
         Ok(Self {
             name: raw.name,
             version: raw.version,
             description: raw.description,
             root,
-            themes,
-            scripts: raw.scripts,
-            commands,
-            process,
+            entry,
         })
     }
-}
-
-fn validate_command(command: RawPluginCommand) -> Result<PluginCommand, PluginLoadError> {
-    if command.request.trim().is_empty() {
-        return Err(PluginLoadError::invalid(
-            "plugin command request must not be empty",
-        ));
-    }
-    if command.request.chars().any(char::is_whitespace) {
-        return Err(PluginLoadError::invalid(format!(
-            "plugin command request {:?} must not contain whitespace",
-            command.request
-        )));
-    }
-
-    Ok(PluginCommand {
-        description: command.description,
-        request: command.request,
-    })
-}
-
-fn validate_process(process: RawPluginProcess) -> Result<PluginProcess, PluginLoadError> {
-    if process.command.trim().is_empty() {
-        return Err(PluginLoadError::invalid(
-            "plugin process command must not be empty",
-        ));
-    }
-    for (name, value) in &process.env {
-        if name.trim().is_empty() {
-            return Err(PluginLoadError::invalid(
-                "plugin process env names must not be empty",
-            ));
-        }
-        if name.contains('=') {
-            return Err(PluginLoadError::invalid(format!(
-                "plugin process env name {name:?} must not contain '='"
-            )));
-        }
-        if value.contains('\0') {
-            return Err(PluginLoadError::invalid(format!(
-                "plugin process env value for {name:?} must not contain NUL"
-            )));
-        }
-    }
-
-    Ok(PluginProcess {
-        command: process.command,
-        args: process.args,
-        env: process.env,
-    })
 }
 
 fn validate_plugin_name(name: &str) -> Result<(), PluginLoadError> {
@@ -246,53 +114,23 @@ fn validate_version(version: &str) -> Result<(), PluginLoadError> {
     Ok(())
 }
 
-fn validate_script_name(name: &str) -> Result<(), PluginLoadError> {
-    if name.trim().is_empty() {
-        return Err(PluginLoadError::invalid("script name must not be empty"));
+fn validate_entry(entry: &str) -> Result<PathBuf, PluginLoadError> {
+    if entry.trim().is_empty() {
+        return Err(PluginLoadError::invalid("plugin entry must not be empty"));
     }
-    if name.chars().any(char::is_whitespace) {
+    if entry.contains('\0') {
         return Err(PluginLoadError::invalid(format!(
-            "script name {name:?} must not contain whitespace"
+            "plugin entry {entry:?} must not contain NUL"
         )));
     }
-    if name.contains('/') || name.contains('\\') {
-        return Err(PluginLoadError::invalid(format!(
-            "script name {name:?} must not contain path separators"
-        )));
-    }
-
-    Ok(())
-}
-
-fn resolve_manifest_relative_path(
-    root: &Path,
-    kind: &str,
-    path: &Path,
-) -> Result<PathBuf, PluginLoadError> {
-    if path.as_os_str().is_empty() {
-        return Err(PluginLoadError::invalid(format!(
-            "{kind} path must not be empty"
-        )));
-    }
+    let path = PathBuf::from(entry);
     if path.is_absolute() {
         return Err(PluginLoadError::invalid(format!(
-            "{kind} path {} must be relative",
-            path.display()
-        )));
-    }
-    if path.components().any(|component| {
-        matches!(
-            component,
-            Component::ParentDir | Component::RootDir | Component::Prefix(_)
-        )
-    }) {
-        return Err(PluginLoadError::invalid(format!(
-            "{kind} path {} must stay inside the plugin directory",
-            path.display()
+            "plugin entry {entry:?} must be relative to the plugin root"
         )));
     }
 
-    Ok(root.join(path))
+    Ok(path)
 }
 
 #[cfg(test)]
@@ -316,66 +154,34 @@ mod tests {
     }
 
     #[test]
-    fn parses_valid_manifest_with_scripts() {
+    fn parses_valid_manifest() {
         let manifest = parse(
             r#"
 name = "demo"
 version = "0.1.0"
-
-[scripts]
-wq = ["write", "quit"]
-save_as = ["buffer write path={1}"]
+entry = "plugin.bear"
 "#,
         )
         .expect("manifest should parse");
 
         assert_eq!(manifest.name, "demo");
         assert_eq!(manifest.version, "0.1.0");
-        assert_eq!(manifest.themes, Vec::<PathBuf>::new());
-        assert_eq!(manifest.scripts["wq"], vec!["write", "quit"]);
-        assert_eq!(manifest.scripts["save_as"], vec!["buffer write path={1}"]);
+        assert_eq!(manifest.entry, PathBuf::from("plugin.bear"));
     }
 
     #[test]
-    fn parses_process_commands() {
-        let manifest = parse(
+    fn rejects_manifest_themes() {
+        let error = parse(
             r#"
 name = "demo"
 version = "0.1.0"
-
-[commands.echo]
-description = "Echo text"
-request = "demo/echo"
-"#,
-        )
-        .expect("manifest should parse");
-
-        let command = manifest
-            .commands
-            .get("echo")
-            .expect("command should be registered");
-        assert_eq!(command.description.as_deref(), Some("Echo text"));
-        assert_eq!(command.request, "demo/echo");
-    }
-
-    #[test]
-    fn resolves_theme_paths_relative_to_plugin_root() {
-        let manifest = parse(
-            r#"
-name = "demo"
-version = "0.1.0"
+entry = "plugin.bear"
 themes = ["themes/demo.toml", "more/alt.toml"]
 "#,
         )
-        .expect("manifest should parse");
+        .expect_err("manifest themes should be rejected");
 
-        assert_eq!(
-            manifest.themes,
-            vec![
-                PathBuf::from("/plugins/demo/themes/demo.toml"),
-                PathBuf::from("/plugins/demo/more/alt.toml"),
-            ]
-        );
+        assert!(matches!(error, PluginLoadError::Parse { .. }));
     }
 
     #[test]
@@ -404,7 +210,7 @@ themes = ["themes/demo.toml", "more/alt.toml"]
             r#"
 name = "demo"
 version = "0.1.0"
-themes = ["themes/demo.toml"]
+entry = "plugin.bear"
 "#,
         )
         .expect("manifest should be written");
@@ -413,10 +219,7 @@ themes = ["themes/demo.toml"]
 
         assert_eq!(manifest.name, "demo");
         assert_eq!(manifest.root, root);
-        assert_eq!(
-            manifest.themes,
-            vec![manifest.root.join("themes/demo.toml")]
-        );
+        assert_eq!(manifest.entry, PathBuf::from("plugin.bear"));
 
         std::fs::remove_dir_all(manifest.root).ok();
     }
@@ -427,6 +230,7 @@ themes = ["themes/demo.toml"]
             r#"
 name = " "
 version = "0.1.0"
+entry = "plugin.bear"
 "#,
         )
         .expect_err("empty name should fail");
@@ -440,6 +244,7 @@ version = "0.1.0"
             r#"
 name = "demo"
 version = " "
+entry = "plugin.bear"
 "#,
         )
         .expect_err("empty version should fail");
@@ -452,47 +257,17 @@ version = " "
     }
 
     #[test]
-    fn rejects_empty_script_name() {
+    fn rejects_empty_entry() {
         let error = parse(
             r#"
 name = "demo"
 version = "0.1.0"
-
-[scripts]
-"" = ["write"]
+entry = " "
 "#,
         )
-        .expect_err("empty script name should fail");
+        .expect_err("empty entry should fail");
 
-        assert!(error.to_string().contains("script name must not be empty"));
-    }
-
-    #[test]
-    fn rejects_parent_dir_theme_path() {
-        let error = parse(
-            r#"
-name = "demo"
-version = "0.1.0"
-themes = ["../outside.toml"]
-"#,
-        )
-        .expect_err("parent path should fail");
-
-        assert!(error.to_string().contains("must stay inside"));
-    }
-
-    #[test]
-    fn rejects_absolute_theme_path() {
-        let error = parse(
-            r#"
-name = "demo"
-version = "0.1.0"
-themes = ["/tmp/outside.toml"]
-"#,
-        )
-        .expect_err("absolute path should fail");
-
-        assert!(error.to_string().contains("must be relative"));
+        assert!(error.to_string().contains("plugin entry must not be empty"));
     }
 
     #[test]
@@ -501,6 +276,7 @@ themes = ["/tmp/outside.toml"]
             r#"
 name = "demo"
 version = "0.1.0"
+entry = "plugin.bear"
 unknown = true
 "#,
         )
@@ -510,102 +286,37 @@ unknown = true
     }
 
     #[test]
-    fn rejects_script_name_with_path_separator() {
+    fn rejects_manifest_commands() {
         let error = parse(
             r#"
 name = "demo"
 version = "0.1.0"
-
-[scripts]
-"nested/name" = ["write"]
-"#,
-        )
-        .expect_err("script path separator should fail");
-
-        assert!(
-            error
-                .to_string()
-                .contains("must not contain path separators")
-        );
-    }
-
-    #[test]
-    fn rejects_process_command_that_conflicts_with_script() {
-        let error = parse(
-            r#"
-name = "demo"
-version = "0.1.0"
-
-[scripts]
-echo = ["write"]
+entry = "plugin.bear"
 
 [commands.echo]
 request = "demo/echo"
 "#,
         )
-        .expect_err("conflicting command should fail");
+        .expect_err("manifest commands should be rejected");
 
-        assert!(error.to_string().contains("conflicts with a script"));
+        assert!(matches!(error, PluginLoadError::Parse { .. }));
     }
 
     #[test]
-    fn rejects_empty_process_command_request() {
+    fn rejects_absolute_entry() {
         let error = parse(
             r#"
 name = "demo"
 version = "0.1.0"
-
-[commands.echo]
-request = " "
+entry = "/tmp/plugin.bear"
 "#,
         )
-        .expect_err("empty request should fail");
+        .expect_err("absolute entry should fail");
 
         assert!(
             error
                 .to_string()
-                .contains("plugin command request must not be empty")
-        );
-    }
-
-    #[test]
-    fn parses_process_config() {
-        let manifest = parse(
-            r#"
-name = "demo"
-version = "0.1.0"
-
-[process]
-command = "demo-plugin"
-args = ["--stdio"]
-env = { RUST_LOG = "info" }
-"#,
-        )
-        .expect("manifest should parse");
-
-        let process = manifest.process.expect("process config should resolve");
-        assert_eq!(process.command, "demo-plugin");
-        assert_eq!(process.args, vec!["--stdio"]);
-        assert_eq!(process.env["RUST_LOG"], "info");
-    }
-
-    #[test]
-    fn rejects_empty_process_command() {
-        let error = parse(
-            r#"
-name = "demo"
-version = "0.1.0"
-
-[process]
-command = " "
-"#,
-        )
-        .expect_err("empty process command should fail");
-
-        assert!(
-            error
-                .to_string()
-                .contains("process command must not be empty")
+                .contains("must be relative to the plugin root")
         );
     }
 }

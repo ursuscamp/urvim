@@ -53,7 +53,7 @@ dl = "action edit delete-line"
 wq = ["write", "quit"]
 save_rust = ["buffer write path={1}", "buffer filetype filetype=rust"]
 
-[plugins.demo-plugin]
+[plugins.cargo-fmt]
 enabled = true
 
 [plugins.local-tools]
@@ -175,7 +175,7 @@ Registers explicitly enabled plugins.
 - Explicit path: when `path` is provided, it may use `~` for the user's home directory
 - Validation: plugin ids must be non-empty and must not contain whitespace or path separators; explicit paths must not be empty
 - Scope: plugin manifest loading, plugin themes, and plugin scripts
-- Example: `[plugins.demo-plugin]` loads `$XDG_CONFIG_HOME/urvim/plugins/demo-plugin` by default
+- Example: `[plugins.cargo-fmt]` loads `$XDG_CONFIG_HOME/urvim/plugins/cargo-fmt` by default
 - See: `docs/plugins.md` for manifest schema, plugin themes, plugin scripts, and local development setup
 
 ### `auto_close_pairs`

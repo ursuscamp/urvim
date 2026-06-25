@@ -1,0 +1,7 @@
+fn init() {
+    urvim.commands.register("hello", hello, "Show a BearScript plugin notification")
+}
+
+fn hello(args) {
+    urvim.ui.show_message("symbol-lens BearScript plugin loaded", { "level": "info" })
+}

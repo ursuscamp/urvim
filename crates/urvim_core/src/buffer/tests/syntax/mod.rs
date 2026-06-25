@@ -1,6 +1,7 @@
 use super::*;
 
 mod bash;
+mod bearscript;
 mod c;
 mod cmake;
 mod cpp;

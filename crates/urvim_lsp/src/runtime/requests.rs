@@ -40,6 +40,24 @@ pub struct LspInlayHintSnapshot {
 }
 
 impl LspServerSession {
+    pub fn hover_async(
+        &mut self,
+        attachment: &BufferAttachment,
+        lines: &PieceTable,
+        cursor: Cursor,
+    ) -> Result<mpsc::Receiver<Message>, String> {
+        if !self.supports_hover() {
+            return Err("attached server does not support hover".to_string());
+        }
+
+        let params = json!({
+            "textDocument": { "uri": attachment.uri },
+            "position": position_to_lsp_json(lines, cursor, self.negotiated.position_encoding.clone())
+        });
+        self.request_raw_async("textDocument/hover", Some(params))
+            .map_err(|error| error.to_string())
+    }
+
     pub fn hover(
         &mut self,
         attachment: &BufferAttachment,
@@ -112,6 +130,42 @@ impl LspServerSession {
         Ok(response)
     }
 
+    pub fn completion_async(
+        &mut self,
+        attachment: &BufferAttachment,
+        lines: &PieceTable,
+        cursor: Cursor,
+    ) -> Result<mpsc::Receiver<Message>, String> {
+        if !self.supports_completion() {
+            return Err("attached server does not support completion".to_string());
+        }
+
+        let params = CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: attachment
+                        .uri
+                        .parse::<lsp_types::Uri>()
+                        .map_err(|error| error.to_string())?,
+                },
+                position: cursor_to_lsp_position(
+                    lines,
+                    cursor,
+                    self.negotiated.position_encoding.clone(),
+                ),
+            },
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+            context: None,
+        };
+
+        self.request_raw_async(
+            "textDocument/completion",
+            Some(serde_json::to_value(params).map_err(|error| error.to_string())?),
+        )
+        .map_err(|error| error.to_string())
+    }
+
     pub fn resolve_completion(
         &mut self,
         item: &serde_json::Value,
@@ -162,6 +216,24 @@ impl LspServerSession {
         };
 
         Ok(first_definition_target(response))
+    }
+
+    pub fn definition_async(
+        &mut self,
+        attachment: &BufferAttachment,
+        lines: &PieceTable,
+        cursor: Cursor,
+    ) -> Result<mpsc::Receiver<Message>, String> {
+        if !self.supports_definition() {
+            return Err("attached server does not support go to definition".to_string());
+        }
+
+        let params = json!({
+            "textDocument": { "uri": attachment.uri },
+            "position": position_to_lsp_json(lines, cursor, self.negotiated.position_encoding.clone())
+        });
+        self.request_raw_async("textDocument/definition", Some(params))
+            .map_err(|error| error.to_string())
     }
 
     pub fn references(

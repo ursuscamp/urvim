@@ -87,6 +87,11 @@ impl RegisterStore {
         self.entries.get(&name).cloned()
     }
 
+    /// Returns the names of registers that currently contain content.
+    pub fn names(&self) -> Vec<RegisterName> {
+        self.entries.keys().copied().collect()
+    }
+
     /// Stores content in the given register.
     pub fn set(&mut self, name: RegisterName, content: RegisterContent) {
         self.entries.insert(name, content);

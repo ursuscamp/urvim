@@ -1,0 +1,72 @@
+fn init() {
+    let name = urvim.themes.create(generated_theme())
+    urvim.commands.register("apply", apply, "Apply the generated demo theme")
+    urvim.ui.show_message("generated theme available: " + name, { "level": "info" })
+}
+
+fn apply(args) {
+    urvim.themes.set("Generated Dawn")
+}
+
+fn generated_theme() {
+    return {
+        "name": "Generated Dawn",
+        "palette": {
+            "bg": "#101010",
+            "fg": "#eeeeee",
+            "accent": "#7aa2f7",
+            "accent_dark": "#1f3b63",
+            "muted": 244,
+            "warning": "#e0af68",
+            "error": "#f7768e"
+        },
+        "default": {
+            "fg": "fg",
+            "bg": "bg"
+        },
+        "highlights": {
+            "ui.status_bar": {
+                "fg": "bg",
+                "bg": "accent",
+                "bold": true
+            },
+            "ui.tab.active": {
+                "fg": "fg",
+                "bg": "accent_dark",
+                "bold": true
+            },
+            "ui.tab.inactive": {
+                "fg": "muted",
+                "bg": "bg"
+            },
+            "ui.window.gutter": {
+                "fg": "muted"
+            },
+            "ui.window.active_line": {
+                "bg": "accent_dark"
+            },
+            "ui.notification.warn": {
+                "fg": "warning",
+                "bold": true
+            },
+            "ui.notification.error": {
+                "fg": "error",
+                "bold": true
+            },
+            "syntax.comment": {
+                "fg": "muted",
+                "italic": true
+            },
+            "syntax.keyword": {
+                "fg": "accent",
+                "bold": true
+            },
+            "syntax.string": {
+                "fg": "warning"
+            },
+            "syntax.constant": {
+                "fg": "error"
+            }
+        }
+    }
+}

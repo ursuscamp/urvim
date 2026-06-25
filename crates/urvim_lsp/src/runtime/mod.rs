@@ -254,6 +254,16 @@ impl LspRuntime {
         })
     }
 
+    pub fn hover_document_async(
+        &mut self,
+        snapshot: &LspDocumentSnapshot,
+        cursor: urvim_text::Cursor,
+    ) -> Result<mpsc::Receiver<urvim_json_rpc::Message>, String> {
+        self.with_session_for_document(snapshot, |session, attachment, lines| {
+            session.hover_async(attachment, lines, cursor)
+        })
+    }
+
     pub fn completion_document(
         &mut self,
         snapshot: &LspDocumentSnapshot,
@@ -261,6 +271,16 @@ impl LspRuntime {
     ) -> Result<Option<lsp_types::CompletionResponse>, String> {
         self.with_session_for_document(snapshot, |session, attachment, lines| {
             session.completion(attachment, lines, cursor)
+        })
+    }
+
+    pub fn completion_document_async(
+        &mut self,
+        snapshot: &LspDocumentSnapshot,
+        cursor: urvim_text::Cursor,
+    ) -> Result<mpsc::Receiver<urvim_json_rpc::Message>, String> {
+        self.with_session_for_document(snapshot, |session, attachment, lines| {
+            session.completion_async(attachment, lines, cursor)
         })
     }
 
@@ -281,6 +301,16 @@ impl LspRuntime {
     ) -> Result<Option<(String, lsp_types::Position)>, String> {
         self.with_session_for_document(snapshot, |session, attachment, lines| {
             session.definition(attachment, lines, cursor)
+        })
+    }
+
+    pub fn definition_document_async(
+        &mut self,
+        snapshot: &LspDocumentSnapshot,
+        cursor: urvim_text::Cursor,
+    ) -> Result<mpsc::Receiver<urvim_json_rpc::Message>, String> {
+        self.with_session_for_document(snapshot, |session, attachment, lines| {
+            session.definition_async(attachment, lines, cursor)
         })
     }
 

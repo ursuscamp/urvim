@@ -127,7 +127,7 @@ Useful assertions include:
 Use `dump_tokens` to inspect actual spans:
 
 ```sh
-cargo run --bin dump_tokens -- path/to/file
+cargo run --example dump_tokens -- path/to/file
 ```
 
 The output is JSON-lines with byte ranges, styles, and token text. It is the fastest way to diagnose surprising highlighting.

@@ -1,0 +1,11 @@
+# SimpleLang demo file
+fn greet NAME {
+    let message = "hello"
+    let count = 42
+
+    if NAME {
+        return message # highlighted comment
+    } else {
+        return "nobody"
+    }
+}

@@ -1,0 +1,9 @@
+[project]
+name = "urvim-symbol-lens-plugin"
+version = "0.1.0"
+description = "Example urvim plugin for async LSP APIs."
+requires-python = ">=3.12"
+dependencies = ["msgpack>=1.0"]
+
+[tool.uv]
+package = true

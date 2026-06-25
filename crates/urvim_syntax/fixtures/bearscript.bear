@@ -1,0 +1,21 @@
+# BearScript syntax fixture
+import tools as helpers
+
+gen count(limit) {
+    let total = 0
+    for value in 0..limit {
+        if value >= 2 and value != 4 {
+            total = total + value
+            yield "value {value}: {helpers.format({ "total": total })}"
+        } else {
+            continue
+        }
+    }
+    return total
+}
+
+let result = count(10)
+let enabled = true
+let empty = null
+let output = print(result)
+print("result: {result}")

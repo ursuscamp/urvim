@@ -1,0 +1,4 @@
+name = "generated-theme"
+version = "0.1.0"
+description = "Generates a theme from BearScript at startup."
+entry = "plugin.bear"

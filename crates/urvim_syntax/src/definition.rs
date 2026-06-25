@@ -8,6 +8,8 @@ use super::normalize::normalize_label;
 /// Selects the tokenizer used for a syntax definition.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SyntaxTokenizer {
+    /// Builtin scanner for BearScript syntax.
+    Bearscript,
     /// Plain text tokenizer that emits no spans.
     Plaintext,
     /// Builtin scanner for Bash syntax.

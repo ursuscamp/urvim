@@ -78,6 +78,15 @@ impl TrieKeymap {
         }
     }
 
+    /// Inserts runtime mappings from canonical key strings to resolved intents.
+    pub fn insert_intents(&mut self, mappings: &BTreeMap<String, Intent>) {
+        for (keys, intent) in mappings {
+            let parsed_keys =
+                validate_key_string(keys).expect("validated runtime keymap key should parse");
+            self.insert_sequence(parsed_keys, intent.clone());
+        }
+    }
+
     /// Returns the intent bound to an exact key sequence.
     pub fn get_action(&self, keys: &[String]) -> Option<Intent> {
         let mut current = &self.root;

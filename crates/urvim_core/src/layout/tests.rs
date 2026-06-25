@@ -325,6 +325,28 @@ fn test_layout_set_buffer_filetype_defaults_to_active_buffer() {
 }
 
 #[test]
+fn test_layout_set_buffer_filetype_accepts_plugin_filetype() {
+    let _pool_guard = globals::buffer_pool_test_lock();
+    globals::with_buffer_pool(|pool| *pool = crate::buffer::BufferPool::new());
+    globals::set_plugin_filetypes(vec!["simplelang".to_string()]);
+
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("one")]);
+    let active_id = layout.active_buffer_view().buffer_id();
+
+    assert!(
+        layout.dispatch_intent(&Intent::Command(Command::SetBufferFiletype(
+            None,
+            "simplelang".to_string(),
+        )))
+    );
+
+    let syntax = globals::with_buffer(active_id, |buffer| buffer.syntax_name().to_string())
+        .expect("active buffer");
+    assert_eq!(syntax, "simplelang");
+    globals::set_plugin_filetypes(Vec::new());
+}
+
+#[test]
 fn test_layout_set_buffer_filetype_targets_explicit_buffer() {
     let _pool_guard = globals::buffer_pool_test_lock();
     globals::with_buffer_pool(|pool| *pool = crate::buffer::BufferPool::new());
@@ -1285,6 +1307,36 @@ fn test_layout_split_copies_active_buffer_view_state() {
         }
         LayoutNode::Pane(_) => panic!("split action should replace the root pane"),
     }
+}
+
+#[test]
+fn test_layout_exposes_stable_window_ids_for_visible_panes() {
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("one\ntwo")]);
+
+    assert_eq!(layout.active_window_id(), Some(PaneId(0)));
+    assert_eq!(layout.window_ids(), vec![PaneId(0)]);
+
+    assert_eq!(
+        dispatch_layout_action(&mut layout, Intent::Command(Command::SplitVertical)),
+        ActionResult::Handled
+    );
+
+    assert_eq!(layout.active_window_id(), Some(PaneId(1)));
+    assert_eq!(layout.window_ids(), vec![PaneId(0), PaneId(1)]);
+    assert!(layout.buffer_view_for_window(PaneId(0)).is_some());
+    assert!(layout.buffer_view_for_window(PaneId(1)).is_some());
+
+    assert!(layout.focus_pane(PaneId(0)));
+    assert_eq!(layout.active_window_id(), Some(PaneId(0)));
+    assert_eq!(layout.window_ids(), vec![PaneId(0), PaneId(1)]);
+
+    assert_eq!(
+        dispatch_layout_action(&mut layout, Intent::Command(Command::ClosePane)),
+        ActionResult::Handled
+    );
+
+    assert_eq!(layout.window_ids(), vec![PaneId(1)]);
+    assert!(layout.buffer_view_for_window(PaneId(0)).is_none());
 }
 
 #[test]

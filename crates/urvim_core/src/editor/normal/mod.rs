@@ -85,6 +85,7 @@ impl NormalMode {
                 keymap.insert_configured(&config.keymaps.normal);
             }
         });
+        keymap.insert_intents(&globals::plugin_keymap_intents_for_mode(ModeKind::Normal));
 
         NormalMode {
             keymap,

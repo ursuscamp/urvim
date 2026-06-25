@@ -23,24 +23,9 @@ impl LoadedPlugin {
         &self.manifest.root
     }
 
-    /// Returns resolved theme paths contributed by this plugin.
-    pub fn themes(&self) -> &[PathBuf] {
-        &self.manifest.themes
-    }
-
-    /// Returns scripts contributed by this plugin.
-    pub fn scripts(&self) -> &BTreeMap<String, Vec<String>> {
-        &self.manifest.scripts
-    }
-
-    /// Returns process commands contributed by this plugin.
-    pub fn commands(&self) -> &BTreeMap<String, crate::PluginCommand> {
-        &self.manifest.commands
-    }
-
-    /// Returns process launch configuration, when this plugin has one.
-    pub fn process(&self) -> Option<&crate::PluginProcess> {
-        self.manifest.process.as_ref()
+    /// Returns the BearScript entry file path.
+    pub fn entry(&self) -> &Path {
+        &self.manifest.entry
     }
 }
 
@@ -121,31 +106,6 @@ impl PluginRegistry {
             .map(|(name, plugin)| (name.as_str(), plugin))
     }
 
-    /// Returns resolved theme paths across all loaded plugins.
-    pub fn theme_paths(&self) -> impl Iterator<Item = (&str, &Path)> {
-        self.plugins.iter().flat_map(|(name, plugin)| {
-            plugin
-                .themes()
-                .iter()
-                .map(move |path| (name.as_str(), path.as_path()))
-        })
-    }
-
-    /// Looks up a namespaced plugin script.
-    pub fn script(&self, plugin: &str, script: &str) -> Option<&[String]> {
-        self.plugins
-            .get(plugin)
-            .and_then(|plugin| plugin.scripts().get(script))
-            .map(Vec::as_slice)
-    }
-
-    /// Looks up a namespaced plugin process command.
-    pub fn command(&self, plugin: &str, command: &str) -> Option<&crate::PluginCommand> {
-        self.plugins
-            .get(plugin)
-            .and_then(|plugin| plugin.commands().get(command))
-    }
-
     fn insert(&mut self, plugin: LoadedPlugin) -> Result<(), PluginLoadError> {
         let name = plugin.name().to_string();
         if self.plugins.contains_key(&name) {
@@ -163,10 +123,15 @@ impl PluginRegistry {
 mod tests {
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
-    use urvim_theme::resolve_theme_from_str;
 
-    const EXAMPLE_PLUGIN_ROOT: &str =
-        concat!(env!("CARGO_MANIFEST_DIR"), "/../../examples/plugins/demo-plugin");
+    const CARGO_FMT_EXAMPLE_PLUGIN_ROOT: &str = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../examples/plugins/cargo-fmt"
+    );
+    const SYMBOL_LENS_EXAMPLE_PLUGIN_ROOT: &str = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../examples/plugins/symbol-lens"
+    );
 
     fn unique_temp_dir(name: &str) -> PathBuf {
         let stamp = SystemTime::now()
@@ -213,13 +178,7 @@ mod tests {
             r#"
 name = "test-plugin"
 version = "0.1.0"
-themes = ["themes/demo.toml"]
-
-[scripts]
-wq = ["write", "quit"]
-
-[commands.echo]
-request = "demo/echo"
+entry = "plugin.bear"
 "#,
         );
         let config = BTreeMap::from([("test-plugin".to_string(), enabled(root.clone()))]);
@@ -231,18 +190,7 @@ request = "demo/echo"
             .get("test-plugin")
             .expect("plugin should be registered");
         assert_eq!(plugin.root(), root.as_path());
-        assert_eq!(plugin.themes(), &[root.join("themes/demo.toml")]);
-        assert_eq!(
-            registry.script("test-plugin", "wq"),
-            Some(&["write".to_string(), "quit".to_string()][..])
-        );
-        assert_eq!(
-            registry
-                .command("test-plugin", "echo")
-                .map(|command| command.request.as_str()),
-            Some("demo/echo")
-        );
-
+        assert_eq!(plugin.entry(), Path::new("plugin.bear"));
         std::fs::remove_dir_all(root).ok();
     }
 
@@ -264,6 +212,7 @@ request = "demo/echo"
             r#"
 name = "other-name"
 version = "0.1.0"
+entry = "plugin.bear"
 "#,
         );
         let config = config_with_plugins(BTreeMap::from([(
@@ -289,6 +238,7 @@ version = "0.1.0"
             r#"
 name = "duplicate"
 version = "0.1.0"
+entry = "plugin.bear"
 "#,
         );
         write_manifest(
@@ -296,6 +246,7 @@ version = "0.1.0"
             r#"
 name = "duplicate"
 version = "0.1.0"
+entry = "plugin.bear"
 "#,
         );
 
@@ -321,17 +272,14 @@ version = "0.1.0"
     }
 
     #[test]
-    fn script_and_theme_contributions_are_visible() {
+    fn entry_path_is_visible() {
         let root = unique_temp_dir("contributions");
         write_manifest(
             &root,
             r#"
 name = "tools"
 version = "0.1.0"
-themes = ["themes/one.toml", "themes/two.toml"]
-
-[scripts]
-format = ["buffer filetype filetype=rust"]
+entry = "plugin.bear"
 "#,
         );
         let config = config_with_plugins(BTreeMap::from([(
@@ -340,21 +288,9 @@ format = ["buffer filetype filetype=rust"]
         )]));
 
         let registry = PluginRegistry::load_from_config(&config).expect("plugin should load");
-        let theme_paths = registry
-            .theme_paths()
-            .map(|(plugin, path)| (plugin.to_string(), path.to_path_buf()))
-            .collect::<Vec<_>>();
-
         assert_eq!(
-            theme_paths,
-            vec![
-                ("tools".to_string(), root.join("themes/one.toml")),
-                ("tools".to_string(), root.join("themes/two.toml")),
-            ]
-        );
-        assert_eq!(
-            registry.script("tools", "format"),
-            Some(&["buffer filetype filetype=rust".to_string()][..])
+            registry.get("tools").unwrap().entry(),
+            Path::new("plugin.bear")
         );
 
         std::fs::remove_dir_all(root).ok();
@@ -380,38 +316,46 @@ format = ["buffer filetype filetype=rust"]
 
     #[test]
     fn example_plugin_manifest_loads_from_disk() {
-        let manifest = PluginManifest::load_from_dir(EXAMPLE_PLUGIN_ROOT)
-            .expect("example plugin manifest should load");
+        let manifest = PluginManifest::load_from_dir(CARGO_FMT_EXAMPLE_PLUGIN_ROOT)
+            .expect("cargo-fmt example plugin manifest should load");
 
-        assert_eq!(manifest.name, "demo-plugin");
+        assert_eq!(manifest.name, "cargo-fmt");
         assert_eq!(manifest.version, "0.1.0");
-        assert_eq!(manifest.themes.len(), 1);
-        assert!(manifest.scripts.contains_key("wq"));
-        assert!(manifest.scripts.contains_key("save_as_rust"));
-        assert!(manifest.scripts.contains_key("rename_write"));
-    }
+        assert_eq!(manifest.entry, PathBuf::from("plugin.bear"));
 
-    #[test]
-    fn example_plugin_theme_resolves_from_disk() {
-        let theme_path = Path::new(EXAMPLE_PLUGIN_ROOT).join("themes/demo-night.toml");
-        let theme_source = std::fs::read_to_string(&theme_path).expect("theme should read");
-        let theme = resolve_theme_from_str(&theme_path.to_string_lossy(), &theme_source)
-            .expect("example theme should resolve");
+        let manifest = PluginManifest::load_from_dir(SYMBOL_LENS_EXAMPLE_PLUGIN_ROOT)
+            .expect("symbol-lens example plugin manifest should load");
 
-        assert_eq!(theme.name(), "Demo Night");
+        assert_eq!(manifest.name, "symbol-lens");
+        assert_eq!(manifest.version, "0.1.0");
+        assert_eq!(manifest.entry, PathBuf::from("plugin.bear"));
     }
 
     #[test]
     fn example_plugin_python_project_files_exist() {
         for relative in [
             "pyproject.toml",
-            "uv.lock",
-            "src/demo_plugin/__init__.py",
-            "src/demo_plugin/__main__.py",
+            "src/cargo_fmt/__init__.py",
+            "src/cargo_fmt/__main__.py",
         ] {
             assert!(
-                Path::new(EXAMPLE_PLUGIN_ROOT).join(relative).exists(),
-                "example plugin should include {relative}"
+                Path::new(CARGO_FMT_EXAMPLE_PLUGIN_ROOT)
+                    .join(relative)
+                    .exists(),
+                "cargo-fmt example plugin should include {relative}"
+            );
+        }
+
+        for relative in [
+            "pyproject.toml",
+            "src/symbol_lens/__init__.py",
+            "src/symbol_lens/__main__.py",
+        ] {
+            assert!(
+                Path::new(SYMBOL_LENS_EXAMPLE_PLUGIN_ROOT)
+                    .join(relative)
+                    .exists(),
+                "symbol-lens example plugin should include {relative}"
             );
         }
     }

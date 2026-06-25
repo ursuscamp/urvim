@@ -11,12 +11,13 @@ pub use error::CommandError;
 pub use highlight::{CommandHighlightKind, CommandHighlightSpan, highlight};
 pub use parser::CommandInvocation;
 pub use registry::{
-    CommandRegistry, RegisteredCommand, install_configured_commands,
-    install_configured_commands_with_plugins,
+    CommandRegistry, CommandRegistrySnapshot, RegisteredCommand, RegisteredCommandSnapshot,
+    install_configured_commands, install_configured_commands_with_plugins,
+    snapshot as command_registry_snapshot,
 };
 
 #[cfg(test)]
-pub use registry::set_test_registry;
+pub use registry::{TestRegistryGuard, set_test_registry};
 
 use crate::ui::{Command, Intent};
 use serde_json::{Map, Value, json};
@@ -83,20 +84,13 @@ fn resolve_invocation(
     }
 
     if root == "plugin" {
-        return expand_plugin_script(&invocation.tokens[1..], script_depth);
+        return resolve_plugin_command(&invocation.tokens[1..]);
     }
 
     catalog::resolve(&invocation).map(|intent| vec![intent])
 }
 
-fn expand_plugin_script(
-    tokens: &[String],
-    script_depth: usize,
-) -> Result<Vec<Intent>, CommandError> {
-    if script_depth >= MAX_SCRIPT_EXPANSION_DEPTH {
-        return Err(CommandError::ScriptExpansionCycle("plugin".to_string()));
-    }
-
+fn resolve_plugin_command(tokens: &[String]) -> Result<Vec<Intent>, CommandError> {
     let plugin = tokens
         .first()
         .ok_or_else(|| CommandError::MissingArgument {
@@ -112,42 +106,29 @@ fn expand_plugin_script(
         }
         return Ok(vec![Intent::Command(Command::PluginStatus)]);
     }
-    let script = tokens.get(1).ok_or_else(|| CommandError::MissingArgument {
+    let command = tokens.get(1).ok_or_else(|| CommandError::MissingArgument {
         command: "plugin".to_string(),
-        name: "script".to_string(),
+        name: "command".to_string(),
     })?;
 
     if !registry::has_plugin(plugin) {
         return Err(CommandError::UnknownPlugin(plugin.clone()));
     }
 
-    if let Some(command) = registry::plugin_command(plugin, script) {
-        let params = PluginCommandArgs::from_tokens(&tokens[2..])?.into_params();
-        return Ok(vec![Intent::Command(Command::PluginRequest {
-            plugin: plugin.clone(),
-            command: script.clone(),
-            method: command.request,
-            params,
-        })]);
-    }
-
-    let commands = registry::plugin_script(plugin, script).ok_or_else(|| {
-        CommandError::UnknownPluginScript {
-            plugin: plugin.clone(),
-            script: script.clone(),
-        }
-    })?;
-    let script_name = format!("plugin {plugin} {script}");
-    expand_script(&script_name, &commands, &tokens[2..], script_depth + 1)
+    Ok(vec![Intent::Command(Command::PluginRequest {
+        plugin: plugin.clone(),
+        command: command.clone(),
+        args: tokens[2..].to_vec(),
+    })])
 }
 
-struct PluginCommandArgs {
+pub struct PluginCommandArgs {
     positionals: Vec<String>,
     named: Map<String, Value>,
 }
 
 impl PluginCommandArgs {
-    fn from_tokens(tokens: &[String]) -> Result<Self, CommandError> {
+    pub fn from_tokens(tokens: &[String]) -> Result<Self, CommandError> {
         let mut positionals = Vec::new();
         let mut named = Map::new();
 
@@ -178,7 +159,7 @@ impl PluginCommandArgs {
         Ok(Self { positionals, named })
     }
 
-    fn into_params(mut self) -> Value {
+    pub fn into_params(mut self) -> Value {
         if !self.positionals.is_empty() {
             self.named
                 .insert("args".to_string(), json!(self.positionals));
@@ -360,6 +341,24 @@ mod tests {
             Intent::Command(Command::OpenUnnamedBuffer)
         ));
         assert!(matches!(
+            parse("buffer close").expect("buffer close should resolve"),
+            Intent::Command(Command::CloseBuffer(None))
+        ));
+        assert!(matches!(
+            parse("buffer unload").expect("buffer unload should resolve"),
+            Intent::Command(Command::UnloadBuffer {
+                buffer_id: None,
+                force: false
+            })
+        ));
+        assert!(matches!(
+            parse("buffer unload force=true").expect("forced buffer unload should resolve"),
+            Intent::Command(Command::UnloadBuffer {
+                buffer_id: None,
+                force: true
+            })
+        ));
+        assert!(matches!(
             parse("quit").expect("quit should resolve"),
             Intent::Command(Command::Quit)
         ));
@@ -506,102 +505,31 @@ mod tests {
         ));
     }
 
-    fn registry_with_plugin_script(
-        plugin: &str,
-        script: &str,
-        commands: Vec<String>,
-    ) -> CommandRegistry {
+    fn registry_with_plugin_namespace(plugin: &str) -> CommandRegistry {
         let mut registry = CommandRegistry::new();
-        registry.register_test_plugin_script(plugin, script, commands);
-        registry
-    }
-
-    fn registry_with_plugin_command(plugin: &str, command: &str, request: &str) -> CommandRegistry {
-        let mut registry = CommandRegistry::new();
-        registry.register_test_plugin_command(plugin, command, request);
+        registry.register_test_plugin_namespace(plugin);
         registry
     }
 
     #[test]
-    fn resolve_plugin_script_to_multiple_intents() {
-        let registry = registry_with_plugin_script(
-            "demo-plugin",
-            "wq",
-            vec!["write".to_string(), "quit".to_string()],
-        );
-        let _guard = set_test_registry(registry);
-
-        let intents = parse_many("plugin demo-plugin wq").expect("plugin script should resolve");
-
-        assert_eq!(intents.len(), 2);
-        assert!(matches!(intents[0], Intent::Action(_)));
-        assert!(matches!(intents[1], Intent::Command(Command::Quit)));
-    }
-
-    #[test]
-    fn resolve_plugin_script_placeholders_from_positional_arguments() {
-        let registry = registry_with_plugin_script(
-            "demo-plugin",
-            "save-as",
-            vec!["buffer write path={1}".to_string()],
-        );
-        let _guard = set_test_registry(registry);
-
-        let intents = parse_many("plugin demo-plugin save-as \"notes/today file.txt\"")
-            .expect("plugin script should resolve");
-
-        assert_eq!(intents.len(), 1);
-        assert!(matches!(
-            &intents[0],
-            Intent::Command(Command::SaveBufferAs(path))
-                if path == &PathBuf::from("notes/today file.txt")
-        ));
-    }
-
-    #[test]
-    fn resolve_plugin_script_placeholders_from_named_arguments() {
-        let registry = registry_with_plugin_script(
-            "demo-plugin",
-            "rename-write",
-            vec!["lsp rename name={name}".to_string(), "write".to_string()],
-        );
-        let _guard = set_test_registry(registry);
-
-        let intents = parse_many("plugin demo-plugin rename-write name=new_symbol")
-            .expect("plugin script should resolve");
-
-        assert_eq!(intents.len(), 2);
-        assert!(matches!(
-            &intents[0],
-            Intent::Command(Command::LspRename(name)) if name == "new_symbol"
-        ));
-        assert!(matches!(intents[1], Intent::Action(_)));
-    }
-
-    #[test]
-    fn resolve_plugin_process_command_to_request_intent() {
-        let registry = registry_with_plugin_command("demo-plugin", "echo", "demo/echo");
+    fn resolve_plugin_command_to_request_intent() {
+        let registry = registry_with_plugin_namespace("demo-plugin");
         let _guard = set_test_registry(registry);
 
         let intent = parse("plugin demo-plugin echo text=hello").expect("command should resolve");
 
         assert!(matches!(
             intent,
-            Intent::Command(Command::PluginRequest {
-                plugin,
-                command,
-                method,
-                params,
-            }) if plugin == "demo-plugin"
-                && command == "echo"
-                && method == "demo/echo"
-                && params == serde_json::json!({ "text": "hello" })
+            Intent::Command(Command::PluginRequest { plugin, command, args })
+                if plugin == "demo-plugin"
+                    && command == "echo"
+                    && args == vec!["text=hello".to_string()]
         ));
     }
 
     #[test]
-    fn resolve_plugin_process_command_preserves_positionals() {
-        let registry = registry_with_plugin_command("demo-plugin", "echo", "demo/echo");
+    fn resolve_plugin_command_preserves_positionals() {
+        let registry = registry_with_plugin_namespace("demo-plugin");
         let _guard = set_test_registry(registry);
 
         let intent = parse("plugin demo-plugin echo first second text=hello")
@@ -609,8 +537,8 @@ mod tests {
 
         assert!(matches!(
             intent,
-            Intent::Command(Command::PluginRequest { params, .. })
-                if params == serde_json::json!({ "args": ["first", "second"], "text": "hello" })
+            Intent::Command(Command::PluginRequest { args, .. })
+                if args == vec!["first".to_string(), "second".to_string(), "text=hello".to_string()]
         ));
     }
 
@@ -635,7 +563,7 @@ mod tests {
     }
 
     #[test]
-    fn resolve_plugin_script_errors_for_missing_plugin_name() {
+    fn resolve_plugin_command_errors_for_missing_plugin_name() {
         let _guard = set_test_registry(CommandRegistry::new());
 
         assert!(matches!(
@@ -646,19 +574,19 @@ mod tests {
     }
 
     #[test]
-    fn resolve_plugin_script_errors_for_missing_script_name() {
-        let registry = registry_with_plugin_script("demo-plugin", "wq", vec!["write".to_string()]);
+    fn resolve_plugin_command_errors_for_missing_command_name() {
+        let registry = registry_with_plugin_namespace("demo-plugin");
         let _guard = set_test_registry(registry);
 
         assert!(matches!(
-            parse_many("plugin demo-plugin").expect_err("script name should be required"),
+            parse_many("plugin demo-plugin").expect_err("command name should be required"),
             CommandError::MissingArgument { command, name }
-                if command == "plugin" && name == "script"
+                if command == "plugin" && name == "command"
         ));
     }
 
     #[test]
-    fn resolve_plugin_script_errors_for_unknown_plugin() {
+    fn resolve_plugin_command_errors_for_unknown_plugin() {
         let _guard = set_test_registry(CommandRegistry::new());
 
         assert_eq!(
@@ -668,40 +596,16 @@ mod tests {
     }
 
     #[test]
-    fn resolve_plugin_script_errors_for_unknown_script() {
-        let registry = registry_with_plugin_script("demo-plugin", "wq", vec!["write".to_string()]);
+    fn resolve_plugin_command_defers_command_to_runtime() {
+        let registry = registry_with_plugin_namespace("demo-plugin");
         let _guard = set_test_registry(registry);
 
-        assert_eq!(
-            parse_many("plugin demo-plugin missing").expect_err("script should be unknown"),
-            CommandError::UnknownPluginScript {
-                plugin: "demo-plugin".to_string(),
-                script: "missing".to_string()
-            }
-        );
-    }
+        let intent = parse("plugin demo-plugin missing").expect("command should defer");
 
-    #[test]
-    fn plugin_scripts_do_not_conflict_with_user_scripts() {
-        let config = Config {
-            scripts: BTreeMap::from([("wq".to_string(), vec!["quit".to_string()])]),
-            ..Config::default()
-        };
-        let mut registry = registry_with_plugin_script(
-            "demo-plugin",
-            "wq",
-            vec!["write".to_string(), "quit".to_string()],
-        );
-        registry
-            .register_configured_commands(&config)
-            .expect("configured commands should register");
-        let _guard = set_test_registry(registry);
-
-        let top_level = parse_many("wq").expect("user script should resolve");
-        let plugin = parse_many("plugin demo-plugin wq").expect("plugin script should resolve");
-
-        assert_eq!(top_level.len(), 1);
-        assert_eq!(plugin.len(), 2);
-        assert!(matches!(top_level[0], Intent::Command(Command::Quit)));
+        assert!(matches!(
+            intent,
+            Intent::Command(Command::PluginRequest { plugin, command, args })
+                if plugin == "demo-plugin" && command == "missing" && args.is_empty()
+        ));
     }
 }

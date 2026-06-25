@@ -8,9 +8,12 @@ use crate::buffer::{Buffer, BufferId, BufferPool};
 use crate::config::Config;
 use crate::diagnostics::DiagnosticsStore;
 use crate::editor::Action;
+use crate::event::EditorEvent;
 use crate::lsp::runtime::LspRuntime;
 use crate::notification::{NotificationLevel, NotificationMessage, NotificationState};
 use crate::register::RegisterStore;
+use crate::ui::Intent;
+use std::collections::BTreeMap;
 use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -79,11 +82,16 @@ static CONFIG: OnceLock<RwLock<Option<Config>>> = OnceLock::new();
 static ACTIVE_THEME: OnceLock<RwLock<Option<Theme>>> = OnceLock::new();
 static THEME_REGISTRY: OnceLock<RwLock<Option<ThemeRegistry>>> = OnceLock::new();
 static LSP_RUNTIME: OnceLock<Mutex<Option<LspRuntime>>> = OnceLock::new();
+#[cfg(not(test))]
 static DIAGNOSTICS_STORE: OnceLock<DiagnosticsStore> = OnceLock::new();
 static NOTIFICATION_STATE: OnceLock<Mutex<NotificationState>> = OnceLock::new();
+static PLUGIN_KEYMAPS: OnceLock<RwLock<PluginKeymaps>> = OnceLock::new();
+static PLUGIN_FILETYPES: OnceLock<RwLock<Vec<String>>> = OnceLock::new();
 static INLAY_HINT_RETRY_REQUESTED: AtomicBool = AtomicBool::new(false);
 static FILE_OPERATION_QUEUE: OnceLock<Mutex<VecDeque<WorkspaceFileOperationNotification>>> =
     OnceLock::new();
+#[cfg_attr(test, allow(dead_code))]
+static EDITOR_EVENT_QUEUE: OnceLock<Mutex<VecDeque<EditorEvent>>> = OnceLock::new();
 #[cfg(not(test))]
 static REGISTER_STORE: OnceLock<RwLock<RegisterStore>> = OnceLock::new();
 
@@ -95,6 +103,54 @@ thread_local! {
     static TEST_LAST_REPEAT: RefCell<Option<RepeatState>> = const { RefCell::new(None) };
     static TEST_REGISTER_STORE: RefCell<RegisterStore> = RefCell::new(RegisterStore::new());
     static TEST_BUFFER_POOL: RefCell<BufferPool> = RefCell::new(BufferPool::new());
+    static TEST_PLUGIN_KEYMAPS: RefCell<PluginKeymaps> = RefCell::new(PluginKeymaps::default());
+    static TEST_PLUGIN_FILETYPES: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Runtime keymaps installed by plugins.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct PluginKeymaps {
+    pub normal: BTreeMap<String, String>,
+    pub insert: BTreeMap<String, String>,
+    pub visual: BTreeMap<String, String>,
+    pub visual_line: BTreeMap<String, String>,
+    pub resizing: BTreeMap<String, String>,
+}
+
+fn plugin_keymaps_slot() -> &'static RwLock<PluginKeymaps> {
+    PLUGIN_KEYMAPS.get_or_init(|| RwLock::new(PluginKeymaps::default()))
+}
+
+fn plugin_filetypes_slot() -> &'static RwLock<Vec<String>> {
+    PLUGIN_FILETYPES.get_or_init(|| RwLock::new(Vec::new()))
+}
+
+/// Replaces the runtime list of filetypes provided by plugins.
+pub fn set_plugin_filetypes(mut filetypes: Vec<String>) {
+    filetypes.sort();
+    filetypes.dedup();
+    #[cfg(test)]
+    {
+        TEST_PLUGIN_FILETYPES.with(|slot| *slot.borrow_mut() = filetypes);
+    }
+
+    #[cfg(not(test))]
+    {
+        *plugin_filetypes_slot().write().unwrap() = filetypes;
+    }
+}
+
+/// Returns filetypes provided by plugins.
+pub fn plugin_filetypes() -> Vec<String> {
+    #[cfg(test)]
+    {
+        return TEST_PLUGIN_FILETYPES.with(|slot| slot.borrow().clone());
+    }
+
+    #[cfg(not(test))]
+    {
+        plugin_filetypes_slot().read().unwrap().clone()
+    }
 }
 
 #[cfg(test)]
@@ -103,6 +159,7 @@ static LSP_RUNTIME_TEST_LOCK: Mutex<()> = Mutex::new(());
 #[cfg(test)]
 thread_local! {
     static TEST_DIAGNOSTICS_STORE: RefCell<DiagnosticsStore> = RefCell::new(DiagnosticsStore::new());
+    static TEST_EDITOR_EVENT_QUEUE: RefCell<VecDeque<EditorEvent>> = RefCell::new(VecDeque::new());
 }
 
 #[cfg(test)]
@@ -321,6 +378,7 @@ fn lsp_runtime_slot() -> &'static Mutex<Option<LspRuntime>> {
     LSP_RUNTIME.get_or_init(|| Mutex::new(None))
 }
 
+#[cfg(not(test))]
 fn diagnostics_store_slot() -> &'static DiagnosticsStore {
     DIAGNOSTICS_STORE.get_or_init(DiagnosticsStore::new)
 }
@@ -362,6 +420,21 @@ pub fn with_theme_registry<R>(f: impl FnOnce(Option<&ThemeRegistry>) -> R) -> R 
         let slot = theme_registry_slot();
         let stored = slot.read().unwrap();
         f(stored.as_ref())
+    }
+}
+
+/// Runs a closure with mutable access to the theme registry, if one has been set.
+pub fn with_theme_registry_mut<R>(f: impl FnOnce(Option<&mut ThemeRegistry>) -> R) -> R {
+    #[cfg(test)]
+    {
+        TEST_THEME_REGISTRY.with(|slot| f(slot.borrow_mut().as_mut()))
+    }
+
+    #[cfg(not(test))]
+    {
+        let slot = theme_registry_slot();
+        let mut stored = slot.write().unwrap();
+        f(stored.as_mut())
     }
 }
 
@@ -434,6 +507,56 @@ pub fn with_register_store_mut<R>(f: impl FnOnce(&mut RegisterStore) -> R) -> R 
     }
 }
 
+/// Runs a closure with shared access to runtime plugin keymaps.
+pub fn with_plugin_keymaps<R>(f: impl FnOnce(&PluginKeymaps) -> R) -> R {
+    #[cfg(test)]
+    {
+        TEST_PLUGIN_KEYMAPS.with(|slot| f(&slot.borrow()))
+    }
+
+    #[cfg(not(test))]
+    {
+        let keymaps = plugin_keymaps_slot().read().unwrap();
+        f(&keymaps)
+    }
+}
+
+/// Runs a closure with mutable access to runtime plugin keymaps.
+pub fn with_plugin_keymaps_mut<R>(f: impl FnOnce(&mut PluginKeymaps) -> R) -> R {
+    #[cfg(test)]
+    {
+        TEST_PLUGIN_KEYMAPS.with(|slot| f(&mut slot.borrow_mut()))
+    }
+
+    #[cfg(not(test))]
+    {
+        let mut keymaps = plugin_keymaps_slot().write().unwrap();
+        f(&mut keymaps)
+    }
+}
+
+/// Returns plugin key mappings for a mode as resolved command intents.
+pub fn plugin_keymap_intents_for_mode(mode: crate::editor::ModeKind) -> BTreeMap<String, Intent> {
+    with_plugin_keymaps(|keymaps| {
+        let mappings = match mode {
+            crate::editor::ModeKind::Normal => &keymaps.normal,
+            crate::editor::ModeKind::Insert => &keymaps.insert,
+            crate::editor::ModeKind::Visual => &keymaps.visual,
+            crate::editor::ModeKind::VisualLine => &keymaps.visual_line,
+            crate::editor::ModeKind::Resizing => &keymaps.resizing,
+            crate::editor::ModeKind::Replace => return BTreeMap::new(),
+        };
+        mappings
+            .iter()
+            .filter_map(|(lhs, rhs)| {
+                crate::command::parse(rhs)
+                    .ok()
+                    .map(|intent| (lhs.clone(), intent))
+            })
+            .collect()
+    })
+}
+
 /// Enqueues a user-facing notification.
 pub fn enqueue_notification(level: NotificationLevel, text: String) -> bool {
     match level {
@@ -492,6 +615,49 @@ pub fn take_inlay_hint_retry_requested() -> bool {
 
 fn file_operation_queue_slot() -> &'static Mutex<VecDeque<WorkspaceFileOperationNotification>> {
     FILE_OPERATION_QUEUE.get_or_init(|| Mutex::new(VecDeque::new()))
+}
+
+#[cfg_attr(test, allow(dead_code))]
+fn editor_event_queue_slot() -> &'static Mutex<VecDeque<EditorEvent>> {
+    EDITOR_EVENT_QUEUE.get_or_init(|| Mutex::new(VecDeque::new()))
+}
+
+/// Enqueues an editor event for delivery to plugin hooks.
+///
+/// Events are consumed in FIFO order by [`take_editor_event`].
+pub fn enqueue_editor_event(event: EditorEvent) {
+    #[cfg(test)]
+    {
+        TEST_EDITOR_EVENT_QUEUE.with(|queue| {
+            queue.borrow_mut().push_back(event);
+        });
+        return;
+    }
+
+    #[cfg(not(test))]
+    {
+        if let Ok(mut queue) = editor_event_queue_slot().lock() {
+            queue.push_back(event);
+        }
+    }
+}
+
+/// Returns and removes the next pending editor event in FIFO order.
+///
+/// Returns `None` when the queue is empty.
+pub fn take_editor_event() -> Option<EditorEvent> {
+    #[cfg(test)]
+    {
+        return TEST_EDITOR_EVENT_QUEUE.with(|queue| queue.borrow_mut().pop_front());
+    }
+
+    #[cfg(not(test))]
+    {
+        let Ok(mut queue) = editor_event_queue_slot().lock() else {
+            return None;
+        };
+        queue.pop_front()
+    }
 }
 
 /// Enqueues a workspace file-operation notification for the UI.
@@ -699,6 +865,37 @@ pub fn clear_notifications() {
 pub fn clear_workspace_file_operation_notifications() {
     if let Ok(mut queue) = file_operation_queue_slot().lock() {
         queue.clear();
+    }
+}
+
+/// Clears the queued editor events. Intended for tests that need a clean queue
+/// between assertions.
+pub fn clear_editor_events_for_tests() {
+    #[cfg(test)]
+    {
+        TEST_EDITOR_EVENT_QUEUE.with(|queue| {
+            queue.borrow_mut().clear();
+        });
+    }
+
+    #[cfg(not(test))]
+    {
+        if let Ok(mut queue) = editor_event_queue_slot().lock() {
+            queue.clear();
+        }
+    }
+}
+
+/// Resets the thread-local test buffer pool to an empty state. Intended for
+/// tests that need a clean pool between assertions.
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn clear_buffer_pool_for_tests() {
+    #[cfg(test)]
+    {
+        let _pool_guard = buffer_pool_test_lock();
+        TEST_BUFFER_POOL.with(|pool| {
+            *pool.borrow_mut() = BufferPool::new();
+        });
     }
 }
 
@@ -1069,12 +1266,68 @@ mod tests {
 
         let deadline = Instant::now() + Duration::from_secs(5);
         while ready_rx.try_recv().is_err() {
-            assert!(Instant::now() < deadline, "timed out waiting for worker to lock runtime");
+            assert!(
+                Instant::now() < deadline,
+                "timed out waiting for worker to lock runtime"
+            );
             thread::sleep(Duration::from_millis(5));
         }
         assert!(try_with_lsp_runtime_mut(|_| ()).is_none());
         release_tx.send(()).expect("release worker");
         handle.join().expect("worker should finish");
         clear_lsp_runtime();
+    }
+
+    #[test]
+    fn test_editor_event_queue_is_fifo_and_empty_after_drain() {
+        clear_editor_events_for_tests();
+        assert!(take_editor_event().is_none());
+
+        enqueue_editor_event(EditorEvent::EditorStarted);
+        enqueue_editor_event(EditorEvent::BufferLoaded {
+            buffer_id: BufferId::new(1),
+        });
+        enqueue_editor_event(EditorEvent::BufferSaved {
+            buffer_id: BufferId::new(1),
+        });
+        enqueue_editor_event(EditorEvent::CommandExecuted {
+            command: "Write".to_string(),
+        });
+
+        let first = take_editor_event();
+        let second = take_editor_event();
+        let third = take_editor_event();
+        let fourth = take_editor_event();
+        let fifth = take_editor_event();
+
+        assert!(matches!(first, Some(EditorEvent::EditorStarted)));
+        assert!(matches!(
+            second,
+            Some(EditorEvent::BufferLoaded { buffer_id }) if buffer_id == BufferId::new(1)
+        ));
+        assert!(matches!(
+            third,
+            Some(EditorEvent::BufferSaved { buffer_id }) if buffer_id == BufferId::new(1)
+        ));
+        assert!(matches!(
+            fourth,
+            Some(EditorEvent::CommandExecuted { ref command }) if command == "Write"
+        ));
+        assert!(fifth.is_none());
+
+        clear_editor_events_for_tests();
+    }
+
+    #[test]
+    fn test_clear_editor_events_for_tests_empties_the_queue() {
+        clear_editor_events_for_tests();
+        enqueue_editor_event(EditorEvent::EditorStarted);
+        enqueue_editor_event(EditorEvent::BufferLoaded {
+            buffer_id: BufferId::new(2),
+        });
+        assert!(take_editor_event().is_some());
+
+        clear_editor_events_for_tests();
+        assert!(take_editor_event().is_none());
     }
 }

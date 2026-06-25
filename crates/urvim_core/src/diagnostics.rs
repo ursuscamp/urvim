@@ -59,9 +59,39 @@ impl DiagnosticsStore {
         }
     }
 
+    /// Clears all diagnostics for every buffer and source server.
+    pub fn clear_all(&self) {
+        if let Ok(mut store) = self.diagnostics.lock() {
+            store.clear();
+        }
+    }
+
     /// Returns diagnostics for a buffer across all source servers.
     pub fn diagnostics_for_buffer(&self, buffer_id: BufferId) -> Vec<Diagnostic> {
         let mut diagnostics = self.collect_diagnostics(buffer_id);
+        diagnostics.sort_by(|left, right| position_cmp(left.range.start, right.range.start));
+        diagnostics
+    }
+
+    /// Returns diagnostics for a buffer from a single source server.
+    pub fn diagnostics_for_buffer_source(
+        &self,
+        buffer_id: BufferId,
+        server_name: &str,
+    ) -> Vec<Diagnostic> {
+        let mut diagnostics = self
+            .diagnostics
+            .lock()
+            .ok()
+            .and_then(|store| {
+                store
+                    .get(&DiagnosticKey {
+                        buffer_id,
+                        server_name: server_name.to_string(),
+                    })
+                    .cloned()
+            })
+            .unwrap_or_default();
         diagnostics.sort_by(|left, right| position_cmp(left.range.start, right.range.start));
         diagnostics
     }

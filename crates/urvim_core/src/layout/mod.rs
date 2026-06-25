@@ -33,7 +33,57 @@ use std::time::Instant;
 use urvim_terminal::CursorStyle;
 
 use self::tree::ResizeDirection;
+pub use geometry::PaneRegion;
 pub use node::{LayoutNode, PaneId, PaneNode, SplitAxis, SplitNode, SplitSize};
+
+/// Snapshot of a visible buffer range in a pane.
+#[derive(Debug, Clone)]
+pub struct VisibleRangeSnapshot {
+    /// Pane identifier.
+    pub pane_id: PaneId,
+    /// Buffer identifier shown in this pane.
+    pub buffer_id: BufferId,
+    /// Whether this pane is the focused pane.
+    pub active: bool,
+    /// Current cursor position.
+    pub cursor: crate::buffer::Cursor,
+    /// Approximate first visible line.
+    pub start_line: usize,
+    /// Approximate last visible line (exclusive).
+    pub end_line: usize,
+    /// Scroll offset from the buffer view.
+    pub scroll_offset: Position,
+    /// Pane content size.
+    pub size: Size,
+}
+
+/// Snapshot of a tab in a pane.
+#[derive(Debug, Clone)]
+pub struct PaneTabSnapshot {
+    /// Buffer identifier for this tab.
+    pub buffer_id: BufferId,
+    /// Whether this tab is the active tab in its pane.
+    pub active: bool,
+}
+
+/// Snapshot of a pane's state.
+#[derive(Debug, Clone)]
+pub struct PaneStateSnapshot {
+    /// Pane identifier.
+    pub id: PaneId,
+    /// Whether this pane is the focused pane.
+    pub focused: bool,
+    /// Active buffer identifier in this pane.
+    pub active_buffer_id: BufferId,
+    /// Active tab index.
+    pub active_tab_index: usize,
+    /// All tabs in this pane.
+    pub tabs: Vec<PaneTabSnapshot>,
+    /// Pane origin (top-left corner).
+    pub origin: Position,
+    /// Pane content size.
+    pub size: Size,
+}
 
 /// Root layout container for urvim.
 ///
@@ -174,6 +224,18 @@ impl Layout {
     /// Returns the active window group.
     pub fn window_group(&self) -> &crate::window_group::WindowGroup {
         self.active_window_group()
+    }
+
+    /// Returns every buffer identifier currently shown in any pane.
+    pub fn visible_buffer_ids(&self) -> Vec<BufferId> {
+        let Some(root) = self.root.as_ref() else {
+            return Vec::new();
+        };
+        let mut ids = Vec::new();
+        Self::collect_buffer_ids(root, &mut ids);
+        ids.sort_unstable();
+        ids.dedup();
+        ids
     }
 
     /// Returns the active window group mutably.
@@ -443,6 +505,7 @@ impl Layout {
                 },
                 |_| true,
             ),
+            Command::CloseBuffer(_) | Command::UnloadBuffer { .. } => true,
             Command::OverwriteBuffer(target) => {
                 let buffer_id = (*target).unwrap_or_else(|| self.active_buffer_view().buffer_id());
                 match crate::globals::with_buffer_pool(|pool| pool.save_buffer(buffer_id)) {
@@ -458,6 +521,9 @@ impl Layout {
                             runtime.did_save_buffer(buffer_id)
                         });
                         crate::notify_info!("Saved {}", label);
+                        crate::globals::enqueue_editor_event(
+                            crate::event::EditorEvent::BufferSaved { buffer_id },
+                        );
                     }
                     Err(error) if error.kind() == std::io::ErrorKind::InvalidInput => {
                         tracing::info!("Skipping save for unnamed buffer {:?}", buffer_id);
@@ -634,10 +700,16 @@ impl Layout {
     }
 
     fn execute_set_buffer_filetype(&mut self, buffer_id: Option<BufferId>, filetype: &str) {
-        let Some(canonical) = urvim_syntax::builtin_syntax_registry()
+        let canonical = urvim_syntax::builtin_syntax_registry()
             .ok()
             .and_then(|registry| registry.resolve_label(filetype))
-        else {
+            .map(|name| name.to_string())
+            .or_else(|| {
+                crate::globals::plugin_filetypes()
+                    .into_iter()
+                    .find(|name| name == filetype)
+            });
+        let Some(canonical) = canonical else {
             crate::notify_error!("Unknown filetype: {}", filetype);
             return;
         };
@@ -654,9 +726,12 @@ impl Layout {
 
         let label = urvim_syntax::builtin_syntax_registry()
             .ok()
-            .and_then(|registry| registry.display_name(canonical.as_str()))
-            .unwrap_or(canonical)
-            .to_string();
+            .and_then(|registry| {
+                registry
+                    .display_name(canonical.as_str())
+                    .map(|label| label.to_string())
+            })
+            .unwrap_or_else(|| canonical.clone());
         crate::notify_info!("filetype: {}", label);
     }
 
@@ -1075,6 +1150,100 @@ fn apply_completion_text(
         .unwrap_or(replacement.len());
 
     (replacement, cursor_offset)
+}
+
+impl Layout {
+    /// Returns visible range snapshots for all panes, optionally filtered by buffer.
+    pub fn visible_range_snapshots(
+        &self,
+        buffer_filter: Option<BufferId>,
+    ) -> Vec<VisibleRangeSnapshot> {
+        let regions = self.pane_regions();
+        let focused_pane = self.focused_pane;
+        let Some(root) = self.root.as_ref() else {
+            return Vec::new();
+        };
+        let mut snapshots = Vec::new();
+
+        for region in &regions {
+            let Some(pane) = Self::find_pane(root, region.id) else {
+                continue;
+            };
+            let window_group = &pane.window_group;
+            let view = window_group.active_buffer_view();
+            let buffer_id = view.buffer_id();
+
+            if let Some(filter) = buffer_filter {
+                if buffer_id != filter {
+                    continue;
+                }
+            }
+
+            let cursor = view.cursor();
+            let scroll_offset = view.scroll_offset();
+            let pane_height = region.size.rows as usize;
+            let start_line = scroll_offset.row as usize;
+            let end_line = start_line.saturating_add(pane_height);
+
+            snapshots.push(VisibleRangeSnapshot {
+                pane_id: region.id,
+                buffer_id,
+                active: region.id == focused_pane,
+                cursor,
+                start_line,
+                end_line,
+                scroll_offset,
+                size: region.size,
+            });
+        }
+
+        snapshots
+    }
+
+    /// Returns a snapshot of all panes' state.
+    pub fn pane_state_snapshots(&self) -> Vec<PaneStateSnapshot> {
+        let regions = self.pane_regions();
+        let focused_pane = self.focused_pane;
+        let Some(root) = self.root.as_ref() else {
+            return Vec::new();
+        };
+        let mut snapshots = Vec::new();
+
+        for region in &regions {
+            let Some(pane) = Self::find_pane(root, region.id) else {
+                continue;
+            };
+            let window_group = &pane.window_group;
+            let active_tab_index = window_group.active_tab_index();
+            let buffer_ids = window_group.buffer_ids();
+
+            let tabs: Vec<PaneTabSnapshot> = buffer_ids
+                .iter()
+                .enumerate()
+                .map(|(index, &buffer_id)| PaneTabSnapshot {
+                    buffer_id,
+                    active: index == active_tab_index,
+                })
+                .collect();
+
+            let active_buffer_id = buffer_ids
+                .get(active_tab_index)
+                .copied()
+                .unwrap_or_else(|| buffer_ids.first().copied().unwrap_or(BufferId::new(0)));
+
+            snapshots.push(PaneStateSnapshot {
+                id: region.id,
+                focused: region.id == focused_pane,
+                active_buffer_id,
+                active_tab_index,
+                tabs,
+                origin: region.origin,
+                size: region.size,
+            });
+        }
+
+        snapshots
+    }
 }
 
 #[cfg(test)]

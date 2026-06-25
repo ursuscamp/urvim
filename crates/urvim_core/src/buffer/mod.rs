@@ -79,6 +79,14 @@ pub use unicode::{
     expand_tabs, grapheme_width, str_width, to_byte_index,
 };
 
+/// Resolves a user-facing builtin syntax label to its canonical syntax name.
+pub fn resolve_builtin_syntax_label(label: &str) -> Option<String> {
+    urvim_syntax::builtin_syntax_registry()
+        .ok()
+        .and_then(|registry| registry.resolve_label(label))
+        .map(|label| label.to_string())
+}
+
 use crate::path::AbsolutePath;
 use smol_str::SmolStr;
 use std::fs::File;

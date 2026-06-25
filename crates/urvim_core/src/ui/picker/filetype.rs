@@ -111,11 +111,19 @@ impl FiletypePickerSource {
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
+        items.extend(crate::globals::plugin_filetypes().into_iter().map(|name| {
+            FiletypePickerItem {
+                icon: None,
+                label: name.clone(),
+                name,
+            }
+        }));
         items.sort_by(|left, right| {
             left.label
                 .cmp(&right.label)
                 .then(left.name.cmp(&right.name))
         });
+        items.dedup_by(|left, right| left.name == right.name);
         items
     }
 
@@ -280,6 +288,16 @@ mod tests {
 
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].name, "javascript");
+    }
+
+    #[test]
+    fn filetype_picker_includes_plugin_filetypes() {
+        crate::globals::set_plugin_filetypes(vec!["simplelang".to_string()]);
+
+        let items = FiletypePickerSource::builtin_items();
+
+        assert!(items.iter().any(|item| item.name == "simplelang"));
+        crate::globals::set_plugin_filetypes(Vec::new());
     }
 
     #[test]

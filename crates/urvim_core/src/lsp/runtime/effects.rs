@@ -12,6 +12,7 @@ use urvim_lsp::document::{LspRuntimeEffect, LspTextEdit, LspWorkspaceFileOperati
 use urvim_lsp::position::text_encoding_from_lsp;
 use urvim_text::{PieceTable, TextRef, TextSnapshot};
 
+use crate::event::EditorEvent;
 use crate::globals;
 
 use super::LspRuntime;
@@ -45,6 +46,7 @@ impl LspRuntime {
                     globals::with_diagnostics_store(|store| {
                         store.set(buffer_id, &server_name, converted)
                     });
+                    globals::enqueue_editor_event(EditorEvent::DiagnosticsChanged { buffer_id });
                 }
                 globals::request_inlay_hint_retry();
                 globals::request_notification_redraw();
@@ -54,6 +56,7 @@ impl LspRuntime {
                 server_name,
             } => {
                 globals::with_diagnostics_store(|store| store.clear(buffer_id, &server_name));
+                globals::enqueue_editor_event(EditorEvent::DiagnosticsChanged { buffer_id });
             }
             LspRuntimeEffect::OpenDocument { path } => {
                 if let Err(error) = globals::open_buffer(&path) {

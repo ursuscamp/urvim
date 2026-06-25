@@ -22,8 +22,7 @@ Examples:
 - `action cursor find-forward char=x`
 - `buffer write path=notes.txt`
 - `lsp rename name=new_name`
-- `plugin demo-plugin wq`
-- `plugin demo-plugin echo text=hello`
+- `plugin cargo-fmt fmt`
 - `plugin status`
 
 In contrast, `left`, `find-forward`, `write`, and `rename` are operation selectors, not arguments.
@@ -70,9 +69,9 @@ Examples:
 - `save_rust src/main.rs`
 - `rename_write name=new_name`
 
-## Plugin Scripts
+## Plugin Commands
 
-Manifest-provided plugin scripts are executed through the `plugin` namespace.
+Dynamically registered plugin commands are executed through the `plugin` namespace.
 
 See `docs/plugins.md` for plugin config and manifest details.
 
@@ -82,35 +81,15 @@ Shape:
 
 Examples:
 
-- `plugin demo-plugin wq`
-- `plugin demo-plugin save_as_rust src/main.rs`
-- `plugin demo-plugin rename_write name=new_symbol`
+- `plugin cargo-fmt fmt`
 
-Plugin script arguments use the same placeholder rules as configured scripts:
-
-- `{1}`, `{2}`, and so on reference positional arguments after the script name.
-- `{name}` references a named argument like `name=value`.
-- Plugin scripts do not create top-level command roots, so a plugin script named `wq` does not conflict with a user-configured top-level `wq` script.
-
-## Plugin Process Commands
-
-Manifest-provided process commands are also executed through the `plugin` namespace.
-
-Shape:
-
-- `plugin <plugin-name> <command-name> [args...]`
-
-Example:
-
-- `plugin demo-plugin echo text=hello`
-
-Named arguments become object fields in the request params sent to the plugin process. Positional arguments are passed as an `args` array.
+Arguments after the command name are passed to the BearScript callback as a list of strings. Plugin commands do not create top-level command roots, so a plugin command named `wq` does not conflict with a user-configured top-level `wq` script.
 
 ## Plugin Status
 
 - `plugin status`
 
-Shows loaded plugin runtime states, including failed process errors and advertised process capabilities.
+Shows loaded plugin runtime states, including failures and callback health statistics.
 
 ## Shared Arguments
 
@@ -128,6 +107,9 @@ Shows loaded plugin runtime states, including failed process errors and advertis
 - `buffer writeall`
 - `buffer edit`
 - `buffer edit path=<path>*`
+- `buffer close`
+- `buffer unload`
+- `buffer unload force=true`
 - `buffer filetype filetype=<filetype>*`
 - `buffer set-filetype filetype=<filetype>*`
 

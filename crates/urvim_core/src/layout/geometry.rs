@@ -5,10 +5,13 @@ use crate::window::{Position, Size};
 use super::PaneId;
 
 #[derive(Debug, Clone, Copy)]
-pub(super) struct PaneRegion {
-    pub(super) id: PaneId,
-    pub(super) origin: Position,
-    pub(super) size: Size,
+pub struct PaneRegion {
+    /// Pane identifier.
+    pub id: PaneId,
+    /// Top-left origin of the pane.
+    pub origin: Position,
+    /// Content size of the pane.
+    pub size: Size,
 }
 
 impl PaneRegion {

@@ -1,6 +1,7 @@
 //! Builtin scanner module declarations and tokenizer dispatch.
 
 pub mod bash;
+pub mod bearscript;
 pub mod bracket_folds;
 pub mod c;
 pub mod cmake;
@@ -56,6 +57,7 @@ pub fn dispatch_builtin(
     state: SyntaxState,
 ) -> SyntaxLineResult {
     match kind {
+        SyntaxTokenizer::Bearscript => bearscript::tokenize_bearscript_line(line, state).into(),
         SyntaxTokenizer::Plaintext => (Vec::new(), SyntaxState::Plain).into(),
         SyntaxTokenizer::Bash => bash::tokenize_bash_line(line, state).into(),
         SyntaxTokenizer::C => c::tokenize_c_line(line, state),

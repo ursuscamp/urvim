@@ -1,7 +1,7 @@
 use super::{CommandError, CommandInvocation};
 use crate::config::Config;
-use std::collections::BTreeMap;
-use urvim_plugin::{PluginCommand, PluginRegistry};
+use std::collections::{BTreeMap, BTreeSet};
+use urvim_plugin::PluginRegistry;
 
 #[cfg(test)]
 use std::cell::RefCell;
@@ -38,8 +38,7 @@ pub enum RegisteredCommand {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommandRegistry {
     commands: BTreeMap<String, RegisteredCommand>,
-    plugin_scripts: BTreeMap<String, BTreeMap<String, Vec<String>>>,
-    plugin_commands: BTreeMap<String, BTreeMap<String, PluginCommand>>,
+    plugins: BTreeSet<String>,
 }
 
 impl CommandRegistry {
@@ -47,8 +46,7 @@ impl CommandRegistry {
     pub fn new() -> Self {
         Self {
             commands: builtin_commands(),
-            plugin_scripts: BTreeMap::new(),
-            plugin_commands: BTreeMap::new(),
+            plugins: BTreeSet::new(),
         }
     }
 
@@ -82,46 +80,16 @@ impl CommandRegistry {
         Ok(())
     }
 
-    /// Registers scripts contributed by loaded plugins.
-    pub fn register_plugin_scripts(&mut self, plugins: &PluginRegistry) {
-        for (plugin_name, plugin) in plugins.iter() {
-            self.plugin_scripts
-                .insert(plugin_name.to_string(), plugin.scripts().clone());
-            self.plugin_commands
-                .insert(plugin_name.to_string(), plugin.commands().clone());
+    /// Registers namespaces for loaded plugins.
+    pub fn register_plugins(&mut self, plugins: &PluginRegistry) {
+        for (plugin_name, _) in plugins.iter() {
+            self.plugins.insert(plugin_name.to_string());
         }
     }
 
     #[cfg(test)]
-    pub fn register_test_plugin_script(
-        &mut self,
-        plugin: impl Into<String>,
-        script: impl Into<String>,
-        commands: Vec<String>,
-    ) {
-        self.plugin_scripts
-            .entry(plugin.into())
-            .or_default()
-            .insert(script.into(), commands);
-    }
-
-    #[cfg(test)]
-    pub fn register_test_plugin_command(
-        &mut self,
-        plugin: impl Into<String>,
-        command: impl Into<String>,
-        request: impl Into<String>,
-    ) {
-        self.plugin_commands
-            .entry(plugin.into())
-            .or_default()
-            .insert(
-                command.into(),
-                PluginCommand {
-                    description: None,
-                    request: request.into(),
-                },
-            );
+    pub fn register_test_plugin_namespace(&mut self, plugin: impl Into<String>) {
+        self.plugins.insert(plugin.into());
     }
 
     /// Returns true if `name` is a registered command root.
@@ -150,23 +118,7 @@ impl CommandRegistry {
 
     /// Returns true when the plugin namespace is registered.
     pub fn has_plugin(&self, plugin: &str) -> bool {
-        self.plugin_scripts.contains_key(plugin) || self.plugin_commands.contains_key(plugin)
-    }
-
-    /// Returns the registered script command list for a namespaced plugin script.
-    pub fn plugin_script(&self, plugin: &str, script: &str) -> Option<Vec<String>> {
-        self.plugin_scripts
-            .get(plugin)
-            .and_then(|scripts| scripts.get(script))
-            .cloned()
-    }
-
-    /// Returns the registered process command for a namespaced plugin command.
-    pub fn plugin_command(&self, plugin: &str, command: &str) -> Option<PluginCommand> {
-        self.plugin_commands
-            .get(plugin)
-            .and_then(|commands| commands.get(command))
-            .cloned()
+        self.plugins.contains(plugin)
     }
 
     fn register(
@@ -215,14 +167,14 @@ pub fn install_configured_commands(config: &Config) -> Result<(), CommandError> 
     Ok(())
 }
 
-/// Installs a fresh registry containing built-ins, configured commands, and plugin scripts.
+/// Installs a fresh registry containing built-ins, configured commands, and plugin namespaces.
 pub fn install_configured_commands_with_plugins(
     config: &Config,
     plugins: &PluginRegistry,
 ) -> Result<(), CommandError> {
     let mut registry = CommandRegistry::new();
     registry.register_configured_commands(config)?;
-    registry.register_plugin_scripts(plugins);
+    registry.register_plugins(plugins);
     set_registry(registry);
     Ok(())
 }
@@ -250,16 +202,6 @@ pub fn script(name: &str) -> Option<Vec<String>> {
 /// Returns true when the plugin namespace is registered.
 pub fn has_plugin(plugin: &str) -> bool {
     with_registry(|registry| registry.has_plugin(plugin))
-}
-
-/// Returns the registered script command list for a namespaced plugin script.
-pub fn plugin_script(plugin: &str, script: &str) -> Option<Vec<String>> {
-    with_registry(|registry| registry.plugin_script(plugin, script))
-}
-
-/// Returns the registered process command for a namespaced plugin command.
-pub fn plugin_command(plugin: &str, command: &str) -> Option<PluginCommand> {
-    with_registry(|registry| registry.plugin_command(plugin, command))
 }
 
 #[cfg(test)]
@@ -335,6 +277,56 @@ fn set_registry(registry: CommandRegistry) {
         let mut stored = REGISTRY.write().unwrap();
         *stored = registry;
     }
+}
+
+/// Snapshot of a registered command for introspection.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RegisteredCommandSnapshot {
+    /// User-facing command root name.
+    pub name: String,
+    /// Command kind: `alias` or `script`.
+    pub kind: &'static str,
+    /// Source of the command: `core` or `config`.
+    pub source: &'static str,
+}
+
+/// Snapshot of the command registry for plugin introspection.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommandRegistrySnapshot {
+    /// Canonical builtin command roots.
+    pub builtins: Vec<String>,
+    /// Registered user/configured commands (aliases and scripts).
+    pub commands: Vec<RegisteredCommandSnapshot>,
+    /// Loaded plugin namespaces.
+    pub plugins: Vec<String>,
+}
+
+/// Returns a snapshot of the current command registry.
+pub fn snapshot() -> CommandRegistrySnapshot {
+    with_registry(|registry| {
+        let builtins = canonical_roots().iter().map(|s| s.to_string()).collect();
+
+        let mut commands = Vec::new();
+        for (name, command) in &registry.commands {
+            let (kind, source) = match command {
+                RegisteredCommand::Alias { .. } => ("alias", "config"),
+                RegisteredCommand::Script { .. } => ("script", "config"),
+            };
+            commands.push(RegisteredCommandSnapshot {
+                name: name.clone(),
+                kind,
+                source,
+            });
+        }
+
+        let plugins = registry.plugins.iter().cloned().collect();
+
+        CommandRegistrySnapshot {
+            builtins,
+            commands,
+            plugins,
+        }
+    })
 }
 
 fn builtin_commands() -> BTreeMap<String, RegisteredCommand> {
@@ -431,7 +423,7 @@ mod tests {
     }
 
     #[test]
-    fn registers_plugin_scripts_without_top_level_roots() {
+    fn registers_plugin_namespaces_without_top_level_roots() {
         let root =
             std::env::temp_dir().join(format!("urvim-command-plugin-{}", std::process::id()));
         std::fs::create_dir_all(&root).expect("plugin dir should exist");
@@ -440,9 +432,7 @@ mod tests {
             r#"
 name = "tools"
 version = "0.1.0"
-
-[scripts]
-wq = ["write", "quit"]
+entry = "plugin.bear"
 "#,
         )
         .expect("manifest should write");
@@ -456,13 +446,10 @@ wq = ["write", "quit"]
         let plugins = PluginRegistry::load_from_config(&config).expect("plugin should load");
         let mut registry = CommandRegistry::new();
 
-        registry.register_plugin_scripts(&plugins);
+        registry.register_plugins(&plugins);
 
-        assert_eq!(
-            registry.plugin_script("tools", "wq"),
-            Some(vec!["write".to_string(), "quit".to_string()])
-        );
-        assert_eq!(registry.script("wq"), None);
+        assert!(registry.has_plugin("tools"));
+        assert_eq!(registry.script("tools"), None);
 
         std::fs::remove_dir_all(root).ok();
     }

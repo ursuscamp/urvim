@@ -138,6 +138,27 @@ impl SyntaxCache {
         &self.syntax_name
     }
 
+    /// Creates a complete syntax cache from externally produced per-line spans.
+    pub fn from_external_line_spans(
+        syntax_name: impl Into<SmolStr>,
+        line_texts: &PieceTable,
+        line_spans: Vec<Vec<SyntaxSpan>>,
+    ) -> Self {
+        let mut cache = Self::new(syntax_name);
+        cache.lines = (0..line_texts.line_count())
+            .map(|line| {
+                let text = line_texts.line(line)?;
+                Some(SyntaxLine {
+                    fingerprint: LineFingerprint::from_text_ref(&text),
+                    spans: line_spans.get(line).cloned().unwrap_or_default(),
+                    fold_events: Vec::new(),
+                    state: SyntaxState::default(),
+                })
+            })
+            .collect();
+        cache
+    }
+
     /// Applies structural edit effects to cached syntax lines.
     pub fn apply_edits(&mut self, effects: &[BufferEditEffect]) {
         for effect in effects {
@@ -1503,6 +1524,36 @@ impl Buffer {
 
         self.buffer_cache.replace_syntax_cache(result.syntax_cache);
         self.sync_undo_snapshot_cache_if_current();
+        true
+    }
+
+    /// Replaces syntax spans with externally produced complete-buffer line spans.
+    pub fn apply_external_syntax_spans(
+        &mut self,
+        generation: u64,
+        line_spans: Vec<Vec<SyntaxSpan>>,
+    ) -> bool {
+        if generation != self.generations.syntax {
+            return false;
+        }
+
+        let syntax_cache = SyntaxCache::from_external_line_spans(
+            self.syntax_name().to_owned(),
+            &self.lines,
+            line_spans,
+        );
+        self.buffer_cache.replace_syntax_cache(syntax_cache);
+        self.sync_undo_snapshot_cache_if_current();
+        true
+    }
+
+    /// Marks an external syntax provider attempt as complete for the current generation.
+    pub fn finish_external_syntax_refresh(&mut self, generation: u64) -> bool {
+        if generation != self.generations.syntax {
+            return false;
+        }
+
+        self.generations.syntax_background = Some(generation);
         true
     }
 

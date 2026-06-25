@@ -1,10 +1,8 @@
 # Plugins
 
-urvim supports explicitly enabled local plugins. A plugin directory contains `urvim-plugin.toml` plus any files referenced by that manifest.
+urvim plugins are explicitly enabled, local BearScript programs. This document is the supported reference for creating and using them.
 
-Plugins can contribute static themes and command scripts. They can also start a local process and expose namespaced process commands.
-
-For process protocol details, see `docs/plugin-protocol.md`.
+A plugin directory contains `urvim-plugin.toml` and the BearScript entry file named by its manifest.
 
 ## Loading Model
 
@@ -13,7 +11,7 @@ Plugins are never auto-discovered. A plugin is loaded only when it appears in `c
 Default path:
 
 ```toml
-[plugins.demo-plugin]
+[plugins.demo]
 enabled = true
 ```
 
@@ -22,9 +20,9 @@ When `path` is omitted, urvim loads the plugin from `$XDG_CONFIG_HOME/urvim/plug
 Explicit path:
 
 ```toml
-[plugins.demo-plugin]
+[plugins.demo]
 enabled = true
-path = "~/src/urvim/plugins/demo-plugin"
+path = "~/src/urvim/plugins/demo"
 ```
 
 Rules:
@@ -41,203 +39,331 @@ Rules:
 Example `urvim-plugin.toml`:
 
 ```toml
-name = "demo-plugin"
+name = "demo"
 version = "0.1.0"
-description = "Example manifest-only urvim plugin"
-
-themes = ["themes/demo-night.toml"]
-
-[process]
-command = "uv"
-args = ["run", "python", "-m", "demo_plugin"]
-env = { RUST_LOG = "info" }
-
-[commands.echo]
-description = "Echo text through the demo plugin process."
-request = "demo/echo"
-
-[scripts]
-wq = ["write", "quit"]
-save_as_rust = ["buffer filetype filetype=rust", "buffer write path={1}"]
-rename_write = ["lsp rename name={name}", "write"]
+entry = "plugin.bear"
 ```
 
 Fields:
 
 - `name`: required plugin namespace; must match `[plugins.<plugin-id>]`.
 - `version`: required non-empty version string.
-- `description`: optional human-readable text.
-- `themes`: optional array of relative theme file paths.
-- `process`: optional process plugin launch table.
-- `commands`: optional table of process-backed commands.
-- `scripts`: optional table from script name to ordered command strings.
+- `entry`: required BearScript file path relative to the plugin root.
 
-Validation:
+Unknown manifest fields are rejected.
 
-- Plugin names and script names must be non-empty.
-- Plugin names and script names must not contain whitespace or path separators.
-- Process command names follow script-name rules and must not conflict with script names in the same plugin.
-- Process command `request` values must be non-empty and contain no whitespace.
-- Theme paths must be relative and must stay inside the plugin directory.
-- Unknown manifest fields are rejected.
+## BearScript Entry
 
-## Themes
+The entry file is evaluated once at startup. After evaluation, urvim calls `init()`.
 
-Plugin themes use the same TOML theme schema as built-in themes. The manifest lists only file paths; the theme file itself supplies the theme name.
-
-Example:
-
-```toml
-themes = ["themes/demo-night.toml"]
-```
-
-Then in `themes/demo-night.toml`:
-
-```toml
-name = "Demo Night"
-
-[palette]
-bg = "#10141f"
-fg = "#d7e1f0"
-
-[default]
-fg = "fg"
-bg = "bg"
-```
-
-To select a plugin theme:
-
-```toml
-theme = "Demo Night"
-```
-
-Theme loading behavior:
-
-- Built-in themes load first.
-- Plugin themes load after built-ins.
-- Duplicate theme names are rejected, including duplicates of built-in themes.
-- Invalid plugin theme TOML fails startup with plugin id and path context.
-
-## Scripts
-
-Plugin scripts use the same command strings and placeholder syntax as configured user scripts.
-
-Example manifest scripts:
-
-```toml
-[scripts]
-wq = ["write", "quit"]
-save_as_rust = ["buffer filetype filetype=rust", "buffer write path={1}"]
-rename_write = ["lsp rename name={name}", "write"]
-```
-
-Run them through the plugin namespace:
+Plugins dynamically register commands, event hooks, and other contributions from `init()` through the global `urvim` module.
 
 ```text
-plugin demo-plugin wq
-plugin demo-plugin save_as_rust src/main.rs
-plugin demo-plugin rename_write name=new_symbol
-```
+fn init() {
+    urvim.commands.register("hello", hello, "Show a greeting")
+    let hook = urvim.register_event_hook(urvim.events.BufferSaved, on_buffer_saved)
+}
 
-Placeholder rules:
+fn hello(args) {
+    urvim.ui.show_message("hello from BearScript", { "level": "info" })
+}
 
-- `{1}`, `{2}`, and so on reference positional arguments after the script name.
-- `{name}` references named arguments such as `name=value`.
-- Missing placeholders are reported before any script command runs.
-
-Plugin scripts do not create top-level command roots. A plugin script named `wq` does not conflict with a user-configured `[scripts].wq`.
-
-## Process Plugins
-
-Process-backed plugins start during normal editor startup when a loaded manifest contains `[process]`. Startup failures are logged and reported as warnings, but static manifest contributions remain available.
-
-Manifest process table:
-
-```toml
-[process]
-command = "uv"
-args = ["run", "python", "-m", "demo_plugin"]
-env = { RUST_LOG = "info" }
-```
-
-Protocol foundation:
-
-- Transport: plugin process stdio.
-- Framing: `u32` big-endian payload length followed by MessagePack bytes.
-- Encoding: MessagePack through `rmp-serde`.
-- Message envelope: request, response, and notification.
-- Protocol version: `1`.
-- The editor sends `protocol_version`, editor metadata, plugin metadata, and editor capabilities in `editor/initialize`.
-- Plugins must respond to `editor/initialize` with matching `protocol_version` and a `capabilities` array.
-- Process commands only run when the plugin advertised the command request method as a capability.
-- Static manifest contributions remain available even when a process cannot be started.
-- Full request, notification, editor API, and error conventions are documented in `docs/plugin-protocol.md`.
-
-Initialize response example:
-
-```json
-{
-  "protocol_version": 1,
-  "capabilities": ["demo/echo"]
+fn on_buffer_saved(event) {
+    urvim.ui.show_message("buffer saved", { "level": "info" })
 }
 ```
 
-Process commands:
-
-```toml
-[commands.echo]
-description = "Echo text through the demo plugin process."
-request = "demo/echo"
-```
-
-Run them through the plugin namespace:
+Run commands through the plugin namespace:
 
 ```text
-plugin demo-plugin echo text=hello
+plugin demo hello
 ```
 
-Named arguments become object fields in the request params. Positional arguments are passed as an `args` array.
+Command arguments are passed to the BearScript function as a list of strings.
 
-Plugin runtime status:
+## Execution Model
+
+BearScript plugins run in-process on the main editor thread. The current synchronous callbacks are:
+
+- `init()`, called during plugin loading.
+- Registered commands, called when `plugin <plugin-id> <command>` is executed.
+- Registered event hooks, called when editor events are drained.
+- Timer callbacks, called when scheduled timer events are drained.
+
+Synchronous callbacks may call editor APIs directly, but they should stay quick. Avoid blocking I/O, long external commands, and expensive CPU work inside `init()`, commands, event hooks, or timer callbacks. Future plugin phases will add provider APIs for expensive structured work.
+
+urvim records callback timing for plugin health. Callbacks at or above these thresholds are considered slow:
+
+- `16ms`: logged as a slow callback.
+- `50ms`: logged and shown as a warning notification.
+- `100ms`: logged and shown as a warning notification.
+
+Runtime health tracks loaded or failed state, the last callback/load error, slow callback count, total callback count, and callback timing stats.
+
+## Host API Reference
+
+The global `urvim` module exposes the APIs below. All arguments and return values are BearScript values. APIs raise an error for invalid argument shapes or invalid ids unless noted otherwise.
+
+### Editor and UI
+
+- `urvim.ui.show_message(message, opts)`
+- `urvim.buffers.active() -> buffer_id | null`
+- `urvim.buffers.list() -> [buffer_id]`
+- `urvim.buffers.exists(buffer_id) -> bool`
+- `urvim.buffers.name(buffer_id) -> string`
+- `urvim.buffers.path(buffer_id) -> string | null`
+- `urvim.buffers.filetype(buffer_id) -> string`
+- `urvim.buffers.set_filetype(buffer_id, filetype)`
+- `urvim.buffers.is_modified(buffer_id) -> bool`
+- `urvim.buffers.line_count(buffer_id) -> number`
+- `urvim.buffers.line(buffer_id, row) -> string`
+- `urvim.buffers.lines(buffer_id, start_row, end_row) -> [string]`
+- `urvim.buffers.text(buffer_id) -> string`
+- `urvim.buffers.set_line(buffer_id, row, text)`
+- `urvim.buffers.insert_line(buffer_id, row, text)`
+- `urvim.buffers.delete_line(buffer_id, row)`
+- `urvim.buffers.replace_range(buffer_id, range, text)`
+- `urvim.buffers.save(buffer_id)`
+- `urvim.windows.active() -> window_id | null`
+- `urvim.windows.list() -> [window_id]`
+- `urvim.windows.buffer(window_id) -> buffer_id`
+- `urvim.windows.cursor(window_id) -> { row, col }`
+- `urvim.windows.set_cursor(window_id, row, col)`
+- `urvim.windows.visible_range(window_id) -> { start_row, end_row }`
+- `urvim.windows.open_buffer(buffer_id)`
+
+### Commands, Keymaps, and Events
+
+- `urvim.commands.register(name, function, description?)`
+- `urvim.commands.unregister(name)`
+- `urvim.commands.list() -> [command]`
+- `urvim.commands.execute(command_line) -> bool`
+- `urvim.command(command_line) -> bool`
+- `urvim.keymaps.set(mode, lhs, rhs, opts?)`
+- `urvim.keymaps.delete(mode, lhs)`
+- `urvim.keymaps.list(mode?) -> [keymap]`
+- `urvim.register_event_hook(event, function) -> hook_id`
+- `urvim.unregister_event_hook(hook_id)`
+
+Keymap modes are `normal`, `insert`, `visual`, `visual_line` (or `visual-line`), and `resizing` (or `resize`). Keymap right-hand sides are urvim command lines. The optional keymap options map is currently reserved and must be empty.
+
+### Registers and Themes
+
+- `urvim.registers.get(name) -> string`
+- `urvim.registers.set(name, value)`
+- `urvim.registers.append(name, value)`
+- `urvim.registers.names() -> [string]`
+- `urvim.themes.list() -> [theme]`
+- `urvim.themes.set(name)`
+- `urvim.themes.register(path) -> name`
+- `urvim.themes.create(theme) -> name`
+- `urvim.themes.unregister(name)`
+
+Register names are a single lowercase ASCII letter or `"`.
+
+### Files, Paths, Environment, and Data
+
+- `urvim.fs.exists(path) -> bool`
+- `urvim.fs.is_file(path) -> bool`
+- `urvim.fs.is_dir(path) -> bool`
+- `urvim.fs.read_file(path, callback) -> request_id`
+- `urvim.fs.write_file(path, text, callback) -> request_id`
+- `urvim.fs.read_dir(path, callback) -> request_id`
+- `urvim.path.join(parts) -> string`
+- `urvim.path.dirname(path) -> string`
+- `urvim.path.basename(path) -> string`
+- `urvim.path.extension(path) -> string | null`
+- `urvim.path.stem(path) -> string`
+- `urvim.env.get(name) -> string | null`
+- `urvim.project.find_up(marker_or_markers, start?) -> string | null`
+- `urvim.project.root(marker_or_markers, start?) -> string | null`
+- `urvim.json.parse(text) -> value`
+- `urvim.json.stringify(value) -> string`
+- `urvim.json.stringify_pretty(value) -> string`
+- `urvim.inspect(value) -> string`
+
+`project.find_up` returns the matching marker path; `project.root` returns its parent directory. Both search upward from `start`, or the editor process current directory when omitted.
+
+### Filetypes and Syntax
+
+- `urvim.filetypes.register(name, opts?)`
+- `urvim.filetypes.detect_extension(extension, filetype)`
+- `urvim.syntax.register(filetype, callback, opts?) -> provider_id`
+- `urvim.syntax.unregister(provider_id)`
+- `urvim.syntax.refresh(buffer_id?)`
+- `urvim.syntax.tags() -> [string]`
+
+### Utilities
+
+- `urvim.lists.push(list, value) -> list`
+- `urvim.strings.len(text) -> number`
+- `urvim.strings.byte_len(text) -> number`
+- `urvim.strings.char_at(text, index) -> string | null`
+- `urvim.strings.find(text, needle, start?) -> number`
+- `urvim.strings.trim(text) -> string`
+- `urvim.strings.trim_start(text) -> string`
+- `urvim.strings.trim_end(text) -> string`
+- `urvim.strings.starts_with(text, prefix) -> bool`
+- `urvim.strings.ends_with(text, suffix) -> bool`
+- `urvim.strings.contains(text, needle) -> bool`
+- `urvim.strings.split(text, separator) -> [string]`
+- `urvim.strings.join(parts, separator) -> string`
+- `urvim.strings.replace(text, from, to) -> string`
+- `urvim.strings.to_lower(text) -> string`
+- `urvim.strings.to_upper(text) -> string`
+
+### Jobs and Timers
+
+- `urvim.jobs.spawn(opts) -> job_id`
+- `urvim.jobs.kill(job_id)`
+- `urvim.jobs.status(job_id) -> string`
+- `urvim.jobs.write_stdin(job_id, text)`
+- `urvim.jobs.close_stdin(job_id)`
+- `urvim.jobs.list() -> [job]`
+- `urvim.timers.defer(callback) -> timer_id`
+- `urvim.timers.set_timeout(ms, callback) -> timer_id`
+- `urvim.timers.set_interval(ms, callback) -> timer_id`
+- `urvim.timers.clear(timer_id)`
+
+Event constants are available under `urvim.events`, for example `urvim.events.BufferSaved`.
+
+Notification levels are `info`, `warn`, `warning`, and `error`.
+
+Buffer rows and columns are 0-based. `urvim.buffers.lines(buffer_id, start_row, end_row)` uses an exclusive `end_row`. Ranges use this shape:
 
 ```text
-plugin status
+{
+    "start": { "row": 0, "col": 0 },
+    "end": { "row": 0, "col": 5 }
+}
 ```
 
-This reports loaded plugin process states, failed process errors, and advertised capabilities.
+Invalid buffer ids, rows, columns, and argument shapes raise errors. `urvim.buffers.save(buffer_id)` saves through the normal buffer save path and emits the same `BufferSaved` editor event on success.
 
-## Example Plugin
+Window rows and columns are 0-based. Window ids are stable pane ids for currently visible editor windows; an id stays valid for the life of that pane and becomes invalid after the pane is closed. Invalid window ids raise errors. `urvim.windows.open_buffer(buffer_id)` mirrors normal editor behavior by activating an existing visible buffer tab or opening a tab for a loaded hidden buffer in the active window.
 
-The living example plugin is in `examples/plugins/demo-plugin`.
+Filesystem read/write callbacks are delivered later through the normal plugin dispatcher, not from filesystem worker threads. `urvim.fs.read_file`, `urvim.fs.write_file`, and `urvim.fs.read_dir` return a numeric request id immediately and call the callback once with a result payload.
 
-It demonstrates:
+Success payloads include `id`, `path`, and `ok = true`. `read_file` success also includes `text`; `read_dir` success also includes `entries`. Failure payloads include `id`, `path`, `ok = false`, and `error`.
 
-- A plugin manifest.
-- A plugin-provided theme named `Demo Night`.
-- A multi-command script.
-- A positional-placeholder script.
-- A named-placeholder script.
-- A Python process plugin.
-- A process command named `echo`.
-- Editor API requests from the plugin process.
-- Optional buffer mutation through `plugin demo-plugin echo insert=...`.
+Directory entries use this shape:
 
-For local testing with the default plugin path:
-
-```sh
-mkdir -p ~/.config/urvim/plugins
-ln -s /Users/ryan/Dev/urvim/examples/plugins/demo-plugin ~/.config/urvim/plugins/demo-plugin
+```text
+{
+    "path": "/path/to/file.rs",
+    "name": "file.rs",
+    "kind": "file" | "dir" | "symlink" | "other"
+}
 ```
 
-Then add this to config:
+Job callbacks are delivered later through the normal plugin dispatcher, not from process I/O threads. Output callbacks receive text chunks and are not guaranteed to receive complete lines. `urvim.jobs.spawn` accepts `cmd`, `args`, `cwd`, `env`, `stdin`, `timeout_ms`, `on_stdout`, `on_stderr`, and `on_exit`.
 
-```toml
-[plugins.demo-plugin]
-enabled = true
+Timer callbacks are also delivered later through the normal plugin dispatcher. Use `urvim.timers.defer(callback)` to run after the current callback returns, `urvim.timers.set_timeout(ms, callback)` to run once after a delay, and `urvim.timers.set_interval(ms, callback)` to run repeatedly. `urvim.timers.clear(timer_id)` cancels a timeout or interval that has not yet dispatched.
+
+## Syntax Providers
+
+Syntax providers run synchronously on the main editor thread for now. Providers should stay fast and return structured spans for the buffer snapshot they receive.
+
+```text
+fn init() {
+    urvim.filetypes.register("simplelang")
+    urvim.filetypes.detect_extension(".simple", "simplelang")
+    urvim.syntax.register("simplelang", highlight_simplelang)
+}
+
+fn highlight_simplelang(snapshot) {
+    return [{
+        "range": {
+            "start": { "row": 0, "col": 0 },
+            "end": { "row": 0, "col": 2 }
+        },
+        "tag": "syntax.keyword"
+    }]
+}
+```
+
+Snapshot fields are `buffer_id`, `generation`, `filetype`, `path`, `text`, `lines`, `visible_range`, and `changed_range`. `lines` is a list of line strings without trailing newlines. `visible_range` is either `null` or `{ "start_row": n, "end_row": n }`.
+
+Span ranges are 0-based byte offsets. A span may cross lines; urvim splits multiline spans into line-local cached spans internally. Tags should use names returned by `urvim.syntax.tags()` or compatible `syntax.*` theme tags.
+
+## Event Hooks
+
+Supported event names:
+
+- `EditorStarted`
+- `BufferOpened`
+- `BufferLoaded`
+- `BufferSaved`
+- `BufferClosed`
+- `BufferUnloaded`
+- `BufferFiletypeChanged`
+- `CommandExecuted`
+- `DiagnosticsChanged`
+
+`register_event_hook` returns a numeric hook id that can be passed to `unregister_event_hook`. Hooks are best-effort and run synchronously in the editor loop. They should stay quick.
+
+## Status
+
+Use `plugin status` to show a compact runtime health summary with loaded plugin count, failed plugin count, total callbacks, slow callback count, and the slowest recorded callback duration.
+
+## Themes
+
+Plugin themes use the same TOML theme schema as built-in themes. Theme files are auto-discovered from direct `.toml` children of the plugin `themes/` directory. The theme file itself supplies the theme name.
+
+Plugins can also manage themes from BearScript:
+
+```text
+fn init() {
+    let name = urvim.themes.register("/absolute/path/to/theme.toml")
+    urvim.themes.set(name)
+}
+```
+
+`urvim.themes.register(path)` loads a TOML theme file immediately, inserts it into the theme registry, records ownership for the current plugin, and returns the resolved theme name. Duplicate theme names are rejected, including duplicates of built-in themes and auto-discovered plugin themes.
+
+`urvim.themes.create(theme)` creates a theme directly from BearScript data using the same schema as TOML themes:
+
+```text
+fn init() {
+    urvim.themes.create({
+        "name": "Generated Dawn",
+        "palette": {
+            "bg": "#101010",
+            "fg": "#eeeeee",
+            "accent": "#7aa2f7",
+            "muted": 244
+        },
+        "default": {
+            "fg": "fg",
+            "bg": "bg"
+        },
+        "highlights": {
+            "ui.status_bar": {
+                "fg": "bg",
+                "bg": "accent",
+                "bold": true
+            },
+            "syntax.comment": {
+                "fg": "muted",
+                "italic": true
+            }
+        }
+    })
+}
+```
+
+Palette values are either `"#rrggbb"` true-color strings or ANSI numbers from `0` to `255`. Style fields such as `fg`, `bg`, and `underline_color` reference palette names, matching the TOML schema. Inline colors inside styles are not supported.
+
+Themes created from `init()` are available when startup selects `theme` from `config.toml`. See `examples/plugins/generated-theme` for a plugin that creates a generated theme and exposes `plugin generated-theme apply` to activate it.
+
+`urvim.themes.unregister(name)` removes only dynamically registered themes owned by the current plugin. Auto-discovered `themes/*.toml` files and themes owned by other plugins cannot be removed this way.
+
+`urvim.themes.list()` returns entries shaped like:
+
+```text
+{ "name": "Nord", "active": true }
 ```
 
 ## Security
 
 Plugins are local files loaded at startup. Treat plugin directories as trusted input.
-
-Plugin scripts execute editor commands. Process plugins execute arbitrary local processes, so keep plugin loading explicit and only enable plugins you trust.

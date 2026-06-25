@@ -50,6 +50,7 @@ impl InsertMode {
                 keymap.insert_configured(&config.keymaps.insert);
             }
         });
+        keymap.insert_intents(&globals::plugin_keymap_intents_for_mode(ModeKind::Insert));
         let auto_close_pairs =
             globals::with_config(|config| config.auto_close_pairs).unwrap_or(true);
         let tab_insertion = globals::with_config(|config| config.tab_insertion).unwrap_or_default();

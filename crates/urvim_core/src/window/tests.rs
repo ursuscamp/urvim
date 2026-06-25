@@ -6533,10 +6533,7 @@ fn test_yank_then_paste_uses_unnamed_register() {
 
     window.dispatch_action(&Action::paste_after());
 
-    assert_eq!(
-        buffer_text(window.buffer_view()),
-        "hello\nhello\nworld"
-    );
+    assert_eq!(buffer_text(window.buffer_view()), "hello\nhello\nworld");
 }
 
 #[test]
@@ -6567,10 +6564,7 @@ fn test_unnamed_register_overwritten_by_subsequent_operation() {
 
     // Unnamed register was overwritten from "first" to "second" by DeleteLine,
     // so paste_before inserts "second" before the current line ("third").
-    assert_eq!(
-        buffer_text(window.buffer_view()),
-        "first\nsecond\nthird"
-    );
+    assert_eq!(buffer_text(window.buffer_view()), "first\nsecond\nthird");
 }
 
 // ── Paste cursor-position regression tests ───────────────────────────────

@@ -284,6 +284,15 @@ impl ThemeRegistry {
         self.themes.get(name)
     }
 
+    /// Removes a non-default theme from the registry.
+    pub fn remove(&mut self, name: &str) -> Option<Theme> {
+        if name == self.default_theme_name {
+            return None;
+        }
+
+        self.themes.remove(name)
+    }
+
     /// Returns the default theme.
     pub fn default_theme(&self) -> &Theme {
         self.themes

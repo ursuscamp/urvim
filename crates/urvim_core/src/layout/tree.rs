@@ -181,12 +181,29 @@ impl Layout {
         removed
     }
 
-    pub(super) fn close_buffer_tabs(&mut self, buffer_id: BufferId) -> bool {
+    pub fn close_buffer_tabs(&mut self, buffer_id: BufferId) -> bool {
         let Some(root) = self.root.as_mut() else {
             return false;
         };
 
         Self::close_buffer_tabs_in_node(root, buffer_id)
+    }
+
+    pub fn close_buffer_tabs_and_prune(&mut self, buffer_id: BufferId) -> bool {
+        let closed = self.close_buffer_tabs(buffer_id);
+        if closed {
+            self.prune_empty_panes();
+        }
+        closed
+    }
+
+    pub fn close_active_buffer_tab(&mut self) -> bool {
+        let buffer_id = self.active_buffer_view().buffer_id();
+        let closed = self.active_window_group_mut().close_buffer_tab(buffer_id);
+        if closed {
+            self.prune_empty_panes();
+        }
+        closed
     }
 
     pub(super) fn resize_focused_pane(
@@ -296,6 +313,16 @@ impl Layout {
                 let removed_first = Self::close_buffer_tabs_in_node(&mut split.first, buffer_id);
                 let removed_second = Self::close_buffer_tabs_in_node(&mut split.second, buffer_id);
                 removed_first || removed_second
+            }
+        }
+    }
+
+    pub(super) fn collect_buffer_ids(node: &LayoutNode, ids: &mut Vec<BufferId>) {
+        match node {
+            LayoutNode::Pane(pane) => ids.extend(pane.window_group.buffer_ids()),
+            LayoutNode::Split(split) => {
+                Self::collect_buffer_ids(&split.first, ids);
+                Self::collect_buffer_ids(&split.second, ids);
             }
         }
     }
@@ -471,6 +498,37 @@ impl Layout {
         })
     }
 
+    /// Returns the stable identifier for the focused visible window.
+    pub fn active_window_id(&self) -> Option<PaneId> {
+        self.root
+            .as_ref()
+            .and_then(|root| Self::find_pane(root, self.focused_pane).map(|pane| pane.id))
+    }
+
+    /// Returns stable identifiers for all visible editor windows in layout order.
+    pub fn window_ids(&self) -> Vec<PaneId> {
+        let mut ids = Vec::new();
+        if let Some(root) = self.root.as_ref() {
+            Self::collect_pane_ids(root, &mut ids);
+        }
+        ids
+    }
+
+    /// Returns the active buffer view for a visible window.
+    pub fn buffer_view_for_window(&self, id: PaneId) -> Option<&crate::window::BufferView> {
+        let root = self.root.as_ref()?;
+        Self::find_pane(root, id).map(|pane| pane.window_group.active_buffer_view())
+    }
+
+    /// Returns the active buffer view mutably for a visible window.
+    pub fn buffer_view_for_window_mut(
+        &mut self,
+        id: PaneId,
+    ) -> Option<&mut crate::window::BufferView> {
+        let root = self.root.as_mut()?;
+        Self::find_pane_mut(root, id).map(|pane| pane.window_group.active_buffer_view_mut())
+    }
+
     pub(super) fn first_pane_id(&self) -> Option<PaneId> {
         self.root.as_ref().and_then(Self::first_pane_in_node)
     }
@@ -480,6 +538,16 @@ impl Layout {
             LayoutNode::Pane(pane) => Some(pane.id),
             LayoutNode::Split(split) => Self::first_pane_in_node(&split.first)
                 .or_else(|| Self::first_pane_in_node(&split.second)),
+        }
+    }
+
+    fn collect_pane_ids(node: &LayoutNode, ids: &mut Vec<PaneId>) {
+        match node {
+            LayoutNode::Pane(pane) => ids.push(pane.id),
+            LayoutNode::Split(split) => {
+                Self::collect_pane_ids(&split.first, ids);
+                Self::collect_pane_ids(&split.second, ids);
+            }
         }
     }
 
@@ -689,7 +757,7 @@ impl Layout {
         Self::resolve_preferred_pane(subtree)
     }
 
-    pub(super) fn pane_regions(&self) -> Vec<PaneRegion> {
+    pub fn pane_regions(&self) -> Vec<PaneRegion> {
         let mut regions = Vec::new();
         let Some(root) = self.root.as_ref() else {
             return regions;
@@ -701,7 +769,7 @@ impl Layout {
         regions
     }
 
-    pub(super) fn pane_region(&self, id: PaneId) -> Option<PaneRegion> {
+    pub fn pane_region(&self, id: PaneId) -> Option<PaneRegion> {
         self.pane_regions()
             .into_iter()
             .find(|region| region.id == id)

@@ -10,16 +10,14 @@ This is a list, in no particular order, of things that need to be addressed whic
 - code action hints for the current line (with ghost text)
 - quick jump
 - healthcheck
-
-## Command line refactor
-
-- highlighting
-- completion
+- stacking notifications
 
 # Bugs
 
-- ignore blank lines at the end of an indented fold region
+- the borders on bordered windows should take their underlying background from the cell under it instead of overwriting the background
+- test flakiness due to global thread state
 
 # Refactors
 
-- workspace arrangment
+# Plugins
+
