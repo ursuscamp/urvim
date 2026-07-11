@@ -574,15 +574,20 @@ pub fn enqueue_notification(level: NotificationLevel, text: String) -> bool {
     state.enqueue(level, text, now)
 }
 
-/// Returns the active notification after pruning/advancing expired entries.
-pub fn active_notification(now: std::time::Instant) -> Option<NotificationMessage> {
+/// Returns visible notifications after pruning expired entries.
+pub fn visible_notifications(now: std::time::Instant) -> Vec<NotificationMessage> {
     let Ok(mut state) = notification_state_slot().lock() else {
-        tracing::warn!("notification queue unavailable; cannot read active notification");
-        return None;
+        tracing::warn!("notification queue unavailable; cannot read visible notifications");
+        return Vec::new();
     };
 
     state.prune_and_advance(now);
-    state.active().cloned()
+    state.visible().iter().cloned().collect()
+}
+
+/// Returns the newest visible notification after pruning expired entries.
+pub fn active_notification(now: std::time::Instant) -> Option<NotificationMessage> {
+    visible_notifications(now).into_iter().next()
 }
 
 /// Prunes expired notifications and advances the queue.

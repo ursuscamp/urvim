@@ -10,7 +10,6 @@ This is a list, in no particular order, of things that need to be addressed whic
 - code action hints for the current line (with ghost text)
 - quick jump
 - healthcheck
-- stacking notifications
 
 # Bugs
 
@@ -20,4 +19,3 @@ This is a list, in no particular order, of things that need to be addressed whic
 # Refactors
 
 # Plugins
-
