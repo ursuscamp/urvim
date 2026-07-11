@@ -1,0 +1,4 @@
+name = "window-demo"
+version = "0.1.0"
+description = "Demonstrates floating and docked plugin-owned UI."
+entry = "plugin.bear"

@@ -47,6 +47,8 @@ fn render_frame<I: io::Read + AsFd, O: io::Write + AsFd>(
 
     if let Some(cursor_pos) = layout.visual_cursor() {
         terminal.set_cursor_position(cursor_pos.row + 1, cursor_pos.col + 1)?;
+    } else {
+        terminal.hide_cursor()?;
     }
 
     Ok(())

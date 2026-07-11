@@ -7,7 +7,7 @@ use crate::AbsolutePath;
 use crate::buffer::{Buffer, BufferId, BufferPool};
 use crate::config::Config;
 use crate::diagnostics::DiagnosticsStore;
-use crate::editor::Action;
+use crate::editor::EditorAction;
 use crate::event::EditorEvent;
 use crate::lsp::runtime::LspRuntime;
 use crate::notification::{NotificationLevel, NotificationMessage, NotificationState};
@@ -50,7 +50,7 @@ pub struct FindState {
 /// State of the last repeatable edit used by dot repeat.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RepeatState {
-    pub action: Action,
+    pub action: EditorAction,
     pub count: usize,
     pub insert_text: Option<String>,
 }
@@ -1178,10 +1178,10 @@ mod tests {
 
     #[test]
     fn test_repeat_state_round_trip() {
-        use crate::editor::ActionKind;
+        use crate::editor::EditorOperation;
 
         set_last_repeat(RepeatState {
-            action: Action::new(ActionKind::DeleteLine),
+            action: EditorAction::new(EditorOperation::DeleteLine),
             count: 4,
             insert_text: Some("hello".to_string()),
         });
@@ -1190,7 +1190,7 @@ mod tests {
         assert_eq!(state.count, 4);
         assert!(matches!(
             state.action.kind.as_ref(),
-            Some(ActionKind::DeleteLine)
+            Some(EditorOperation::DeleteLine)
         ));
         assert_eq!(state.insert_text.as_deref(), Some("hello"));
     }

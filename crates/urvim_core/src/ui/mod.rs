@@ -12,11 +12,13 @@ pub mod inputs;
 pub mod line_format;
 pub mod lsp_rename;
 pub mod picker;
+pub mod plugin_pane;
+pub mod plugin_window;
 pub mod text_width;
 
 use crate::buffer::BufferId;
 use crate::buffer::Cursor;
-use crate::editor::Action;
+use crate::editor::EditorAction;
 use crate::notification::NotificationLevel;
 use crate::window::{Position, Size};
 use std::path::PathBuf;
@@ -59,11 +61,11 @@ impl UiEventResult {
     }
 }
 
-/// Unified dispatch envelope for editor actions and UI commands.
+/// Unified dispatch envelope for editor operations and UI commands.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Intent {
-    /// Editing-semantic action.
-    Action(Action),
+    /// An operation interpreted against an editor window and its modal state.
+    Editor(EditorAction),
     /// UI/app orchestration command.
     Command(Command),
 }
@@ -74,10 +76,10 @@ impl Intent {
         payload.into()
     }
 
-    /// Returns the contained action, if this is an action intent.
-    pub fn as_action(&self) -> Option<&Action> {
+    /// Returns the contained editor action, if this is an editor intent.
+    pub fn as_editor_action(&self) -> Option<&EditorAction> {
         match self {
-            Intent::Action(action) => Some(action),
+            Intent::Editor(action) => Some(action),
             Intent::Command(_) => None,
         }
     }
@@ -85,15 +87,15 @@ impl Intent {
     /// Returns the contained command, if this is a command intent.
     pub fn as_command(&self) -> Option<&Command> {
         match self {
-            Intent::Action(_) => None,
+            Intent::Editor(_) => None,
             Intent::Command(command) => Some(command),
         }
     }
 }
 
-impl From<Action> for Intent {
-    fn from(action: Action) -> Self {
-        Intent::Action(action)
+impl From<EditorAction> for Intent {
+    fn from(action: EditorAction) -> Self {
+        Intent::Editor(action)
     }
 }
 
@@ -101,6 +103,19 @@ impl From<Command> for Intent {
     fn from(command: Command) -> Self {
         Intent::Command(command)
     }
+}
+
+/// Controls where a global key mapping is inherited outside editor input.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeymapInheritance {
+    /// Inherited by persistent editor and plugin focus targets.
+    Focus,
+    /// Inherited by application input contexts that enable global mappings.
+    Application,
+    /// Available only while an editor handles input.
+    Editor,
+    /// Never inherited; only explicit local or programmatic invocation is allowed.
+    Explicit,
 }
 
 /// UI/app orchestration command.
@@ -137,6 +152,8 @@ pub enum Command {
     OpenGrepPicker,
     /// Write all modified buffers in the pool.
     WriteAll,
+    /// Save the current buffer or a specific buffer when provided.
+    SaveBuffer(Option<BufferId>),
     /// Save the active buffer to a new path.
     SaveBufferAs(PathBuf),
     /// Close a buffer from the current pane.
@@ -187,7 +204,7 @@ pub enum Command {
     LspApplyCodeAction {
         /// Buffer that owns the action.
         buffer_id: crate::buffer::BufferId,
-        /// Action payload to apply.
+        /// Code-action payload to apply.
         action: crate::lsp::runtime::CodeActionApplication,
     },
     /// Open a file selected from a picker.
@@ -214,6 +231,10 @@ pub enum Command {
     ResizePaneDown(usize),
     /// Equalize all split ratios in the layout.
     EqualizeSplits,
+    /// Switch backward through editor tabs by the provided count.
+    PreviousTab(usize),
+    /// Switch forward through editor tabs by the provided count.
+    NextTab(usize),
     /// Toggle visual wrapping for the focused window.
     ToggleWrap,
     /// Split the focused pane vertically.
@@ -228,12 +249,92 @@ pub enum Command {
     FocusPaneUp,
     /// Focus the pane to the right.
     FocusPaneRight,
+    /// Focus the next persistent editor or plugin window.
+    FocusNextWindow,
+    /// Focus the previous persistent editor or plugin window.
+    FocusPreviousWindow,
     /// Close the focused pane.
     ClosePane,
     /// Attempt to exit the editor, allowing the app to confirm first if needed.
     TryQuit,
     /// Exit the editor.
     Quit,
+}
+
+impl Command {
+    /// Returns where a global mapping for this command may be inherited.
+    pub fn keymap_inheritance(&self) -> KeymapInheritance {
+        match self {
+            Self::ResizePaneLeft(_)
+            | Self::ResizePaneRight(_)
+            | Self::ResizePaneUp(_)
+            | Self::ResizePaneDown(_)
+            | Self::EqualizeSplits
+            | Self::FocusPaneLeft
+            | Self::FocusPaneDown
+            | Self::FocusPaneUp
+            | Self::FocusPaneRight
+            | Self::FocusNextWindow
+            | Self::FocusPreviousWindow
+            | Self::ClosePane => KeymapInheritance::Focus,
+            Self::OpenCommandLine
+            | Self::OpenBufferPicker
+            | Self::OpenFilePicker
+            | Self::OpenGitPicker
+            | Self::OpenColorschemePicker
+            | Self::OpenWorkspaceSymbolsPicker
+            | Self::OpenGrepPicker
+            | Self::WriteAll
+            | Self::PluginRequest { .. }
+            | Self::PluginStatus
+            | Self::TryQuit
+            | Self::Quit => KeymapInheritance::Application,
+            Self::OpenUnnamedBuffer
+            | Self::OpenCompletion
+            | Self::OpenFiletypePicker
+            | Self::OpenDocumentSymbolsPicker
+            | Self::SaveBuffer(_)
+            | Self::SaveBufferAs(_)
+            | Self::CloseBuffer(_)
+            | Self::UnloadBuffer { .. }
+            | Self::LspHover
+            | Self::LspDefinition
+            | Self::LspReferences
+            | Self::LspPreviousDiagnostic
+            | Self::LspNextDiagnostic
+            | Self::LspPreviousErrorDiagnostic
+            | Self::LspNextErrorDiagnostic
+            | Self::LspRenamePrompt
+            | Self::LspCodeActions
+            | Self::PreviousTab(_)
+            | Self::NextTab(_)
+            | Self::ToggleWrap
+            | Self::SplitVertical
+            | Self::SplitHorizontal => KeymapInheritance::Editor,
+            Self::EnqueueNotification { .. }
+            | Self::OverwriteBuffer(_)
+            | Self::LspRename(_)
+            | Self::ApplyCompletion(_)
+            | Self::LspApplyCodeAction { .. }
+            | Self::OpenFile(_)
+            | Self::OpenFileAtCursor(_, _)
+            | Self::FocusBuffer(_)
+            | Self::SetBufferFiletype(_, _)
+            | Self::GitPickerToggleStage(_)
+            | Self::GitPickerDiscard(_)
+            | Self::GitPickerDiscardConfirmed(_) => KeymapInheritance::Explicit,
+        }
+    }
+}
+
+impl Intent {
+    /// Returns where a global mapping for this intent may be inherited.
+    pub fn keymap_inheritance(&self) -> KeymapInheritance {
+        match self {
+            Self::Editor(_) => KeymapInheritance::Editor,
+            Self::Command(command) => command.keymap_inheritance(),
+        }
+    }
 }
 
 /// Payload for applying a selected completion replacement.
@@ -331,5 +432,37 @@ mod tests {
         let rect = UiRect::new(Position::new(1, 2), Size::new(3, 4));
         assert_eq!(rect.origin, Position::new(1, 2));
         assert_eq!(rect.size, Size::new(3, 4));
+    }
+
+    #[test]
+    fn keymap_inheritance_distinguishes_editor_focus_and_application_intents() {
+        assert_eq!(
+            Command::FocusPaneLeft.keymap_inheritance(),
+            KeymapInheritance::Focus
+        );
+        assert_eq!(
+            Command::OpenFilePicker.keymap_inheritance(),
+            KeymapInheritance::Application
+        );
+        assert_eq!(
+            Command::LspDefinition.keymap_inheritance(),
+            KeymapInheritance::Editor
+        );
+        assert_eq!(
+            Command::EnqueueNotification {
+                level: NotificationLevel::Info,
+                message: String::new(),
+            }
+            .keymap_inheritance(),
+            KeymapInheritance::Explicit
+        );
+    }
+
+    #[test]
+    fn editor_intents_are_editor_only() {
+        let intent = Intent::Editor(crate::editor::EditorAction::new(
+            crate::editor::EditorOperation::MoveDown,
+        ));
+        assert_eq!(intent.keymap_inheritance(), KeymapInheritance::Editor);
     }
 }

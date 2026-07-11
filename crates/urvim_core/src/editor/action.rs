@@ -1,4 +1,4 @@
-use crate::buffer::{Boundary, BufferId, Cursor};
+use crate::buffer::{Boundary, Cursor};
 use crate::editor::ModeKind;
 use crate::globals;
 use crate::register::RegisterName;
@@ -213,18 +213,18 @@ pub enum LinewiseMotion {
     LastLine,
 }
 
-/// Actions that the main event loop processes.
+/// Editor-specific operation with modal metadata.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Action {
-    pub kind: Option<ActionKind>,
+pub struct EditorAction {
+    pub kind: Option<EditorOperation>,
     pub from_mode: Option<ModeKind>,
     pub to_mode: Option<ModeKind>,
     pub register: Option<RegisterName>,
 }
 
-/// Intent payload for an action envelope.
+/// Operation interpreted against an editor window.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ActionKind {
+pub enum EditorOperation {
     /// Move the cursor one character to the left.
     MoveLeft,
     /// Move the cursor one character down.
@@ -332,10 +332,6 @@ pub enum ActionKind {
     IndentIncrease,
     /// Toggle the current line's comment prefix.
     ToggleLineComment,
-    /// Switch to the previous tab.
-    PreviousTab,
-    /// Switch to the next tab.
-    NextTab,
     /// Move to the matching bracket for the one under the cursor.
     MoveToMatchingBracket,
     /// Move to the previous paragraph.
@@ -368,11 +364,9 @@ pub enum ActionKind {
     Undo,
     /// Redo the last undone edit.
     Redo,
-    /// Save the current buffer or a specific buffer when provided.
-    SaveBuffer(Option<BufferId>),
     /// Open the command-line overlay in normal mode.
     /// Wrap another action in a repeat count.
-    Count(usize, Box<Action>),
+    Count(usize, Box<EditorAction>),
     /// Apply an operator to the given target region.
     Operation(Operator, OperatorTarget),
     /// Replace a surrounding delimiter pair around the cursor.
@@ -401,9 +395,9 @@ pub enum ActionKind {
     },
 }
 
-impl Action {
+impl EditorAction {
     /// Creates a plain action envelope carrying the given intent payload.
-    pub fn new(kind: ActionKind) -> Self {
+    pub fn new(kind: EditorOperation) -> Self {
         Self {
             kind: Some(kind),
             from_mode: None,
@@ -434,96 +428,91 @@ impl Action {
 
     /// Creates an insert-char action.
     pub fn insert_char(ch: char) -> Self {
-        Self::new(ActionKind::InsertChar(ch))
+        Self::new(EditorOperation::InsertChar(ch))
     }
 
     /// Creates an insert-text action.
     pub fn insert_text(text: String) -> Self {
-        Self::new(ActionKind::InsertText(text))
+        Self::new(EditorOperation::InsertText(text))
     }
 
     /// Creates a raw-paste insertion action.
     pub fn insert_raw_paste(text: String) -> Self {
-        Self::new(ActionKind::InsertRawPaste(text))
+        Self::new(EditorOperation::InsertRawPaste(text))
     }
 
     /// Creates a raw-paste visual replacement action.
     pub fn replace_selection_raw_paste(text: String) -> Self {
-        Self::new(ActionKind::ReplaceSelectionRawPaste(text))
+        Self::new(EditorOperation::ReplaceSelectionRawPaste(text))
     }
 
     /// Creates an insert-newline action.
     pub fn insert_newline() -> Self {
-        Self::new(ActionKind::InsertNewline)
+        Self::new(EditorOperation::InsertNewline)
     }
 
     /// Creates a motion that moves forward to the given boundary.
     pub fn forward_to(boundary: Boundary) -> Self {
-        Self::new(ActionKind::ForwardTo(boundary))
+        Self::new(EditorOperation::ForwardTo(boundary))
     }
 
     /// Creates a motion that moves backward to the given boundary.
     pub fn back_to(boundary: Boundary) -> Self {
-        Self::new(ActionKind::BackTo(boundary))
+        Self::new(EditorOperation::BackTo(boundary))
     }
 
     /// Creates a forward-finding motion.
     pub fn find_forward(target: char) -> Self {
-        Self::new(ActionKind::FindForward(target))
+        Self::new(EditorOperation::FindForward(target))
     }
 
     /// Creates a backward-finding motion.
     pub fn find_backward(target: char) -> Self {
-        Self::new(ActionKind::FindBackward(target))
+        Self::new(EditorOperation::FindBackward(target))
     }
 
     /// Creates a forward till motion.
     pub fn till_forward(target: char) -> Self {
-        Self::new(ActionKind::TillForward(target))
+        Self::new(EditorOperation::TillForward(target))
     }
 
     /// Creates a backward till motion.
     pub fn till_backward(target: char) -> Self {
-        Self::new(ActionKind::TillBackward(target))
-    }
-
-    /// Creates a save-buffer action.
-    pub fn save_buffer(target: Option<BufferId>) -> Self {
-        Self::new(ActionKind::SaveBuffer(target))
+        Self::new(EditorOperation::TillBackward(target))
     }
 
     /// Creates a paste-after action.
     pub fn paste_after() -> Self {
-        Self::new(ActionKind::PasteAfter)
+        Self::new(EditorOperation::PasteAfter)
     }
 
     /// Creates a paste-before action.
     pub fn paste_before() -> Self {
-        Self::new(ActionKind::PasteBefore)
+        Self::new(EditorOperation::PasteBefore)
     }
 
     /// Creates a line-comment toggle action.
     pub fn toggle_line_comment() -> Self {
-        Self::new(ActionKind::ToggleLineComment)
+        Self::new(EditorOperation::ToggleLineComment)
     }
 
     /// Creates a jumplist backward navigation action.
     pub fn jump_backward() -> Self {
-        Self::new(ActionKind::JumpBackward)
+        Self::new(EditorOperation::JumpBackward)
     }
 
     /// Creates a jumplist forward navigation action.
     pub fn jump_forward() -> Self {
-        Self::new(ActionKind::JumpForward)
+        Self::new(EditorOperation::JumpForward)
     }
 
     /// Wraps an action in a repeat count.
-    pub fn count(count: usize, inner: Box<Action>) -> Self {
+    pub fn count(count: usize, inner: Box<EditorAction>) -> Self {
         let register = inner.register;
         let from_mode = inner.from_mode;
         let to_mode = inner.to_mode;
         Self {
-            kind: Some(ActionKind::Count(count, inner)),
+            kind: Some(EditorOperation::Count(count, inner)),
             from_mode,
             to_mode,
             register,
@@ -532,7 +521,7 @@ impl Action {
 
     /// Creates an operator action.
     pub fn operation(operator: Operator, target: OperatorTarget) -> Self {
-        Self::new(ActionKind::Operation(operator, target))
+        Self::new(EditorOperation::Operation(operator, target))
     }
 
     /// Targets a register for this action.
@@ -576,7 +565,7 @@ impl Action {
     }
 
     /// Returns the action kind if one is present.
-    fn kind_ref(&self) -> Option<&ActionKind> {
+    fn kind_ref(&self) -> Option<&EditorOperation> {
         self.kind.as_ref()
     }
 
@@ -584,53 +573,53 @@ impl Action {
     pub fn resets_remembered_column(&self) -> bool {
         matches!(
             self.kind_ref(),
-            Some(ActionKind::MoveLeft)
-                | Some(ActionKind::MoveRight)
-                | Some(ActionKind::ForwardTo(_))
-                | Some(ActionKind::BackTo(_))
-                | Some(ActionKind::MoveToLineEnd)
-                | Some(ActionKind::MoveToLineStart)
-                | Some(ActionKind::MoveToLineContentStart)
-                | Some(ActionKind::InsertChar(_))
-                | Some(ActionKind::InsertText(_))
-                | Some(ActionKind::InsertRawPaste(_))
-                | Some(ActionKind::ReplaceSelectionRawPaste(_))
-                | Some(ActionKind::InsertNewline)
-                | Some(ActionKind::DeleteBackward)
-                | Some(ActionKind::DeleteForward)
-                | Some(ActionKind::DeleteSelection)
-                | Some(ActionKind::DeleteLine)
-                | Some(ActionKind::YankLine)
-                | Some(ActionKind::YankSelection)
-                | Some(ActionKind::ChangeLine)
-                | Some(ActionKind::ChangeSelection)
-                | Some(ActionKind::VisualTextObject(_))
-                | Some(ActionKind::ChangeToLineEnd)
-                | Some(ActionKind::JoinWithSpace)
-                | Some(ActionKind::JoinWithoutSpace)
-                | Some(ActionKind::IndentDecrease)
-                | Some(ActionKind::IndentIncrease)
-                | Some(ActionKind::AppendAfterCursor)
-                | Some(ActionKind::AppendToLineEnd)
-                | Some(ActionKind::InsertAtLineStart)
-                | Some(ActionKind::OpenLineBelow)
-                | Some(ActionKind::OpenLineAbove)
-                | Some(ActionKind::ToggleLineComment)
-                | Some(ActionKind::FindForward(_))
-                | Some(ActionKind::FindBackward(_))
-                | Some(ActionKind::TillForward(_))
-                | Some(ActionKind::TillBackward(_))
-                | Some(ActionKind::RepeatLastFind)
-                | Some(ActionKind::RepeatLastFindReverse)
-                | Some(ActionKind::ToggleFold)
-                | Some(ActionKind::OpenFold)
-                | Some(ActionKind::CloseFold)
-                | Some(ActionKind::SurroundReplace { .. })
-                | Some(ActionKind::SurroundDelete { .. })
-                | Some(ActionKind::SurroundAdd { .. })
-                | Some(ActionKind::SurroundAddSelection { .. })
-                | Some(ActionKind::ReplaceChar(_))
-                | Some(ActionKind::ReplaceBackspace { .. })
+            Some(EditorOperation::MoveLeft)
+                | Some(EditorOperation::MoveRight)
+                | Some(EditorOperation::ForwardTo(_))
+                | Some(EditorOperation::BackTo(_))
+                | Some(EditorOperation::MoveToLineEnd)
+                | Some(EditorOperation::MoveToLineStart)
+                | Some(EditorOperation::MoveToLineContentStart)
+                | Some(EditorOperation::InsertChar(_))
+                | Some(EditorOperation::InsertText(_))
+                | Some(EditorOperation::InsertRawPaste(_))
+                | Some(EditorOperation::ReplaceSelectionRawPaste(_))
+                | Some(EditorOperation::InsertNewline)
+                | Some(EditorOperation::DeleteBackward)
+                | Some(EditorOperation::DeleteForward)
+                | Some(EditorOperation::DeleteSelection)
+                | Some(EditorOperation::DeleteLine)
+                | Some(EditorOperation::YankLine)
+                | Some(EditorOperation::YankSelection)
+                | Some(EditorOperation::ChangeLine)
+                | Some(EditorOperation::ChangeSelection)
+                | Some(EditorOperation::VisualTextObject(_))
+                | Some(EditorOperation::ChangeToLineEnd)
+                | Some(EditorOperation::JoinWithSpace)
+                | Some(EditorOperation::JoinWithoutSpace)
+                | Some(EditorOperation::IndentDecrease)
+                | Some(EditorOperation::IndentIncrease)
+                | Some(EditorOperation::AppendAfterCursor)
+                | Some(EditorOperation::AppendToLineEnd)
+                | Some(EditorOperation::InsertAtLineStart)
+                | Some(EditorOperation::OpenLineBelow)
+                | Some(EditorOperation::OpenLineAbove)
+                | Some(EditorOperation::ToggleLineComment)
+                | Some(EditorOperation::FindForward(_))
+                | Some(EditorOperation::FindBackward(_))
+                | Some(EditorOperation::TillForward(_))
+                | Some(EditorOperation::TillBackward(_))
+                | Some(EditorOperation::RepeatLastFind)
+                | Some(EditorOperation::RepeatLastFindReverse)
+                | Some(EditorOperation::ToggleFold)
+                | Some(EditorOperation::OpenFold)
+                | Some(EditorOperation::CloseFold)
+                | Some(EditorOperation::SurroundReplace { .. })
+                | Some(EditorOperation::SurroundDelete { .. })
+                | Some(EditorOperation::SurroundAdd { .. })
+                | Some(EditorOperation::SurroundAddSelection { .. })
+                | Some(EditorOperation::ReplaceChar(_))
+                | Some(EditorOperation::ReplaceBackspace { .. })
         )
     }
 
@@ -638,23 +627,23 @@ impl Action {
     pub fn uses_remembered_column(&self) -> bool {
         matches!(
             self.kind_ref(),
-            Some(ActionKind::MoveUp)
-                | Some(ActionKind::MoveDown)
-                | Some(ActionKind::MoveToFirstLine)
-                | Some(ActionKind::MoveToLastLine)
-                | Some(ActionKind::MovePageUp)
-                | Some(ActionKind::MovePageDown)
-                | Some(ActionKind::MoveHalfPageUp)
-                | Some(ActionKind::MoveHalfPageDown)
-                | Some(ActionKind::MoveToScreenTop)
-                | Some(ActionKind::MoveToScreenMiddle)
-                | Some(ActionKind::MoveToScreenBottom)
-                | Some(ActionKind::MoveToPreviousParagraph)
-                | Some(ActionKind::MoveToNextParagraph)
-                | Some(ActionKind::MoveToPreviousDiffHunk)
-                | Some(ActionKind::MoveToNextDiffHunk)
-                | Some(ActionKind::MoveToPreviousDiffHunkEnd)
-                | Some(ActionKind::MoveToNextDiffHunkEnd)
+            Some(EditorOperation::MoveUp)
+                | Some(EditorOperation::MoveDown)
+                | Some(EditorOperation::MoveToFirstLine)
+                | Some(EditorOperation::MoveToLastLine)
+                | Some(EditorOperation::MovePageUp)
+                | Some(EditorOperation::MovePageDown)
+                | Some(EditorOperation::MoveHalfPageUp)
+                | Some(EditorOperation::MoveHalfPageDown)
+                | Some(EditorOperation::MoveToScreenTop)
+                | Some(EditorOperation::MoveToScreenMiddle)
+                | Some(EditorOperation::MoveToScreenBottom)
+                | Some(EditorOperation::MoveToPreviousParagraph)
+                | Some(EditorOperation::MoveToNextParagraph)
+                | Some(EditorOperation::MoveToPreviousDiffHunk)
+                | Some(EditorOperation::MoveToNextDiffHunk)
+                | Some(EditorOperation::MoveToPreviousDiffHunkEnd)
+                | Some(EditorOperation::MoveToNextDiffHunkEnd)
         )
     }
 
@@ -662,43 +651,41 @@ impl Action {
     pub fn is_countable(&self) -> bool {
         matches!(
             self.kind_ref(),
-            Some(ActionKind::MoveLeft)
-                | Some(ActionKind::MoveRight)
-                | Some(ActionKind::MoveUp)
-                | Some(ActionKind::MoveDown)
-                | Some(ActionKind::ForwardTo(_))
-                | Some(ActionKind::BackTo(_))
-                | Some(ActionKind::MoveToFirstLine)
-                | Some(ActionKind::MoveToLastLine)
-                | Some(ActionKind::MoveToScreenTop)
-                | Some(ActionKind::MoveToScreenBottom)
-                | Some(ActionKind::JoinWithSpace)
-                | Some(ActionKind::JoinWithoutSpace)
-                | Some(ActionKind::IndentDecrease)
-                | Some(ActionKind::IndentIncrease)
-                | Some(ActionKind::DeleteLine)
-                | Some(ActionKind::ChangeLine)
-                | Some(ActionKind::VisualTextObject(_))
-                | Some(ActionKind::ChangeToLineEnd)
-                | Some(ActionKind::YankSelection)
-                | Some(ActionKind::PasteAfter)
-                | Some(ActionKind::PasteBefore)
-                | Some(ActionKind::OpenLineBelow)
-                | Some(ActionKind::OpenLineAbove)
-                | Some(ActionKind::ToggleLineComment)
-                | Some(ActionKind::PreviousTab)
-                | Some(ActionKind::NextTab)
-                | Some(ActionKind::FindForward(_))
-                | Some(ActionKind::FindBackward(_))
-                | Some(ActionKind::TillForward(_))
-                | Some(ActionKind::TillBackward(_))
-                | Some(ActionKind::RepeatLastFind)
-                | Some(ActionKind::RepeatLastChange)
-                | Some(ActionKind::Operation(_, _))
-                | Some(ActionKind::RepeatLastFindReverse)
-                | Some(ActionKind::MoveToPreviousParagraph)
-                | Some(ActionKind::MoveToNextParagraph)
-                | Some(ActionKind::ReplaceChar(_))
+            Some(EditorOperation::MoveLeft)
+                | Some(EditorOperation::MoveRight)
+                | Some(EditorOperation::MoveUp)
+                | Some(EditorOperation::MoveDown)
+                | Some(EditorOperation::ForwardTo(_))
+                | Some(EditorOperation::BackTo(_))
+                | Some(EditorOperation::MoveToFirstLine)
+                | Some(EditorOperation::MoveToLastLine)
+                | Some(EditorOperation::MoveToScreenTop)
+                | Some(EditorOperation::MoveToScreenBottom)
+                | Some(EditorOperation::JoinWithSpace)
+                | Some(EditorOperation::JoinWithoutSpace)
+                | Some(EditorOperation::IndentDecrease)
+                | Some(EditorOperation::IndentIncrease)
+                | Some(EditorOperation::DeleteLine)
+                | Some(EditorOperation::ChangeLine)
+                | Some(EditorOperation::VisualTextObject(_))
+                | Some(EditorOperation::ChangeToLineEnd)
+                | Some(EditorOperation::YankSelection)
+                | Some(EditorOperation::PasteAfter)
+                | Some(EditorOperation::PasteBefore)
+                | Some(EditorOperation::OpenLineBelow)
+                | Some(EditorOperation::OpenLineAbove)
+                | Some(EditorOperation::ToggleLineComment)
+                | Some(EditorOperation::FindForward(_))
+                | Some(EditorOperation::FindBackward(_))
+                | Some(EditorOperation::TillForward(_))
+                | Some(EditorOperation::TillBackward(_))
+                | Some(EditorOperation::RepeatLastFind)
+                | Some(EditorOperation::RepeatLastChange)
+                | Some(EditorOperation::Operation(_, _))
+                | Some(EditorOperation::RepeatLastFindReverse)
+                | Some(EditorOperation::MoveToPreviousParagraph)
+                | Some(EditorOperation::MoveToNextParagraph)
+                | Some(EditorOperation::ReplaceChar(_))
         )
     }
 
@@ -706,26 +693,24 @@ impl Action {
     pub fn is_line_action(&self) -> bool {
         matches!(
             self.kind_ref(),
-            Some(ActionKind::MoveToLineEnd)
-                | Some(ActionKind::MoveToLineStart)
-                | Some(ActionKind::MoveToLineContentStart)
-                | Some(ActionKind::MoveToFirstLine)
-                | Some(ActionKind::MoveToLastLine)
-                | Some(ActionKind::YankLine)
-                | Some(ActionKind::AppendToLineEnd)
-                | Some(ActionKind::InsertAtLineStart)
-                | Some(ActionKind::ToggleLineComment)
-                | Some(ActionKind::IndentDecrease)
-                | Some(ActionKind::IndentIncrease)
-                | Some(ActionKind::PreviousTab)
-                | Some(ActionKind::NextTab)
+            Some(EditorOperation::MoveToLineEnd)
+                | Some(EditorOperation::MoveToLineStart)
+                | Some(EditorOperation::MoveToLineContentStart)
+                | Some(EditorOperation::MoveToFirstLine)
+                | Some(EditorOperation::MoveToLastLine)
+                | Some(EditorOperation::YankLine)
+                | Some(EditorOperation::AppendToLineEnd)
+                | Some(EditorOperation::InsertAtLineStart)
+                | Some(EditorOperation::ToggleLineComment)
+                | Some(EditorOperation::IndentDecrease)
+                | Some(EditorOperation::IndentIncrease)
         )
     }
 
     /// Wraps the action in a count when the action supports it.
-    pub fn with_count(self, count: usize) -> Option<Action> {
+    pub fn with_count(self, count: usize) -> Option<EditorAction> {
         if (self.is_countable() || self.is_line_action()) && count > 0 && count < 10000 {
-            Some(Action::count(count, Box::new(self)))
+            Some(EditorAction::count(count, Box::new(self)))
         } else {
             None
         }
@@ -739,76 +724,78 @@ impl Action {
     pub fn is_snapshottable(&self) -> bool {
         match self.kind_ref() {
             None => false,
-            Some(ActionKind::DeleteBackward)
-            | Some(ActionKind::DeleteForward)
-            | Some(ActionKind::DeleteSelection)
-            | Some(ActionKind::DeleteLine)
-            | Some(ActionKind::PasteAfter)
-            | Some(ActionKind::PasteBefore)
-            | Some(ActionKind::InsertRawPaste(_))
-            | Some(ActionKind::ReplaceSelectionRawPaste(_))
-            | Some(ActionKind::JoinWithSpace)
-            | Some(ActionKind::JoinWithoutSpace)
-            | Some(ActionKind::IndentDecrease)
-            | Some(ActionKind::IndentIncrease)
-            | Some(ActionKind::ToggleLineComment) => true,
-            Some(ActionKind::InsertChar(_)) => false,
-            Some(ActionKind::Undo) | Some(ActionKind::Redo) => false,
-            Some(ActionKind::Count(_, inner)) => inner.is_snapshottable(),
-            Some(ActionKind::Operation(Operator::Delete, _)) => true,
-            Some(ActionKind::Operation(Operator::Change, _)) => false,
-            Some(ActionKind::Operation(Operator::Yank, _)) => false,
-            Some(ActionKind::ReplaceChar(_)) => self.from_mode != Some(ModeKind::Replace),
-            Some(ActionKind::ReplaceBackspaceLast | ActionKind::ReplaceBackspace { .. }) => false,
-            Some(ActionKind::SurroundReplace { .. })
-            | Some(ActionKind::SurroundDelete { .. })
-            | Some(ActionKind::SurroundAdd { .. })
-            | Some(ActionKind::SurroundAddSelection { .. }) => true,
-            Some(ActionKind::Operation(Operator::Lowercase, _))
-            | Some(ActionKind::Operation(Operator::Uppercase, _))
-            | Some(ActionKind::Operation(Operator::ToggleCase, _)) => true,
+            Some(EditorOperation::DeleteBackward)
+            | Some(EditorOperation::DeleteForward)
+            | Some(EditorOperation::DeleteSelection)
+            | Some(EditorOperation::DeleteLine)
+            | Some(EditorOperation::PasteAfter)
+            | Some(EditorOperation::PasteBefore)
+            | Some(EditorOperation::InsertRawPaste(_))
+            | Some(EditorOperation::ReplaceSelectionRawPaste(_))
+            | Some(EditorOperation::JoinWithSpace)
+            | Some(EditorOperation::JoinWithoutSpace)
+            | Some(EditorOperation::IndentDecrease)
+            | Some(EditorOperation::IndentIncrease)
+            | Some(EditorOperation::ToggleLineComment) => true,
+            Some(EditorOperation::InsertChar(_)) => false,
+            Some(EditorOperation::Undo) | Some(EditorOperation::Redo) => false,
+            Some(EditorOperation::Count(_, inner)) => inner.is_snapshottable(),
+            Some(EditorOperation::Operation(Operator::Delete, _)) => true,
+            Some(EditorOperation::Operation(Operator::Change, _)) => false,
+            Some(EditorOperation::Operation(Operator::Yank, _)) => false,
+            Some(EditorOperation::ReplaceChar(_)) => self.from_mode != Some(ModeKind::Replace),
+            Some(
+                EditorOperation::ReplaceBackspaceLast | EditorOperation::ReplaceBackspace { .. },
+            ) => false,
+            Some(EditorOperation::SurroundReplace { .. })
+            | Some(EditorOperation::SurroundDelete { .. })
+            | Some(EditorOperation::SurroundAdd { .. })
+            | Some(EditorOperation::SurroundAddSelection { .. }) => true,
+            Some(EditorOperation::Operation(Operator::Lowercase, _))
+            | Some(EditorOperation::Operation(Operator::Uppercase, _))
+            | Some(EditorOperation::Operation(Operator::ToggleCase, _)) => true,
             _ => false,
         }
     }
 
     pub fn updates_snapshot_cursor(&self) -> bool {
         match self.kind_ref() {
-            Some(ActionKind::MoveLeft)
-            | Some(ActionKind::MoveDown)
-            | Some(ActionKind::MoveUp)
-            | Some(ActionKind::MoveRight)
-            | Some(ActionKind::ForwardTo(_))
-            | Some(ActionKind::BackTo(_))
-            | Some(ActionKind::MoveToLineEnd)
-            | Some(ActionKind::MoveToLineStart)
-            | Some(ActionKind::MoveToLineContentStart)
-            | Some(ActionKind::MoveToFirstLine)
-            | Some(ActionKind::MoveToLastLine)
-            | Some(ActionKind::MovePageUp)
-            | Some(ActionKind::MovePageDown)
-            | Some(ActionKind::MoveHalfPageUp)
-            | Some(ActionKind::MoveHalfPageDown)
-            | Some(ActionKind::MoveToScreenTop)
-            | Some(ActionKind::MoveToScreenMiddle)
-            | Some(ActionKind::MoveToScreenBottom)
-            | Some(ActionKind::PasteAfter)
-            | Some(ActionKind::PasteBefore)
-            | Some(ActionKind::MoveToMatchingBracket)
-            | Some(ActionKind::MoveToPreviousParagraph)
-            | Some(ActionKind::MoveToNextParagraph)
-            | Some(ActionKind::VisualTextObject(_))
-            | Some(ActionKind::FindForward(_))
-            | Some(ActionKind::FindBackward(_))
-            | Some(ActionKind::TillForward(_))
-            | Some(ActionKind::TillBackward(_))
-            | Some(ActionKind::RepeatLastFind)
-            | Some(ActionKind::RepeatLastFindReverse) => true,
-            Some(ActionKind::Count(_, inner)) => inner.updates_snapshot_cursor(),
-            Some(ActionKind::Operation(
+            Some(EditorOperation::MoveLeft)
+            | Some(EditorOperation::MoveDown)
+            | Some(EditorOperation::MoveUp)
+            | Some(EditorOperation::MoveRight)
+            | Some(EditorOperation::ForwardTo(_))
+            | Some(EditorOperation::BackTo(_))
+            | Some(EditorOperation::MoveToLineEnd)
+            | Some(EditorOperation::MoveToLineStart)
+            | Some(EditorOperation::MoveToLineContentStart)
+            | Some(EditorOperation::MoveToFirstLine)
+            | Some(EditorOperation::MoveToLastLine)
+            | Some(EditorOperation::MovePageUp)
+            | Some(EditorOperation::MovePageDown)
+            | Some(EditorOperation::MoveHalfPageUp)
+            | Some(EditorOperation::MoveHalfPageDown)
+            | Some(EditorOperation::MoveToScreenTop)
+            | Some(EditorOperation::MoveToScreenMiddle)
+            | Some(EditorOperation::MoveToScreenBottom)
+            | Some(EditorOperation::PasteAfter)
+            | Some(EditorOperation::PasteBefore)
+            | Some(EditorOperation::MoveToMatchingBracket)
+            | Some(EditorOperation::MoveToPreviousParagraph)
+            | Some(EditorOperation::MoveToNextParagraph)
+            | Some(EditorOperation::VisualTextObject(_))
+            | Some(EditorOperation::FindForward(_))
+            | Some(EditorOperation::FindBackward(_))
+            | Some(EditorOperation::TillForward(_))
+            | Some(EditorOperation::TillBackward(_))
+            | Some(EditorOperation::RepeatLastFind)
+            | Some(EditorOperation::RepeatLastFindReverse) => true,
+            Some(EditorOperation::Count(_, inner)) => inner.updates_snapshot_cursor(),
+            Some(EditorOperation::Operation(
                 Operator::Lowercase | Operator::Uppercase | Operator::ToggleCase,
                 _,
             )) => false,
-            Some(ActionKind::Operation(_, _)) => false,
+            Some(EditorOperation::Operation(_, _)) => false,
             _ => false,
         }
     }
@@ -816,60 +803,60 @@ impl Action {
     /// Returns true when this action should become the new dot-repeat source after it succeeds.
     pub fn is_dot_repeat_source(&self) -> bool {
         match self.kind_ref() {
-            Some(ActionKind::DeleteBackward)
-            | Some(ActionKind::DeleteForward)
-            | Some(ActionKind::DeleteSelection)
-            | Some(ActionKind::JoinWithSpace)
-            | Some(ActionKind::JoinWithoutSpace)
-            | Some(ActionKind::DeleteLine)
-            | Some(ActionKind::ChangeLine)
-            | Some(ActionKind::ChangeSelection)
-            | Some(ActionKind::VisualTextObject(_))
-            | Some(ActionKind::ChangeToLineEnd)
-            | Some(ActionKind::InsertRawPaste(_))
-            | Some(ActionKind::ReplaceSelectionRawPaste(_))
-            | Some(ActionKind::PasteAfter)
-            | Some(ActionKind::PasteBefore)
-            | Some(ActionKind::IndentDecrease)
-            | Some(ActionKind::IndentIncrease)
-            | Some(ActionKind::AppendAfterCursor)
-            | Some(ActionKind::AppendToLineEnd)
-            | Some(ActionKind::InsertAtLineStart)
-            | Some(ActionKind::OpenLineBelow)
-            | Some(ActionKind::OpenLineAbove)
-            | Some(ActionKind::ToggleLineComment)
-            | Some(ActionKind::Operation(Operator::Delete, _))
-            | Some(ActionKind::Operation(Operator::Change, _))
-            | Some(ActionKind::Operation(Operator::Lowercase, _))
-            | Some(ActionKind::Operation(Operator::Uppercase, _))
-            | Some(ActionKind::Operation(Operator::ToggleCase, _))
-            | Some(ActionKind::ReplaceChar(_))
-            | Some(ActionKind::ReplaceBackspaceLast)
-            | Some(ActionKind::ReplaceBackspace { .. })
-            | Some(ActionKind::SurroundReplace { .. })
-            | Some(ActionKind::SurroundDelete { .. })
-            | Some(ActionKind::SurroundAdd { .. })
-            | Some(ActionKind::SurroundAddSelection { .. }) => true,
-            Some(ActionKind::Count(_, inner)) => inner.is_dot_repeat_source(),
+            Some(EditorOperation::DeleteBackward)
+            | Some(EditorOperation::DeleteForward)
+            | Some(EditorOperation::DeleteSelection)
+            | Some(EditorOperation::JoinWithSpace)
+            | Some(EditorOperation::JoinWithoutSpace)
+            | Some(EditorOperation::DeleteLine)
+            | Some(EditorOperation::ChangeLine)
+            | Some(EditorOperation::ChangeSelection)
+            | Some(EditorOperation::VisualTextObject(_))
+            | Some(EditorOperation::ChangeToLineEnd)
+            | Some(EditorOperation::InsertRawPaste(_))
+            | Some(EditorOperation::ReplaceSelectionRawPaste(_))
+            | Some(EditorOperation::PasteAfter)
+            | Some(EditorOperation::PasteBefore)
+            | Some(EditorOperation::IndentDecrease)
+            | Some(EditorOperation::IndentIncrease)
+            | Some(EditorOperation::AppendAfterCursor)
+            | Some(EditorOperation::AppendToLineEnd)
+            | Some(EditorOperation::InsertAtLineStart)
+            | Some(EditorOperation::OpenLineBelow)
+            | Some(EditorOperation::OpenLineAbove)
+            | Some(EditorOperation::ToggleLineComment)
+            | Some(EditorOperation::Operation(Operator::Delete, _))
+            | Some(EditorOperation::Operation(Operator::Change, _))
+            | Some(EditorOperation::Operation(Operator::Lowercase, _))
+            | Some(EditorOperation::Operation(Operator::Uppercase, _))
+            | Some(EditorOperation::Operation(Operator::ToggleCase, _))
+            | Some(EditorOperation::ReplaceChar(_))
+            | Some(EditorOperation::ReplaceBackspaceLast)
+            | Some(EditorOperation::ReplaceBackspace { .. })
+            | Some(EditorOperation::SurroundReplace { .. })
+            | Some(EditorOperation::SurroundDelete { .. })
+            | Some(EditorOperation::SurroundAdd { .. })
+            | Some(EditorOperation::SurroundAddSelection { .. }) => true,
+            Some(EditorOperation::Count(_, inner)) => inner.is_dot_repeat_source(),
             _ => false,
         }
     }
 
     /// Returns true when this action is the dot-repeat command itself.
     pub fn is_repeat_command(&self) -> bool {
-        matches!(self.kind_ref(), Some(ActionKind::RepeatLastChange))
-            || matches!(self.kind_ref(), Some(ActionKind::Count(_, inner)) if matches!(inner.kind_ref(), Some(ActionKind::RepeatLastChange)))
+        matches!(self.kind_ref(), Some(EditorOperation::RepeatLastChange))
+            || matches!(self.kind_ref(), Some(EditorOperation::Count(_, inner)) if matches!(inner.kind_ref(), Some(EditorOperation::RepeatLastChange)))
     }
 
     /// Returns the repeat source and count recorded by this action, if it is repeatable.
-    pub fn dot_repeat_source(&self) -> Option<(Action, usize)> {
+    pub fn dot_repeat_source(&self) -> Option<(EditorAction, usize)> {
         match self.kind_ref() {
-            Some(ActionKind::Count(count, inner)) => {
+            Some(EditorOperation::Count(count, inner)) => {
                 let (action, source_count) = inner.dot_repeat_source()?;
                 Some((action, count.saturating_mul(source_count)))
             }
             Some(kind) if self.is_dot_repeat_source() => Some((
-                Action {
+                EditorAction {
                     kind: Some(kind.clone()),
                     from_mode: self.from_mode,
                     to_mode: self.to_mode,
@@ -884,7 +871,7 @@ impl Action {
     /// Resolves this action into the buffer edit that should be replayed for dot repeat.
     pub fn resolve_dot_repeat(&self) -> Option<RepeatReplay> {
         match self.kind_ref() {
-            Some(ActionKind::RepeatLastChange) => {
+            Some(EditorOperation::RepeatLastChange) => {
                 globals::get_last_repeat().map(|state| RepeatReplay {
                     action: state.action,
                     structural_count: state.count,
@@ -892,8 +879,8 @@ impl Action {
                     insert_text: state.insert_text,
                 })
             }
-            Some(ActionKind::Count(count, inner))
-                if matches!(inner.kind_ref(), Some(ActionKind::RepeatLastChange)) =>
+            Some(EditorOperation::Count(count, inner))
+                if matches!(inner.kind_ref(), Some(EditorOperation::RepeatLastChange)) =>
             {
                 globals::get_last_repeat().map(|state| RepeatReplay {
                     action: state.action,
@@ -922,8 +909,8 @@ impl HandleKeyResult {
     }
 }
 
-impl From<Action> for HandleKeyResult {
-    fn from(action: Action) -> Self {
+impl From<EditorAction> for HandleKeyResult {
+    fn from(action: EditorAction) -> Self {
         HandleKeyResult::Complete(Intent::from(action))
     }
 }
@@ -944,7 +931,7 @@ impl From<Intent> for HandleKeyResult {
 #[derive(Debug, Clone, PartialEq)]
 pub struct RepeatReplay {
     /// The repeatable normal-mode action to replay.
-    pub action: Action,
+    pub action: EditorAction,
     /// The count to apply to the stored structural action.
     pub structural_count: usize,
     /// The number of times to replay the completed edit for the dot command.

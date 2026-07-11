@@ -1,12 +1,13 @@
 use super::keymap::MAX_COUNT;
 use super::surround;
 use super::text_object::{self, TextObjectScope};
-use super::{Action, ActionKind, HandleKeyResult, ModeKind, TrieKeymap};
+use super::{EditorAction, EditorOperation, HandleKeyResult, ModeKind, TrieKeymap};
 use crate::buffer::Boundary;
 use crate::editor::{Operator, OperatorTarget};
 use crate::globals;
 use crate::globals::{Direction, FindKind};
 use crate::register::RegisterName;
+use crate::ui::Intent;
 use urvim_terminal::{Key, KeyCode};
 
 /// Shared state and key handling for visual modes.
@@ -76,7 +77,7 @@ impl VisualModeState {
         if key.code == KeyCode::Esc {
             self.reset();
             return HandleKeyResult::complete(
-                Action::mode_transition(ModeKind::Normal).with_from_mode(self.mode_kind),
+                EditorAction::mode_transition(ModeKind::Normal).with_from_mode(self.mode_kind),
             );
         }
 
@@ -174,7 +175,7 @@ impl VisualModeState {
         self.trie_keys.push(key_str);
 
         if let Some(intent) = self.keymap.get_action(&self.trie_keys) {
-            let result = match intent.as_action().cloned() {
+            let result = match intent.as_editor_action().cloned() {
                 Some(mut action) => {
                     if let Some(reg) = self.register.take() {
                         action = action.with_register(reg);
@@ -205,7 +206,7 @@ impl VisualModeState {
         if let Some(text_object) = text_object::resolve(scope, &key_str) {
             self.reset();
             return HandleKeyResult::Complete(
-                Action::new(ActionKind::VisualTextObject(text_object))
+                EditorAction::new(EditorOperation::VisualTextObject(text_object))
                     .with_from_mode(self.mode_kind)
                     .into(),
             );
@@ -220,10 +221,10 @@ impl VisualModeState {
             && !key.modifiers.has_ctrl()
         {
             let mut action = match (data.kind, data.direction) {
-                (FindKind::Find, Direction::Forward) => Action::find_forward(c),
-                (FindKind::Find, Direction::Backward) => Action::find_backward(c),
-                (FindKind::Till, Direction::Forward) => Action::till_forward(c),
-                (FindKind::Till, Direction::Backward) => Action::till_backward(c),
+                (FindKind::Find, Direction::Forward) => EditorAction::find_forward(c),
+                (FindKind::Find, Direction::Backward) => EditorAction::find_backward(c),
+                (FindKind::Till, Direction::Forward) => EditorAction::till_forward(c),
+                (FindKind::Till, Direction::Backward) => EditorAction::till_backward(c),
             };
             if let Some(reg) = self.register.take() {
                 action = action.with_register(reg);
@@ -259,72 +260,90 @@ impl VisualModeState {
 }
 
 fn build_visual_keymap(exit_key: &str, switch_key: &str, switch_to: ModeKind) -> TrieKeymap {
-    let mut keymap = TrieKeymap::new();
+    let mut keymap = TrieKeymap::<Intent>::new();
 
-    keymap.insert_str("h", Action::new(ActionKind::MoveLeft));
-    keymap.insert_str("j", Action::new(ActionKind::MoveDown));
-    keymap.insert_str("k", Action::new(ActionKind::MoveUp));
-    keymap.insert_str("l", Action::new(ActionKind::MoveRight));
+    keymap.insert_str("h", EditorAction::new(EditorOperation::MoveLeft));
+    keymap.insert_str("j", EditorAction::new(EditorOperation::MoveDown));
+    keymap.insert_str("k", EditorAction::new(EditorOperation::MoveUp));
+    keymap.insert_str("l", EditorAction::new(EditorOperation::MoveRight));
 
-    keymap.insert_str("w", Action::forward_to(Boundary::Word));
-    keymap.insert_str("b", Action::back_to(Boundary::Word));
-    keymap.insert_str("e", Action::forward_to(Boundary::WordEnd));
+    keymap.insert_str("w", EditorAction::forward_to(Boundary::Word));
+    keymap.insert_str("b", EditorAction::back_to(Boundary::Word));
+    keymap.insert_str("e", EditorAction::forward_to(Boundary::WordEnd));
 
-    keymap.insert_str("W", Action::forward_to(Boundary::BigWord));
-    keymap.insert_str("B", Action::back_to(Boundary::BigWord));
-    keymap.insert_str("E", Action::forward_to(Boundary::BigWordEnd));
+    keymap.insert_str("W", EditorAction::forward_to(Boundary::BigWord));
+    keymap.insert_str("B", EditorAction::back_to(Boundary::BigWord));
+    keymap.insert_str("E", EditorAction::forward_to(Boundary::BigWordEnd));
 
-    keymap.insert_str("0", Action::new(ActionKind::MoveToLineStart));
-    keymap.insert_str("^", Action::new(ActionKind::MoveToLineContentStart));
-    keymap.insert_str("$", Action::new(ActionKind::MoveToLineEnd));
-    keymap.insert_str("gg", Action::new(ActionKind::MoveToFirstLine));
-    keymap.insert_str("G", Action::new(ActionKind::MoveToLastLine));
-    keymap.insert_str("H", Action::new(ActionKind::MoveToScreenTop));
-    keymap.insert_str("M", Action::new(ActionKind::MoveToScreenMiddle));
-    keymap.insert_str("L", Action::new(ActionKind::MoveToScreenBottom));
+    keymap.insert_str("0", EditorAction::new(EditorOperation::MoveToLineStart));
+    keymap.insert_str(
+        "^",
+        EditorAction::new(EditorOperation::MoveToLineContentStart),
+    );
+    keymap.insert_str("$", EditorAction::new(EditorOperation::MoveToLineEnd));
+    keymap.insert_str("gg", EditorAction::new(EditorOperation::MoveToFirstLine));
+    keymap.insert_str("G", EditorAction::new(EditorOperation::MoveToLastLine));
+    keymap.insert_str("H", EditorAction::new(EditorOperation::MoveToScreenTop));
+    keymap.insert_str("M", EditorAction::new(EditorOperation::MoveToScreenMiddle));
+    keymap.insert_str("L", EditorAction::new(EditorOperation::MoveToScreenBottom));
     keymap.insert_str(
         "gu",
-        Action::operation(Operator::Lowercase, OperatorTarget::Selection)
+        EditorAction::operation(Operator::Lowercase, OperatorTarget::Selection)
             .with_to_mode(ModeKind::Normal),
     );
     keymap.insert_str(
         "gU",
-        Action::operation(Operator::Uppercase, OperatorTarget::Selection)
+        EditorAction::operation(Operator::Uppercase, OperatorTarget::Selection)
             .with_to_mode(ModeKind::Normal),
     );
     keymap.insert_str(
         "g~",
-        Action::operation(Operator::ToggleCase, OperatorTarget::Selection)
+        EditorAction::operation(Operator::ToggleCase, OperatorTarget::Selection)
             .with_to_mode(ModeKind::Normal),
     );
-    keymap.insert_str("{", Action::new(ActionKind::MoveToPreviousParagraph));
-    keymap.insert_str("}", Action::new(ActionKind::MoveToNextParagraph));
-    keymap.insert_str("%", Action::new(ActionKind::MoveToMatchingBracket));
-    keymap.insert_str(";", Action::new(ActionKind::RepeatLastFind));
-    keymap.insert_str(",", Action::new(ActionKind::RepeatLastFindReverse));
-    keymap.insert_str(exit_key, Action::mode_transition(ModeKind::Normal));
-    keymap.insert_str(switch_key, Action::mode_transition(switch_to));
+    keymap.insert_str(
+        "{",
+        EditorAction::new(EditorOperation::MoveToPreviousParagraph),
+    );
+    keymap.insert_str("}", EditorAction::new(EditorOperation::MoveToNextParagraph));
+    keymap.insert_str(
+        "%",
+        EditorAction::new(EditorOperation::MoveToMatchingBracket),
+    );
+    keymap.insert_str(";", EditorAction::new(EditorOperation::RepeatLastFind));
+    keymap.insert_str(
+        ",",
+        EditorAction::new(EditorOperation::RepeatLastFindReverse),
+    );
+    keymap.insert_str(exit_key, EditorAction::mode_transition(ModeKind::Normal));
+    keymap.insert_str(switch_key, EditorAction::mode_transition(switch_to));
     keymap.insert_str(
         "d",
-        Action::new(ActionKind::DeleteSelection).with_to_mode(ModeKind::Normal),
+        EditorAction::new(EditorOperation::DeleteSelection).with_to_mode(ModeKind::Normal),
     );
     keymap.insert_str(
         "y",
-        Action::new(ActionKind::YankSelection).with_to_mode(ModeKind::Normal),
+        EditorAction::new(EditorOperation::YankSelection).with_to_mode(ModeKind::Normal),
     );
     keymap.insert_str(
         "c",
-        Action::new(ActionKind::ChangeSelection).with_to_mode(ModeKind::Insert),
+        EditorAction::new(EditorOperation::ChangeSelection).with_to_mode(ModeKind::Insert),
     );
     register_visual_surround_bindings(&mut keymap);
-    keymap.insert_str("<Left>", Action::new(ActionKind::MoveLeft));
-    keymap.insert_str("<Down>", Action::new(ActionKind::MoveDown));
-    keymap.insert_str("<Up>", Action::new(ActionKind::MoveUp));
-    keymap.insert_str("<Right>", Action::new(ActionKind::MoveRight));
-    keymap.insert_str("<PageUp>", Action::new(ActionKind::MovePageUp));
-    keymap.insert_str("<PageDown>", Action::new(ActionKind::MovePageDown));
-    keymap.insert_str("<C-u>", Action::new(ActionKind::MoveHalfPageUp));
-    keymap.insert_str("<C-d>", Action::new(ActionKind::MoveHalfPageDown));
+    keymap.insert_str("<Left>", EditorAction::new(EditorOperation::MoveLeft));
+    keymap.insert_str("<Down>", EditorAction::new(EditorOperation::MoveDown));
+    keymap.insert_str("<Up>", EditorAction::new(EditorOperation::MoveUp));
+    keymap.insert_str("<Right>", EditorAction::new(EditorOperation::MoveRight));
+    keymap.insert_str("<PageUp>", EditorAction::new(EditorOperation::MovePageUp));
+    keymap.insert_str(
+        "<PageDown>",
+        EditorAction::new(EditorOperation::MovePageDown),
+    );
+    keymap.insert_str("<C-u>", EditorAction::new(EditorOperation::MoveHalfPageUp));
+    keymap.insert_str(
+        "<C-d>",
+        EditorAction::new(EditorOperation::MoveHalfPageDown),
+    );
 
     keymap
 }
@@ -333,7 +352,7 @@ fn register_visual_surround_bindings(trie_keymap: &mut TrieKeymap) {
     for (selector, delimiter) in surround::delimiter_selectors() {
         trie_keymap.insert_str(
             &format!("gsa{selector}"),
-            Action::new(ActionKind::SurroundAddSelection {
+            EditorAction::new(EditorOperation::SurroundAddSelection {
                 delimiter: *delimiter,
             })
             .with_to_mode(ModeKind::Normal),

@@ -101,6 +101,8 @@ Defines custom key bindings for supported editor modes.
 - Type: TOML tables under `[keymaps.normal]`, `[keymaps.insert]`, `[keymaps.visual]`, `[keymaps.visual_line]`, and `[keymaps.resizing]`
 - Default: no custom mappings
 - Behavior: mappings are applied after built-in bindings, so configured mappings replace built-ins with the same key sequence
+- Inheritance: focused plugin panes and windows inherit normal-mode focus and application mappings after their local mappings; picker, rename, and confirmation dialogs inherit application mappings only after their local controls and text input
+- Dialog input: printable normal-mode mappings are shadowed by picker and rename text entry; unrecognized keys may start an inherited application mapping, and a failed inherited sequence is consumed
 - Keys: use urvim's canonical key string format, such as `jk`, `<Space>f`, `<C-s>`, or `<Esc>`
 - Values: command strings parsed the same way as command-line input, such as `write`, `pick file`, `mode normal`, or `action cursor right`
 - Multi-command mappings: map to a configured script name; direct multi-command keymap values are not supported

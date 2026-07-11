@@ -10,6 +10,7 @@ impl Layout {
         query: impl Into<String>,
         positive_intent: impl Into<Intent>,
     ) {
+        self.clear_modal_inherited_keys();
         self.dialogs.confirmation_box = Some(ConfirmationBox::new(query, positive_intent));
     }
 
@@ -36,6 +37,7 @@ impl Layout {
 
     pub(super) fn close_confirmation_box(&mut self) {
         self.dialogs.confirmation_box = None;
+        self.clear_modal_inherited_keys();
     }
 
     pub(super) fn confirmation_box_is_open(&self) -> bool {

@@ -1,8 +1,10 @@
-use crate::ui::Intent;
+use super::HandleKeyResult;
+use crate::ui::{Intent, KeymapInheritance};
 use std::collections::BTreeMap;
 use std::fmt;
+use urvim_terminal::Key;
 
-/// A mapping from key sequences to intents.
+/// A mapping from key sequences to values.
 pub trait Keymap {
     /// Returns the intent for an exact key sequence, if present.
     fn get_action(&self, keys: &[String]) -> Option<Intent>;
@@ -14,26 +16,28 @@ pub trait Keymap {
 
 pub(super) const MAX_COUNT: usize = 9999;
 
-struct TrieNode {
-    children: BTreeMap<String, TrieNode>,
-    intent: Option<Intent>,
+#[derive(Debug)]
+struct TrieNode<T> {
+    children: BTreeMap<String, TrieNode<T>>,
+    value: Option<T>,
 }
 
-impl TrieNode {
+impl<T> TrieNode<T> {
     fn new() -> Self {
         Self {
             children: BTreeMap::new(),
-            intent: None,
+            value: None,
         }
     }
 }
 
 /// Trie-based keymap for efficient key sequence matching.
-pub struct TrieKeymap {
-    root: TrieNode,
+#[derive(Debug)]
+pub struct TrieKeymap<T = Intent> {
+    root: TrieNode<T>,
 }
 
-impl TrieKeymap {
+impl<T> TrieKeymap<T> {
     /// Creates a new empty trie keymap.
     pub fn new() -> Self {
         Self {
@@ -42,21 +46,21 @@ impl TrieKeymap {
     }
 
     /// Inserts a single-key binding.
-    pub fn insert<T: Into<Intent>>(&mut self, key: String, intent: T) {
-        self.insert_str(&key, intent);
+    pub fn insert<V: Into<T>>(&mut self, key: String, value: V) {
+        self.insert_str(&key, value);
     }
 
     /// Inserts a binding from a canonical key string.
     ///
     /// The string uses the same canonical notation produced by
     /// `Key::canonical_string()`.
-    pub fn insert_str<T: Into<Intent>>(&mut self, keys: &str, intent: T) {
+    pub fn insert_str<V: Into<T>>(&mut self, keys: &str, value: V) {
         let parsed = validate_key_string(keys).expect("invalid canonical key string");
-        self.insert_sequence(parsed, intent);
+        self.insert_sequence(parsed, value);
     }
 
     /// Inserts a multi-key binding from an already parsed sequence.
-    pub fn insert_sequence<T: Into<Intent>>(&mut self, keys: Vec<String>, intent: T) {
+    pub fn insert_sequence<V: Into<T>>(&mut self, keys: Vec<String>, value: V) {
         let mut current = &mut self.root;
         for key in &keys {
             current = current
@@ -64,9 +68,113 @@ impl TrieKeymap {
                 .entry(key.clone())
                 .or_insert_with(TrieNode::new);
         }
-        current.intent = Some(intent.into());
+        current.value = Some(value.into());
     }
 
+    /// Returns the value bound to an exact key sequence.
+    pub fn get(&self, keys: &[String]) -> Option<&T> {
+        self.node(keys)?.value.as_ref()
+    }
+
+    /// Returns the exact value when it satisfies `eligible`.
+    pub fn get_filtered(&self, keys: &[String], eligible: impl Fn(&T) -> bool) -> Option<&T> {
+        self.get(keys).filter(|value| eligible(value))
+    }
+
+    /// Removes an exact key sequence and returns its value, if present.
+    pub fn remove_sequence(&mut self, keys: &[String]) -> Option<T> {
+        fn remove<T>(node: &mut TrieNode<T>, keys: &[String]) -> Option<T> {
+            if keys.is_empty() {
+                return node.value.take();
+            }
+
+            let key = keys[0].clone();
+            let value = node
+                .children
+                .get_mut(&key)
+                .and_then(|child| remove(child, &keys[1..]));
+            if node
+                .children
+                .get(&key)
+                .is_some_and(|child| child.value.is_none() && child.children.is_empty())
+            {
+                node.children.remove(&key);
+            }
+            value
+        }
+
+        remove(&mut self.root, keys)
+    }
+
+    /// Returns all exact bindings and their key sequences.
+    pub fn bindings(&self) -> Vec<(Vec<String>, &T)> {
+        fn collect<'a, T>(
+            node: &'a TrieNode<T>,
+            prefix: &mut Vec<String>,
+            bindings: &mut Vec<(Vec<String>, &'a T)>,
+        ) {
+            if let Some(value) = node.value.as_ref() {
+                bindings.push((prefix.clone(), value));
+            }
+            for (key, child) in &node.children {
+                prefix.push(key.clone());
+                collect(child, prefix, bindings);
+                prefix.pop();
+            }
+        }
+
+        let mut bindings = Vec::new();
+        collect(&self.root, &mut Vec::new(), &mut bindings);
+        bindings
+    }
+
+    /// Returns `true` if the provided key sequence is a valid prefix in the trie.
+    pub fn is_prefix(&self, keys: &[String]) -> bool {
+        let Some(current) = self.node(keys) else {
+            return false;
+        };
+        !current.children.is_empty() || current.value.is_some()
+    }
+
+    /// Returns whether the sequence reaches an eligible value or descendant binding.
+    pub fn is_prefix_filtered(&self, keys: &[String], eligible: impl Fn(&T) -> bool) -> bool {
+        self.node(keys)
+            .is_some_and(|node| Self::subtree_has_filtered_value(node, &eligible))
+    }
+
+    /// Returns `true` if the provided key sequence has at least one child binding.
+    pub fn has_children(&self, keys: &[String]) -> bool {
+        self.node(keys)
+            .is_some_and(|current| !current.children.is_empty())
+    }
+
+    /// Returns whether the sequence has an eligible descendant binding.
+    pub fn has_children_filtered(&self, keys: &[String], eligible: impl Fn(&T) -> bool) -> bool {
+        self.node(keys).is_some_and(|node| {
+            node.children
+                .values()
+                .any(|child| Self::subtree_has_filtered_value(child, &eligible))
+        })
+    }
+
+    fn node(&self, keys: &[String]) -> Option<&TrieNode<T>> {
+        let mut current = &self.root;
+        for key in keys {
+            current = current.children.get(key)?;
+        }
+        Some(current)
+    }
+
+    fn subtree_has_filtered_value(node: &TrieNode<T>, eligible: &impl Fn(&T) -> bool) -> bool {
+        node.value.as_ref().is_some_and(eligible)
+            || node
+                .children
+                .values()
+                .any(|child| Self::subtree_has_filtered_value(child, eligible))
+    }
+}
+
+impl TrieKeymap<Intent> {
     /// Inserts configured mappings from canonical key strings to command strings.
     pub fn insert_configured(&mut self, mappings: &BTreeMap<String, String>) {
         for (keys, command) in mappings {
@@ -89,42 +197,11 @@ impl TrieKeymap {
 
     /// Returns the intent bound to an exact key sequence.
     pub fn get_action(&self, keys: &[String]) -> Option<Intent> {
-        let mut current = &self.root;
-        for key in keys {
-            match current.children.get(key) {
-                Some(node) => current = node,
-                None => return None,
-            }
-        }
-        current.intent.clone()
-    }
-
-    /// Returns `true` if the provided key sequence is a valid prefix in the trie.
-    pub fn is_prefix(&self, keys: &[String]) -> bool {
-        let mut current = &self.root;
-        for key in keys {
-            match current.children.get(key) {
-                Some(node) => current = node,
-                None => return false,
-            }
-        }
-        !current.children.is_empty() || current.intent.is_some()
-    }
-
-    /// Returns `true` if the provided key sequence has at least one child binding.
-    pub fn has_children(&self, keys: &[String]) -> bool {
-        let mut current = &self.root;
-        for key in keys {
-            match current.children.get(key) {
-                Some(node) => current = node,
-                None => return false,
-            }
-        }
-        !current.children.is_empty()
+        self.get(keys).cloned()
     }
 }
 
-impl Keymap for TrieKeymap {
+impl Keymap for TrieKeymap<Intent> {
     fn get_action(&self, keys: &[String]) -> Option<Intent> {
         TrieKeymap::get_action(self, keys)
     }
@@ -141,6 +218,57 @@ impl Keymap for TrieKeymap {
 impl Default for TrieKeymap {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Resolves inherited mappings without involving editor mode state.
+#[derive(Debug)]
+pub struct InheritedKeymap {
+    keymap: TrieKeymap<Intent>,
+    pending: Vec<String>,
+}
+
+impl InheritedKeymap {
+    /// Creates an inherited resolver over an effective keymap.
+    pub fn new(keymap: TrieKeymap<Intent>) -> Self {
+        Self {
+            keymap,
+            pending: Vec::new(),
+        }
+    }
+
+    /// Routes a key through mappings whose inheritance satisfies `eligible`.
+    pub fn handle_key(
+        &mut self,
+        key: &Key,
+        eligible: impl Fn(KeymapInheritance) -> bool,
+    ) -> HandleKeyResult {
+        self.pending.push(key.canonical_string());
+
+        if let Some(intent) = self
+            .keymap
+            .get_filtered(&self.pending, |intent| {
+                eligible(intent.keymap_inheritance())
+            })
+            .cloned()
+        {
+            self.pending.clear();
+            return HandleKeyResult::Complete(intent);
+        }
+
+        if self.keymap.is_prefix_filtered(&self.pending, |intent| {
+            eligible(intent.keymap_inheritance())
+        }) {
+            return HandleKeyResult::WaitForMore;
+        }
+
+        self.pending.clear();
+        HandleKeyResult::InvalidSequence
+    }
+
+    /// Clears any partially entered inherited key sequence.
+    pub fn clear_pending(&mut self) {
+        self.pending.clear();
     }
 }
 
@@ -273,7 +401,8 @@ impl CountParser {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::editor::{Action, ActionKind};
+    use crate::editor::{EditorAction, EditorOperation};
+    use crate::ui::Command;
 
     #[test]
     fn test_parse_key_string_single_key() {
@@ -310,11 +439,72 @@ mod tests {
     #[test]
     fn test_insert_str_matches_sequence_lookup() {
         let mut keymap = TrieKeymap::new();
-        keymap.insert_str("gg", Action::new(ActionKind::MoveUp));
+        keymap.insert_str("gg", EditorAction::new(EditorOperation::MoveUp));
 
         assert_eq!(
             keymap.get_action(&["g".to_string(), "g".to_string()]),
-            Some(Action::new(ActionKind::MoveUp).into())
+            Some(EditorAction::new(EditorOperation::MoveUp).into())
+        );
+    }
+
+    #[test]
+    fn generic_trie_keymap_supports_bindings_and_removal() {
+        let mut keymap = TrieKeymap::<String>::new();
+        keymap.insert_sequence(vec!["g".to_string(), "g".to_string()], "first".to_string());
+        keymap.insert_sequence(vec!["g".to_string(), "h".to_string()], "second".to_string());
+
+        assert_eq!(keymap.get(&["g".to_string()]), None);
+        assert!(keymap.is_prefix(&["g".to_string()]));
+        assert_eq!(
+            keymap
+                .get(&["g".to_string(), "g".to_string()])
+                .map(String::as_str),
+            Some("first")
+        );
+        assert_eq!(keymap.bindings().len(), 2);
+        assert_eq!(
+            keymap.remove_sequence(&["g".to_string(), "g".to_string()]),
+            Some("first".to_string())
+        );
+        assert!(keymap.is_prefix(&["g".to_string()]));
+        assert_eq!(
+            keymap.remove_sequence(&["g".to_string(), "g".to_string()]),
+            None
+        );
+    }
+
+    #[test]
+    fn filtered_prefix_ignores_ineligible_descendants() {
+        let mut keymap = TrieKeymap::<Intent>::new();
+        keymap.insert_str("gd", Command::LspDefinition);
+
+        assert!(!keymap.is_prefix_filtered(&["g".to_string()], |intent| {
+            intent.keymap_inheritance() == KeymapInheritance::Focus
+        }));
+    }
+
+    #[test]
+    fn filtered_prefix_keeps_mixed_eligible_descendants() {
+        let mut keymap = TrieKeymap::<Intent>::new();
+        keymap.insert_str("gd", Command::LspDefinition);
+        keymap.insert_str("gp", Command::FocusPreviousWindow);
+
+        assert!(keymap.is_prefix_filtered(&["g".to_string()], |intent| {
+            intent.keymap_inheritance() == KeymapInheritance::Focus
+        }));
+        assert!(
+            keymap
+                .get_filtered(&["g".to_string(), "p".to_string()], |intent| {
+                    intent.keymap_inheritance() == KeymapInheritance::Focus
+                })
+                .is_some()
+        );
+        assert!(
+            keymap
+                .get_filtered(&["g".to_string(), "d".to_string()], |intent| {
+                    intent.keymap_inheritance() == KeymapInheritance::Focus
+                })
+                .is_none()
         );
     }
 

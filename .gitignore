@@ -12,3 +12,4 @@ TODO.md
 /examples/plugins/cargo-fmt/src/urvim_cargo_fmt_plugin.egg-info
 /examples/plugins/symbol-lens/src/urvim_symbol_lens_plugin.egg-info
 /examples/plugins/symbol-lens/src/symbol_lens/__pycache__
+/.maki

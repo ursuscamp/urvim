@@ -10,12 +10,21 @@ This is a list, in no particular order, of things that need to be addressed whic
 - code action hints for the current line (with ghost text)
 - quick jump
 - healthcheck
+- expand intents to have more scriptable actions
 
 # Bugs
 
-- the borders on bordered windows should take their underlying background from the cell under it instead of overwriting the background
-- test flakiness due to global thread state
+- plugin windows on top of quit modal
 
 # Refactors
 
+# Plugin Windows
+
+
 # Plugins
+
+- can plugins expose APIs to each other?
+- there are lots of utility functions that convert script values to other types. can that be a trait?
+- we need to look for more opportunities for events for plugins to react to
+- custom pickers
+- confirmation-style dialogs

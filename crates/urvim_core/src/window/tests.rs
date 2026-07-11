@@ -7,7 +7,8 @@ use crate::config::{
     AdvancedGlyphCapability, AutoIndentMode, Config, DefaultRegisters, ScrollMargin, WrapMode,
 };
 use crate::editor::{
-    Action, ActionKind, BoundaryMotion, BracketKind, DelimiterFamily, LinewiseMotion, ModeKind,
+    BoundaryMotion, BracketKind, DelimiterFamily, EditorAction, EditorOperation, LinewiseMotion,
+    ModeKind,
 };
 use crate::editor::{Operator, OperatorTarget, QuoteKind, TextObject};
 use crate::globals;
@@ -26,7 +27,7 @@ use urvim_theme::{HighlightStyles, Tag, Theme, ThemeKind};
 
 const CONTENT_COL: u16 = 5;
 
-fn process_action_and_snapshot(window: &mut Window, action: &Action) {
+fn process_action_and_snapshot(window: &mut Window, action: &EditorAction) {
     assert_eq!(window.dispatch_action(action), ActionResult::Handled);
 
     if action.is_snapshottable() {
@@ -38,7 +39,7 @@ fn process_action_and_snapshot(window: &mut Window, action: &Action) {
     }
 }
 
-fn dispatch_with_main_loop_snapshot(window: &mut Window, action: &Action) {
+fn dispatch_with_main_loop_snapshot(window: &mut Window, action: &EditorAction) {
     assert_eq!(window.dispatch_action(action), ActionResult::Handled);
 
     if action.is_snapshottable() {
@@ -55,7 +56,7 @@ fn test_surround_replace_updates_nearest_enclosing_pair() {
     let mut window = Window::new(Buffer::from_str("one {two {three} four} five"));
     window.set_cursor(Cursor::new(0, 10));
 
-    let action = Action::new(ActionKind::SurroundReplace {
+    let action = EditorAction::new(EditorOperation::SurroundReplace {
         target: DelimiterFamily::Curly,
         replacement: DelimiterFamily::Square,
     });
@@ -78,7 +79,7 @@ fn test_surround_delete_works_across_lines() {
     let mut window = Window::new(Buffer::from_str("foo \"bar\nbaz\" qux"));
     window.set_cursor(Cursor::new(1, 1));
 
-    let action = Action::new(ActionKind::SurroundDelete {
+    let action = EditorAction::new(EditorOperation::SurroundDelete {
         target: DelimiterFamily::DoubleQuote,
     });
     assert_eq!(window.dispatch_action(&action), ActionResult::Handled);
@@ -89,7 +90,7 @@ fn test_surround_delete_works_across_lines() {
 fn test_surround_actions_noop_when_unresolvable_or_same_family() {
     let mut missing = Window::new(Buffer::from_str("no delimiters here"));
     missing.set_cursor(Cursor::new(0, 3));
-    let delete_action = Action::new(ActionKind::SurroundDelete {
+    let delete_action = EditorAction::new(EditorOperation::SurroundDelete {
         target: DelimiterFamily::Curly,
     });
     assert_eq!(
@@ -100,7 +101,7 @@ fn test_surround_actions_noop_when_unresolvable_or_same_family() {
 
     let mut same_family = Window::new(Buffer::from_str("wrap (me) please"));
     same_family.set_cursor(Cursor::new(0, 6));
-    let replace_action = Action::new(ActionKind::SurroundReplace {
+    let replace_action = EditorAction::new(EditorOperation::SurroundReplace {
         target: DelimiterFamily::Paren,
         replacement: DelimiterFamily::Paren,
     });
@@ -118,7 +119,7 @@ fn test_surround_replace_is_single_undoable_edit() {
 
     process_action_and_snapshot(
         &mut window,
-        &Action::new(ActionKind::SurroundReplace {
+        &EditorAction::new(EditorOperation::SurroundReplace {
             target: DelimiterFamily::Paren,
             replacement: DelimiterFamily::Square,
         }),
@@ -136,11 +137,11 @@ fn test_replace_mode_edits_undo_as_single_snapshot() {
 
     dispatch_with_main_loop_snapshot(
         &mut window,
-        &Action::new(ActionKind::ReplaceChar('a')).with_from_mode(ModeKind::Replace),
+        &EditorAction::new(EditorOperation::ReplaceChar('a')).with_from_mode(ModeKind::Replace),
     );
     dispatch_with_main_loop_snapshot(
         &mut window,
-        &Action::new(ActionKind::ReplaceChar('b')).with_from_mode(ModeKind::Replace),
+        &EditorAction::new(EditorOperation::ReplaceChar('b')).with_from_mode(ModeKind::Replace),
     );
     commit_insert_exit_snapshot(&mut window);
 
@@ -156,7 +157,7 @@ fn test_replace_backspace_restores_overwritten_character() {
 
     assert_eq!(
         window.dispatch_action(
-            &Action::new(ActionKind::ReplaceChar('a')).with_from_mode(ModeKind::Replace)
+            &EditorAction::new(EditorOperation::ReplaceChar('a')).with_from_mode(ModeKind::Replace)
         ),
         ActionResult::Handled
     );
@@ -165,7 +166,7 @@ fn test_replace_backspace_restores_overwritten_character() {
 
     assert_eq!(
         window.dispatch_action(
-            &Action::new(ActionKind::ReplaceBackspace {
+            &EditorAction::new(EditorOperation::ReplaceBackspace {
                 cursor: Cursor::new(0, 1),
                 replaced: Some('e'),
                 inserted: 'a',
@@ -185,29 +186,29 @@ fn test_replace_backspace_restores_successive_live_replace_positions() {
 
     dispatch_with_main_loop_snapshot(
         &mut window,
-        &Action::new(ActionKind::ReplaceChar('a')).with_from_mode(ModeKind::Replace),
+        &EditorAction::new(EditorOperation::ReplaceChar('a')).with_from_mode(ModeKind::Replace),
     );
     dispatch_with_main_loop_snapshot(
         &mut window,
-        &Action::new(ActionKind::ReplaceChar('b')).with_from_mode(ModeKind::Replace),
+        &EditorAction::new(EditorOperation::ReplaceChar('b')).with_from_mode(ModeKind::Replace),
     );
     dispatch_with_main_loop_snapshot(
         &mut window,
-        &Action::new(ActionKind::ReplaceChar('c')).with_from_mode(ModeKind::Replace),
+        &EditorAction::new(EditorOperation::ReplaceChar('c')).with_from_mode(ModeKind::Replace),
     );
     assert_eq!(buffer_text(window.buffer_view()), "habco");
     assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 4));
 
     dispatch_with_main_loop_snapshot(
         &mut window,
-        &Action::new(ActionKind::ReplaceBackspaceLast).with_from_mode(ModeKind::Replace),
+        &EditorAction::new(EditorOperation::ReplaceBackspaceLast).with_from_mode(ModeKind::Replace),
     );
     assert_eq!(buffer_text(window.buffer_view()), "hablo");
     assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 3));
 
     dispatch_with_main_loop_snapshot(
         &mut window,
-        &Action::new(ActionKind::ReplaceBackspaceLast).with_from_mode(ModeKind::Replace),
+        &EditorAction::new(EditorOperation::ReplaceBackspaceLast).with_from_mode(ModeKind::Replace),
     );
     assert_eq!(buffer_text(window.buffer_view()), "hallo");
     assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 2));
@@ -220,7 +221,7 @@ fn test_replace_backspace_removes_inserted_character_past_line_end() {
 
     assert_eq!(
         window.dispatch_action(
-            &Action::new(ActionKind::ReplaceChar('x')).with_from_mode(ModeKind::Replace)
+            &EditorAction::new(EditorOperation::ReplaceChar('x')).with_from_mode(ModeKind::Replace)
         ),
         ActionResult::Handled
     );
@@ -229,7 +230,7 @@ fn test_replace_backspace_removes_inserted_character_past_line_end() {
 
     assert_eq!(
         window.dispatch_action(
-            &Action::new(ActionKind::ReplaceBackspace {
+            &EditorAction::new(EditorOperation::ReplaceBackspace {
                 cursor: Cursor::new(0, 2),
                 replaced: None,
                 inserted: 'x',
@@ -249,14 +250,14 @@ fn test_replace_backspace_rejoins_line_split_by_replace_newline() {
 
     dispatch_with_main_loop_snapshot(
         &mut window,
-        &Action::insert_newline().with_from_mode(ModeKind::Replace),
+        &EditorAction::insert_newline().with_from_mode(ModeKind::Replace),
     );
     assert_eq!(buffer_text(window.buffer_view()), "he\nllo");
     assert_eq!(window.buffer_view().cursor(), Cursor::new(1, 0));
 
     dispatch_with_main_loop_snapshot(
         &mut window,
-        &Action::new(ActionKind::ReplaceBackspaceLast).with_from_mode(ModeKind::Replace),
+        &EditorAction::new(EditorOperation::ReplaceBackspaceLast).with_from_mode(ModeKind::Replace),
     );
     assert_eq!(buffer_text(window.buffer_view()), "hello");
     assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 2));
@@ -267,7 +268,7 @@ fn test_surround_add_inner_word_with_quotes() {
     let mut window = Window::new(Buffer::from_str("hello world"));
     window.set_cursor(Cursor::new(0, 1));
 
-    let action = Action::new(ActionKind::SurroundAdd {
+    let action = EditorAction::new(EditorOperation::SurroundAdd {
         target: TextObject::InnerWord,
         delimiter: DelimiterFamily::DoubleQuote,
     });
@@ -281,7 +282,7 @@ fn test_surround_add_bracket_selector_result() {
     let mut window = Window::new(Buffer::from_str("hello world"));
     window.set_cursor(Cursor::new(0, 1));
 
-    let action = Action::new(ActionKind::SurroundAdd {
+    let action = EditorAction::new(EditorOperation::SurroundAdd {
         target: TextObject::InnerWord,
         delimiter: DelimiterFamily::Paren,
     });
@@ -294,7 +295,7 @@ fn test_surround_add_noops_when_text_object_unresolvable() {
     let mut window = Window::new(Buffer::from_str("hello"));
     window.set_cursor(Cursor::new(0, 0));
 
-    let action = Action::new(ActionKind::SurroundAdd {
+    let action = EditorAction::new(EditorOperation::SurroundAdd {
         target: TextObject::InnerBracket(BracketKind::Paren),
         delimiter: DelimiterFamily::DoubleQuote,
     });
@@ -311,7 +312,7 @@ fn test_surround_add_visual_selection_with_quotes() {
         .begin_visual_selection(VisualSelectionKind::Character);
     window.buffer_view_mut().set_cursor(Cursor::new(0, 6));
 
-    let action = Action::new(ActionKind::SurroundAddSelection {
+    let action = EditorAction::new(EditorOperation::SurroundAddSelection {
         delimiter: DelimiterFamily::DoubleQuote,
     })
     .with_from_mode(ModeKind::Visual)
@@ -330,7 +331,7 @@ fn test_surround_add_visual_selection_with_square_brackets() {
         .begin_visual_selection(VisualSelectionKind::Character);
     window.buffer_view_mut().set_cursor(Cursor::new(0, 6));
 
-    let action = Action::new(ActionKind::SurroundAddSelection {
+    let action = EditorAction::new(EditorOperation::SurroundAddSelection {
         delimiter: DelimiterFamily::Square,
     })
     .with_from_mode(ModeKind::Visual)
@@ -349,7 +350,7 @@ fn test_surround_add_visual_line_selection_without_auto_indent() {
         .begin_visual_selection(VisualSelectionKind::Line);
     window.buffer_view_mut().set_cursor(Cursor::new(1, 0));
 
-    let action = Action::new(ActionKind::SurroundAddSelection {
+    let action = EditorAction::new(EditorOperation::SurroundAddSelection {
         delimiter: DelimiterFamily::Curly,
     })
     .with_from_mode(ModeKind::VisualLine)
@@ -369,7 +370,7 @@ fn test_surround_add_visual_line_selection_with_auto_indent() {
         .begin_visual_selection(VisualSelectionKind::Line);
     window.buffer_view_mut().set_cursor(Cursor::new(1, 0));
 
-    let action = Action::new(ActionKind::SurroundAddSelection {
+    let action = EditorAction::new(EditorOperation::SurroundAddSelection {
         delimiter: DelimiterFamily::Curly,
     })
     .with_from_mode(ModeKind::VisualLine)
@@ -389,7 +390,7 @@ fn test_surround_add_is_single_undoable_edit() {
 
     process_action_and_snapshot(
         &mut window,
-        &Action::new(ActionKind::SurroundAdd {
+        &EditorAction::new(EditorOperation::SurroundAdd {
             target: TextObject::InnerWord,
             delimiter: DelimiterFamily::DoubleQuote,
         }),
@@ -1318,7 +1319,7 @@ fn test_window_render_collapses_indent_scope_fold() {
     window.set_cursor(Cursor::new(1, 0));
 
     assert_eq!(
-        window.dispatch_action(&Action::new(ActionKind::CloseFold)),
+        window.dispatch_action(&EditorAction::new(EditorOperation::CloseFold)),
         ActionResult::Handled
     );
     let mut screen = crate::screen::Screen::new(4, 40);
@@ -1351,7 +1352,7 @@ fn test_window_render_uses_syntax_folds_for_rust() {
     window.set_cursor(Cursor::new(0, 0));
 
     assert_eq!(
-        window.dispatch_action(&Action::new(ActionKind::CloseFold)),
+        window.dispatch_action(&EditorAction::new(EditorOperation::CloseFold)),
         ActionResult::Handled
     );
 
@@ -1386,7 +1387,7 @@ fn test_window_syntax_folds_take_precedence_over_indent_folds() {
     window.set_cursor(Cursor::new(0, 0));
 
     assert_eq!(
-        window.dispatch_action(&Action::new(ActionKind::CloseFold)),
+        window.dispatch_action(&EditorAction::new(EditorOperation::CloseFold)),
         ActionResult::Handled
     );
 
@@ -1525,7 +1526,7 @@ fn test_window_keeps_syntax_fold_marker_after_open_line_above_main() {
     );
 
     assert_eq!(
-        window.dispatch_action(&Action::new(ActionKind::OpenLineAbove)),
+        window.dispatch_action(&EditorAction::new(EditorOperation::OpenLineAbove)),
         ActionResult::Handled
     );
 
@@ -1578,7 +1579,7 @@ fn test_window_keeps_syntax_fold_marker_after_open_line_above_main_in_scrolled_f
     }));
 
     assert_eq!(
-        window.dispatch_action(&Action::new(ActionKind::OpenLineAbove)),
+        window.dispatch_action(&EditorAction::new(EditorOperation::OpenLineAbove)),
         ActionResult::Handled
     );
 
@@ -1615,7 +1616,7 @@ fn test_window_keeps_syntax_fold_marker_after_open_line_above_large_main() {
     }));
 
     assert_eq!(
-        window.dispatch_action(&Action::new(ActionKind::OpenLineAbove)),
+        window.dispatch_action(&EditorAction::new(EditorOperation::OpenLineAbove)),
         ActionResult::Handled
     );
 
@@ -1647,7 +1648,7 @@ fn test_window_render_fold_text_inherits_active_line_background() {
     });
 
     assert_eq!(
-        window.dispatch_action(&Action::new(ActionKind::CloseFold)),
+        window.dispatch_action(&EditorAction::new(EditorOperation::CloseFold)),
         ActionResult::Handled
     );
     let mut screen = crate::screen::Screen::new(4, 40);
@@ -1668,7 +1669,7 @@ fn test_window_render_fold_spans_blank_lines() {
     window.set_cursor(Cursor::new(0, 0));
 
     assert_eq!(
-        window.dispatch_action(&Action::new(ActionKind::CloseFold)),
+        window.dispatch_action(&EditorAction::new(EditorOperation::CloseFold)),
         ActionResult::Handled
     );
     let mut screen = crate::screen::Screen::new(5, 40);
@@ -1692,7 +1693,7 @@ fn test_window_render_does_not_fold_blank_only_suffix() {
     window.set_cursor(Cursor::new(0, 0));
 
     assert_eq!(
-        window.dispatch_action(&Action::new(ActionKind::CloseFold)),
+        window.dispatch_action(&EditorAction::new(EditorOperation::CloseFold)),
         ActionResult::Handled
     );
     let mut screen = crate::screen::Screen::new(3, 20);
@@ -1712,7 +1713,7 @@ fn test_window_indent_fold_excludes_trailing_blank_lines() {
     window.set_cursor(Cursor::new(0, 0));
 
     assert_eq!(
-        window.dispatch_action(&Action::new(ActionKind::CloseFold)),
+        window.dispatch_action(&EditorAction::new(EditorOperation::CloseFold)),
         ActionResult::Handled
     );
     let mut screen = crate::screen::Screen::new(5, 40);
@@ -1739,7 +1740,7 @@ fn test_window_fold_state_is_window_local() {
     folded.set_cursor(Cursor::new(1, 0));
 
     assert_eq!(
-        folded.dispatch_action(&Action::new(ActionKind::CloseFold)),
+        folded.dispatch_action(&EditorAction::new(EditorOperation::CloseFold)),
         ActionResult::Handled
     );
 
@@ -1760,11 +1761,11 @@ fn test_window_move_down_skips_folded_lines() {
     window.set_cursor(Cursor::new(1, 0));
 
     assert_eq!(
-        window.dispatch_action(&Action::new(ActionKind::CloseFold)),
+        window.dispatch_action(&EditorAction::new(EditorOperation::CloseFold)),
         ActionResult::Handled
     );
     assert_eq!(
-        window.dispatch_action(&Action::new(ActionKind::MoveDown)),
+        window.dispatch_action(&EditorAction::new(EditorOperation::MoveDown)),
         ActionResult::Handled
     );
 
@@ -1781,13 +1782,13 @@ fn test_window_move_up_skips_large_fold_without_scanning_each_line() {
     let mut window = Window::new(Buffer::from_str(&text));
     window.set_cursor(Cursor::new(0, 0));
     assert_eq!(
-        window.dispatch_action(&Action::new(ActionKind::CloseFold)),
+        window.dispatch_action(&EditorAction::new(EditorOperation::CloseFold)),
         ActionResult::Handled
     );
     window.set_cursor(Cursor::new(1001, 0));
 
     assert_eq!(
-        window.dispatch_action(&Action::new(ActionKind::MoveUp)),
+        window.dispatch_action(&EditorAction::new(EditorOperation::MoveUp)),
         ActionResult::Handled
     );
 
@@ -1799,14 +1800,14 @@ fn test_counted_line_jump_opens_fold_containing_target() {
     let mut window = Window::new(Buffer::from_str("outer\n  inner1\n  inner2\nafter"));
     window.set_cursor(Cursor::new(0, 0));
     assert_eq!(
-        window.dispatch_action(&Action::new(ActionKind::CloseFold)),
+        window.dispatch_action(&EditorAction::new(EditorOperation::CloseFold)),
         ActionResult::Handled
     );
 
     assert_eq!(
-        window.dispatch_action(&Action::count(
+        window.dispatch_action(&EditorAction::count(
             3,
-            Box::new(Action::new(ActionKind::MoveToLastLine)),
+            Box::new(EditorAction::new(EditorOperation::MoveToLastLine)),
         )),
         ActionResult::Handled
     );
@@ -1823,13 +1824,13 @@ fn test_move_left_from_fold_closing_line_stays_on_line_start() {
     let mut window = Window::new(Buffer::from_str("struct Cli {\n    files: Vec<File>,\n}"));
     window.set_cursor(Cursor::new(0, 0));
     assert_eq!(
-        window.dispatch_action(&Action::new(ActionKind::CloseFold)),
+        window.dispatch_action(&EditorAction::new(EditorOperation::CloseFold)),
         ActionResult::Handled
     );
     window.set_cursor(Cursor::new(2, 0));
 
     assert_eq!(
-        window.dispatch_action(&Action::new(ActionKind::MoveLeft)),
+        window.dispatch_action(&EditorAction::new(EditorOperation::MoveLeft)),
         ActionResult::Handled
     );
     let mut screen = crate::screen::Screen::new(3, 40);
@@ -1844,12 +1845,12 @@ fn test_open_line_below_opens_fold_when_cursor_enters_hidden_line() {
     let mut window = Window::new(Buffer::from_str("outer\n  inner1\n  inner2\nafter"));
     window.set_cursor(Cursor::new(1, 0));
     assert_eq!(
-        window.dispatch_action(&Action::new(ActionKind::CloseFold)),
+        window.dispatch_action(&EditorAction::new(EditorOperation::CloseFold)),
         ActionResult::Handled
     );
 
     assert_eq!(
-        window.dispatch_action(&Action::new(ActionKind::OpenLineBelow)),
+        window.dispatch_action(&EditorAction::new(EditorOperation::OpenLineBelow)),
         ActionResult::Handled
     );
     let mut screen = crate::screen::Screen::new(5, 40);
@@ -1865,13 +1866,13 @@ fn test_open_line_above_opens_fold_when_cursor_enters_hidden_line() {
     let mut window = Window::new(Buffer::from_str("outer\n  inner1\n  inner2\nafter"));
     window.set_cursor(Cursor::new(1, 0));
     assert_eq!(
-        window.dispatch_action(&Action::new(ActionKind::CloseFold)),
+        window.dispatch_action(&EditorAction::new(EditorOperation::CloseFold)),
         ActionResult::Handled
     );
     window.set_cursor(Cursor::new(3, 0));
 
     assert_eq!(
-        window.dispatch_action(&Action::new(ActionKind::OpenLineAbove)),
+        window.dispatch_action(&EditorAction::new(EditorOperation::OpenLineAbove)),
         ActionResult::Handled
     );
     let mut screen = crate::screen::Screen::new(5, 40);
@@ -1889,7 +1890,7 @@ fn test_open_line_above_on_brace_fold_end_inserts_above_brace() {
     ));
     window.set_cursor(Cursor::new(0, 0));
     assert_eq!(
-        window.dispatch_action(&Action::new(ActionKind::CloseFold)),
+        window.dispatch_action(&EditorAction::new(EditorOperation::CloseFold)),
         ActionResult::Handled
     );
     window.set_cursor(Cursor::new(4, 0));
@@ -1899,7 +1900,7 @@ fn test_open_line_above_on_brace_fold_end_inserts_above_brace() {
     assert_eq!(window.render_data().line_data[1].buffer_line, 4);
 
     assert_eq!(
-        window.dispatch_action(&Action::new(ActionKind::OpenLineAbove)),
+        window.dispatch_action(&EditorAction::new(EditorOperation::OpenLineAbove)),
         ActionResult::Handled
     );
 
@@ -1921,19 +1922,19 @@ fn test_counted_line_jump_opens_all_nested_folds() {
     let mut window = Window::from_owned_buffer(buffer);
     window.set_cursor(Cursor::new(0, 0));
     assert_eq!(
-        window.dispatch_action(&Action::new(ActionKind::CloseFold)),
+        window.dispatch_action(&EditorAction::new(EditorOperation::CloseFold)),
         ActionResult::Handled
     );
     window.set_cursor(Cursor::new(1, 0));
     assert_eq!(
-        window.dispatch_action(&Action::new(ActionKind::CloseFold)),
+        window.dispatch_action(&EditorAction::new(EditorOperation::CloseFold)),
         ActionResult::Handled
     );
 
     assert_eq!(
-        window.dispatch_action(&Action::count(
+        window.dispatch_action(&EditorAction::count(
             3,
-            Box::new(Action::new(ActionKind::MoveToLastLine)),
+            Box::new(EditorAction::new(EditorOperation::MoveToLastLine)),
         )),
         ActionResult::Handled
     );
@@ -2646,7 +2647,7 @@ fn test_open_line_below_uses_neighbor_indent() {
     window.set_cursor(Cursor::new(0, 4));
 
     assert_eq!(
-        window.handle_count(1, &Action::new(ActionKind::OpenLineBelow)),
+        window.handle_count(1, &EditorAction::new(EditorOperation::OpenLineBelow)),
         ActionResult::Handled
     );
     assert_eq!(
@@ -2665,7 +2666,7 @@ fn test_open_line_above_uses_neighbor_indent() {
     window.set_cursor(Cursor::new(1, 4));
 
     assert_eq!(
-        window.dispatch_action(&Action::new(ActionKind::OpenLineAbove)),
+        window.dispatch_action(&EditorAction::new(EditorOperation::OpenLineAbove)),
         ActionResult::Handled
     );
     assert_eq!(
@@ -2682,7 +2683,7 @@ fn test_open_line_below_undo_restores_original_text() {
 
     assert_eq!(
         window.dispatch_action(
-            &Action::new(ActionKind::OpenLineBelow).with_to_mode(ModeKind::Insert)
+            &EditorAction::new(EditorOperation::OpenLineBelow).with_to_mode(ModeKind::Insert)
         ),
         ActionResult::Handled
     );
@@ -2691,7 +2692,7 @@ fn test_open_line_below_undo_restores_original_text() {
 
     assert_eq!(
         window.dispatch_action(
-            &Action::insert_text("world".to_string()).with_from_mode(ModeKind::Insert)
+            &EditorAction::insert_text("world".to_string()).with_from_mode(ModeKind::Insert)
         ),
         ActionResult::Handled
     );
@@ -2716,7 +2717,7 @@ fn test_insert_newline_uses_neighbor_indent_and_reports_suffix() {
     window.set_cursor(Cursor::new(0, line_end));
 
     assert_eq!(
-        window.dispatch_action(&Action::insert_newline().with_from_mode(ModeKind::Insert)),
+        window.dispatch_action(&EditorAction::insert_newline().with_from_mode(ModeKind::Insert)),
         ActionResult::Handled
     );
     assert_eq!(
@@ -2734,7 +2735,9 @@ fn test_change_line_preserves_current_indentation_when_auto_indent_is_enabled() 
     window.set_cursor(Cursor::new(0, 4));
 
     assert_eq!(
-        window.dispatch_action(&Action::new(ActionKind::ChangeLine).with_to_mode(ModeKind::Insert)),
+        window.dispatch_action(
+            &EditorAction::new(EditorOperation::ChangeLine).with_to_mode(ModeKind::Insert)
+        ),
         ActionResult::Handled
     );
     assert_eq!(
@@ -2752,7 +2755,9 @@ fn test_change_line_undo_restores_original_text() {
     window.set_cursor(Cursor::new(0, 4));
 
     assert_eq!(
-        window.dispatch_action(&Action::new(ActionKind::ChangeLine).with_to_mode(ModeKind::Insert)),
+        window.dispatch_action(
+            &EditorAction::new(EditorOperation::ChangeLine).with_to_mode(ModeKind::Insert)
+        ),
         ActionResult::Handled
     );
     assert_eq!(
@@ -2764,7 +2769,7 @@ fn test_change_line_undo_restores_original_text() {
 
     assert_eq!(
         window.dispatch_action(
-            &Action::insert_text("x".to_string()).with_from_mode(ModeKind::Insert)
+            &EditorAction::insert_text("x".to_string()).with_from_mode(ModeKind::Insert)
         ),
         ActionResult::Handled
     );
@@ -2792,7 +2797,7 @@ fn test_change_to_line_end_undo_restores_original_text() {
 
     assert_eq!(
         window.dispatch_action(
-            &Action::new(ActionKind::ChangeToLineEnd).with_to_mode(ModeKind::Insert)
+            &EditorAction::new(EditorOperation::ChangeToLineEnd).with_to_mode(ModeKind::Insert)
         ),
         ActionResult::Handled
     );
@@ -2801,7 +2806,7 @@ fn test_change_to_line_end_undo_restores_original_text() {
 
     assert_eq!(
         window.dispatch_action(
-            &Action::insert_text("p".to_string()).with_from_mode(ModeKind::Insert)
+            &EditorAction::insert_text("p".to_string()).with_from_mode(ModeKind::Insert)
         ),
         ActionResult::Handled
     );
@@ -2826,7 +2831,7 @@ fn test_insert_newline_reports_no_suffix_when_disabled() {
     window.set_cursor(Cursor::new(0, line_end));
 
     assert_eq!(
-        window.dispatch_action(&Action::insert_newline().with_from_mode(ModeKind::Insert)),
+        window.dispatch_action(&EditorAction::insert_newline().with_from_mode(ModeKind::Insert)),
         ActionResult::Handled
     );
     assert_eq!(
@@ -2845,7 +2850,7 @@ fn test_insert_newline_prefers_next_line_indent_when_it_is_more_indented() {
     window.set_cursor(Cursor::new(0, line_end));
 
     assert_eq!(
-        window.dispatch_action(&Action::insert_newline().with_from_mode(ModeKind::Insert)),
+        window.dispatch_action(&EditorAction::insert_newline().with_from_mode(ModeKind::Insert)),
         ActionResult::Handled
     );
     assert_eq!(
@@ -2874,7 +2879,7 @@ fn test_raw_paste_in_insert_mode_bypasses_auto_pair_and_auto_indent() {
 
     process_action_and_snapshot(
         &mut window,
-        &Action::insert_raw_paste("(\n".to_string()).with_from_mode(ModeKind::Insert),
+        &EditorAction::insert_raw_paste("(\n".to_string()).with_from_mode(ModeKind::Insert),
     );
 
     assert_eq!(buffer_text(window.buffer_view()), "fn main() {(\n");
@@ -2899,7 +2904,7 @@ fn test_raw_paste_in_normal_mode_inserts_text_without_mode_change() {
 
     process_action_and_snapshot(
         &mut window,
-        &Action::insert_raw_paste(" world".to_string()).with_from_mode(ModeKind::Normal),
+        &EditorAction::insert_raw_paste(" world".to_string()).with_from_mode(ModeKind::Normal),
     );
 
     assert_eq!(buffer_text(window.buffer_view()), "hello world");
@@ -2925,7 +2930,7 @@ fn test_raw_paste_replaces_visual_selection_and_exits_to_normal_mode() {
 
     process_action_and_snapshot(
         &mut window,
-        &Action::replace_selection_raw_paste("zap".to_string())
+        &EditorAction::replace_selection_raw_paste("zap".to_string())
             .with_mode(Some(ModeKind::Visual), Some(ModeKind::Normal)),
     );
     window.switch_mode(ModeKind::Normal);
@@ -2950,7 +2955,7 @@ fn test_raw_paste_replaces_visual_line_selection_and_exits_to_normal_mode() {
 
     process_action_and_snapshot(
         &mut window,
-        &Action::replace_selection_raw_paste("Z".to_string())
+        &EditorAction::replace_selection_raw_paste("Z".to_string())
             .with_mode(Some(ModeKind::VisualLine), Some(ModeKind::Normal)),
     );
     window.switch_mode(ModeKind::Normal);
@@ -2967,7 +2972,7 @@ fn test_indent_decrease_shifts_current_line() {
     window.set_cursor(Cursor::new(0, 4));
 
     assert_eq!(
-        window.dispatch_action(&Action::new(ActionKind::IndentDecrease)),
+        window.dispatch_action(&EditorAction::new(EditorOperation::IndentDecrease)),
         ActionResult::Handled
     );
     assert_eq!(buffer_text(window.buffer_view()), "hello\n  world");
@@ -2981,7 +2986,7 @@ fn test_counted_indent_decrease_shifts_multiple_lines() {
 
     assert_eq!(
         window.dispatch_action(
-            &Action::new(ActionKind::IndentDecrease)
+            &EditorAction::new(EditorOperation::IndentDecrease)
                 .with_count(2)
                 .expect("counted indent decrease should be allowed"),
         ),
@@ -3001,7 +3006,7 @@ fn test_insert_mode_shift_tab_dedents_without_leaving_insert_mode() {
 
     assert_eq!(
         window.dispatch_action(
-            &Action::new(ActionKind::IndentDecrease).with_from_mode(ModeKind::Insert),
+            &EditorAction::new(EditorOperation::IndentDecrease).with_from_mode(ModeKind::Insert),
         ),
         ActionResult::Handled
     );
@@ -3016,7 +3021,7 @@ fn test_insert_mode_backspace_dedents_inside_leading_whitespace() {
 
     assert_eq!(
         window.dispatch_action(
-            &Action::new(ActionKind::DeleteBackward).with_from_mode(ModeKind::Insert)
+            &EditorAction::new(EditorOperation::DeleteBackward).with_from_mode(ModeKind::Insert)
         ),
         ActionResult::Handled
     );
@@ -3031,7 +3036,7 @@ fn test_insert_mode_backspace_keeps_plain_deletion_outside_indentation() {
 
     assert_eq!(
         window.dispatch_action(
-            &Action::new(ActionKind::DeleteBackward).with_from_mode(ModeKind::Insert)
+            &EditorAction::new(EditorOperation::DeleteBackward).with_from_mode(ModeKind::Insert)
         ),
         ActionResult::Handled
     );
@@ -3383,7 +3388,7 @@ fn test_gutter_render_for_render_data_uses_ascii_fold_glyphs() {
     assert_eq!(screen.get_cell_mut(3, 3).unwrap().text, " ");
 
     window.set_cursor(Cursor::new(0, 0));
-    window.dispatch_action(&Action::new(ActionKind::CloseFold));
+    window.dispatch_action(&EditorAction::new(EditorOperation::CloseFold));
     window.render(&mut screen, Position::new(0, 0), Size::new(4, 20));
 
     assert_eq!(screen.get_cell_mut(0, 3).unwrap().text, ">");
@@ -3424,7 +3429,7 @@ fn test_gutter_render_for_render_data_uses_unicode_fold_glyphs() {
     assert_eq!(screen.get_cell_mut(0, 3).unwrap().text, "▼");
 
     window.set_cursor(Cursor::new(0, 0));
-    window.dispatch_action(&Action::new(ActionKind::CloseFold));
+    window.dispatch_action(&EditorAction::new(EditorOperation::CloseFold));
     window.render(&mut screen, Position::new(0, 0), Size::new(3, 20));
 
     assert_eq!(screen.get_cell_mut(0, 3).unwrap().text, "▶");
@@ -3474,21 +3479,21 @@ fn test_window_diff_hunk_navigation_moves_between_hunks() {
 
     window.set_cursor(Cursor::new(0, 0));
     assert_eq!(
-        window.dispatch_action(&Action::new(ActionKind::MoveToNextDiffHunk)),
+        window.dispatch_action(&EditorAction::new(EditorOperation::MoveToNextDiffHunk)),
         ActionResult::Handled
     );
     assert_eq!(window.buffer_view().cursor().line, 1);
     assert_eq!(window.buffer_view().cursor().col, 0);
 
     assert_eq!(
-        window.dispatch_action(&Action::new(ActionKind::MoveToNextDiffHunk)),
+        window.dispatch_action(&EditorAction::new(EditorOperation::MoveToNextDiffHunk)),
         ActionResult::Handled
     );
     assert_eq!(window.buffer_view().cursor().line, 4);
     assert_eq!(window.buffer_view().cursor().col, 0);
 
     assert_eq!(
-        window.dispatch_action(&Action::new(ActionKind::MoveToPreviousDiffHunk)),
+        window.dispatch_action(&EditorAction::new(EditorOperation::MoveToPreviousDiffHunk)),
         ActionResult::Handled
     );
     assert_eq!(window.buffer_view().cursor().line, 1);
@@ -3496,14 +3501,14 @@ fn test_window_diff_hunk_navigation_moves_between_hunks() {
 
     window.set_cursor(Cursor::new(2, 0));
     assert_eq!(
-        window.dispatch_action(&Action::new(ActionKind::MoveToNextDiffHunk)),
+        window.dispatch_action(&EditorAction::new(EditorOperation::MoveToNextDiffHunk)),
         ActionResult::Handled
     );
     assert_eq!(window.buffer_view().cursor().line, 1);
     assert_eq!(window.buffer_view().cursor().col, 0);
 
     assert_eq!(
-        window.dispatch_action(&Action::new(ActionKind::MoveToNextDiffHunkEnd)),
+        window.dispatch_action(&EditorAction::new(EditorOperation::MoveToNextDiffHunkEnd)),
         ActionResult::Handled
     );
     assert_eq!(window.buffer_view().cursor().line, 2);
@@ -3511,7 +3516,9 @@ fn test_window_diff_hunk_navigation_moves_between_hunks() {
 
     window.set_cursor(Cursor::new(1, 0));
     assert_eq!(
-        window.dispatch_action(&Action::new(ActionKind::MoveToPreviousDiffHunkEnd)),
+        window.dispatch_action(&EditorAction::new(
+            EditorOperation::MoveToPreviousDiffHunkEnd
+        )),
         ActionResult::Handled
     );
     assert_eq!(window.buffer_view().cursor().line, 2);
@@ -3931,7 +3938,7 @@ fn test_window_visual_cursor_drops_deleted_inlay_hint_after_di_paren() {
     window.set_cursor(Cursor::new(0, 36));
 
     assert_eq!(
-        window.dispatch_action(&Action::operation(
+        window.dispatch_action(&EditorAction::operation(
             Operator::Delete,
             OperatorTarget::TextObject(TextObject::InnerBracket(BracketKind::Paren)),
         )),
@@ -4063,19 +4070,19 @@ fn test_vertical_motions_remain_logical_lines_when_wrapping_is_enabled() {
     window.set_cursor(Cursor::new(0, 6));
 
     assert_eq!(
-        window.dispatch_action(&Action::new(ActionKind::MoveDown)),
+        window.dispatch_action(&EditorAction::new(EditorOperation::MoveDown)),
         ActionResult::Handled
     );
     assert_eq!(window.buffer_view().cursor().line, 1);
 
     assert_eq!(
-        window.dispatch_action(&Action::new(ActionKind::MoveDown)),
+        window.dispatch_action(&EditorAction::new(EditorOperation::MoveDown)),
         ActionResult::Handled
     );
     assert_eq!(window.buffer_view().cursor().line, 2);
 
     assert_eq!(
-        window.dispatch_action(&Action::new(ActionKind::MoveUp)),
+        window.dispatch_action(&EditorAction::new(EditorOperation::MoveUp)),
         ActionResult::Handled
     );
     assert_eq!(window.buffer_view().cursor().line, 1);
@@ -4191,7 +4198,7 @@ fn test_normal_yank_characterwise_flashes_selection() {
     let mut window = Window::new(buffer);
     window.buffer_view_mut().set_cursor(Cursor::new(0, 0));
 
-    let action = Action::operation(
+    let action = EditorAction::operation(
         Operator::Yank,
         OperatorTarget::TextObject(TextObject::InnerWord),
     );
@@ -4217,7 +4224,7 @@ fn test_normal_yank_line_flashes_selection() {
     window.buffer_view_mut().set_cursor(Cursor::new(0, 0));
 
     assert_eq!(
-        window.dispatch_action(&Action::new(ActionKind::YankLine)),
+        window.dispatch_action(&EditorAction::new(EditorOperation::YankLine)),
         ActionResult::Handled
     );
 
@@ -4244,9 +4251,9 @@ fn test_normal_counted_linewise_yank_motion_flashes_selection() {
     window.buffer_view_mut().set_cursor(Cursor::new(3, 0));
 
     // Equivalent to y2gg in Vim: yank from the current line to line 2.
-    let action = Action::count(
+    let action = EditorAction::count(
         2,
-        Box::new(Action::operation(
+        Box::new(EditorAction::operation(
             Operator::Yank,
             OperatorTarget::LinewiseMotion(LinewiseMotion::FirstLine),
         )),
@@ -4279,12 +4286,12 @@ fn test_normal_yank_restarts_flash_on_subsequent_yank() {
     let mut window = Window::new(buffer);
 
     assert_eq!(
-        window.dispatch_action(&Action::new(ActionKind::YankLine)),
+        window.dispatch_action(&EditorAction::new(EditorOperation::YankLine)),
         ActionResult::Handled
     );
     window.buffer_view_mut().set_cursor(Cursor::new(1, 0));
     assert_eq!(
-        window.dispatch_action(&Action::new(ActionKind::YankLine)),
+        window.dispatch_action(&EditorAction::new(EditorOperation::YankLine)),
         ActionResult::Handled
     );
 
@@ -4309,7 +4316,7 @@ fn test_normal_yank_flash_expires_and_is_cleared_on_render() {
     let buffer = Buffer::from_str("alpha");
     let mut window = Window::new(buffer);
     assert_eq!(
-        window.dispatch_action(&Action::new(ActionKind::YankLine)),
+        window.dispatch_action(&EditorAction::new(EditorOperation::YankLine)),
         ActionResult::Handled
     );
 
@@ -4331,7 +4338,7 @@ fn test_visual_repeated_motion_matches_counted_motion() {
     counted
         .buffer_view_mut()
         .begin_visual_selection(VisualSelectionKind::Character);
-    let counted_action = Action::new(ActionKind::MoveRight)
+    let counted_action = EditorAction::new(EditorOperation::MoveRight)
         .with_count(3)
         .expect("counted motion should be allowed")
         .with_from_mode(ModeKind::Visual);
@@ -4344,7 +4351,7 @@ fn test_visual_repeated_motion_matches_counted_motion() {
     repeated
         .buffer_view_mut()
         .begin_visual_selection(VisualSelectionKind::Character);
-    let motion = Action::new(ActionKind::MoveRight).with_from_mode(ModeKind::Visual);
+    let motion = EditorAction::new(EditorOperation::MoveRight).with_from_mode(ModeKind::Visual);
     for _ in 0..3 {
         assert_eq!(repeated.dispatch_action(&motion), ActionResult::Handled);
     }
@@ -4370,7 +4377,7 @@ fn test_visual_delete_leaves_cursor_at_selection_start() {
         .begin_visual_selection(VisualSelectionKind::Character);
     window.buffer_view_mut().set_cursor(Cursor::new(0, 1));
 
-    let action = Action::new(ActionKind::DeleteSelection)
+    let action = EditorAction::new(EditorOperation::DeleteSelection)
         .with_from_mode(ModeKind::Visual)
         .with_to_mode(ModeKind::Normal);
     assert_eq!(window.dispatch_action(&action), ActionResult::Handled);
@@ -4389,7 +4396,7 @@ fn test_visual_change_leaves_cursor_at_selection_start() {
         .begin_visual_selection(VisualSelectionKind::Character);
     window.buffer_view_mut().set_cursor(Cursor::new(0, 1));
 
-    let action = Action::new(ActionKind::ChangeSelection)
+    let action = EditorAction::new(EditorOperation::ChangeSelection)
         .with_from_mode(ModeKind::Visual)
         .with_to_mode(ModeKind::Insert);
     assert_eq!(window.dispatch_action(&action), ActionResult::Handled);
@@ -4408,7 +4415,7 @@ fn test_visual_change_undo_restores_original_text() {
         .begin_visual_selection(VisualSelectionKind::Character);
     window.buffer_view_mut().set_cursor(Cursor::new(0, 1));
 
-    let action = Action::new(ActionKind::ChangeSelection)
+    let action = EditorAction::new(EditorOperation::ChangeSelection)
         .with_from_mode(ModeKind::Visual)
         .with_to_mode(ModeKind::Insert);
     assert_eq!(window.dispatch_action(&action), ActionResult::Handled);
@@ -4417,7 +4424,7 @@ fn test_visual_change_undo_restores_original_text() {
 
     assert_eq!(
         window.dispatch_action(
-            &Action::insert_text("x".to_string()).with_from_mode(ModeKind::Insert)
+            &EditorAction::insert_text("x".to_string()).with_from_mode(ModeKind::Insert)
         ),
         ActionResult::Handled
     );
@@ -4441,7 +4448,7 @@ fn test_visual_text_object_repeats_are_idempotent() {
         .buffer_view_mut()
         .begin_visual_selection(VisualSelectionKind::Character);
 
-    let action = Action::new(ActionKind::VisualTextObject(TextObject::InnerWord))
+    let action = EditorAction::new(EditorOperation::VisualTextObject(TextObject::InnerWord))
         .with_from_mode(ModeKind::Visual);
     assert_eq!(window.dispatch_action(&action), ActionResult::Handled);
     let expected = Some(crate::buffer::TextObjectRange {
@@ -4465,11 +4472,11 @@ fn test_visual_text_object_can_retarget_selection() {
         .buffer_view_mut()
         .begin_visual_selection(VisualSelectionKind::Character);
 
-    let inner_word = Action::new(ActionKind::VisualTextObject(TextObject::InnerWord))
+    let inner_word = EditorAction::new(EditorOperation::VisualTextObject(TextObject::InnerWord))
         .with_from_mode(ModeKind::Visual);
     assert_eq!(window.dispatch_action(&inner_word), ActionResult::Handled);
 
-    let around_word = Action::new(ActionKind::VisualTextObject(TextObject::AroundWord))
+    let around_word = EditorAction::new(EditorOperation::VisualTextObject(TextObject::AroundWord))
         .with_from_mode(ModeKind::Visual);
     assert_eq!(window.dispatch_action(&around_word), ActionResult::Handled);
     assert_eq!(
@@ -4492,7 +4499,7 @@ fn test_visual_text_object_invalid_location_leaves_selection_unchanged() {
         .begin_visual_selection(VisualSelectionKind::Character);
 
     let before = window.buffer_view().visual_selection_range();
-    let action = Action::new(ActionKind::VisualTextObject(TextObject::InnerBracket(
+    let action = EditorAction::new(EditorOperation::VisualTextObject(TextObject::InnerBracket(
         BracketKind::Paren,
     )))
     .with_from_mode(ModeKind::Visual);
@@ -4512,7 +4519,7 @@ fn test_visual_case_lowercases_selection_and_exits_to_normal() {
         .begin_visual_selection(VisualSelectionKind::Character);
     window.buffer_view_mut().set_cursor(Cursor::new(0, 3));
 
-    let action = Action::operation(Operator::Lowercase, OperatorTarget::Selection)
+    let action = EditorAction::operation(Operator::Lowercase, OperatorTarget::Selection)
         .with_from_mode(ModeKind::Visual)
         .with_to_mode(ModeKind::Normal);
     assert_eq!(window.dispatch_action(&action), ActionResult::Handled);
@@ -4527,7 +4534,7 @@ fn test_case_uppercase_operator_handles_unicode_expansion() {
     let mut window = Window::new(buffer);
 
     window.buffer_view_mut().set_cursor(Cursor::new(0, 0));
-    let result = window.dispatch_action(&Action::operation(
+    let result = window.dispatch_action(&EditorAction::operation(
         Operator::Uppercase,
         OperatorTarget::TextObject(TextObject::InnerBigWord),
     ));
@@ -4549,7 +4556,7 @@ fn test_visual_line_toggle_case_handles_unicode_and_exits_to_normal() {
         .begin_visual_selection(VisualSelectionKind::Line);
     window.buffer_view_mut().set_cursor(Cursor::new(1, 0));
 
-    let action = Action::operation(Operator::ToggleCase, OperatorTarget::Selection)
+    let action = EditorAction::operation(Operator::ToggleCase, OperatorTarget::Selection)
         .with_from_mode(ModeKind::VisualLine)
         .with_to_mode(ModeKind::Normal);
     assert_eq!(window.dispatch_action(&action), ActionResult::Handled);
@@ -4568,7 +4575,7 @@ fn test_visual_yank_copies_selection_without_mutating_buffer() {
         .begin_visual_selection(VisualSelectionKind::Character);
     window.buffer_view_mut().set_cursor(Cursor::new(0, 0));
 
-    let action = Action::new(ActionKind::YankSelection)
+    let action = EditorAction::new(EditorOperation::YankSelection)
         .with_from_mode(ModeKind::Visual)
         .with_to_mode(ModeKind::Normal);
     assert_eq!(window.dispatch_action(&action), ActionResult::Handled);
@@ -4592,7 +4599,7 @@ fn test_visual_line_delete_removes_entire_lines() {
         .begin_visual_selection(VisualSelectionKind::Line);
     window.buffer_view_mut().set_cursor(Cursor::new(2, 1));
 
-    let action = Action::new(ActionKind::DeleteSelection)
+    let action = EditorAction::new(EditorOperation::DeleteSelection)
         .with_from_mode(ModeKind::VisualLine)
         .with_to_mode(ModeKind::Normal);
     assert_eq!(window.dispatch_action(&action), ActionResult::Handled);
@@ -4612,7 +4619,7 @@ fn test_visual_line_change_leaves_blank_line() {
         .begin_visual_selection(VisualSelectionKind::Line);
     window.buffer_view_mut().set_cursor(Cursor::new(2, 1));
 
-    let action = Action::new(ActionKind::ChangeSelection)
+    let action = EditorAction::new(EditorOperation::ChangeSelection)
         .with_from_mode(ModeKind::VisualLine)
         .with_to_mode(ModeKind::Insert);
     assert_eq!(window.dispatch_action(&action), ActionResult::Handled);
@@ -4631,7 +4638,7 @@ fn test_visual_line_yank_copies_lines_without_mutating_buffer() {
         .begin_visual_selection(VisualSelectionKind::Line);
     window.buffer_view_mut().set_cursor(Cursor::new(2, 1));
 
-    let action = Action::new(ActionKind::YankSelection)
+    let action = EditorAction::new(EditorOperation::YankSelection)
         .with_from_mode(ModeKind::VisualLine)
         .with_to_mode(ModeKind::Normal);
     assert_eq!(window.dispatch_action(&action), ActionResult::Handled);
@@ -4769,7 +4776,7 @@ fn test_column_preservation_first_vertical_move() {
     window.buffer_view.set_cursor(Cursor::new(0, 5));
 
     // First move down via Window - should use current column (5), remember it
-    window.dispatch_action(&Action::new(ActionKind::MoveDown));
+    window.dispatch_action(&EditorAction::new(EditorOperation::MoveDown));
     assert_eq!(window.buffer_view.cursor().line, 1);
     // Line 2 is "ij", so normal mode should clamp to its last character.
     assert_eq!(window.buffer_view.cursor().col, 1);
@@ -4785,22 +4792,22 @@ fn test_column_preservation_consecutive_vertical_moves() {
     window.buffer_view.set_cursor(Cursor::new(0, 5));
 
     // Move down - remembers column 5
-    window.dispatch_action(&Action::new(ActionKind::MoveDown));
+    window.dispatch_action(&EditorAction::new(EditorOperation::MoveDown));
     assert_eq!(window.buffer_view.cursor(), Cursor::new(1, 5));
 
     // Move down again - should use remembered column 5
-    window.dispatch_action(&Action::new(ActionKind::MoveDown));
+    window.dispatch_action(&EditorAction::new(EditorOperation::MoveDown));
     assert_eq!(window.buffer_view.cursor(), Cursor::new(2, 5));
 
     // Move up - should use remembered column 5
-    window.dispatch_action(&Action::new(ActionKind::MoveUp));
+    window.dispatch_action(&EditorAction::new(EditorOperation::MoveUp));
     assert_eq!(window.buffer_view.cursor(), Cursor::new(1, 5));
 }
 
 #[test]
 fn test_column_preservation_horizontal_resets() {
     // Horizontal movement should reset remembered column
-    use crate::editor::Action;
+    use crate::editor::EditorAction;
 
     let buffer = Buffer::from_str("abcdefgh\nabcdefgh\nabcdefgh");
     let mut window = Window::new(buffer);
@@ -4809,15 +4816,15 @@ fn test_column_preservation_horizontal_resets() {
     window.buffer_view.set_cursor(Cursor::new(0, 5));
 
     // Move down - remembers column 5
-    window.dispatch_action(&Action::new(ActionKind::MoveDown));
+    window.dispatch_action(&EditorAction::new(EditorOperation::MoveDown));
     assert_eq!(window.buffer_view.cursor(), Cursor::new(1, 5));
 
     // Move right - should reset remembered column to current (now at column 6)
-    window.dispatch_action(&Action::new(ActionKind::MoveRight));
+    window.dispatch_action(&EditorAction::new(EditorOperation::MoveRight));
     // Now at column 6 on line 1
 
     // Move down again - should use new column 6 and go to line 2
-    window.dispatch_action(&Action::new(ActionKind::MoveDown));
+    window.dispatch_action(&EditorAction::new(EditorOperation::MoveDown));
     assert_eq!(window.buffer_view.cursor(), Cursor::new(2, 6));
 }
 
@@ -4831,12 +4838,12 @@ fn test_column_preservation_clamp_on_short_line() {
     window.buffer_view.set_cursor(Cursor::new(0, 5));
 
     // Move down to shorter line "ij" (length 2)
-    window.dispatch_action(&Action::new(ActionKind::MoveDown));
+    window.dispatch_action(&EditorAction::new(EditorOperation::MoveDown));
     // Should clamp to column 1 (last character of "ij")
     assert_eq!(window.buffer_view.cursor(), Cursor::new(1, 1));
 
     // Move down to longer line - should use remembered column 5
-    window.dispatch_action(&Action::new(ActionKind::MoveDown));
+    window.dispatch_action(&EditorAction::new(EditorOperation::MoveDown));
     assert_eq!(window.buffer_view.cursor(), Cursor::new(2, 5));
 }
 
@@ -4847,12 +4854,12 @@ fn test_normal_cursor_does_not_move_past_last_character() {
     window.set_cursor(Cursor::new(0, 1));
 
     assert_eq!(
-        window.dispatch_action(&Action::new(ActionKind::MoveRight)),
+        window.dispatch_action(&EditorAction::new(EditorOperation::MoveRight)),
         ActionResult::Handled
     );
     assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 2));
     assert_eq!(
-        window.dispatch_action(&Action::new(ActionKind::MoveRight)),
+        window.dispatch_action(&EditorAction::new(EditorOperation::MoveRight)),
         ActionResult::Handled
     );
 
@@ -4867,7 +4874,7 @@ fn test_visual_cursor_does_not_move_past_last_character() {
     window.switch_mode(ModeKind::Visual);
     window.set_cursor(Cursor::new(0, 1));
 
-    let action = Action::new(ActionKind::MoveRight).with_from_mode(ModeKind::Visual);
+    let action = EditorAction::new(EditorOperation::MoveRight).with_from_mode(ModeKind::Visual);
     assert_eq!(window.dispatch_action(&action), ActionResult::Handled);
     assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 2));
     assert_eq!(window.dispatch_action(&action), ActionResult::Handled);
@@ -4882,7 +4889,7 @@ fn test_normal_cursor_does_not_move_before_line_start() {
     window.set_cursor(Cursor::new(1, 0));
 
     assert_eq!(
-        window.dispatch_action(&Action::new(ActionKind::MoveLeft)),
+        window.dispatch_action(&EditorAction::new(EditorOperation::MoveLeft)),
         ActionResult::Handled
     );
 
@@ -4897,7 +4904,7 @@ fn test_visual_cursor_does_not_move_before_line_start() {
     window.switch_mode(ModeKind::Visual);
     window.set_cursor(Cursor::new(1, 0));
 
-    let action = Action::new(ActionKind::MoveLeft).with_from_mode(ModeKind::Visual);
+    let action = EditorAction::new(EditorOperation::MoveLeft).with_from_mode(ModeKind::Visual);
     assert_eq!(window.dispatch_action(&action), ActionResult::Handled);
 
     assert_eq!(window.buffer_view().cursor(), Cursor::new(1, 0));
@@ -4910,7 +4917,7 @@ fn test_replace_cursor_does_not_move_before_line_start() {
     window.switch_mode(ModeKind::Replace);
     window.set_cursor(Cursor::new(1, 0));
 
-    let action = Action::new(ActionKind::MoveLeft).with_from_mode(ModeKind::Replace);
+    let action = EditorAction::new(EditorOperation::MoveLeft).with_from_mode(ModeKind::Replace);
     assert_eq!(window.dispatch_action(&action), ActionResult::Handled);
 
     assert_eq!(window.buffer_view().cursor(), Cursor::new(1, 0));
@@ -4923,7 +4930,7 @@ fn test_insert_cursor_can_move_to_previous_line_end() {
     window.switch_mode(ModeKind::Insert);
     window.set_cursor(Cursor::new(1, 0));
 
-    let action = Action::new(ActionKind::MoveLeft).with_from_mode(ModeKind::Insert);
+    let action = EditorAction::new(EditorOperation::MoveLeft).with_from_mode(ModeKind::Insert);
     assert_eq!(window.dispatch_action(&action), ActionResult::Handled);
 
     assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 3));
@@ -4948,7 +4955,7 @@ fn test_non_insert_cursor_can_remain_on_empty_line() {
     window.set_cursor(Cursor::new(0, 0));
 
     assert_eq!(
-        window.dispatch_action(&Action::new(ActionKind::MoveRight)),
+        window.dispatch_action(&EditorAction::new(EditorOperation::MoveRight)),
         ActionResult::Handled
     );
 
@@ -4964,7 +4971,7 @@ fn test_insert_mode_cursor_can_stay_at_line_end() {
 
     assert_eq!(
         window.dispatch_action(
-            &Action::insert_char('d')
+            &EditorAction::insert_char('d')
                 .with_from_mode(ModeKind::Insert)
                 .with_to_mode(ModeKind::Insert)
         ),
@@ -4977,59 +4984,59 @@ fn test_insert_mode_cursor_can_stay_at_line_end() {
 #[test]
 fn test_action_resets_remembered_column() {
     use crate::buffer::Boundary;
-    use crate::editor::Action;
+    use crate::editor::EditorAction;
 
     // Horizontal movements should reset
-    assert!(Action::new(ActionKind::MoveLeft).resets_remembered_column());
-    assert!(Action::new(ActionKind::MoveRight).resets_remembered_column());
-    assert!(Action::forward_to(Boundary::Word).resets_remembered_column());
-    assert!(Action::back_to(Boundary::Word).resets_remembered_column());
-    assert!(Action::new(ActionKind::MoveToLineEnd).resets_remembered_column());
-    assert!(Action::new(ActionKind::MoveToLineStart).resets_remembered_column());
-    assert!(Action::new(ActionKind::MoveToLineContentStart).resets_remembered_column());
+    assert!(EditorAction::new(EditorOperation::MoveLeft).resets_remembered_column());
+    assert!(EditorAction::new(EditorOperation::MoveRight).resets_remembered_column());
+    assert!(EditorAction::forward_to(Boundary::Word).resets_remembered_column());
+    assert!(EditorAction::back_to(Boundary::Word).resets_remembered_column());
+    assert!(EditorAction::new(EditorOperation::MoveToLineEnd).resets_remembered_column());
+    assert!(EditorAction::new(EditorOperation::MoveToLineStart).resets_remembered_column());
+    assert!(EditorAction::new(EditorOperation::MoveToLineContentStart).resets_remembered_column());
 
     // Vertical movements should NOT reset
-    assert!(!Action::new(ActionKind::MoveUp).resets_remembered_column());
-    assert!(!Action::new(ActionKind::MoveDown).resets_remembered_column());
+    assert!(!EditorAction::new(EditorOperation::MoveUp).resets_remembered_column());
+    assert!(!EditorAction::new(EditorOperation::MoveDown).resets_remembered_column());
 
     // Other actions should not reset
-    assert!(!Action::mode_transition(ModeKind::Insert).resets_remembered_column());
-    assert!(Action::insert_char('a').resets_remembered_column());
-    assert!(Action::new(ActionKind::DeleteBackward).resets_remembered_column());
-    assert!(Action::new(ActionKind::DeleteForward).resets_remembered_column());
+    assert!(!EditorAction::mode_transition(ModeKind::Insert).resets_remembered_column());
+    assert!(EditorAction::insert_char('a').resets_remembered_column());
+    assert!(EditorAction::new(EditorOperation::DeleteBackward).resets_remembered_column());
+    assert!(EditorAction::new(EditorOperation::DeleteForward).resets_remembered_column());
 }
 
 #[test]
 fn test_action_uses_remembered_column() {
-    use crate::editor::Action;
+    use crate::editor::EditorAction;
 
     // Vertical movements should use remembered column
-    assert!(Action::new(ActionKind::MoveUp).uses_remembered_column());
-    assert!(Action::new(ActionKind::MoveDown).uses_remembered_column());
-    assert!(Action::new(ActionKind::MovePageUp).uses_remembered_column());
-    assert!(Action::new(ActionKind::MovePageDown).uses_remembered_column());
-    assert!(Action::new(ActionKind::MoveHalfPageUp).uses_remembered_column());
-    assert!(Action::new(ActionKind::MoveHalfPageDown).uses_remembered_column());
+    assert!(EditorAction::new(EditorOperation::MoveUp).uses_remembered_column());
+    assert!(EditorAction::new(EditorOperation::MoveDown).uses_remembered_column());
+    assert!(EditorAction::new(EditorOperation::MovePageUp).uses_remembered_column());
+    assert!(EditorAction::new(EditorOperation::MovePageDown).uses_remembered_column());
+    assert!(EditorAction::new(EditorOperation::MoveHalfPageUp).uses_remembered_column());
+    assert!(EditorAction::new(EditorOperation::MoveHalfPageDown).uses_remembered_column());
 
     // Other movements should NOT
-    assert!(!Action::new(ActionKind::MoveLeft).uses_remembered_column());
-    assert!(!Action::new(ActionKind::MoveRight).uses_remembered_column());
+    assert!(!EditorAction::new(EditorOperation::MoveLeft).uses_remembered_column());
+    assert!(!EditorAction::new(EditorOperation::MoveRight).uses_remembered_column());
 }
 
 #[test]
 fn test_action_page_motions_do_not_reset_remembered_column() {
-    assert!(!Action::new(ActionKind::MovePageUp).resets_remembered_column());
-    assert!(!Action::new(ActionKind::MovePageDown).resets_remembered_column());
-    assert!(!Action::new(ActionKind::MoveHalfPageUp).resets_remembered_column());
-    assert!(!Action::new(ActionKind::MoveHalfPageDown).resets_remembered_column());
+    assert!(!EditorAction::new(EditorOperation::MovePageUp).resets_remembered_column());
+    assert!(!EditorAction::new(EditorOperation::MovePageDown).resets_remembered_column());
+    assert!(!EditorAction::new(EditorOperation::MoveHalfPageUp).resets_remembered_column());
+    assert!(!EditorAction::new(EditorOperation::MoveHalfPageDown).resets_remembered_column());
 }
 
 #[test]
 fn test_action_page_motions_update_snapshot_cursor() {
-    assert!(Action::new(ActionKind::MovePageUp).updates_snapshot_cursor());
-    assert!(Action::new(ActionKind::MovePageDown).updates_snapshot_cursor());
-    assert!(Action::new(ActionKind::MoveHalfPageUp).updates_snapshot_cursor());
-    assert!(Action::new(ActionKind::MoveHalfPageDown).updates_snapshot_cursor());
+    assert!(EditorAction::new(EditorOperation::MovePageUp).updates_snapshot_cursor());
+    assert!(EditorAction::new(EditorOperation::MovePageDown).updates_snapshot_cursor());
+    assert!(EditorAction::new(EditorOperation::MoveHalfPageUp).updates_snapshot_cursor());
+    assert!(EditorAction::new(EditorOperation::MoveHalfPageDown).updates_snapshot_cursor());
 }
 
 #[test]
@@ -5041,10 +5048,10 @@ fn test_page_motions_move_by_viewport_height() {
     let mut screen = crate::screen::Screen::new(3, 40);
     window.render(&mut screen, Position::new(0, 0), Size::new(3, 40));
 
-    window.dispatch_action(&Action::new(ActionKind::MovePageDown));
+    window.dispatch_action(&EditorAction::new(EditorOperation::MovePageDown));
     assert_eq!(window.buffer_view.cursor(), Cursor::new(3, 8));
 
-    window.dispatch_action(&Action::new(ActionKind::MovePageUp));
+    window.dispatch_action(&EditorAction::new(EditorOperation::MovePageUp));
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 8));
 }
 
@@ -5059,14 +5066,14 @@ fn test_page_motions_render_updated_gutter_line_numbers() {
     window.render(&mut screen, Position::new(0, 0), size);
     assert_eq!(screen.get_cell_mut(0, gutter_col).unwrap().text, "1");
 
-    window.dispatch_action(&Action::new(ActionKind::MovePageDown));
+    window.dispatch_action(&EditorAction::new(EditorOperation::MovePageDown));
     window.render(&mut screen, Position::new(0, 0), size);
     assert_eq!(window.buffer_view.scroll_offset(), Position::new(2, 0));
     assert_eq!(screen.get_cell_mut(0, gutter_col).unwrap().text, "3");
     assert_eq!(screen.get_cell_mut(1, gutter_col).unwrap().text, "4");
     assert_eq!(screen.get_cell_mut(2, gutter_col).unwrap().text, "5");
 
-    window.dispatch_action(&Action::new(ActionKind::MovePageUp));
+    window.dispatch_action(&EditorAction::new(EditorOperation::MovePageUp));
     window.render(&mut screen, Position::new(0, 0), size);
     assert_eq!(window.buffer_view.scroll_offset(), Position::new(0, 0));
     assert_eq!(screen.get_cell_mut(0, gutter_col).unwrap().text, "1");
@@ -5083,7 +5090,7 @@ fn test_page_motions_clamp_on_short_line() {
     let mut screen = crate::screen::Screen::new(3, 40);
     window.render(&mut screen, Position::new(0, 0), Size::new(3, 40));
 
-    window.dispatch_action(&Action::new(ActionKind::MovePageDown));
+    window.dispatch_action(&EditorAction::new(EditorOperation::MovePageDown));
     assert_eq!(window.buffer_view.cursor(), Cursor::new(3, 1));
 }
 
@@ -5096,10 +5103,10 @@ fn test_half_page_motions_move_by_half_viewport_height() {
     let mut screen = crate::screen::Screen::new(3, 40);
     window.render(&mut screen, Position::new(0, 0), Size::new(3, 40));
 
-    window.dispatch_action(&Action::new(ActionKind::MoveHalfPageDown));
+    window.dispatch_action(&EditorAction::new(EditorOperation::MoveHalfPageDown));
     assert_eq!(window.buffer_view.cursor(), Cursor::new(1, 8));
 
-    window.dispatch_action(&Action::new(ActionKind::MoveHalfPageUp));
+    window.dispatch_action(&EditorAction::new(EditorOperation::MoveHalfPageUp));
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 8));
 }
 
@@ -5112,7 +5119,7 @@ fn test_find_forward_moves_to_char() {
     let mut window = Window::new(buffer);
 
     window.buffer_view.set_cursor(Cursor::new(0, 0)); // at 'h'
-    window.dispatch_action(&Action::find_forward('o'));
+    window.dispatch_action(&EditorAction::find_forward('o'));
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 4)); // 'o' is at column 4
 }
 
@@ -5123,7 +5130,10 @@ fn test_find_forward_finds_third_occurrence() {
     let mut window = Window::new(buffer);
 
     window.buffer_view.set_cursor(Cursor::new(0, 0));
-    window.dispatch_action(&Action::count(3, Box::new(Action::find_forward('x'))));
+    window.dispatch_action(&EditorAction::count(
+        3,
+        Box::new(EditorAction::find_forward('x')),
+    ));
     // Third 'x' is at column 4
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 4));
 }
@@ -5135,7 +5145,7 @@ fn test_find_forward_not_found_stays_in_place() {
     let mut window = Window::new(buffer);
 
     window.buffer_view.set_cursor(Cursor::new(0, 2)); // at 'l'
-    window.dispatch_action(&Action::find_forward('z'));
+    window.dispatch_action(&EditorAction::find_forward('z'));
     // Cursor should stay at column 2
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 2));
 }
@@ -5147,7 +5157,7 @@ fn test_find_backward_moves_to_char() {
     let mut window = Window::new(buffer);
 
     window.buffer_view.set_cursor(Cursor::new(0, 10)); // at 'd'
-    window.dispatch_action(&Action::find_backward('o'));
+    window.dispatch_action(&EditorAction::find_backward('o'));
     // First 'o' when going backward from position 10 is at column 7
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 7));
 }
@@ -5159,7 +5169,7 @@ fn test_find_backward_not_found_stays_in_place() {
     let mut window = Window::new(buffer);
 
     window.buffer_view.set_cursor(Cursor::new(0, 0)); // at 'h'
-    window.dispatch_action(&Action::find_backward('x'));
+    window.dispatch_action(&EditorAction::find_backward('x'));
     // Cursor should stay at column 0
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
 }
@@ -5171,7 +5181,7 @@ fn test_till_forward_lands_before_char() {
     let mut window = Window::new(buffer);
 
     window.buffer_view.set_cursor(Cursor::new(0, 0)); // at 'h'
-    window.dispatch_action(&Action::till_forward('o'));
+    window.dispatch_action(&EditorAction::till_forward('o'));
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 3)); // 'l' is at column 3
 }
 
@@ -5182,7 +5192,7 @@ fn test_till_forward_clamp_at_line_start() {
     let mut window = Window::new(buffer);
 
     window.buffer_view.set_cursor(Cursor::new(0, 0)); // at 'h'
-    window.dispatch_action(&Action::till_forward('h'));
+    window.dispatch_action(&EditorAction::till_forward('h'));
     // Till lands one before 'h', which would be column -1, clamped to 0
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
 }
@@ -5194,7 +5204,7 @@ fn test_till_backward_lands_after_char() {
     let mut window = Window::new(buffer);
 
     window.buffer_view.set_cursor(Cursor::new(0, 4)); // at 'o'
-    window.dispatch_action(&Action::till_backward('h'));
+    window.dispatch_action(&EditorAction::till_backward('h'));
     // Till backward 'h' from 'o': 'h' is at 0, +1 = column 1
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 1));
 }
@@ -5206,7 +5216,7 @@ fn test_till_backward_clamp_at_line_end() {
     let mut window = Window::new(buffer);
 
     window.buffer_view.set_cursor(Cursor::new(0, 4)); // at 'o'
-    window.dispatch_action(&Action::till_backward('o'));
+    window.dispatch_action(&EditorAction::till_backward('o'));
     // Till backward 'o' from 'o': there's no 'o' before position 4, so cursor stays
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 4));
 }
@@ -5219,7 +5229,10 @@ fn test_find_forward_with_count() {
 
     window.buffer_view.set_cursor(Cursor::new(0, 0));
     // Use Count wrapper for the action
-    window.dispatch_action(&Action::count(2, Box::new(Action::find_forward('o'))));
+    window.dispatch_action(&EditorAction::count(
+        2,
+        Box::new(EditorAction::find_forward('o')),
+    ));
     // 'o' appears at column 4 and 7
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 7)); // second 'o'
 }
@@ -5231,7 +5244,10 @@ fn test_find_backward_with_count() {
     let mut window = Window::new(buffer);
 
     window.buffer_view.set_cursor(Cursor::new(0, 10)); // at 'd'
-    window.dispatch_action(&Action::count(2, Box::new(Action::find_backward('l'))));
+    window.dispatch_action(&EditorAction::count(
+        2,
+        Box::new(EditorAction::find_backward('l')),
+    ));
     // 'l' appears at columns 2, 3, and 9
     // Going backward from 'd' at 10: 1st 'l' is at 9, 2nd 'l' is at 3
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 3));
@@ -5244,7 +5260,7 @@ fn test_find_backward_skips_current_char_on_duplicate() {
     let mut window = Window::new(buffer);
 
     window.buffer_view.set_cursor(Cursor::new(0, 3)); // at 3rd 'l'
-    window.dispatch_action(&Action::find_backward('l'));
+    window.dispatch_action(&EditorAction::find_backward('l'));
     // Should find 2nd 'l' at column 2, not 3rd 'l' at column 3
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 2));
 }
@@ -5260,7 +5276,7 @@ fn test_delete_character_scan_operator_updates_repeat_state() {
     };
 
     window.buffer_view.set_cursor(Cursor::new(0, 0));
-    window.dispatch_action(&Action::operation(
+    window.dispatch_action(&EditorAction::operation(
         Operator::Delete,
         OperatorTarget::CharacterScan(expected),
     ));
@@ -5281,9 +5297,9 @@ fn test_counted_character_scan_operator_uses_motion_count() {
     };
 
     window.buffer_view.set_cursor(Cursor::new(0, 0));
-    window.dispatch_action(&Action::count(
+    window.dispatch_action(&EditorAction::count(
         2,
-        Box::new(Action::operation(
+        Box::new(EditorAction::operation(
             Operator::Delete,
             OperatorTarget::CharacterScan(expected),
         )),
@@ -5300,9 +5316,9 @@ fn test_count_diw_deletes_multiple_words() {
     let mut window = Window::new(buffer);
 
     window.buffer_view.set_cursor(Cursor::new(0, 0));
-    window.dispatch_action(&Action::count(
+    window.dispatch_action(&EditorAction::count(
         3,
-        Box::new(Action::operation(
+        Box::new(EditorAction::operation(
             Operator::Delete,
             OperatorTarget::TextObject(TextObject::InnerWord),
         )),
@@ -5324,7 +5340,7 @@ fn test_dw_deletes_through_next_word_start() {
     let mut window = Window::new(buffer);
 
     window.buffer_view.set_cursor(Cursor::new(0, 0));
-    window.dispatch_action(&Action::operation(
+    window.dispatch_action(&EditorAction::operation(
         Operator::Delete,
         OperatorTarget::BoundaryMotion(BoundaryMotion::WordForward),
     ));
@@ -5339,7 +5355,7 @@ fn test_cw_changes_through_next_word_start() {
     let mut window = Window::new(buffer);
 
     window.buffer_view.set_cursor(Cursor::new(0, 0));
-    let result = window.dispatch_action(&Action::operation(
+    let result = window.dispatch_action(&EditorAction::operation(
         Operator::Change,
         OperatorTarget::BoundaryMotion(BoundaryMotion::WordForward),
     ));
@@ -5348,7 +5364,7 @@ fn test_cw_changes_through_next_word_start() {
     assert_eq!(buffer_text(window.buffer_view()), "world");
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
     assert!(
-        Action::operation(
+        EditorAction::operation(
             Operator::Change,
             OperatorTarget::BoundaryMotion(BoundaryMotion::WordForward)
         )
@@ -5409,7 +5425,7 @@ fn test_ciw_keeps_syntax_styled_above_changed_line() {
         .buffer_view_mut()
         .set_cursor(Cursor::new(edit_line, value_start));
     assert_eq!(
-        window.dispatch_action(&Action::operation(
+        window.dispatch_action(&EditorAction::operation(
             Operator::Change,
             OperatorTarget::TextObject(TextObject::InnerWord),
         )),
@@ -5417,7 +5433,7 @@ fn test_ciw_keeps_syntax_styled_above_changed_line() {
     );
     assert_eq!(
         window.dispatch_action(
-            &Action::insert_text("foo".to_string()).with_from_mode(ModeKind::Insert)
+            &EditorAction::insert_text("foo".to_string()).with_from_mode(ModeKind::Insert)
         ),
         ActionResult::Handled
     );
@@ -5488,7 +5504,7 @@ fn test_open_line_after_ciw_keeps_prefix_styled() {
         .buffer_view_mut()
         .set_cursor(Cursor::new(edit_line, value_start));
     assert_eq!(
-        window.dispatch_action(&Action::operation(
+        window.dispatch_action(&EditorAction::operation(
             Operator::Change,
             OperatorTarget::TextObject(TextObject::InnerWord),
         )),
@@ -5496,13 +5512,13 @@ fn test_open_line_after_ciw_keeps_prefix_styled() {
     );
     assert_eq!(
         window.dispatch_action(
-            &Action::insert_text("foo".to_string()).with_from_mode(ModeKind::Insert)
+            &EditorAction::insert_text("foo".to_string()).with_from_mode(ModeKind::Insert)
         ),
         ActionResult::Handled
     );
     assert_eq!(
         window.dispatch_action(
-            &Action::new(ActionKind::OpenLineBelow).with_to_mode(ModeKind::Insert)
+            &EditorAction::new(EditorOperation::OpenLineBelow).with_to_mode(ModeKind::Insert)
         ),
         ActionResult::Handled
     );
@@ -5527,7 +5543,7 @@ fn test_cw_undo_restores_original_text() {
     window.buffer_view.set_cursor(Cursor::new(0, 0));
     process_action_and_snapshot(
         &mut window,
-        &Action::operation(
+        &EditorAction::operation(
             Operator::Change,
             OperatorTarget::BoundaryMotion(BoundaryMotion::WordForward),
         ),
@@ -5538,7 +5554,7 @@ fn test_cw_undo_restores_original_text() {
 
     assert_eq!(
         window.dispatch_action(
-            &Action::insert_text("hi".to_string()).with_from_mode(ModeKind::Insert)
+            &EditorAction::insert_text("hi".to_string()).with_from_mode(ModeKind::Insert)
         ),
         ActionResult::Handled
     );
@@ -5558,7 +5574,7 @@ fn test_cw_at_end_of_line_is_noop() {
     let mut window = Window::new(buffer);
 
     window.buffer_view.set_cursor(Cursor::new(0, 5));
-    let result = window.dispatch_action(&Action::operation(
+    let result = window.dispatch_action(&EditorAction::operation(
         Operator::Change,
         OperatorTarget::BoundaryMotion(BoundaryMotion::WordForward),
     ));
@@ -5574,7 +5590,7 @@ fn test_da_paren_deletes_around_bracket_pair() {
     let mut window = Window::new(buffer);
 
     window.buffer_view.set_cursor(Cursor::new(0, 4));
-    let result = window.dispatch_action(&Action::operation(
+    let result = window.dispatch_action(&EditorAction::operation(
         Operator::Delete,
         OperatorTarget::TextObject(TextObject::AroundBracket(BracketKind::Paren)),
     ));
@@ -5590,7 +5606,7 @@ fn test_di_quote_deletes_inner_quote_pair() {
     let mut window = Window::new(buffer);
 
     window.buffer_view.set_cursor(Cursor::new(0, 6));
-    let result = window.dispatch_action(&Action::operation(
+    let result = window.dispatch_action(&EditorAction::operation(
         Operator::Delete,
         OperatorTarget::TextObject(TextObject::InnerQuote(QuoteKind::Double)),
     ));
@@ -5606,7 +5622,7 @@ fn test_di_quote_with_no_matching_pair_is_noop() {
     let mut window = Window::new(buffer);
 
     window.buffer_view.set_cursor(Cursor::new(0, 0));
-    let result = window.dispatch_action(&Action::operation(
+    let result = window.dispatch_action(&EditorAction::operation(
         Operator::Delete,
         OperatorTarget::TextObject(TextObject::InnerQuote(QuoteKind::Single)),
     ));
@@ -5622,7 +5638,7 @@ fn test_di_paren_with_no_matching_pair_is_noop() {
     let mut window = Window::new(buffer);
 
     window.buffer_view.set_cursor(Cursor::new(0, 0));
-    let result = window.dispatch_action(&Action::operation(
+    let result = window.dispatch_action(&EditorAction::operation(
         Operator::Delete,
         OperatorTarget::TextObject(TextObject::InnerBracket(BracketKind::Paren)),
     ));
@@ -5638,7 +5654,7 @@ fn test_di_paren_on_empty_pair_is_noop() {
     let mut window = Window::new(buffer);
 
     window.buffer_view.set_cursor(Cursor::new(0, 0));
-    let result = window.dispatch_action(&Action::operation(
+    let result = window.dispatch_action(&EditorAction::operation(
         Operator::Delete,
         OperatorTarget::TextObject(TextObject::InnerBracket(BracketKind::Paren)),
     ));
@@ -5654,7 +5670,7 @@ fn test_ci_paren_on_empty_pair_enters_insert_point() {
     let mut window = Window::new(buffer);
 
     window.buffer_view.set_cursor(Cursor::new(0, 0));
-    let result = window.dispatch_action(&Action::operation(
+    let result = window.dispatch_action(&EditorAction::operation(
         Operator::Change,
         OperatorTarget::TextObject(TextObject::InnerBracket(BracketKind::Paren)),
     ));
@@ -5670,7 +5686,7 @@ fn test_ci_quote_on_empty_pair_enters_insert_point() {
     let mut window = Window::new(buffer);
 
     window.buffer_view.set_cursor(Cursor::new(0, 0));
-    let result = window.dispatch_action(&Action::operation(
+    let result = window.dispatch_action(&EditorAction::operation(
         Operator::Change,
         OperatorTarget::TextObject(TextObject::InnerQuote(QuoteKind::Double)),
     ));
@@ -5687,7 +5703,8 @@ fn test_insert_text_auto_closes_supported_pair_in_insert_mode() {
     let _config_guard = globals::set_test_config(pairing_test_config(true));
 
     window.buffer_view.set_cursor(Cursor::new(0, 0));
-    let result = window.dispatch_action(&Action::insert_char('(').with_from_mode(ModeKind::Insert));
+    let result =
+        window.dispatch_action(&EditorAction::insert_char('(').with_from_mode(ModeKind::Insert));
 
     assert_eq!(result, ActionResult::Handled);
     assert_eq!(buffer_text(window.buffer_view()), "()");
@@ -5701,7 +5718,8 @@ fn test_insert_char_skips_supported_closer_in_insert_mode() {
     let _config_guard = globals::set_test_config(pairing_test_config(true));
 
     window.buffer_view.set_cursor(Cursor::new(0, 1));
-    let result = window.dispatch_action(&Action::insert_char(')').with_from_mode(ModeKind::Insert));
+    let result =
+        window.dispatch_action(&EditorAction::insert_char(')').with_from_mode(ModeKind::Insert));
 
     assert_eq!(result, ActionResult::Handled);
     assert_eq!(buffer_text(window.buffer_view()), "()");
@@ -5715,7 +5733,8 @@ fn test_insert_char_skips_quote_closer_in_insert_mode() {
     let _config_guard = globals::set_test_config(pairing_test_config(true));
 
     window.buffer_view.set_cursor(Cursor::new(0, 1));
-    let result = window.dispatch_action(&Action::insert_char('"').with_from_mode(ModeKind::Insert));
+    let result =
+        window.dispatch_action(&EditorAction::insert_char('"').with_from_mode(ModeKind::Insert));
 
     assert_eq!(result, ActionResult::Handled);
     assert_eq!(buffer_text(window.buffer_view()), "\"\"");
@@ -5729,8 +5748,9 @@ fn test_delete_backward_removes_supported_pair_in_insert_mode() {
     let _config_guard = globals::set_test_config(pairing_test_config(true));
 
     window.buffer_view.set_cursor(Cursor::new(0, 1));
-    let result = window
-        .dispatch_action(&Action::new(ActionKind::DeleteBackward).with_from_mode(ModeKind::Insert));
+    let result = window.dispatch_action(
+        &EditorAction::new(EditorOperation::DeleteBackward).with_from_mode(ModeKind::Insert),
+    );
 
     assert_eq!(result, ActionResult::Handled);
     assert_eq!(buffer_text(window.buffer_view()), "");
@@ -5745,14 +5765,15 @@ fn test_pairing_disabled_keeps_plain_insert_and_delete_behavior() {
 
     window.buffer_view.set_cursor(Cursor::new(0, 1));
     let insert_result =
-        window.dispatch_action(&Action::insert_char(')').with_from_mode(ModeKind::Insert));
+        window.dispatch_action(&EditorAction::insert_char(')').with_from_mode(ModeKind::Insert));
     assert_eq!(insert_result, ActionResult::Handled);
     assert_eq!(buffer_text(window.buffer_view()), "())");
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 2));
 
     window.buffer_view.set_cursor(Cursor::new(0, 1));
-    let delete_result = window
-        .dispatch_action(&Action::new(ActionKind::DeleteBackward).with_from_mode(ModeKind::Insert));
+    let delete_result = window.dispatch_action(
+        &EditorAction::new(EditorOperation::DeleteBackward).with_from_mode(ModeKind::Insert),
+    );
 
     assert_eq!(delete_result, ActionResult::Handled);
     assert_eq!(buffer_text(window.buffer_view()), "))");
@@ -5766,7 +5787,8 @@ fn test_insert_pair_undo_and_redo_restore_exact_states() {
     let _config_guard = globals::set_test_config(pairing_test_config(true));
 
     window.buffer_view.set_cursor(Cursor::new(0, 0));
-    let result = window.dispatch_action(&Action::insert_char('(').with_from_mode(ModeKind::Insert));
+    let result =
+        window.dispatch_action(&EditorAction::insert_char('(').with_from_mode(ModeKind::Insert));
     assert_eq!(result, ActionResult::Handled);
     let cursor = window.buffer_view.cursor();
     window
@@ -5793,8 +5815,9 @@ fn test_pair_delete_undo_and_redo_restore_exact_states() {
     let _config_guard = globals::set_test_config(pairing_test_config(true));
 
     window.buffer_view.set_cursor(Cursor::new(0, 1));
-    let result = window
-        .dispatch_action(&Action::new(ActionKind::DeleteBackward).with_from_mode(ModeKind::Insert));
+    let result = window.dispatch_action(
+        &EditorAction::new(EditorOperation::DeleteBackward).with_from_mode(ModeKind::Insert),
+    );
     assert_eq!(result, ActionResult::Handled);
     let cursor = window.buffer_view.cursor();
     window
@@ -5836,7 +5859,10 @@ fn test_delete_forward_undo_and_redo() {
     let mut window = Window::new(buffer);
 
     window.buffer_view.set_cursor(Cursor::new(0, 0));
-    process_action_and_snapshot(&mut window, &Action::new(ActionKind::DeleteForward));
+    process_action_and_snapshot(
+        &mut window,
+        &EditorAction::new(EditorOperation::DeleteForward),
+    );
 
     assert_eq!(buffer_text(window.buffer_view()), "ello");
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
@@ -5858,7 +5884,7 @@ fn test_dw_undo_and_redo() {
     window.buffer_view.set_cursor(Cursor::new(0, 0));
     process_action_and_snapshot(
         &mut window,
-        &Action::operation(
+        &EditorAction::operation(
             Operator::Delete,
             OperatorTarget::BoundaryMotion(BoundaryMotion::WordForward),
         ),
@@ -5882,7 +5908,7 @@ fn test_cg_changes_to_first_line() {
     let mut window = Window::new(buffer);
 
     window.buffer_view.set_cursor(Cursor::new(1, 0));
-    let result = window.dispatch_action(&Action::operation(
+    let result = window.dispatch_action(&EditorAction::operation(
         Operator::Change,
         OperatorTarget::LinewiseMotion(LinewiseMotion::LastLine),
     ));
@@ -5900,9 +5926,9 @@ fn test_counted_dw_undo_restores_original_text() {
     window.buffer_view.set_cursor(Cursor::new(0, 0));
     process_action_and_snapshot(
         &mut window,
-        &Action::count(
+        &EditorAction::count(
             2,
-            Box::new(Action::operation(
+            Box::new(EditorAction::operation(
                 Operator::Delete,
                 OperatorTarget::BoundaryMotion(BoundaryMotion::WordForward),
             )),
@@ -5922,7 +5948,7 @@ fn test_dollar_deletes_to_line_end() {
     let mut window = Window::new(buffer);
 
     window.buffer_view.set_cursor(Cursor::new(0, 6));
-    window.dispatch_action(&Action::operation(
+    window.dispatch_action(&EditorAction::operation(
         Operator::Delete,
         OperatorTarget::BoundaryMotion(BoundaryMotion::LineEnd),
     ));
@@ -5937,7 +5963,7 @@ fn test_d0_deletes_to_line_start() {
     let mut window = Window::new(buffer);
 
     window.buffer_view.set_cursor(Cursor::new(0, 6));
-    window.dispatch_action(&Action::operation(
+    window.dispatch_action(&EditorAction::operation(
         Operator::Delete,
         OperatorTarget::BoundaryMotion(BoundaryMotion::LineStart),
     ));
@@ -5952,7 +5978,7 @@ fn test_dcaret_deletes_to_line_content_start() {
     let mut window = Window::new(buffer);
 
     window.buffer_view.set_cursor(Cursor::new(0, 10));
-    window.dispatch_action(&Action::operation(
+    window.dispatch_action(&EditorAction::operation(
         Operator::Delete,
         OperatorTarget::BoundaryMotion(BoundaryMotion::LineContentStart),
     ));
@@ -5967,7 +5993,7 @@ fn test_db_deletes_back_to_previous_word_start() {
     let mut window = Window::new(buffer);
 
     window.buffer_view.set_cursor(Cursor::new(0, 6));
-    window.dispatch_action(&Action::operation(
+    window.dispatch_action(&EditorAction::operation(
         Operator::Delete,
         OperatorTarget::BoundaryMotion(BoundaryMotion::WordBackward),
     ));
@@ -5982,7 +6008,7 @@ fn test_dgg_deletes_to_first_line_linewise() {
     let mut window = Window::new(buffer);
 
     window.buffer_view.set_cursor(Cursor::new(3, 1));
-    window.dispatch_action(&Action::operation(
+    window.dispatch_action(&EditorAction::operation(
         Operator::Delete,
         OperatorTarget::LinewiseMotion(LinewiseMotion::FirstLine),
     ));
@@ -5997,7 +6023,7 @@ fn test_d_g_deletes_to_last_line_linewise() {
     let mut window = Window::new(buffer);
 
     window.buffer_view.set_cursor(Cursor::new(2, 0));
-    window.dispatch_action(&Action::operation(
+    window.dispatch_action(&EditorAction::operation(
         Operator::Delete,
         OperatorTarget::LinewiseMotion(LinewiseMotion::LastLine),
     ));
@@ -6012,9 +6038,9 @@ fn test_counted_d_g_deletes_to_destination_line() {
     let mut window = Window::new(buffer);
 
     window.buffer_view.set_cursor(Cursor::new(2, 0));
-    window.dispatch_action(&Action::count(
+    window.dispatch_action(&EditorAction::count(
         5,
-        Box::new(Action::operation(
+        Box::new(EditorAction::operation(
             Operator::Delete,
             OperatorTarget::LinewiseMotion(LinewiseMotion::LastLine),
         )),
@@ -6030,9 +6056,9 @@ fn test_dw_with_count_deletes_multiple_words() {
     let mut window = Window::new(buffer);
 
     window.buffer_view.set_cursor(Cursor::new(0, 0));
-    window.dispatch_action(&Action::count(
+    window.dispatch_action(&EditorAction::count(
         2,
-        Box::new(Action::operation(
+        Box::new(EditorAction::operation(
             Operator::Delete,
             OperatorTarget::BoundaryMotion(BoundaryMotion::WordForward),
         )),
@@ -6048,7 +6074,7 @@ fn test_dbigword_forward_and_backward() {
     let mut window = Window::new(buffer);
 
     window.buffer_view.set_cursor(Cursor::new(0, 0));
-    window.dispatch_action(&Action::operation(
+    window.dispatch_action(&EditorAction::operation(
         Operator::Delete,
         OperatorTarget::BoundaryMotion(BoundaryMotion::BigWordForward),
     ));
@@ -6058,7 +6084,7 @@ fn test_dbigword_forward_and_backward() {
     let buffer = Buffer::from_str("alpha --- beta");
     let mut window = Window::new(buffer);
     window.buffer_view.set_cursor(Cursor::new(0, 10));
-    window.dispatch_action(&Action::operation(
+    window.dispatch_action(&EditorAction::operation(
         Operator::Delete,
         OperatorTarget::BoundaryMotion(BoundaryMotion::BigWordBackward),
     ));
@@ -6073,11 +6099,11 @@ fn test_till_forward_repeated_finds_next_occurrence() {
     let mut window = Window::new(buffer);
 
     window.buffer_view.set_cursor(Cursor::new(0, 0)); // at 'h'
-    window.dispatch_action(&Action::till_forward('l'));
+    window.dispatch_action(&EditorAction::till_forward('l'));
     // First 'l' at column 2, land before it at column 1
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 1));
 
-    window.dispatch_action(&Action::till_forward('l'));
+    window.dispatch_action(&EditorAction::till_forward('l'));
     // Second 'l' at column 3, land before it at column 2
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 2));
 }
@@ -6089,15 +6115,15 @@ fn test_till_backward_repeated_finds_previous_occurrence() {
     let mut window = Window::new(buffer);
 
     window.buffer_view.set_cursor(Cursor::new(0, 5)); // at 'o'
-    window.dispatch_action(&Action::till_backward('h'));
+    window.dispatch_action(&EditorAction::till_backward('h'));
     // First 'h' at column 1, land after it at column 2
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 2));
 
-    window.dispatch_action(&Action::till_backward('h'));
+    window.dispatch_action(&EditorAction::till_backward('h'));
     // Second 'h' at column 0, land after it at column 1
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 1));
 
-    window.dispatch_action(&Action::till_backward('h'));
+    window.dispatch_action(&EditorAction::till_backward('h'));
     // No more 'h' before column 0, cursor stays at column 1
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 1));
 }
@@ -6108,7 +6134,7 @@ fn test_till_forward_preserves_grapheme_boundaries() {
     let mut window = Window::new(buffer);
 
     window.buffer_view.set_cursor(Cursor::new(0, 0));
-    window.dispatch_action(&Action::till_forward('b'));
+    window.dispatch_action(&EditorAction::till_forward('b'));
 
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 1));
 }
@@ -6119,7 +6145,7 @@ fn test_till_backward_preserves_grapheme_boundaries() {
     let mut window = Window::new(buffer);
 
     window.buffer_view.set_cursor(Cursor::new(0, 5));
-    window.dispatch_action(&Action::till_backward('a'));
+    window.dispatch_action(&EditorAction::till_backward('a'));
 
     assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 1));
 }
@@ -6130,7 +6156,7 @@ fn test_move_to_last_line_preserves_visual_column() {
     let mut window = Window::new(buffer);
 
     window.buffer_view.set_cursor(Cursor::new(0, 2));
-    window.dispatch_action(&Action::new(ActionKind::MoveToLastLine));
+    window.dispatch_action(&EditorAction::new(EditorOperation::MoveToLastLine));
 
     assert_eq!(window.buffer_view.cursor(), Cursor::new(1, 1));
 }
@@ -6143,9 +6169,9 @@ fn test_count_screen_top_preserves_visual_column() {
     window.size = Size::new(2, 10);
     window.buffer_view.set_scroll_offset(Position::new(1, 0));
     window.buffer_view.set_cursor(Cursor::new(0, 2));
-    window.dispatch_action(&Action::count(
+    window.dispatch_action(&EditorAction::count(
         1,
-        Box::new(Action::new(ActionKind::MoveToScreenTop)),
+        Box::new(EditorAction::new(EditorOperation::MoveToScreenTop)),
     ));
 
     assert_eq!(window.buffer_view.cursor(), Cursor::new(1, 1));
@@ -6160,15 +6186,15 @@ fn test_viewport_cursor_alignment_repositions_without_moving_cursor() {
     window.buffer_view.set_cursor(Cursor::new(6, 0));
     window.buffer_view.set_scroll_offset(Position::new(0, 3));
 
-    window.dispatch_action(&Action::new(ActionKind::ViewportCursorTop));
+    window.dispatch_action(&EditorAction::new(EditorOperation::ViewportCursorTop));
     assert_eq!(window.buffer_view.scroll_offset(), Position::new(5, 3));
     assert_eq!(window.buffer_view.cursor(), Cursor::new(6, 0));
 
-    window.dispatch_action(&Action::new(ActionKind::ViewportCursorCenter));
+    window.dispatch_action(&EditorAction::new(EditorOperation::ViewportCursorCenter));
     assert_eq!(window.buffer_view.scroll_offset(), Position::new(4, 3));
     assert_eq!(window.buffer_view.cursor(), Cursor::new(6, 0));
 
-    window.dispatch_action(&Action::new(ActionKind::ViewportCursorBottom));
+    window.dispatch_action(&EditorAction::new(EditorOperation::ViewportCursorBottom));
     assert_eq!(window.buffer_view.scroll_offset(), Position::new(2, 3));
     assert_eq!(window.buffer_view.cursor(), Cursor::new(6, 0));
 }
@@ -6181,15 +6207,15 @@ fn test_viewport_cursor_alignment_clamps_near_buffer_end() {
     window.size = Size::new(5, 20);
     window.buffer_view.set_cursor(Cursor::new(7, 0));
 
-    window.dispatch_action(&Action::new(ActionKind::ViewportCursorTop));
+    window.dispatch_action(&EditorAction::new(EditorOperation::ViewportCursorTop));
     assert_eq!(window.buffer_view.scroll_offset(), Position::new(3, 0));
     assert_eq!(window.buffer_view.cursor(), Cursor::new(7, 0));
 
-    window.dispatch_action(&Action::new(ActionKind::ViewportCursorCenter));
+    window.dispatch_action(&EditorAction::new(EditorOperation::ViewportCursorCenter));
     assert_eq!(window.buffer_view.scroll_offset(), Position::new(3, 0));
     assert_eq!(window.buffer_view.cursor(), Cursor::new(7, 0));
 
-    window.dispatch_action(&Action::new(ActionKind::ViewportCursorBottom));
+    window.dispatch_action(&EditorAction::new(EditorOperation::ViewportCursorBottom));
     assert_eq!(window.buffer_view.scroll_offset(), Position::new(3, 0));
     assert_eq!(window.buffer_view.cursor(), Cursor::new(7, 0));
 }
@@ -6200,7 +6226,7 @@ fn test_next_paragraph_clamps_visual_column_on_blank_line() {
     let mut window = Window::new(buffer);
 
     window.buffer_view.set_cursor(Cursor::new(0, 2));
-    window.dispatch_action(&Action::new(ActionKind::MoveToNextParagraph));
+    window.dispatch_action(&EditorAction::new(EditorOperation::MoveToNextParagraph));
 
     assert_eq!(window.buffer_view.cursor(), Cursor::new(1, 0));
 }
@@ -6212,7 +6238,7 @@ fn test_toggle_line_comment_uses_active_syntax_prefix() {
     let buffer = Buffer::from_str_with_path("fn main() {}", path);
     let mut window = Window::new(buffer);
 
-    let result = window.dispatch_action(&Action::toggle_line_comment());
+    let result = window.dispatch_action(&EditorAction::toggle_line_comment());
 
     assert_eq!(result, ActionResult::Handled);
     assert_eq!(
@@ -6231,7 +6257,10 @@ fn test_toggle_line_comment_count_applies_to_multiple_lines() {
     let buffer = Buffer::from_str_with_path("fn a() {}\nfn b() {}\nfn c() {}", path);
     let mut window = Window::new(buffer);
 
-    let result = window.dispatch_action(&Action::count(3, Box::new(Action::toggle_line_comment())));
+    let result = window.dispatch_action(&EditorAction::count(
+        3,
+        Box::new(EditorAction::toggle_line_comment()),
+    ));
 
     assert_eq!(result, ActionResult::Handled);
     assert_eq!(
@@ -6250,7 +6279,10 @@ fn test_toggle_line_comment_aligns_to_minimum_column_across_range() {
     let buffer = Buffer::from_str_with_path("  fn a() {}\n    fn b() {}", path);
     let mut window = Window::new(buffer);
 
-    let result = window.dispatch_action(&Action::count(2, Box::new(Action::toggle_line_comment())));
+    let result = window.dispatch_action(&EditorAction::count(
+        2,
+        Box::new(EditorAction::toggle_line_comment()),
+    ));
 
     assert_eq!(result, ActionResult::Handled);
     assert_eq!(
@@ -6269,7 +6301,10 @@ fn test_toggle_line_comment_skips_blank_lines() {
     let buffer = Buffer::from_str_with_path("\n    print('hello')", path);
     let mut window = Window::new(buffer);
 
-    let result = window.dispatch_action(&Action::count(2, Box::new(Action::toggle_line_comment())));
+    let result = window.dispatch_action(&EditorAction::count(
+        2,
+        Box::new(EditorAction::toggle_line_comment()),
+    ));
 
     assert_eq!(result, ActionResult::Handled);
     assert_eq!(
@@ -6286,7 +6321,7 @@ fn test_toggle_line_comment_returns_not_handled_without_prefix() {
     let buffer = Buffer::from_str("plain text");
     let mut window = Window::new(buffer);
 
-    let result = window.dispatch_action(&Action::toggle_line_comment());
+    let result = window.dispatch_action(&EditorAction::toggle_line_comment());
 
     assert_eq!(result, ActionResult::NotHandled);
     assert_eq!(
@@ -6305,7 +6340,7 @@ fn test_yank_line_populates_yank_register_and_paste_after_uses_it() {
     let mut window = Window::new(buffer);
 
     assert_eq!(
-        window.dispatch_action(&Action::new(ActionKind::YankLine)),
+        window.dispatch_action(&EditorAction::new(EditorOperation::YankLine)),
         ActionResult::Handled
     );
 
@@ -6315,7 +6350,7 @@ fn test_yank_line_populates_yank_register_and_paste_after_uses_it() {
     assert_eq!(content.kind, RegisterContentKind::Linewise);
 
     assert_eq!(
-        window.dispatch_action(&Action::paste_after()),
+        window.dispatch_action(&EditorAction::paste_after()),
         ActionResult::Handled
     );
     assert_eq!(
@@ -6334,7 +6369,7 @@ fn test_visual_yank_uses_explicit_named_register() {
         .begin_visual_selection(VisualSelectionKind::Character);
     window.buffer_view_mut().set_cursor(Cursor::new(0, 0));
 
-    let action = Action::new(ActionKind::YankSelection)
+    let action = EditorAction::new(EditorOperation::YankSelection)
         .with_from_mode(ModeKind::Visual)
         .with_to_mode(ModeKind::Normal)
         .with_register(RegisterName('z'));
@@ -6361,7 +6396,7 @@ fn test_delete_line_uses_configured_default_register() {
     let mut window = Window::new(buffer);
 
     assert_eq!(
-        window.dispatch_action(&Action::new(ActionKind::DeleteLine)),
+        window.dispatch_action(&EditorAction::new(EditorOperation::DeleteLine)),
         ActionResult::Handled
     );
 
@@ -6386,7 +6421,7 @@ fn test_paste_after_uses_explicit_named_register() {
     let mut window = Window::new(buffer);
 
     assert_eq!(
-        window.dispatch_action(&Action::paste_after().with_register(RegisterName('z'))),
+        window.dispatch_action(&EditorAction::paste_after().with_register(RegisterName('z'))),
         ActionResult::Handled
     );
     assert_eq!(buffer_text(window.buffer_view()), "hiab".to_string());
@@ -6400,7 +6435,7 @@ fn test_yank_line_writes_to_unnamed_register() {
     let buffer = Buffer::from_str("hello\nworld");
     let mut window = Window::new(buffer);
 
-    window.dispatch_action(&Action::new(ActionKind::YankLine));
+    window.dispatch_action(&EditorAction::new(EditorOperation::YankLine));
 
     let content = globals::with_register_store(|store| store.get(RegisterName::UNNAMED))
         .expect("unnamed register should have content");
@@ -6414,7 +6449,7 @@ fn test_delete_line_writes_to_unnamed_register() {
     let buffer = Buffer::from_str("hello\nworld");
     let mut window = Window::new(buffer);
 
-    window.dispatch_action(&Action::new(ActionKind::DeleteLine));
+    window.dispatch_action(&EditorAction::new(EditorOperation::DeleteLine));
 
     let content = globals::with_register_store(|store| store.get(RegisterName::UNNAMED))
         .expect("unnamed register should have content");
@@ -6432,7 +6467,7 @@ fn test_yank_selection_writes_to_unnamed_register() {
         .begin_visual_selection(VisualSelectionKind::Character);
     window.buffer_view_mut().set_cursor(Cursor::new(0, 0));
 
-    let action = Action::new(ActionKind::YankSelection)
+    let action = EditorAction::new(EditorOperation::YankSelection)
         .with_from_mode(ModeKind::Visual)
         .with_to_mode(ModeKind::Normal);
     window.dispatch_action(&action);
@@ -6448,7 +6483,7 @@ fn test_explicit_named_register_also_writes_to_unnamed() {
     let buffer = Buffer::from_str("hello\nworld");
     let mut window = Window::new(buffer);
 
-    let action = Action::new(ActionKind::YankLine).with_register(RegisterName('a'));
+    let action = EditorAction::new(EditorOperation::YankLine).with_register(RegisterName('a'));
     window.dispatch_action(&action);
 
     let named = globals::with_register_store(|store| store.get(RegisterName('a')))
@@ -6475,7 +6510,7 @@ fn test_paste_after_reads_from_unnamed_register() {
     let buffer = Buffer::from_str("ab");
     let mut window = Window::new(buffer);
 
-    window.dispatch_action(&Action::paste_after());
+    window.dispatch_action(&EditorAction::paste_after());
 
     assert_eq!(buffer_text(window.buffer_view()), "pastedab");
 }
@@ -6493,7 +6528,7 @@ fn test_paste_before_reads_from_unnamed_register() {
     let buffer = Buffer::from_str("ab");
     let mut window = Window::new(buffer);
 
-    window.dispatch_action(&Action::paste_before());
+    window.dispatch_action(&EditorAction::paste_before());
 
     assert_eq!(buffer_text(window.buffer_view()), "pastedab");
 }
@@ -6518,7 +6553,7 @@ fn test_paste_with_explicit_register_bypasses_unnamed() {
     let buffer = Buffer::from_str("ab");
     let mut window = Window::new(buffer);
 
-    window.dispatch_action(&Action::paste_after().with_register(RegisterName('z')));
+    window.dispatch_action(&EditorAction::paste_after().with_register(RegisterName('z')));
 
     assert_eq!(buffer_text(window.buffer_view()), "from-zab");
 }
@@ -6529,9 +6564,9 @@ fn test_yank_then_paste_uses_unnamed_register() {
     let buffer = Buffer::from_str("hello\nworld");
     let mut window = Window::new(buffer);
 
-    window.dispatch_action(&Action::new(ActionKind::YankLine));
+    window.dispatch_action(&EditorAction::new(EditorOperation::YankLine));
 
-    window.dispatch_action(&Action::paste_after());
+    window.dispatch_action(&EditorAction::paste_after());
 
     assert_eq!(buffer_text(window.buffer_view()), "hello\nhello\nworld");
 }
@@ -6542,9 +6577,9 @@ fn test_delete_then_paste_uses_unnamed_register() {
     let buffer = Buffer::from_str("hello\nworld");
     let mut window = Window::new(buffer);
 
-    window.dispatch_action(&Action::new(ActionKind::DeleteLine));
+    window.dispatch_action(&EditorAction::new(EditorOperation::DeleteLine));
 
-    window.dispatch_action(&Action::paste_before());
+    window.dispatch_action(&EditorAction::paste_before());
 
     assert_eq!(buffer_text(window.buffer_view()), "hello\nworld");
 }
@@ -6555,12 +6590,12 @@ fn test_unnamed_register_overwritten_by_subsequent_operation() {
     let buffer = Buffer::from_str("first\nsecond\nthird");
     let mut window = Window::new(buffer);
 
-    window.dispatch_action(&Action::new(ActionKind::YankLine));
+    window.dispatch_action(&EditorAction::new(EditorOperation::YankLine));
 
     window.buffer_view_mut().set_cursor(Cursor::new(1, 0));
-    window.dispatch_action(&Action::new(ActionKind::DeleteLine));
+    window.dispatch_action(&EditorAction::new(EditorOperation::DeleteLine));
 
-    window.dispatch_action(&Action::paste_before());
+    window.dispatch_action(&EditorAction::paste_before());
 
     // Unnamed register was overwritten from "first" to "second" by DeleteLine,
     // so paste_before inserts "second" before the current line ("third").
@@ -6583,7 +6618,7 @@ fn paste_after_characterwise_puts_cursor_at_end_of_pasted_text() {
     let mut window = Window::new(buffer);
 
     assert_eq!(
-        window.dispatch_action(&Action::paste_after()),
+        window.dispatch_action(&EditorAction::paste_after()),
         ActionResult::Handled
     );
     assert_eq!(buffer_text(window.buffer_view()), "helloab");
@@ -6604,7 +6639,7 @@ fn paste_before_characterwise_puts_cursor_at_start_of_pasted_text() {
     let mut window = Window::new(buffer);
 
     assert_eq!(
-        window.dispatch_action(&Action::paste_before()),
+        window.dispatch_action(&EditorAction::paste_before()),
         ActionResult::Handled
     );
     assert_eq!(buffer_text(window.buffer_view()), "helloab");
@@ -6625,7 +6660,7 @@ fn paste_after_characterwise_multiline_puts_cursor_at_end() {
     let mut window = Window::new(buffer);
 
     assert_eq!(
-        window.dispatch_action(&Action::paste_after()),
+        window.dispatch_action(&EditorAction::paste_after()),
         ActionResult::Handled
     );
     assert_eq!(buffer_text(window.buffer_view()), "hi\nthereab");
@@ -6646,7 +6681,7 @@ fn paste_after_linewise_puts_cursor_at_end_of_last_pasted_line() {
     let mut window = Window::new(buffer);
 
     assert_eq!(
-        window.dispatch_action(&Action::paste_after()),
+        window.dispatch_action(&EditorAction::paste_after()),
         ActionResult::Handled
     );
     assert_eq!(buffer_text(window.buffer_view()), "ab\nhello");
@@ -6667,7 +6702,7 @@ fn paste_before_linewise_puts_cursor_at_start_of_first_pasted_line() {
     let mut window = Window::new(buffer);
 
     assert_eq!(
-        window.dispatch_action(&Action::paste_before()),
+        window.dispatch_action(&EditorAction::paste_before()),
         ActionResult::Handled
     );
     assert_eq!(buffer_text(window.buffer_view()), "hello\nab");
@@ -6688,7 +6723,7 @@ fn paste_after_linewise_multiline_puts_cursor_at_end_of_last_line() {
     let mut window = Window::new(buffer);
 
     assert_eq!(
-        window.dispatch_action(&Action::paste_after()),
+        window.dispatch_action(&EditorAction::paste_after()),
         ActionResult::Handled
     );
     assert_eq!(buffer_text(window.buffer_view()), "ab\none\ntwo");
@@ -6709,7 +6744,7 @@ fn paste_before_linewise_multiline_puts_cursor_at_start_of_first_line() {
     let mut window = Window::new(buffer);
 
     assert_eq!(
-        window.dispatch_action(&Action::paste_before()),
+        window.dispatch_action(&EditorAction::paste_before()),
         ActionResult::Handled
     );
     assert_eq!(buffer_text(window.buffer_view()), "one\ntwo\nab");
@@ -6730,7 +6765,7 @@ fn paste_after_characterwise_inserts_at_cursor_not_after_character() {
     let mut window = Window::new(buffer);
 
     assert_eq!(
-        window.dispatch_action(&Action::paste_after()),
+        window.dispatch_action(&EditorAction::paste_after()),
         ActionResult::Handled
     );
     assert_eq!(buffer_text(window.buffer_view()), "hellohello world");
@@ -6754,7 +6789,7 @@ fn paste_after_linewise_multiple_lines_inserts_all_content() {
     let mut window = Window::new(buffer);
 
     assert_eq!(
-        window.dispatch_action(&Action::paste_after()),
+        window.dispatch_action(&EditorAction::paste_after()),
         ActionResult::Handled
     );
     assert_eq!(
@@ -6781,7 +6816,7 @@ fn paste_before_linewise_multiple_lines_inserts_all_content() {
     let mut window = Window::new(buffer);
 
     assert_eq!(
-        window.dispatch_action(&Action::paste_before()),
+        window.dispatch_action(&EditorAction::paste_before()),
         ActionResult::Handled
     );
     assert_eq!(

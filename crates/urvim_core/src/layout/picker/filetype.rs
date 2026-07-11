@@ -25,6 +25,7 @@ impl Layout {
             picker.close();
         }
         self.dialogs.filetype_picker = None;
+        self.clear_modal_inherited_keys();
     }
 
     /// Returns true when the filetype picker is open.

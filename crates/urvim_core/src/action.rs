@@ -1,4 +1,4 @@
-//! Action result module.
+//! Action dispatch result module.
 //!
 //! This module provides the ActionResult enum which indicates whether
 //! a widget handled an action or not.

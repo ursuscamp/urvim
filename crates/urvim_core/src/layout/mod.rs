@@ -10,6 +10,7 @@ mod confirmation;
 mod dialogs;
 mod geometry;
 mod hover;
+mod keymap;
 mod lsp;
 mod lsp_rename;
 mod node;
@@ -19,13 +20,18 @@ mod session;
 mod tree;
 
 use self::dialogs::Dialogs;
+use self::keymap::ModalKeySequence;
 use crate::action::ActionResult;
 use crate::background::{JobEvent, JobKind, JobManager};
 use crate::buffer::BufferId;
-use crate::editor::{Action, ModeKind};
+use crate::editor::{EditorAction, InheritedKeymap, ModeKind, NormalMode};
 use crate::screen::Screen;
 use crate::status_bar::StatusBar;
-use crate::ui::{Command, Intent, UiEvent, UiEventResult};
+use crate::ui::plugin_pane::{PluginPane, PluginPaneOptions};
+use crate::ui::plugin_window::{
+    PluginWindowContent, PluginWindowId, PluginWindowManager, PluginWindowOptions,
+};
+use crate::ui::{Command, Intent, KeymapInheritance, UiEvent, UiEventResult};
 use crate::window::{BufferView, Position, Size};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -34,7 +40,7 @@ use urvim_terminal::CursorStyle;
 
 use self::tree::ResizeDirection;
 pub use geometry::PaneRegion;
-pub use node::{LayoutNode, PaneId, PaneNode, SplitAxis, SplitNode, SplitSize};
+pub use node::{LayoutNode, PaneContent, PaneId, PaneNode, SplitAxis, SplitNode, SplitSize};
 
 /// Snapshot of a visible buffer range in a pane.
 #[derive(Debug, Clone)]
@@ -85,6 +91,20 @@ pub struct PaneStateSnapshot {
     pub size: Size,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PersistentFocusTarget {
+    Pane(PaneId),
+    Plugin(PluginWindowId),
+    PluginPane(PaneId),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PluginPaneKeySequence {
+    None,
+    Local,
+    Inherited,
+}
+
 /// Root layout container for urvim.
 ///
 /// The layout owns a binary split tree of panes, tracks the focused pane,
@@ -94,6 +114,7 @@ pub struct PaneStateSnapshot {
 pub struct Layout {
     root: Option<LayoutNode>,
     focused_pane: PaneId,
+    last_editor_pane: PaneId,
     next_pane_id: usize,
     status_bar: StatusBar,
     origin: Position,
@@ -102,6 +123,11 @@ pub struct Layout {
     jobs: Arc<JobManager>,
     inlay_hints: InlayHintState,
     autocomplete: AutocompleteState,
+    plugin_windows: PluginWindowManager,
+    plugin_pane_inherited_keymap: InheritedKeymap,
+    plugin_pane_key_sequence: PluginPaneKeySequence,
+    modal_inherited_keymap: InheritedKeymap,
+    modal_key_sequence: ModalKeySequence,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -165,8 +191,12 @@ impl Layout {
     pub fn new(window_group: crate::window_group::WindowGroup) -> Self {
         let focused_pane = PaneId(0);
         Self {
-            root: Some(LayoutNode::Pane(PaneNode::new(focused_pane, window_group))),
+            root: Some(LayoutNode::Pane(PaneNode::new_editor(
+                focused_pane,
+                window_group,
+            ))),
             focused_pane,
+            last_editor_pane: focused_pane,
             next_pane_id: 1,
             status_bar: StatusBar::new(),
             origin: Position::default(),
@@ -175,6 +205,11 @@ impl Layout {
             jobs: Arc::new(JobManager::new()),
             inlay_hints: InlayHintState::Idle,
             autocomplete: AutocompleteState::default(),
+            plugin_windows: PluginWindowManager::new(),
+            plugin_pane_inherited_keymap: InheritedKeymap::new(NormalMode::keymap()),
+            plugin_pane_key_sequence: PluginPaneKeySequence::None,
+            modal_inherited_keymap: InheritedKeymap::new(NormalMode::keymap()),
+            modal_key_sequence: ModalKeySequence::None,
         }
     }
 
@@ -204,20 +239,20 @@ impl Layout {
             .root
             .as_ref()
             .expect("layout should contain a focused pane");
-        Self::find_pane(root, self.focused_pane)
-            .map(|pane| &pane.window_group)
+        Self::find_pane(root, self.last_editor_pane)
+            .and_then(PaneNode::editor_window_group)
             .expect("focused pane should exist")
     }
 
     /// Returns the active window group mutably for the focused pane.
     pub fn active_window_group_mut(&mut self) -> &mut crate::window_group::WindowGroup {
-        let focused_pane = self.focused_pane;
+        let focused_pane = self.last_editor_pane;
         let root = self
             .root
             .as_mut()
             .expect("layout should contain a focused pane");
         Self::find_pane_mut(root, focused_pane)
-            .map(|pane| &mut pane.window_group)
+            .and_then(PaneNode::editor_window_group_mut)
             .expect("focused pane should exist")
     }
 
@@ -298,6 +333,10 @@ impl Layout {
             return Some(position);
         }
 
+        if self.plugin_windows.focused().is_some() || self.focused_plugin_pane().is_some() {
+            return None;
+        }
+
         let pane_region = self.pane_region(self.focused_pane)?;
         let mut pos = self.active_window_group().visual_cursor()?;
         pos.row = pos.row.saturating_add(pane_region.origin.row);
@@ -308,6 +347,317 @@ impl Layout {
     /// Renders the layout tree and footer status bar.
     pub fn render(&mut self, screen: &mut Screen, origin: Position, size: Size) {
         self.render_layout(screen, origin, size);
+    }
+
+    /// Returns the registry of plugin-owned floating windows.
+    pub fn plugin_windows(&self) -> &PluginWindowManager {
+        &self.plugin_windows
+    }
+
+    /// Returns the mutable registry of plugin-owned floating windows.
+    pub fn plugin_windows_mut(&mut self) -> &mut PluginWindowManager {
+        &mut self.plugin_windows
+    }
+
+    /// Returns the focused plugin pane, if any.
+    pub fn focused_plugin_pane(&self) -> Option<PaneId> {
+        self.is_plugin_pane(self.focused_pane)
+            .then_some(self.focused_pane)
+    }
+
+    /// Returns an owned plugin pane.
+    pub fn plugin_pane(&self, owner: &str, id: PaneId) -> Result<&PluginPane, String> {
+        let pane = self
+            .plugin_pane_node(id)
+            .ok_or_else(|| format!("unknown plugin pane_id {}", id.0))?;
+        let window = pane
+            .plugin_pane()
+            .ok_or_else(|| format!("pane_id {} is not a plugin pane", id.0))?;
+        if window.owner() != owner {
+            return Err(format!("plugin {owner:?} does not own pane_id {}", id.0));
+        }
+        Ok(window)
+    }
+
+    /// Returns all plugin pane IDs owned by a plugin.
+    pub fn plugin_pane_ids(&self, owner: &str) -> Vec<PaneId> {
+        self.plugin_pane_ids_in_tree()
+            .into_iter()
+            .filter(|id| self.plugin_pane(owner, *id).is_ok())
+            .collect()
+    }
+
+    /// Returns the configured options for an owned plugin pane.
+    pub fn plugin_pane_options(
+        &self,
+        owner: &str,
+        id: PaneId,
+    ) -> Result<PluginPaneOptions, String> {
+        Ok(self.plugin_pane(owner, id)?.options().clone())
+    }
+
+    /// Replaces an owned plugin pane's content.
+    pub fn set_plugin_pane_content(
+        &mut self,
+        owner: &str,
+        id: PaneId,
+        content: PluginWindowContent,
+    ) -> Result<(), String> {
+        self.plugin_pane(owner, id)?;
+        self.plugin_pane_node_mut(id)
+            .and_then(PaneNode::plugin_pane_mut)
+            .expect("owned plugin pane should exist")
+            .set_content(content);
+        Ok(())
+    }
+
+    /// Updates an owned plugin pane's presentation options.
+    pub fn configure_plugin_pane(
+        &mut self,
+        owner: &str,
+        id: PaneId,
+        options: PluginPaneOptions,
+    ) -> Result<(), String> {
+        self.plugin_pane(owner, id)?;
+        self.plugin_pane_node_mut(id)
+            .and_then(PaneNode::plugin_pane_mut)
+            .expect("owned plugin pane should exist")
+            .set_options(options);
+        Ok(())
+    }
+
+    /// Installs a keymap on an owned plugin pane.
+    pub fn set_plugin_pane_keymap(
+        &mut self,
+        owner: &str,
+        id: PaneId,
+        keys: Vec<String>,
+        rhs: String,
+        intent: Intent,
+    ) -> Result<(), String> {
+        self.plugin_pane(owner, id)?;
+        self.plugin_pane_node_mut(id)
+            .and_then(PaneNode::plugin_pane_mut)
+            .expect("owned plugin pane should exist")
+            .set_keymap(keys, rhs, intent);
+        if self.focused_plugin_pane() == Some(id) {
+            self.plugin_pane_inherited_keymap.clear_pending();
+            self.plugin_pane_key_sequence = PluginPaneKeySequence::None;
+        }
+        Ok(())
+    }
+
+    /// Removes a keymap from an owned plugin pane.
+    pub fn delete_plugin_pane_keymap(
+        &mut self,
+        owner: &str,
+        id: PaneId,
+        keys: &[String],
+    ) -> Result<(), String> {
+        self.plugin_pane(owner, id)?;
+        self.plugin_pane_node_mut(id)
+            .and_then(PaneNode::plugin_pane_mut)
+            .expect("owned plugin pane should exist")
+            .delete_keymap(keys);
+        if self.focused_plugin_pane() == Some(id) {
+            self.plugin_pane_inherited_keymap.clear_pending();
+            self.plugin_pane_key_sequence = PluginPaneKeySequence::None;
+        }
+        Ok(())
+    }
+
+    /// Returns keymaps installed on an owned plugin pane.
+    pub fn plugin_pane_keymaps(
+        &self,
+        owner: &str,
+        id: PaneId,
+    ) -> Result<Vec<(Vec<String>, String)>, String> {
+        Ok(self.plugin_pane(owner, id)?.keymaps())
+    }
+
+    /// Focuses an owned plugin pane.
+    pub fn focus_plugin_pane(&mut self, owner: &str, id: PaneId) -> Result<(), String> {
+        self.plugin_pane(owner, id)?;
+        self.plugin_windows.blur_focused();
+        self.focus_pane(id);
+        Ok(())
+    }
+
+    /// Closes an owned plugin pane and removes its layout leaf.
+    pub fn close_plugin_pane(&mut self, owner: &str, id: PaneId) -> Result<(), String> {
+        self.plugin_pane(owner, id)?;
+        let Some(root) = self.root.take() else {
+            return Err("layout has no panes".to_string());
+        };
+        let (root, removed) = Self::remove_pane(root, id);
+        self.root = root;
+        if !removed {
+            return Err(format!("unknown pane_id {}", id.0));
+        }
+        if self.focused_pane == id {
+            if let Some(next) = self.first_editor_pane_id() {
+                self.focus_pane(next);
+            }
+        }
+        crate::session::mark_dirty();
+        Ok(())
+    }
+
+    /// Closes every layout pane owned by a plugin.
+    pub fn close_plugin_panes_owned(&mut self, owner: &str) {
+        let ids = self.plugin_pane_ids(owner);
+        let focused = self.focused_plugin_pane();
+        for id in ids {
+            if let Some(root) = self.root.take() {
+                let (root, removed) = Self::remove_pane(root, id);
+                self.root = root;
+                debug_assert!(removed, "owned plugin pane should be present in the tree");
+            }
+        }
+        if focused.is_some() {
+            if let Some(next) = self.first_editor_pane_id() {
+                self.focus_pane(next);
+            }
+        }
+        crate::session::mark_dirty();
+    }
+
+    /// Focuses the next visible editor pane or plugin window in visual order.
+    pub fn focus_next_window(&mut self) -> bool {
+        self.cycle_persistent_focus(true)
+    }
+
+    /// Focuses the previous visible editor pane or plugin window in visual order.
+    pub fn focus_previous_window(&mut self) -> bool {
+        self.cycle_persistent_focus(false)
+    }
+
+    fn cycle_persistent_focus(&mut self, forward: bool) -> bool {
+        let mut pane_regions = self.pane_regions();
+        pane_regions.sort_by_key(|region| (region.origin.row, region.origin.col, region.id.0));
+
+        let mut targets = pane_regions
+            .into_iter()
+            .map(|region| {
+                if self.is_plugin_pane(region.id) {
+                    PersistentFocusTarget::PluginPane(region.id)
+                } else {
+                    PersistentFocusTarget::Pane(region.id)
+                }
+            })
+            .collect::<Vec<_>>();
+        targets.extend(
+            self.plugin_windows
+                .visible_ids()
+                .map(PersistentFocusTarget::Plugin),
+        );
+
+        let current = self
+            .focused_plugin_pane()
+            .map(PersistentFocusTarget::PluginPane)
+            .or_else(|| {
+                self.plugin_windows
+                    .focused()
+                    .map(PersistentFocusTarget::Plugin)
+            })
+            .unwrap_or(PersistentFocusTarget::Pane(self.focused_pane));
+        if targets.is_empty() {
+            return false;
+        }
+
+        let current_index = targets.iter().position(|target| *target == current);
+        let target_index = match current_index {
+            Some(index) if forward => (index + 1) % targets.len(),
+            Some(0) if !forward => targets.len() - 1,
+            Some(index) => index - 1,
+            None if forward => 0,
+            None => targets.len() - 1,
+        };
+
+        match targets[target_index] {
+            PersistentFocusTarget::Pane(id) => {
+                self.plugin_windows.blur_focused();
+                self.focus_pane(id)
+            }
+            PersistentFocusTarget::Plugin(id) => self.plugin_windows.focus_id(id),
+            PersistentFocusTarget::PluginPane(id) => {
+                self.plugin_windows.blur_focused();
+                self.focus_pane(id)
+            }
+        }
+    }
+
+    pub(super) fn focus_layout_pane(&mut self, id: PaneId) -> bool {
+        if self.is_plugin_pane(id) {
+            self.plugin_windows.blur_focused();
+            return self.focus_pane(id);
+        }
+        self.focus_pane(id)
+    }
+
+    /// Creates a plugin-owned floating window.
+    pub fn create_plugin_window(
+        &mut self,
+        owner: String,
+        options: PluginWindowOptions,
+    ) -> PluginWindowId {
+        self.plugin_windows.create(owner, options)
+    }
+
+    /// Replaces a plugin window's retained content.
+    pub fn set_plugin_window_content(
+        &mut self,
+        owner: &str,
+        id: PluginWindowId,
+        content: PluginWindowContent,
+    ) -> Result<(), String> {
+        self.plugin_windows.set_content(owner, id, content)
+    }
+
+    /// Creates a plugin pane beside an existing pane and focuses it.
+    pub fn create_plugin_pane(
+        &mut self,
+        owner: String,
+        target: Option<PaneId>,
+        axis: SplitAxis,
+        split_size: SplitSize,
+        options: PluginPaneOptions,
+    ) -> Result<PaneId, String> {
+        let target = target.unwrap_or(self.focused_pane);
+        let new_id = self.allocate_pane_id();
+        let Some(root) = self.root.take() else {
+            return Err("layout has no panes".to_string());
+        };
+        let mut plugin = Some(PaneNode::new_plugin(new_id, owner, options));
+        let (root, changed) =
+            Self::split_node_with_content(root, target, axis, split_size, &mut plugin);
+        if !changed {
+            self.root = Some(root);
+            return Err(format!("unknown pane_id {}", target.0));
+        }
+        self.root = Some(root);
+        self.plugin_windows.blur_focused();
+        self.focus_pane(new_id);
+        crate::session::mark_dirty();
+        Ok(new_id)
+    }
+
+    /// Closes the focused plugin pane and collapses its parent split.
+    pub fn close_focused_plugin_pane(&mut self) -> bool {
+        let Some(id) = self.focused_plugin_pane() else {
+            return false;
+        };
+        let Some(root) = self.root.take() else {
+            return false;
+        };
+        let (root, removed) = Self::remove_pane(root, id);
+        self.root = root;
+        if removed {
+            if let Some(next) = self.first_pane_id() {
+                self.focus_pane(next);
+            }
+        }
+        removed
     }
 
     /// Returns true when any visible pane has visual buffer changes not yet rendered.
@@ -402,12 +752,13 @@ impl Layout {
     /// Closes all open dialogs and overlays.
     pub(super) fn close_all_dialogs(&mut self) {
         self.dialogs.close_all();
+        self.clear_modal_inherited_keys();
     }
 
     /// Dispatches a unified intent through the root layout.
     pub fn dispatch_intent(&mut self, intent: &Intent) -> bool {
         match intent {
-            Intent::Action(action) => self.dispatch_action(action),
+            Intent::Editor(action) => self.dispatch_action(action),
             Intent::Command(command) => self.dispatch_command(command),
         }
     }
@@ -498,6 +849,9 @@ impl Layout {
                 },
                 |_| true,
             ),
+            // Saving a single buffer is coordinated by the application layer so it can
+            // perform overwrite confirmation and emit plugin-facing editor events.
+            Command::SaveBuffer(_) => false,
             Command::SaveBufferAs(path) => self.execute_save_as(path.as_path()).map_or_else(
                 |error| {
                     crate::notify_error!("Failed to write buffer to {:?}: {}", path, error);
@@ -658,6 +1012,14 @@ impl Layout {
                 self.resize_counted_pane(*count, SplitAxis::Horizontal, ResizeDirection::Down)
             }
             Command::EqualizeSplits => self.equalize_splits(),
+            Command::PreviousTab(count) => {
+                self.active_window_group_mut().previous_tab(*count);
+                true
+            }
+            Command::NextTab(count) => {
+                self.active_window_group_mut().next_tab(*count);
+                true
+            }
             Command::ToggleWrap => {
                 if self.should_exit() {
                     false
@@ -674,6 +1036,8 @@ impl Layout {
             Command::FocusPaneDown => self.move_focus(geometry::FocusDirection::Down),
             Command::FocusPaneUp => self.move_focus(geometry::FocusDirection::Up),
             Command::FocusPaneRight => self.move_focus(geometry::FocusDirection::Right),
+            Command::FocusNextWindow => self.focus_next_window(),
+            Command::FocusPreviousWindow => self.focus_previous_window(),
             Command::ClosePane => self.close_focused_pane(),
             Command::TryQuit => {
                 let modified_count =
@@ -735,8 +1099,8 @@ impl Layout {
         crate::notify_info!("filetype: {}", label);
     }
 
-    /// Dispatches an action intent through the layout tree.
-    pub fn dispatch_action(&mut self, action: &Action) -> bool {
+    /// Dispatches an editor action through the active editor pane.
+    pub fn dispatch_action(&mut self, action: &EditorAction) -> bool {
         self.close_hover();
         self.close_diagnostic_hover();
         self.prune_empty_panes();
@@ -761,6 +1125,21 @@ impl Layout {
 
     /// Routes a UI event with overlay-first precedence.
     pub fn route_ui_event(&mut self, event: &UiEvent) -> UiEventResult {
+        if !self.modal_dialog_is_open() {
+            self.clear_modal_inherited_keys();
+        } else if matches!(event, UiEvent::Paste(_) | UiEvent::Resize(_, _)) {
+            self.clear_modal_inherited_keys();
+        }
+
+        // Once an inherited sequence starts, it owns subsequent keys until the
+        // sequence completes or fails. Local dialog handling only gets first
+        // refusal when no inherited sequence is pending.
+        if self.modal_key_sequence == ModalKeySequence::Inherited
+            && let UiEvent::Key(key) = event
+        {
+            return self.route_modal_inherited_key(key);
+        }
+
         if matches!(event, UiEvent::Tick) {
             let overlay = self.route_overlay_ui_event(event);
             let overlay_handled = overlay.handled();
@@ -783,10 +1162,33 @@ impl Layout {
         if overlay.handled() {
             return overlay;
         }
+        // Confirmation and rename controls are local; only keys they reject may
+        // participate in application-level normal-mode mappings.
+        if self.overlay_modal_is_open()
+            && let UiEvent::Key(key) = event
+        {
+            return self.route_modal_inherited_key(key);
+        }
 
         let picker = self.route_picker_ui_event(event);
         if picker.handled() {
             return picker;
+        }
+        // Picker query editing is local as well, so printable mappings never
+        // delay or replace text input.
+        if self.picker_is_open()
+            && let UiEvent::Key(key) = event
+        {
+            return self.route_modal_inherited_key(key);
+        }
+
+        let plugin_pane = self.route_plugin_pane_ui_event(event);
+        if plugin_pane.handled() {
+            return plugin_pane;
+        }
+        let plugin_window = self.plugin_windows.route_ui_event(event);
+        if plugin_window.handled() {
+            return plugin_window;
         }
 
         let hover = self.route_hover_ui_event(event);
@@ -908,6 +1310,87 @@ impl Layout {
         }
 
         UiEventResult::NotHandled
+    }
+
+    fn route_plugin_pane_ui_event(&mut self, event: &UiEvent) -> UiEventResult {
+        let Some(id) = self.focused_plugin_pane() else {
+            return UiEventResult::NotHandled;
+        };
+
+        match event {
+            UiEvent::Key(key) => {
+                if self.plugin_pane_key_sequence == PluginPaneKeySequence::Inherited {
+                    return self.route_plugin_pane_inherited_key(key);
+                }
+
+                let local_result = {
+                    let Some(pane) = self.plugin_pane_node_mut(id) else {
+                        return UiEventResult::Handled(Vec::new());
+                    };
+                    pane.plugin_pane_mut()
+                        .expect("focused plugin pane should contain plugin content")
+                        .handle_key(key)
+                };
+
+                match local_result {
+                    crate::editor::HandleKeyResult::Complete(intent) => {
+                        self.plugin_pane_key_sequence = PluginPaneKeySequence::None;
+                        UiEventResult::Handled(vec![intent])
+                    }
+                    crate::editor::HandleKeyResult::WaitForMore => {
+                        self.plugin_pane_key_sequence = PluginPaneKeySequence::Local;
+                        UiEventResult::Handled(Vec::new())
+                    }
+                    crate::editor::HandleKeyResult::InvalidSequence
+                        if self.plugin_pane_key_sequence == PluginPaneKeySequence::Local =>
+                    {
+                        self.plugin_pane_key_sequence = PluginPaneKeySequence::None;
+                        UiEventResult::Handled(Vec::new())
+                    }
+                    crate::editor::HandleKeyResult::InvalidSequence => {
+                        self.route_plugin_pane_inherited_key(key)
+                    }
+                }
+            }
+            UiEvent::Paste(_) | UiEvent::Resize(_, _) => {
+                self.plugin_pane_inherited_keymap.clear_pending();
+                self.plugin_pane_key_sequence = PluginPaneKeySequence::None;
+                if let Some(pane) = self.plugin_pane_node_mut(id) {
+                    pane.plugin_pane_mut()
+                        .expect("focused plugin pane should contain plugin content")
+                        .clear_pending_keys();
+                    UiEventResult::Handled(Vec::new())
+                } else {
+                    UiEventResult::NotHandled
+                }
+            }
+            UiEvent::Tick => UiEventResult::NotHandled,
+        }
+    }
+
+    fn route_plugin_pane_inherited_key(&mut self, key: &urvim_terminal::Key) -> UiEventResult {
+        let result = self
+            .plugin_pane_inherited_keymap
+            .handle_key(key, |inheritance| {
+                matches!(
+                    inheritance,
+                    KeymapInheritance::Focus | KeymapInheritance::Application
+                )
+            });
+        match result {
+            crate::editor::HandleKeyResult::Complete(intent) => {
+                self.plugin_pane_key_sequence = PluginPaneKeySequence::None;
+                UiEventResult::Handled(vec![intent])
+            }
+            crate::editor::HandleKeyResult::WaitForMore => {
+                self.plugin_pane_key_sequence = PluginPaneKeySequence::Inherited;
+                UiEventResult::Handled(Vec::new())
+            }
+            crate::editor::HandleKeyResult::InvalidSequence => {
+                self.plugin_pane_key_sequence = PluginPaneKeySequence::None;
+                UiEventResult::Handled(Vec::new())
+            }
+        }
     }
 
     fn route_base_ui_event(&mut self, event: &UiEvent) -> UiEventResult {
@@ -1169,7 +1652,9 @@ impl Layout {
             let Some(pane) = Self::find_pane(root, region.id) else {
                 continue;
             };
-            let window_group = &pane.window_group;
+            let Some(window_group) = pane.editor_window_group() else {
+                continue;
+            };
             let view = window_group.active_buffer_view();
             let buffer_id = view.buffer_id();
 
@@ -1213,7 +1698,9 @@ impl Layout {
             let Some(pane) = Self::find_pane(root, region.id) else {
                 continue;
             };
-            let window_group = &pane.window_group;
+            let Some(window_group) = pane.editor_window_group() else {
+                continue;
+            };
             let active_tab_index = window_group.active_tab_index();
             let buffer_ids = window_group.buffer_ids();
 

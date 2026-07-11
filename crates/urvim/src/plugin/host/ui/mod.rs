@@ -1,21 +1,45 @@
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use bearscript::Value;
 use urvim_core::globals;
 
-use super::native_fn;
+use super::super::{SharedLayout, native_fn};
 
-pub(in crate::plugin) fn ui_module() -> Value {
+mod line_format;
+mod panes;
+mod windows;
+
+pub(in crate::plugin) fn ui_module(
+    plugin: String,
+    contributions: Rc<RefCell<urvim_plugin::PluginContributionRegistry>>,
+    layout: SharedLayout,
+) -> Value {
+    let panes_plugin = plugin.clone();
+    let panes_contributions = Rc::clone(&contributions);
+    let panes_layout = Rc::clone(&layout);
     Value::Module(
-        HashMap::from([(
-            "show_message".to_string(),
-            native_fn("ui.show_message", |message: String, opts: Option<Value>| {
-                let opts = opts.unwrap_or(Value::Null);
-                let level = show_message_level_from_opts(&opts)?;
-                globals::enqueue_notification(level, message);
-                Ok(())
-            }),
-        )])
+        HashMap::from([
+            (
+                "show_message".to_string(),
+                native_fn("ui.show_message", |message: String, opts: Option<Value>| {
+                    let opts = opts.unwrap_or(Value::Null);
+                    let level = show_message_level_from_opts(&opts)?;
+                    globals::enqueue_notification(level, message);
+                    Ok(())
+                }),
+            ),
+            ("line_format".to_string(), line_format::line_format_module()),
+            (
+                "windows".to_string(),
+                windows::windows_module(plugin, contributions, layout),
+            ),
+            (
+                "panes".to_string(),
+                panes::panes_module(panes_plugin, panes_contributions, panes_layout),
+            ),
+        ])
         .into(),
     )
 }

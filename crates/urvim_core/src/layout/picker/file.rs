@@ -28,6 +28,7 @@ impl Layout {
             picker.close();
         }
         self.dialogs.file_picker = None;
+        self.clear_modal_inherited_keys();
     }
 
     /// Returns true when the file picker is open.

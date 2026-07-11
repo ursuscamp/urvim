@@ -18,7 +18,7 @@ mod widget;
 use crate::action::ActionResult;
 use crate::buffer::{Boundary, Buffer, BufferId, Cursor, DiffMarkerKind};
 use crate::editor::{
-    Action, InsertMode, LinewiseMotion, Mode, ModeKind, NormalMode, Operator, ReplaceMode,
+    EditorAction, InsertMode, LinewiseMotion, Mode, ModeKind, NormalMode, Operator, ReplaceMode,
     ResizingMode, VisualLineMode, VisualMode,
 };
 use crate::globals;

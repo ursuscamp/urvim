@@ -10,7 +10,10 @@ use crate::globals;
 use crate::notification;
 use crate::screen::Screen;
 use crate::status_bar::StatusBarContext;
-use crate::ui::floating_window::{FloatingAnchor, FloatingWindowFrame, FloatingWindowFrameLabel};
+use crate::ui::floating_window::{
+    FloatingAnchor, FloatingMargins, FloatingPlacement, FloatingWindowFrame,
+    FloatingWindowFrameLabel,
+};
 use crate::ui::inputs::LineSegment;
 use crate::ui::{UiContext, UiRect};
 use crate::widget::Widget;
@@ -26,10 +29,11 @@ struct BorderCell {
 impl Layout {
     pub(super) fn move_focus(&mut self, direction: FocusDirection) -> bool {
         let regions = self.pane_regions();
+        let current_id = self.focused_pane;
         let Some(current) = regions
             .iter()
             .copied()
-            .find(|region| region.id == self.focused_pane)
+            .find(|region| region.id == current_id)
         else {
             return false;
         };
@@ -89,7 +93,7 @@ impl Layout {
             let target = self
                 .resolve_directional_focus_target(current.id, candidate.id)
                 .unwrap_or(candidate.id);
-            return self.focus_pane(target);
+            return self.focus_layout_pane(target);
         }
 
         false
@@ -107,8 +111,9 @@ impl Layout {
         let content_rows = size.rows.saturating_sub(1);
         let content_size = Size::new(content_rows, size.cols);
 
-        if let Some(root) = self.root.as_mut() {
-            Self::render_node(root, screen, origin, content_size);
+        if let Some(mut root) = self.root.take() {
+            self.render_node(&mut root, screen, origin, content_size);
+            self.root = Some(root);
         }
 
         if self.should_exit() {
@@ -147,6 +152,11 @@ impl Layout {
         notification::render_active_banner(screen, origin, size, std::time::Instant::now());
         let mut progress_widget = notification::ProgressWidget::new();
         progress_widget.render_widget(screen, UiRect::new(origin, size), &UiContext);
+        self.render_completion_overlay(screen, origin, size);
+        self.render_diagnostic_hover_overlay(screen, origin, size);
+        self.render_hover_overlay(screen, origin, size);
+        self.plugin_windows
+            .render(screen, UiRect::new(origin, size));
         self.render_buffer_picker_overlay(screen, origin, size);
         self.render_colorscheme_picker_overlay(screen, origin, size);
         self.render_code_actions_picker_overlay(screen, origin, size);
@@ -158,11 +168,8 @@ impl Layout {
         self.render_filetype_picker_overlay(screen, origin, size);
         self.render_git_picker_overlay(screen, origin, size);
         self.render_command_line_overlay(screen, origin, size);
-        self.render_completion_overlay(screen, origin, size);
         self.render_lsp_rename_overlay(screen, origin, size);
         self.render_confirmation_box_overlay(screen, origin, size);
-        self.render_diagnostic_hover_overlay(screen, origin, size);
-        self.render_hover_overlay(screen, origin, size);
 
         if self.inlay_hint_request_pending() {
             self.request_active_buffer_inlay_hints();
@@ -317,8 +324,16 @@ impl Layout {
 
         let frame_cols = size.cols.min(55);
         let content_cols = frame_cols.saturating_sub(2);
-        let frame =
-            FloatingWindowFrame::resolve(origin, size, 1, content_cols, FloatingAnchor::Center);
+        let frame = FloatingWindowFrame::resolve_placement(
+            origin,
+            size,
+            1,
+            content_cols,
+            FloatingPlacement::Anchored {
+                anchor: FloatingAnchor::Center,
+                margins: FloatingMargins::default(),
+            },
+        );
         let Some(frame) = frame else {
             return;
         };
@@ -615,18 +630,31 @@ impl Layout {
     }
 
     pub(super) fn render_node(
+        &mut self,
         node: &mut LayoutNode,
         screen: &mut Screen,
         origin: Position,
         size: Size,
     ) {
         match node {
-            LayoutNode::Pane(pane) => pane.window_group.render(screen, origin, size),
+            LayoutNode::Pane(pane) => {
+                let pane_id = pane.id;
+                match &mut pane.content {
+                    super::PaneContent::Editor(window_group) => {
+                        window_group.render(screen, origin, size)
+                    }
+                    super::PaneContent::Plugin(plugin_pane) => plugin_pane.render(
+                        screen,
+                        UiRect::new(origin, size),
+                        pane_id == self.focused_pane,
+                    ),
+                }
+            }
             LayoutNode::Split(split) => {
                 let (first_origin, first_size, second_origin, second_size) =
                     Self::split_regions(origin, size, split.axis, split.split_size);
-                Self::render_node(&mut split.first, screen, first_origin, first_size);
-                Self::render_node(&mut split.second, screen, second_origin, second_size);
+                self.render_node(&mut split.first, screen, first_origin, first_size);
+                self.render_node(&mut split.second, screen, second_origin, second_size);
             }
         }
     }

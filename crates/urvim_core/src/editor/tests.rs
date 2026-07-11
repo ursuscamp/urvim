@@ -2,7 +2,7 @@ use super::*;
 use crate::buffer::{Buffer, Cursor};
 use crate::config::{AutoIndentMode, TabBehavior, TabInsertion};
 use crate::config::{Config, DefaultRegisters, KeymapsConfig};
-use crate::editor::{ActionKind, DelimiterFamily};
+use crate::editor::{DelimiterFamily, EditorOperation};
 use crate::globals;
 use crate::globals::set_test_config;
 use crate::globals::{Direction, FindKind, FindState};
@@ -18,22 +18,24 @@ fn ctrl_key(c: char) -> Key {
     Key::with_modifiers(KeyCode::Char(c), Modifiers::CTRL)
 }
 
-fn handle_and_unwrap(mode: &mut impl Mode, k: &Key) -> Action {
+fn handle_and_unwrap(mode: &mut impl Mode, k: &Key) -> EditorAction {
     match mode.handle_key(k) {
         HandleKeyResult::Complete(intent) => {
-            let action = intent.as_action().expect("expected a complete action");
+            let action = intent
+                .as_editor_action()
+                .expect("expected a complete action");
             let to_mode = action.to_mode;
             action.clone().with_mode(None, to_mode)
         }
-        HandleKeyResult::WaitForMore => Action::none(),
-        HandleKeyResult::InvalidSequence => Action::none(),
+        HandleKeyResult::WaitForMore => EditorAction::none(),
+        HandleKeyResult::InvalidSequence => EditorAction::none(),
     }
 }
 
-fn complete_action_kind(mode_result: HandleKeyResult) -> ActionKind {
+fn complete_action_kind(mode_result: HandleKeyResult) -> EditorOperation {
     match mode_result {
         HandleKeyResult::Complete(intent) => intent
-            .as_action()
+            .as_editor_action()
             .expect("expected a complete action")
             .kind
             .clone()
@@ -96,7 +98,7 @@ fn test_normal_mode_move_left() {
     let mut mode = NormalMode::new();
     assert_eq!(
         handle_and_unwrap(&mut mode, &key('h')),
-        Action::new(ActionKind::MoveLeft)
+        EditorAction::new(EditorOperation::MoveLeft)
     );
 }
 
@@ -112,7 +114,7 @@ fn test_normal_mode_configured_keymap_overrides_builtin() {
 
     assert_eq!(
         handle_and_unwrap(&mut mode, &key('h')),
-        Action::new(ActionKind::MoveRight)
+        EditorAction::new(EditorOperation::MoveRight)
     );
 }
 
@@ -122,27 +124,27 @@ fn test_normal_mode_page_keys() {
 
     assert_eq!(
         handle_and_unwrap(&mut mode, &Key::new(KeyCode::PageUp)),
-        Action::new(ActionKind::MovePageUp)
+        EditorAction::new(EditorOperation::MovePageUp)
     );
     assert_eq!(
         handle_and_unwrap(&mut mode, &Key::new(KeyCode::PageDown)),
-        Action::new(ActionKind::MovePageDown)
+        EditorAction::new(EditorOperation::MovePageDown)
     );
     assert_eq!(
         handle_and_unwrap(&mut mode, &ctrl_key('u')),
-        Action::new(ActionKind::MoveHalfPageUp)
+        EditorAction::new(EditorOperation::MoveHalfPageUp)
     );
     assert_eq!(
         handle_and_unwrap(&mut mode, &ctrl_key('d')),
-        Action::new(ActionKind::MoveHalfPageDown)
+        EditorAction::new(EditorOperation::MoveHalfPageDown)
     );
     assert_eq!(
         handle_and_unwrap(&mut mode, &ctrl_key('o')),
-        Action::jump_backward()
+        EditorAction::jump_backward()
     );
     assert_eq!(
         handle_and_unwrap(&mut mode, &ctrl_key('i')),
-        Action::jump_forward()
+        EditorAction::jump_forward()
     );
 }
 
@@ -198,9 +200,31 @@ fn test_normal_mode_split_management_bindings() {
         mode.handle_key(&ctrl_key('w')),
         HandleKeyResult::WaitForMore
     ));
+    assert!(matches!(
+        mode.handle_key(&key('n')),
+        HandleKeyResult::Complete(intent)
+            if matches!(intent, crate::ui::Intent::Command(crate::ui::Command::FocusNextWindow))
+    ));
+
+    let mut mode = NormalMode::new();
+    assert!(matches!(
+        mode.handle_key(&ctrl_key('w')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert!(matches!(
+        mode.handle_key(&key('p')),
+        HandleKeyResult::Complete(intent)
+            if matches!(intent, crate::ui::Intent::Command(crate::ui::Command::FocusPreviousWindow))
+    ));
+
+    let mut mode = NormalMode::new();
+    assert!(matches!(
+        mode.handle_key(&ctrl_key('w')),
+        HandleKeyResult::WaitForMore
+    ));
     assert_eq!(
         handle_and_unwrap(&mut mode, &key('r')),
-        Action::mode_transition(ModeKind::Resizing)
+        EditorAction::mode_transition(ModeKind::Resizing)
     );
 }
 
@@ -343,20 +367,23 @@ fn test_normal_mode_equalize_binding() {
 #[test]
 fn test_normal_mode_comment_toggle_binding() {
     let mut mode = NormalMode::new();
-    assert_eq!(handle_and_unwrap(&mut mode, &key('g')), Action::none());
+    assert_eq!(
+        handle_and_unwrap(&mut mode, &key('g')),
+        EditorAction::none()
+    );
     assert!(matches!(
         mode.handle_key(&key('c')),
         HandleKeyResult::WaitForMore
     ));
     assert_eq!(
         handle_and_unwrap(&mut mode, &key('c')),
-        Action::toggle_line_comment()
+        EditorAction::toggle_line_comment()
     );
 }
 
 #[test]
 fn test_comment_toggle_does_not_switch_to_insert_mode() {
-    assert!(!Action::toggle_line_comment().switches_to_insert_mode());
+    assert!(!EditorAction::toggle_line_comment().switches_to_insert_mode());
 }
 
 #[test]
@@ -364,7 +391,7 @@ fn test_normal_mode_append_after_cursor_sets_insert_mode() {
     let mut mode = NormalMode::new();
     assert_eq!(
         handle_and_unwrap(&mut mode, &key('a')),
-        Action::new(ActionKind::AppendAfterCursor).with_to_mode(ModeKind::Insert)
+        EditorAction::new(EditorOperation::AppendAfterCursor).with_to_mode(ModeKind::Insert)
     );
 }
 
@@ -374,11 +401,11 @@ fn test_normal_mode_visual_binding_switches_to_visual_mode() {
 
     assert_eq!(
         handle_and_unwrap(&mut mode, &key('v')),
-        Action::mode_transition(ModeKind::Visual)
+        EditorAction::mode_transition(ModeKind::Visual)
     );
     assert_eq!(
         handle_and_unwrap(&mut mode, &key('V')),
-        Action::mode_transition(ModeKind::VisualLine)
+        EditorAction::mode_transition(ModeKind::VisualLine)
     );
 }
 
@@ -392,7 +419,7 @@ fn test_normal_mode_indent_bindings() {
     ));
     assert_eq!(
         handle_and_unwrap(&mut mode, &key('<')),
-        Action::new(ActionKind::IndentDecrease)
+        EditorAction::new(EditorOperation::IndentDecrease)
     );
 
     let mut mode = NormalMode::new();
@@ -402,7 +429,7 @@ fn test_normal_mode_indent_bindings() {
     ));
     assert_eq!(
         handle_and_unwrap(&mut mode, &key('>')),
-        Action::new(ActionKind::IndentIncrease)
+        EditorAction::new(EditorOperation::IndentIncrease)
     );
 }
 
@@ -411,7 +438,7 @@ fn test_normal_mode_dot_repeat_action() {
     let mut mode = NormalMode::new();
     assert_eq!(
         handle_and_unwrap(&mut mode, &key('.')),
-        Action::new(ActionKind::RepeatLastChange)
+        EditorAction::new(EditorOperation::RepeatLastChange)
     );
 }
 
@@ -485,7 +512,7 @@ fn test_resizing_mode_key_bindings() {
     ));
     assert_eq!(
         handle_and_unwrap(&mut mode, &Key::new(KeyCode::Esc)),
-        Action::mode_transition(ModeKind::Normal)
+        EditorAction::mode_transition(ModeKind::Normal)
     );
     assert!(matches!(
         mode.handle_key(&key('x')),
@@ -516,41 +543,44 @@ fn test_visual_mode_motion_and_exit_bindings() {
 
     assert_eq!(
         handle_and_unwrap(&mut mode, &key('l')),
-        Action::new(ActionKind::MoveRight)
+        EditorAction::new(EditorOperation::MoveRight)
     );
     assert_eq!(
         handle_and_unwrap(&mut mode, &key(';')),
-        Action::new(ActionKind::RepeatLastFind)
+        EditorAction::new(EditorOperation::RepeatLastFind)
     );
     assert_eq!(
         handle_and_unwrap(&mut mode, &key(',')),
-        Action::new(ActionKind::RepeatLastFindReverse)
+        EditorAction::new(EditorOperation::RepeatLastFindReverse)
     );
     assert_eq!(
         handle_and_unwrap(&mut mode, &key('d')),
-        Action::new(ActionKind::DeleteSelection).with_to_mode(ModeKind::Normal)
+        EditorAction::new(EditorOperation::DeleteSelection).with_to_mode(ModeKind::Normal)
     );
     assert_eq!(
         handle_and_unwrap(&mut mode, &key('y')),
-        Action::new(ActionKind::YankSelection).with_to_mode(ModeKind::Normal)
+        EditorAction::new(EditorOperation::YankSelection).with_to_mode(ModeKind::Normal)
     );
     assert_eq!(
         handle_and_unwrap(&mut mode, &key('V')),
-        Action::mode_transition(ModeKind::VisualLine)
+        EditorAction::mode_transition(ModeKind::VisualLine)
     );
     assert_eq!(
         handle_and_unwrap(&mut mode, &key('c')),
-        Action::new(ActionKind::ChangeSelection).with_to_mode(ModeKind::Insert)
+        EditorAction::new(EditorOperation::ChangeSelection).with_to_mode(ModeKind::Insert)
     );
-    assert_eq!(handle_and_unwrap(&mut mode, &key('g')), Action::none());
+    assert_eq!(
+        handle_and_unwrap(&mut mode, &key('g')),
+        EditorAction::none()
+    );
     assert_eq!(
         handle_and_unwrap(&mut mode, &key('u')),
-        Action::operation(Operator::Lowercase, OperatorTarget::Selection)
+        EditorAction::operation(Operator::Lowercase, OperatorTarget::Selection)
             .with_to_mode(ModeKind::Normal)
     );
     assert_eq!(
         handle_and_unwrap(&mut mode, &Key::new(urvim_terminal::KeyCode::Esc)),
-        Action::mode_transition(ModeKind::Normal)
+        EditorAction::mode_transition(ModeKind::Normal)
     );
 }
 
@@ -566,7 +596,7 @@ fn test_visual_mode_configured_keymap_overrides_builtin() {
 
     assert_eq!(
         handle_and_unwrap(&mut mode, &key('l')),
-        Action::new(ActionKind::MoveLeft)
+        EditorAction::new(EditorOperation::MoveLeft)
     );
 }
 
@@ -580,7 +610,7 @@ fn test_visual_mode_text_object_bindings() {
     ));
     assert_eq!(
         handle_and_unwrap(&mut mode, &key('w')),
-        Action::new(ActionKind::VisualTextObject(TextObject::InnerWord))
+        EditorAction::new(EditorOperation::VisualTextObject(TextObject::InnerWord))
     );
 
     let mut mode = VisualMode::new();
@@ -590,7 +620,7 @@ fn test_visual_mode_text_object_bindings() {
     ));
     assert_eq!(
         handle_and_unwrap(&mut mode, &key('W')),
-        Action::new(ActionKind::VisualTextObject(TextObject::AroundBigWord))
+        EditorAction::new(EditorOperation::VisualTextObject(TextObject::AroundBigWord))
     );
 }
 
@@ -612,7 +642,7 @@ fn test_visual_mode_surround_add_binding() {
     ));
     assert_eq!(
         handle_and_unwrap(&mut mode, &key('"')),
-        Action::new(ActionKind::SurroundAddSelection {
+        EditorAction::new(EditorOperation::SurroundAddSelection {
             delimiter: DelimiterFamily::DoubleQuote,
         })
         .with_to_mode(ModeKind::Normal)
@@ -625,7 +655,7 @@ fn test_visual_mode_v_exits_to_normal() {
 
     assert_eq!(
         handle_and_unwrap(&mut mode, &key('v')),
-        Action::mode_transition(ModeKind::Normal)
+        EditorAction::mode_transition(ModeKind::Normal)
     );
 }
 
@@ -635,33 +665,36 @@ fn test_visual_line_mode_motion_and_exit_bindings() {
 
     assert_eq!(
         handle_and_unwrap(&mut mode, &key('l')),
-        Action::new(ActionKind::MoveRight)
+        EditorAction::new(EditorOperation::MoveRight)
     );
     assert_eq!(
         handle_and_unwrap(&mut mode, &key('v')),
-        Action::mode_transition(ModeKind::Visual)
+        EditorAction::mode_transition(ModeKind::Visual)
     );
     assert_eq!(
         handle_and_unwrap(&mut mode, &key('d')),
-        Action::new(ActionKind::DeleteSelection).with_to_mode(ModeKind::Normal)
+        EditorAction::new(EditorOperation::DeleteSelection).with_to_mode(ModeKind::Normal)
     );
     assert_eq!(
         handle_and_unwrap(&mut mode, &key('y')),
-        Action::new(ActionKind::YankSelection).with_to_mode(ModeKind::Normal)
+        EditorAction::new(EditorOperation::YankSelection).with_to_mode(ModeKind::Normal)
     );
     assert_eq!(
         handle_and_unwrap(&mut mode, &key('c')),
-        Action::new(ActionKind::ChangeSelection).with_to_mode(ModeKind::Insert)
+        EditorAction::new(EditorOperation::ChangeSelection).with_to_mode(ModeKind::Insert)
     );
-    assert_eq!(handle_and_unwrap(&mut mode, &key('g')), Action::none());
+    assert_eq!(
+        handle_and_unwrap(&mut mode, &key('g')),
+        EditorAction::none()
+    );
     assert_eq!(
         handle_and_unwrap(&mut mode, &key('U')),
-        Action::operation(Operator::Uppercase, OperatorTarget::Selection)
+        EditorAction::operation(Operator::Uppercase, OperatorTarget::Selection)
             .with_to_mode(ModeKind::Normal)
     );
     assert_eq!(
         handle_and_unwrap(&mut mode, &Key::new(urvim_terminal::KeyCode::Esc)),
-        Action::mode_transition(ModeKind::Normal)
+        EditorAction::mode_transition(ModeKind::Normal)
     );
 }
 
@@ -677,7 +710,7 @@ fn test_visual_line_mode_configured_keymap_overrides_builtin() {
 
     assert_eq!(
         handle_and_unwrap(&mut mode, &key('l')),
-        Action::new(ActionKind::MoveLeft)
+        EditorAction::new(EditorOperation::MoveLeft)
     );
 }
 
@@ -699,7 +732,7 @@ fn test_visual_line_mode_surround_add_binding_accepts_closer() {
     ));
     assert_eq!(
         handle_and_unwrap(&mut mode, &key(']')),
-        Action::new(ActionKind::SurroundAddSelection {
+        EditorAction::new(EditorOperation::SurroundAddSelection {
             delimiter: DelimiterFamily::Square,
         })
         .with_to_mode(ModeKind::Normal)
@@ -712,7 +745,7 @@ fn test_visual_line_mode_v_exits_to_normal() {
 
     assert_eq!(
         handle_and_unwrap(&mut mode, &key('V')),
-        Action::mode_transition(ModeKind::Normal)
+        EditorAction::mode_transition(ModeKind::Normal)
     );
 }
 
@@ -721,7 +754,7 @@ fn test_insert_mode_escape_switches_to_normal() {
     let mut mode = InsertMode::new();
     assert_eq!(
         handle_and_unwrap(&mut mode, &Key::new(urvim_terminal::KeyCode::Esc)),
-        Action::mode_transition(ModeKind::Normal)
+        EditorAction::mode_transition(ModeKind::Normal)
     );
 }
 
@@ -731,12 +764,12 @@ fn test_replace_mode_backspace_restores_last_replace() {
 
     assert_eq!(
         complete_action_kind(mode.handle_key(&key('a'))),
-        ActionKind::ReplaceChar('a')
+        EditorOperation::ReplaceChar('a')
     );
 
     assert_eq!(
         complete_action_kind(mode.handle_key(&Key::new(KeyCode::Backspace))),
-        ActionKind::ReplaceBackspaceLast
+        EditorOperation::ReplaceBackspaceLast
     );
 }
 
@@ -750,7 +783,7 @@ fn test_insert_mode_shift_tab_binds_to_indent_decrease() {
             &mut mode,
             &Key::with_modifiers(KeyCode::Tab, Modifiers::SHIFT)
         ),
-        Action::new(ActionKind::IndentDecrease)
+        EditorAction::new(EditorOperation::IndentDecrease)
     );
 }
 
@@ -768,7 +801,7 @@ fn test_insert_mode_configured_keymap_switches_to_normal() {
     ));
     assert_eq!(
         handle_and_unwrap(&mut mode, &key('k')),
-        Action::mode_transition(ModeKind::Normal)
+        EditorAction::mode_transition(ModeKind::Normal)
     );
     assert_eq!(mode.take_repeat_text(), None);
 }
@@ -783,7 +816,7 @@ fn test_insert_mode_configured_keymap_keeps_builtin_escape() {
 
     assert_eq!(
         handle_and_unwrap(&mut mode, &Key::new(urvim_terminal::KeyCode::Esc)),
-        Action::mode_transition(ModeKind::Normal)
+        EditorAction::mode_transition(ModeKind::Normal)
     );
 }
 
@@ -797,7 +830,7 @@ fn test_insert_mode_configured_keymap_does_not_affect_normal_mode() {
 
     assert_eq!(
         handle_and_unwrap(&mut mode, &key('j')),
-        Action::new(ActionKind::MoveDown)
+        EditorAction::new(EditorOperation::MoveDown)
     );
 }
 
@@ -807,19 +840,19 @@ fn test_insert_mode_page_keys() {
 
     assert_eq!(
         handle_and_unwrap(&mut mode, &Key::new(KeyCode::PageUp)),
-        Action::new(ActionKind::MovePageUp)
+        EditorAction::new(EditorOperation::MovePageUp)
     );
     assert_eq!(
         handle_and_unwrap(&mut mode, &Key::new(KeyCode::PageDown)),
-        Action::new(ActionKind::MovePageDown)
+        EditorAction::new(EditorOperation::MovePageDown)
     );
     assert_eq!(
         handle_and_unwrap(&mut mode, &ctrl_key('u')),
-        Action::new(ActionKind::MoveHalfPageUp)
+        EditorAction::new(EditorOperation::MoveHalfPageUp)
     );
     assert_eq!(
         handle_and_unwrap(&mut mode, &ctrl_key('d')),
-        Action::new(ActionKind::MoveHalfPageDown)
+        EditorAction::new(EditorOperation::MoveHalfPageDown)
     );
 }
 
@@ -832,7 +865,7 @@ fn test_insert_mode_enter_emits_plain_newline() {
 
     assert_eq!(
         handle_and_unwrap(&mut mode, &Key::new(urvim_terminal::KeyCode::Enter)),
-        Action::insert_newline()
+        EditorAction::insert_newline()
     );
     assert_eq!(mode.take_repeat_text().as_deref(), Some("\n"));
 }
@@ -844,7 +877,7 @@ fn test_insert_mode_enter_emits_plain_newline_when_disabled() {
 
     assert_eq!(
         handle_and_unwrap(&mut mode, &Key::new(urvim_terminal::KeyCode::Enter)),
-        Action::insert_newline()
+        EditorAction::insert_newline()
     );
     assert_eq!(mode.take_repeat_text().as_deref(), Some("\n"));
 }
@@ -863,7 +896,7 @@ fn test_insert_mode_partial_escape_sequence_falls_back_to_literal_text() {
     ));
     assert_eq!(
         handle_and_unwrap(&mut mode, &key('j')),
-        Action::insert_text("jj".to_string())
+        EditorAction::insert_text("jj".to_string())
     );
     assert_eq!(mode.take_repeat_text().as_deref(), Some("jj"));
 }
@@ -882,7 +915,7 @@ fn test_insert_mode_partial_escape_sequence_keeps_following_text() {
     ));
     assert_eq!(
         handle_and_unwrap(&mut mode, &key('u')),
-        Action::insert_text("ju".to_string())
+        EditorAction::insert_text("ju".to_string())
     );
     assert_eq!(mode.take_repeat_text().as_deref(), Some("ju"));
 }
@@ -894,7 +927,7 @@ fn test_insert_mode_emits_pair_action_for_supported_opener() {
 
     assert_eq!(
         handle_and_unwrap(&mut mode, &key('(')),
-        Action::insert_char('(')
+        EditorAction::insert_char('(')
     );
 }
 
@@ -905,7 +938,7 @@ fn test_insert_mode_emits_skip_closer_action_for_supported_closer() {
 
     assert_eq!(
         handle_and_unwrap(&mut mode, &key(')')),
-        Action::insert_char(')')
+        EditorAction::insert_char(')')
     );
 }
 
@@ -916,7 +949,7 @@ fn test_insert_mode_emits_skip_action_for_quote_closer() {
 
     assert_eq!(
         handle_and_unwrap(&mut mode, &key('"')),
-        Action::insert_char('"')
+        EditorAction::insert_char('"')
     );
 }
 
@@ -927,7 +960,7 @@ fn test_insert_mode_disabled_auto_close_keeps_plain_insertion() {
 
     assert_eq!(
         handle_and_unwrap(&mut mode, &key('(')),
-        Action::insert_char('(')
+        EditorAction::insert_char('(')
     );
 }
 
@@ -942,10 +975,12 @@ fn test_insert_mode_tab_simple_uses_configured_insertion_setting() {
 
     match mode.handle_key(&Key::new(KeyCode::Tab)) {
         HandleKeyResult::Complete(intent) => {
-            let action = intent.as_action().expect("expected a complete action");
+            let action = intent
+                .as_editor_action()
+                .expect("expected a complete action");
             assert_eq!(
                 action.kind,
-                Some(ActionKind::InsertText("    ".to_string()))
+                Some(EditorOperation::InsertText("    ".to_string()))
             );
         }
         other => panic!("expected complete action, got {other:?}"),
@@ -964,8 +999,13 @@ fn test_insert_mode_tab_smart_infers_tabs_from_buffer_contents() {
 
     match mode.handle_key(&Key::new(KeyCode::Tab)) {
         HandleKeyResult::Complete(intent) => {
-            let action = intent.as_action().expect("expected a complete action");
-            assert_eq!(action.kind, Some(ActionKind::InsertText("\t".to_string())));
+            let action = intent
+                .as_editor_action()
+                .expect("expected a complete action");
+            assert_eq!(
+                action.kind,
+                Some(EditorOperation::InsertText("\t".to_string()))
+            );
         }
         other => panic!("expected complete action, got {other:?}"),
     }
@@ -983,8 +1023,13 @@ fn test_insert_mode_tab_smart_falls_back_to_configured_insertion_setting() {
 
     match mode.handle_key(&Key::new(KeyCode::Tab)) {
         HandleKeyResult::Complete(intent) => {
-            let action = intent.as_action().expect("expected a complete action");
-            assert_eq!(action.kind, Some(ActionKind::InsertText("\t".to_string())));
+            let action = intent
+                .as_editor_action()
+                .expect("expected a complete action");
+            assert_eq!(
+                action.kind,
+                Some(EditorOperation::InsertText("\t".to_string()))
+            );
         }
         other => panic!("expected complete action, got {other:?}"),
     }
@@ -995,15 +1040,15 @@ fn test_insert_mode_captures_repeat_text() {
     let mut mode = InsertMode::new();
     assert_eq!(
         handle_and_unwrap(&mut mode, &key('h')),
-        Action::insert_char('h')
+        EditorAction::insert_char('h')
     );
     assert_eq!(
         handle_and_unwrap(&mut mode, &key('i')),
-        Action::insert_char('i')
+        EditorAction::insert_char('i')
     );
     assert_eq!(
         handle_and_unwrap(&mut mode, &Key::new(urvim_terminal::KeyCode::Esc)),
-        Action::mode_transition(ModeKind::Normal)
+        EditorAction::mode_transition(ModeKind::Normal)
     );
 
     assert_eq!(mode.take_repeat_text().as_deref(), Some("hi"));
@@ -1015,19 +1060,19 @@ fn test_insert_mode_captured_repeat_text_tracks_backspace() {
     let mut mode = InsertMode::new();
     assert_eq!(
         handle_and_unwrap(&mut mode, &key('h')),
-        Action::insert_char('h')
+        EditorAction::insert_char('h')
     );
     assert_eq!(
         handle_and_unwrap(&mut mode, &key('i')),
-        Action::insert_char('i')
+        EditorAction::insert_char('i')
     );
     assert_eq!(
         handle_and_unwrap(&mut mode, &Key::new(urvim_terminal::KeyCode::Backspace)),
-        Action::new(ActionKind::DeleteBackward)
+        EditorAction::new(EditorOperation::DeleteBackward)
     );
     assert_eq!(
         handle_and_unwrap(&mut mode, &Key::new(urvim_terminal::KeyCode::Esc)),
-        Action::mode_transition(ModeKind::Normal)
+        EditorAction::mode_transition(ModeKind::Normal)
     );
 
     assert_eq!(mode.take_repeat_text().as_deref(), Some("h"));
@@ -1041,7 +1086,7 @@ fn test_gg_motion() {
     let result = mode.handle_key(&key('g'));
     assert!(matches!(
         complete_action_kind(result),
-        ActionKind::MoveToFirstLine
+        EditorOperation::MoveToFirstLine
     ));
 }
 
@@ -1054,7 +1099,7 @@ fn test_z_viewport_sequences() {
     ));
     assert!(matches!(
         complete_action_kind(mode.handle_key(&key('t'))),
-        ActionKind::ViewportCursorTop
+        EditorOperation::ViewportCursorTop
     ));
 
     let mut mode = NormalMode::new();
@@ -1064,7 +1109,7 @@ fn test_z_viewport_sequences() {
     ));
     assert!(matches!(
         complete_action_kind(mode.handle_key(&key('z'))),
-        ActionKind::ViewportCursorCenter
+        EditorOperation::ViewportCursorCenter
     ));
 
     let mut mode = NormalMode::new();
@@ -1074,7 +1119,7 @@ fn test_z_viewport_sequences() {
     ));
     assert!(matches!(
         complete_action_kind(mode.handle_key(&key('b'))),
-        ActionKind::ViewportCursorBottom
+        EditorOperation::ViewportCursorBottom
     ));
 }
 
@@ -1091,7 +1136,7 @@ fn test_counted_z_viewport_sequence_ignores_count() {
     ));
     assert!(matches!(
         complete_action_kind(mode.handle_key(&key('z'))),
-        ActionKind::ViewportCursorCenter
+        EditorOperation::ViewportCursorCenter
     ));
 }
 
@@ -1150,7 +1195,7 @@ fn test_gsd_quote_sequence() {
     ));
     assert_eq!(
         complete_action_kind(mode.handle_key(&key('"'))),
-        ActionKind::SurroundDelete {
+        EditorOperation::SurroundDelete {
             target: DelimiterFamily::DoubleQuote,
         }
     );
@@ -1177,7 +1222,7 @@ fn test_gsr_bracket_replace_sequence_accepts_closer_target() {
     ));
     assert_eq!(
         complete_action_kind(mode.handle_key(&key('['))),
-        ActionKind::SurroundReplace {
+        EditorOperation::SurroundReplace {
             target: DelimiterFamily::Curly,
             replacement: DelimiterFamily::Square,
         }
@@ -1205,7 +1250,7 @@ fn test_gsr_angle_to_quote_sequence() {
     ));
     assert_eq!(
         complete_action_kind(mode.handle_key(&key('"'))),
-        ActionKind::SurroundReplace {
+        EditorOperation::SurroundReplace {
             target: DelimiterFamily::Angle,
             replacement: DelimiterFamily::DoubleQuote,
         }
@@ -1237,7 +1282,7 @@ fn test_gsa_inner_word_to_quote_sequence() {
     ));
     assert_eq!(
         complete_action_kind(mode.handle_key(&key('"'))),
-        ActionKind::SurroundAdd {
+        EditorOperation::SurroundAdd {
             target: TextObject::InnerWord,
             delimiter: DelimiterFamily::DoubleQuote,
         }
@@ -1269,7 +1314,7 @@ fn test_gsa_bracket_sequence_accepts_closer_text_object_and_delimiter() {
     ));
     assert_eq!(
         complete_action_kind(mode.handle_key(&key(']'))),
-        ActionKind::SurroundAdd {
+        EditorOperation::SurroundAdd {
             target: TextObject::AroundBracket(BracketKind::Curly),
             delimiter: DelimiterFamily::Square,
         }
@@ -1294,7 +1339,7 @@ fn test_count_diw() {
     let result = mode.handle_key(&key('w'));
     assert!(matches!(
         complete_action_kind(result),
-        ActionKind::Count(3, _)
+        EditorOperation::Count(3, _)
     ));
 }
 
@@ -1308,7 +1353,7 @@ fn test_dw_sequence() {
     let result = mode.handle_key(&key('w'));
     assert!(matches!(
         complete_action_kind(result),
-        ActionKind::Operation(
+        EditorOperation::Operation(
             Operator::Delete,
             OperatorTarget::BoundaryMotion(BoundaryMotion::WordForward),
         )
@@ -1328,7 +1373,7 @@ fn test_dfx_sequence() {
     ));
     let result = mode.handle_key(&key('x'));
     match complete_action_kind(result) {
-        ActionKind::Operation(
+        EditorOperation::Operation(
             Operator::Delete,
             OperatorTarget::CharacterScan(FindState {
                 target_char,
@@ -1354,7 +1399,7 @@ fn test_space_character_scan_bindings() {
     ));
     assert_eq!(
         complete_action_kind(mode.handle_key(&key(' '))),
-        ActionKind::FindForward(' ')
+        EditorOperation::FindForward(' ')
     );
 
     assert!(matches!(
@@ -1363,7 +1408,7 @@ fn test_space_character_scan_bindings() {
     ));
     assert_eq!(
         complete_action_kind(mode.handle_key(&key(' '))),
-        ActionKind::FindBackward(' ')
+        EditorOperation::FindBackward(' ')
     );
 
     assert!(matches!(
@@ -1372,7 +1417,7 @@ fn test_space_character_scan_bindings() {
     ));
     assert_eq!(
         complete_action_kind(mode.handle_key(&key(' '))),
-        ActionKind::TillForward(' ')
+        EditorOperation::TillForward(' ')
     );
 
     assert!(matches!(
@@ -1381,7 +1426,7 @@ fn test_space_character_scan_bindings() {
     ));
     assert_eq!(
         complete_action_kind(mode.handle_key(&key(' '))),
-        ActionKind::TillBackward(' ')
+        EditorOperation::TillBackward(' ')
     );
 }
 
@@ -1399,7 +1444,7 @@ fn test_df_space_sequence() {
     ));
 
     match complete_action_kind(mode.handle_key(&key(' '))) {
-        ActionKind::Operation(
+        EditorOperation::Operation(
             Operator::Delete,
             OperatorTarget::CharacterScan(FindState {
                 target_char,
@@ -1431,10 +1476,12 @@ fn test_cf_space_sequence_enters_insert_mode() {
     let result = mode.handle_key(&key(' '));
     match result {
         HandleKeyResult::Complete(intent) => {
-            let action = intent.as_action().expect("expected a complete action");
+            let action = intent
+                .as_editor_action()
+                .expect("expected a complete action");
             assert_eq!(action.to_mode, Some(ModeKind::Insert));
             match action.kind.as_ref() {
-                Some(ActionKind::Operation(
+                Some(EditorOperation::Operation(
                     Operator::Change,
                     OperatorTarget::CharacterScan(FindState {
                         target_char,
@@ -1467,10 +1514,12 @@ fn test_ct_sequence() {
     let result = mode.handle_key(&key(':'));
     match result {
         HandleKeyResult::Complete(intent) => {
-            let action = intent.as_action().expect("expected a complete action");
+            let action = intent
+                .as_editor_action()
+                .expect("expected a complete action");
             assert_eq!(action.to_mode, Some(ModeKind::Insert));
             match action.kind.as_ref() {
-                Some(ActionKind::Operation(
+                Some(EditorOperation::Operation(
                     Operator::Change,
                     OperatorTarget::CharacterScan(FindState {
                         target_char,
@@ -1506,7 +1555,7 @@ fn test_gufx_sequence() {
     ));
     let result = mode.handle_key(&key('x'));
     match complete_action_kind(result) {
-        ActionKind::Operation(
+        EditorOperation::Operation(
             Operator::Lowercase,
             OperatorTarget::CharacterScan(FindState {
                 target_char,
@@ -1540,7 +1589,7 @@ fn test_count_dfx_sequence() {
     let result = mode.handle_key(&key('x'));
     assert!(matches!(
         complete_action_kind(result),
-        ActionKind::Count(2, _)
+        EditorOperation::Count(2, _)
     ));
 }
 
@@ -1554,7 +1603,7 @@ fn test_cw_sequence() {
     let result = mode.handle_key(&key('w'));
     assert!(matches!(
         complete_action_kind(result),
-        ActionKind::Operation(
+        EditorOperation::Operation(
             Operator::Change,
             OperatorTarget::BoundaryMotion(BoundaryMotion::WordForward),
         )
@@ -1575,7 +1624,7 @@ fn test_ciw_sequence() {
     let result = mode.handle_key(&key('w'));
     assert!(matches!(
         complete_action_kind(result),
-        ActionKind::Operation(
+        EditorOperation::Operation(
             Operator::Change,
             OperatorTarget::TextObject(TextObject::InnerWord),
         )
@@ -1596,7 +1645,7 @@ fn test_diw_capital_w_sequence() {
     let result = mode.handle_key(&key('W'));
     assert!(matches!(
         complete_action_kind(result),
-        ActionKind::Operation(
+        EditorOperation::Operation(
             Operator::Delete,
             OperatorTarget::TextObject(TextObject::InnerBigWord),
         )
@@ -1617,7 +1666,7 @@ fn test_daw_capital_w_sequence() {
     let result = mode.handle_key(&key('W'));
     assert!(matches!(
         complete_action_kind(result),
-        ActionKind::Operation(
+        EditorOperation::Operation(
             Operator::Delete,
             OperatorTarget::TextObject(TextObject::AroundBigWord),
         )
@@ -1638,7 +1687,7 @@ fn test_ciw_capital_w_sequence() {
     let result = mode.handle_key(&key('W'));
     assert!(matches!(
         complete_action_kind(result),
-        ActionKind::Operation(
+        EditorOperation::Operation(
             Operator::Change,
             OperatorTarget::TextObject(TextObject::InnerBigWord),
         )
@@ -1659,7 +1708,7 @@ fn test_caw_capital_w_sequence() {
     let result = mode.handle_key(&key('W'));
     assert!(matches!(
         complete_action_kind(result),
-        ActionKind::Operation(
+        EditorOperation::Operation(
             Operator::Change,
             OperatorTarget::TextObject(TextObject::AroundBigWord),
         )
@@ -1724,12 +1773,12 @@ fn test_bracket_text_object_sequences() {
         let result = mode.handle_key(&key(delimiter));
         match result {
             HandleKeyResult::Complete(intent) => match intent
-                .as_action()
+                .as_editor_action()
                 .expect("expected a complete action")
                 .kind
                 .as_ref()
             {
-                Some(ActionKind::Operation(
+                Some(EditorOperation::Operation(
                     Operator::Delete,
                     OperatorTarget::TextObject(TextObject::InnerBracket(actual)),
                 )) => assert_eq!(*actual, kind),
@@ -1759,12 +1808,12 @@ fn test_bracket_text_object_sequences() {
         let result = mode.handle_key(&key(delimiter));
         match result {
             HandleKeyResult::Complete(intent) => match intent
-                .as_action()
+                .as_editor_action()
                 .expect("expected a complete action")
                 .kind
                 .as_ref()
             {
-                Some(ActionKind::Operation(
+                Some(EditorOperation::Operation(
                     Operator::Change,
                     OperatorTarget::TextObject(TextObject::AroundBracket(actual)),
                 )) => assert_eq!(*actual, kind),
@@ -1796,12 +1845,12 @@ fn test_quote_text_object_sequences() {
         let result = mode.handle_key(&key(delimiter));
         match result {
             HandleKeyResult::Complete(intent) => match intent
-                .as_action()
+                .as_editor_action()
                 .expect("expected a complete action")
                 .kind
                 .as_ref()
             {
-                Some(ActionKind::Operation(
+                Some(EditorOperation::Operation(
                     Operator::Delete,
                     OperatorTarget::TextObject(TextObject::InnerQuote(actual)),
                 )) => assert_eq!(*actual, kind),
@@ -1824,12 +1873,12 @@ fn test_quote_text_object_sequences() {
         let result = mode.handle_key(&key(delimiter));
         match result {
             HandleKeyResult::Complete(intent) => match intent
-                .as_action()
+                .as_editor_action()
                 .expect("expected a complete action")
                 .kind
                 .as_ref()
             {
-                Some(ActionKind::Operation(
+                Some(EditorOperation::Operation(
                     Operator::Change,
                     OperatorTarget::TextObject(TextObject::AroundQuote(actual)),
                 )) => assert_eq!(*actual, kind),
@@ -1854,7 +1903,7 @@ fn test_cgg_sequence() {
     let result = mode.handle_key(&key('g'));
     assert!(matches!(
         complete_action_kind(result),
-        ActionKind::Operation(
+        EditorOperation::Operation(
             Operator::Change,
             OperatorTarget::LinewiseMotion(LinewiseMotion::FirstLine),
         )
@@ -1875,7 +1924,7 @@ fn test_gu_sequence() {
     let result = mode.handle_key(&key('w'));
     assert!(matches!(
         complete_action_kind(result),
-        ActionKind::Operation(
+        EditorOperation::Operation(
             Operator::Lowercase,
             OperatorTarget::BoundaryMotion(BoundaryMotion::WordForward),
         )
@@ -1896,7 +1945,7 @@ fn test_g_upper_sequence() {
     let result = mode.handle_key(&key('w'));
     assert!(matches!(
         complete_action_kind(result),
-        ActionKind::Operation(
+        EditorOperation::Operation(
             Operator::Uppercase,
             OperatorTarget::BoundaryMotion(BoundaryMotion::WordForward),
         )
@@ -1917,7 +1966,7 @@ fn test_g_tilde_sequence() {
     let result = mode.handle_key(&key('w'));
     assert!(matches!(
         complete_action_kind(result),
-        ActionKind::Operation(
+        EditorOperation::Operation(
             Operator::ToggleCase,
             OperatorTarget::BoundaryMotion(BoundaryMotion::WordForward),
         )
@@ -1934,7 +1983,7 @@ fn test_dollar_sequence() {
     let result = mode.handle_key(&key('$'));
     assert!(matches!(
         complete_action_kind(result),
-        ActionKind::Operation(
+        EditorOperation::Operation(
             Operator::Delete,
             OperatorTarget::BoundaryMotion(BoundaryMotion::LineEnd),
         )
@@ -1951,7 +2000,7 @@ fn test_d0_sequence() {
     let result = mode.handle_key(&key('0'));
     assert!(matches!(
         complete_action_kind(result),
-        ActionKind::Operation(
+        EditorOperation::Operation(
             Operator::Delete,
             OperatorTarget::BoundaryMotion(BoundaryMotion::LineStart),
         )
@@ -1968,7 +2017,7 @@ fn test_dcaret_sequence() {
     let result = mode.handle_key(&key('^'));
     assert!(matches!(
         complete_action_kind(result),
-        ActionKind::Operation(
+        EditorOperation::Operation(
             Operator::Delete,
             OperatorTarget::BoundaryMotion(BoundaryMotion::LineContentStart),
         )
@@ -1985,7 +2034,7 @@ fn test_dbigword_sequence() {
     let result = mode.handle_key(&key('W'));
     assert!(matches!(
         complete_action_kind(result),
-        ActionKind::Operation(
+        EditorOperation::Operation(
             Operator::Delete,
             OperatorTarget::BoundaryMotion(BoundaryMotion::BigWordForward),
         )
@@ -2006,7 +2055,7 @@ fn test_dgg_sequence() {
     let result = mode.handle_key(&key('g'));
     assert!(matches!(
         complete_action_kind(result),
-        ActionKind::Operation(
+        EditorOperation::Operation(
             Operator::Delete,
             OperatorTarget::LinewiseMotion(LinewiseMotion::FirstLine),
         )
@@ -2049,7 +2098,7 @@ fn test_d_g_sequence() {
     let result = mode.handle_key(&key('G'));
     assert!(matches!(
         complete_action_kind(result),
-        ActionKind::Operation(
+        EditorOperation::Operation(
             Operator::Delete,
             OperatorTarget::LinewiseMotion(LinewiseMotion::LastLine),
         )
@@ -2068,10 +2117,10 @@ fn test_d5_g_sequence() {
         HandleKeyResult::WaitForMore
     ));
     let result = mode.handle_key(&key('G'));
-    if let ActionKind::Count(5, inner) = complete_action_kind(result) {
+    if let EditorOperation::Count(5, inner) = complete_action_kind(result) {
         assert!(matches!(
             inner.kind.as_ref(),
-            Some(ActionKind::Operation(
+            Some(EditorOperation::Operation(
                 Operator::Delete,
                 OperatorTarget::LinewiseMotion(LinewiseMotion::LastLine)
             ))
@@ -2097,10 +2146,10 @@ fn test_d5gg_sequence() {
         HandleKeyResult::WaitForMore
     ));
     let result = mode.handle_key(&key('g'));
-    if let ActionKind::Count(5, inner) = complete_action_kind(result) {
+    if let EditorOperation::Count(5, inner) = complete_action_kind(result) {
         assert!(matches!(
             inner.kind.as_ref(),
-            Some(ActionKind::Operation(
+            Some(EditorOperation::Operation(
                 Operator::Delete,
                 OperatorTarget::LinewiseMotion(LinewiseMotion::FirstLine)
             ))
@@ -2124,56 +2173,59 @@ fn test_d_counted_word_sequence() {
     let result = mode.handle_key(&key('w'));
     assert!(matches!(
         complete_action_kind(result),
-        ActionKind::Count(2, _)
+        EditorOperation::Count(2, _)
     ));
 }
 
 #[test]
 fn test_action_with_count() {
-    let action = Action::new(ActionKind::MoveDown).clone().with_count(5);
+    let action = EditorAction::new(EditorOperation::MoveDown)
+        .clone()
+        .with_count(5);
     assert!(matches!(
         action,
-        Some(action) if matches!(action.kind.as_ref(), Some(ActionKind::Count(5, _)))
+        Some(action) if matches!(action.kind.as_ref(), Some(EditorOperation::Count(5, _)))
     ));
 }
 
 #[test]
 fn test_dot_repeat_source_classification() {
-    assert!(Action::new(ActionKind::DeleteLine).is_dot_repeat_source());
-    assert!(Action::new(ActionKind::IndentDecrease).is_dot_repeat_source());
-    assert!(Action::new(ActionKind::IndentIncrease).is_dot_repeat_source());
+    assert!(EditorAction::new(EditorOperation::DeleteLine).is_dot_repeat_source());
+    assert!(EditorAction::new(EditorOperation::IndentDecrease).is_dot_repeat_source());
+    assert!(EditorAction::new(EditorOperation::IndentIncrease).is_dot_repeat_source());
     assert!(
-        Action::operation(Operator::Lowercase, OperatorTarget::Selection,).is_dot_repeat_source()
+        EditorAction::operation(Operator::Lowercase, OperatorTarget::Selection,)
+            .is_dot_repeat_source()
     );
-    assert!(!Action::mode_transition(ModeKind::Insert).is_dot_repeat_source());
+    assert!(!EditorAction::mode_transition(ModeKind::Insert).is_dot_repeat_source());
     assert!(
-        Action::operation(
+        EditorAction::operation(
             Operator::Delete,
             OperatorTarget::BoundaryMotion(BoundaryMotion::WordForward),
         )
         .is_dot_repeat_source()
     );
     assert!(
-        Action::new(ActionKind::SurroundAdd {
+        EditorAction::new(EditorOperation::SurroundAdd {
             target: TextObject::InnerWord,
             delimiter: DelimiterFamily::DoubleQuote,
         })
         .is_dot_repeat_source()
     );
     assert!(
-        Action::new(ActionKind::SurroundAddSelection {
+        EditorAction::new(EditorOperation::SurroundAddSelection {
             delimiter: DelimiterFamily::Curly,
         })
         .is_dot_repeat_source()
     );
-    assert!(!Action::new(ActionKind::MoveDown).is_dot_repeat_source());
-    assert!(!Action::new(ActionKind::RepeatLastChange).is_dot_repeat_source());
+    assert!(!EditorAction::new(EditorOperation::MoveDown).is_dot_repeat_source());
+    assert!(!EditorAction::new(EditorOperation::RepeatLastChange).is_dot_repeat_source());
 }
 
 #[test]
 fn test_indent_action_traits() {
-    let decrease = Action::new(ActionKind::IndentDecrease);
-    let increase = Action::new(ActionKind::IndentIncrease);
+    let decrease = EditorAction::new(EditorOperation::IndentDecrease);
+    let increase = EditorAction::new(EditorOperation::IndentIncrease);
 
     assert!(decrease.is_countable());
     assert!(increase.is_countable());
@@ -2181,16 +2233,19 @@ fn test_indent_action_traits() {
     assert!(increase.is_line_action());
     assert!(decrease.is_snapshottable());
     assert!(increase.is_snapshottable());
-    assert!(Action::operation(Operator::ToggleCase, OperatorTarget::Selection,).is_snapshottable());
+    assert!(
+        EditorAction::operation(Operator::ToggleCase, OperatorTarget::Selection,)
+            .is_snapshottable()
+    );
 
-    let surround_add = Action::new(ActionKind::SurroundAdd {
+    let surround_add = EditorAction::new(EditorOperation::SurroundAdd {
         target: TextObject::InnerWord,
         delimiter: DelimiterFamily::DoubleQuote,
     });
     assert!(surround_add.resets_remembered_column());
     assert!(surround_add.is_snapshottable());
 
-    let surround_selection = Action::new(ActionKind::SurroundAddSelection {
+    let surround_selection = EditorAction::new(EditorOperation::SurroundAddSelection {
         delimiter: DelimiterFamily::Curly,
     });
     assert!(surround_selection.resets_remembered_column());
@@ -2200,22 +2255,22 @@ fn test_indent_action_traits() {
 #[test]
 fn test_replace_mode_character_actions_are_not_individually_snapshottable() {
     assert!(
-        Action::new(ActionKind::ReplaceChar('x'))
+        EditorAction::new(EditorOperation::ReplaceChar('x'))
             .with_from_mode(ModeKind::Normal)
             .is_snapshottable()
     );
     assert!(
-        !Action::new(ActionKind::ReplaceChar('x'))
+        !EditorAction::new(EditorOperation::ReplaceChar('x'))
             .with_from_mode(ModeKind::Replace)
             .is_snapshottable()
     );
     assert!(
-        !Action::new(ActionKind::ReplaceBackspaceLast)
+        !EditorAction::new(EditorOperation::ReplaceBackspaceLast)
             .with_from_mode(ModeKind::Replace)
             .is_snapshottable()
     );
     assert!(
-        !Action::new(ActionKind::ReplaceBackspace {
+        !EditorAction::new(EditorOperation::ReplaceBackspace {
             cursor: Cursor::new(0, 0),
             replaced: Some('a'),
             inserted: 'x',
@@ -2227,12 +2282,12 @@ fn test_replace_mode_character_actions_are_not_individually_snapshottable() {
 
 #[test]
 fn test_change_operation_traits() {
-    let action = Action::operation(
+    let action = EditorAction::operation(
         Operator::Change,
         OperatorTarget::BoundaryMotion(BoundaryMotion::WordForward),
     );
     let insert_action = action.clone().with_to_mode(ModeKind::Insert);
-    let counted_insert_action = Action::count(2, Box::new(insert_action.clone()));
+    let counted_insert_action = EditorAction::count(2, Box::new(insert_action.clone()));
 
     assert!(!action.is_snapshottable());
     assert!(action.is_countable());
@@ -2241,14 +2296,14 @@ fn test_change_operation_traits() {
     assert!(counted_insert_action.switches_to_insert_mode());
     assert!(matches!(
         counted_insert_action.kind.as_ref(),
-        Some(ActionKind::Count(2, inner)) if inner.to_mode == Some(ModeKind::Insert)
+        Some(EditorOperation::Count(2, inner)) if inner.to_mode == Some(ModeKind::Insert)
     ));
 }
 
 #[test]
 fn test_jump_action_traits() {
-    let backward = Action::jump_backward();
-    let forward = Action::jump_forward();
+    let backward = EditorAction::jump_backward();
+    let forward = EditorAction::jump_forward();
 
     assert!(!backward.is_countable());
     assert!(!forward.is_countable());
@@ -2270,8 +2325,10 @@ fn test_tab_navigation_key_sequences() {
     ));
     let result = mode.handle_key(&key('b'));
     assert!(matches!(
-        complete_action_kind(result),
-        ActionKind::PreviousTab
+        result,
+        HandleKeyResult::Complete(crate::ui::Intent::Command(crate::ui::Command::PreviousTab(
+            1
+        )))
     ));
 
     let mut mode = NormalMode::new();
@@ -2280,30 +2337,26 @@ fn test_tab_navigation_key_sequences() {
         HandleKeyResult::WaitForMore
     ));
     let result = mode.handle_key(&key('b'));
-    assert!(matches!(complete_action_kind(result), ActionKind::NextTab));
+    assert!(matches!(
+        result,
+        HandleKeyResult::Complete(crate::ui::Intent::Command(crate::ui::Command::NextTab(1)))
+    ));
 }
 
 #[test]
-fn test_tab_navigation_action_traits() {
-    let previous = Action::new(ActionKind::PreviousTab);
-    let next = Action::new(ActionKind::NextTab);
-
-    assert!(previous.is_countable());
-    assert!(next.is_countable());
-    assert!(!previous.is_snapshottable());
-    assert!(!next.is_snapshottable());
-    assert!(!previous.switches_to_insert_mode());
-    assert!(!next.switches_to_insert_mode());
-    assert!(!previous.updates_snapshot_cursor());
-    assert!(!next.updates_snapshot_cursor());
-
+fn test_tab_navigation_commands_preserve_counts() {
+    let mut mode = NormalMode::new();
     assert!(matches!(
-        previous.clone().with_count(3),
-        Some(action) if matches!(action.kind.as_ref(), Some(ActionKind::Count(3, _)))
+        mode.handle_key(&key('3')),
+        HandleKeyResult::WaitForMore
     ));
     assert!(matches!(
-        next.clone().with_count(4),
-        Some(action) if matches!(action.kind.as_ref(), Some(ActionKind::Count(4, _)))
+        mode.handle_key(&key(']')),
+        HandleKeyResult::WaitForMore
+    ));
+    assert!(matches!(
+        mode.handle_key(&key('b')),
+        HandleKeyResult::Complete(crate::ui::Intent::Command(crate::ui::Command::NextTab(3)))
     ));
 }
 
@@ -2330,9 +2383,14 @@ fn test_register_prefix_uses_configured_default_and_named_registers() {
     let result = mode.handle_key(&key('p'));
     match result {
         HandleKeyResult::Complete(intent) => {
-            let action = intent.as_action().expect("expected a complete action");
+            let action = intent
+                .as_editor_action()
+                .expect("expected a complete action");
             assert_eq!(action.register, Some(RegisterName('m')));
-            assert!(matches!(action.kind.as_ref(), Some(ActionKind::PasteAfter)));
+            assert!(matches!(
+                action.kind.as_ref(),
+                Some(EditorOperation::PasteAfter)
+            ));
         }
         other => panic!("expected complete action, got {other:?}"),
     }
@@ -2348,9 +2406,14 @@ fn test_register_prefix_uses_configured_default_and_named_registers() {
     let result = mode.handle_key(&key('p'));
     match result {
         HandleKeyResult::Complete(intent) => {
-            let action = intent.as_action().expect("expected a complete action");
+            let action = intent
+                .as_editor_action()
+                .expect("expected a complete action");
             assert_eq!(action.register, Some(RegisterName('a')));
-            assert!(matches!(action.kind.as_ref(), Some(ActionKind::PasteAfter)));
+            assert!(matches!(
+                action.kind.as_ref(),
+                Some(EditorOperation::PasteAfter)
+            ));
         }
         other => panic!("expected complete action, got {other:?}"),
     }
@@ -2378,11 +2441,13 @@ fn test_visual_mode_register_prefix_applies_to_yank() {
     ));
     match mode.handle_key(&key('y')) {
         HandleKeyResult::Complete(intent) => {
-            let action = intent.as_action().expect("expected a complete action");
+            let action = intent
+                .as_editor_action()
+                .expect("expected a complete action");
             assert_eq!(action.register, Some(RegisterName('a')));
             assert!(matches!(
                 action.kind.as_ref(),
-                Some(ActionKind::YankSelection)
+                Some(EditorOperation::YankSelection)
             ));
             assert_eq!(action.to_mode, Some(ModeKind::Normal));
         }
@@ -2412,11 +2477,13 @@ fn test_visual_line_mode_register_prefix_applies_to_yank() {
     ));
     match mode.handle_key(&key('y')) {
         HandleKeyResult::Complete(intent) => {
-            let action = intent.as_action().expect("expected a complete action");
+            let action = intent
+                .as_editor_action()
+                .expect("expected a complete action");
             assert_eq!(action.register, Some(RegisterName('b')));
             assert!(matches!(
                 action.kind.as_ref(),
-                Some(ActionKind::YankSelection)
+                Some(EditorOperation::YankSelection)
             ));
             assert_eq!(action.to_mode, Some(ModeKind::Normal));
         }

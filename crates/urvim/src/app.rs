@@ -2,11 +2,8 @@ use std::cell::RefCell;
 use std::io;
 use std::rc::Rc;
 
-use crate::actions::{
-    execute_action_intent_with_plugin_runtime, process_intent_queue,
-    process_intent_queue_with_plugin_runtime,
-};
-use crate::plugin::{BearscriptPluginRuntime, SharedLayout};
+use crate::actions::{execute_action_intent_with_plugin_runtime, process_intent_queue};
+use crate::plugin::BearscriptPluginRuntime;
 use crate::render::{handle_resize, render_frame_if_needed};
 use crate::startup::{StartupPluginsAndThemes, load_startup_plugins_and_themes, startup_layout};
 use urvim_core::config::Config;
@@ -29,61 +26,6 @@ fn drain_editor_events(plugin_runtime: &mut BearscriptPluginRuntime) -> bool {
         }
     }
     dispatched
-}
-
-fn process_intents_with_shared_layout(
-    layout: &SharedLayout,
-    plugin_runtime: Option<&mut BearscriptPluginRuntime>,
-    intents: Vec<Intent>,
-) -> bool {
-    if intents
-        .iter()
-        .any(|intent| matches!(intent, Intent::Command(Command::PluginRequest { .. })))
-    {
-        let mut handled_all = true;
-        let mut saw_intent = false;
-        let mut plugin_runtime = plugin_runtime;
-        for intent in intents {
-            saw_intent = true;
-            handled_all &= match intent {
-                Intent::Command(Command::PluginRequest {
-                    plugin,
-                    command,
-                    args,
-                }) => match plugin_runtime.as_deref_mut() {
-                    Some(runtime) => {
-                        match runtime.run_command(&plugin, &command, &args) {
-                            Ok(()) => {
-                                tracing::debug!(plugin, command, "ran BearScript plugin command")
-                            }
-                            Err(error) => {
-                                tracing::warn!(plugin, command, error = %error, "BearScript plugin command failed");
-                                urvim_core::notify_warn!(
-                                    "Plugin command {plugin} {command} failed: {error}"
-                                );
-                            }
-                        }
-                        true
-                    }
-                    None => {
-                        tracing::warn!(plugin, command, "plugin command has no runtime");
-                        urvim_core::notify_warn!(
-                            "Plugin command {plugin} {command} could not run: no runtime"
-                        );
-                        true
-                    }
-                },
-                other => process_intent_queue_with_plugin_runtime(
-                    &mut layout.borrow_mut(),
-                    plugin_runtime.as_deref_mut(),
-                    vec![other],
-                ),
-            };
-        }
-        saw_intent && handled_all
-    } else {
-        process_intent_queue_with_plugin_runtime(&mut layout.borrow_mut(), plugin_runtime, intents)
-    }
 }
 
 pub(super) fn run(cli: Cli) -> io::Result<()> {
@@ -203,8 +145,8 @@ pub(super) fn run(cli: Cli) -> io::Result<()> {
         match ui_event {
             UiEvent::Tick => {
                 let ui_result = layout.borrow_mut().route_ui_event(&UiEvent::Tick);
-                if crate::actions::handle_ui_result_with_plugin_runtime(
-                    &mut layout.borrow_mut(),
+                if crate::actions::handle_ui_result_with_shared_layout(
+                    &layout,
                     &mut plugin_runtime,
                     ui_result,
                 ) {
@@ -235,8 +177,8 @@ pub(super) fn run(cli: Cli) -> io::Result<()> {
                 let overlay_result = layout
                     .borrow_mut()
                     .route_ui_event(&UiEvent::Paste(text.clone()));
-                if crate::actions::handle_ui_result_with_plugin_runtime(
-                    &mut layout.borrow_mut(),
+                if crate::actions::handle_ui_result_with_shared_layout(
+                    &layout,
                     &mut plugin_runtime,
                     overlay_result,
                 ) {
@@ -263,7 +205,7 @@ pub(super) fn run(cli: Cli) -> io::Result<()> {
 
                 let handled = process_intent_queue(
                     &mut layout.borrow_mut(),
-                    vec![Intent::Action(action.clone())],
+                    vec![Intent::Editor(action.clone())],
                 );
                 if handled {
                     if let Some(to_mode) = action.to_mode {
@@ -320,8 +262,8 @@ pub(super) fn run(cli: Cli) -> io::Result<()> {
             }
             UiEvent::Key(key) => {
                 let overlay_result = layout.borrow_mut().route_ui_event(&UiEvent::Key(key));
-                if crate::actions::handle_ui_result_with_plugin_runtime(
-                    &mut layout.borrow_mut(),
+                if crate::actions::handle_ui_result_with_shared_layout(
+                    &layout,
                     &mut plugin_runtime,
                     overlay_result,
                 ) {
@@ -344,7 +286,7 @@ pub(super) fn run(cli: Cli) -> io::Result<()> {
 
                 match result {
                     HandleKeyResult::Complete(intent) => match intent {
-                        Intent::Action(action) => {
+                        Intent::Editor(action) => {
                             if execute_action_intent_with_plugin_runtime(
                                 &mut layout.borrow_mut(),
                                 &mut plugin_runtime,
@@ -388,7 +330,7 @@ pub(super) fn run(cli: Cli) -> io::Result<()> {
                                 continue;
                             }
 
-                            let handled = process_intents_with_shared_layout(
+                            let handled = crate::actions::process_intents_with_shared_layout(
                                 &layout,
                                 Some(&mut plugin_runtime),
                                 vec![Intent::Command(command.clone())],

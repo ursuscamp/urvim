@@ -17,11 +17,48 @@ pub enum FloatingAnchor {
     /// Place the floating window centered inside the bounds.
     Center,
     /// Place the floating window near the top, centered horizontally.
-    TopCenter { top_margin: u16 },
+    TopCenter,
     /// Place the floating window at the top-right corner inside the bounds.
     TopRight,
     /// Place the floating window at the bottom-right corner inside the bounds.
     BottomRight,
+}
+
+/// Spacing applied between a floating frame and the bounds used to place it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct FloatingMargins {
+    /// Spacing from the top edge.
+    pub top: u16,
+    /// Spacing from the right edge.
+    pub right: u16,
+    /// Spacing from the bottom edge.
+    pub bottom: u16,
+    /// Spacing from the left edge.
+    pub left: u16,
+}
+
+/// Placement mode for a floating frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FloatingPlacement {
+    /// Resolve the frame from an anchor after applying edge margins.
+    Anchored {
+        /// Anchor used to resolve the frame.
+        anchor: FloatingAnchor,
+        /// Margins applied before resolving the anchor.
+        margins: FloatingMargins,
+    },
+    /// Place the frame at fixed coordinates relative to the bounds.
+    Fixed {
+        /// Zero-based row of the frame origin.
+        row: u16,
+        /// Zero-based column of the frame origin.
+        col: u16,
+    },
+    /// Place the frame near a cursor position.
+    NearCursor {
+        /// Cursor position used as the placement reference.
+        cursor: Position,
+    },
 }
 
 /// Resolved geometry for a bordered floating window.
@@ -116,10 +153,8 @@ impl FloatingWindowFrame {
                     .col
                     .saturating_add(bounds_size.cols.saturating_sub(frame_cols) / 2),
             ),
-            FloatingAnchor::TopCenter { top_margin } => Position::new(
-                bounds_origin
-                    .row
-                    .saturating_add(top_margin.min(bounds_size.rows.saturating_sub(frame_rows))),
+            FloatingAnchor::TopCenter => Position::new(
+                bounds_origin.row,
                 bounds_origin
                     .col
                     .saturating_add(bounds_size.cols.saturating_sub(frame_cols) / 2),
@@ -144,6 +179,100 @@ impl FloatingWindowFrame {
             origin,
             size: Size::new(frame_rows, frame_cols),
             content_origin: Position::new(origin.row + 1, origin.col + 1),
+            content_size: Size::new(frame_rows - 2, frame_cols - 2),
+        })
+    }
+
+    /// Resolves a frame using anchored, fixed, or cursor-relative placement.
+    pub fn resolve_placement(
+        bounds_origin: Position,
+        bounds_size: Size,
+        content_rows: u16,
+        content_cols: u16,
+        placement: FloatingPlacement,
+    ) -> Option<Self> {
+        match placement {
+            FloatingPlacement::Anchored { anchor, margins } => {
+                let top = if matches!(anchor, FloatingAnchor::TopCenter) {
+                    let frame_rows = content_rows.saturating_add(2).min(bounds_size.rows);
+                    margins.top.min(
+                        bounds_size
+                            .rows
+                            .saturating_sub(margins.bottom)
+                            .saturating_sub(frame_rows),
+                    )
+                } else {
+                    margins.top
+                };
+                let inset_origin = Position::new(
+                    bounds_origin.row.saturating_add(top),
+                    bounds_origin.col.saturating_add(margins.left),
+                );
+                let inset_size = Size::new(
+                    bounds_size
+                        .rows
+                        .saturating_sub(top.saturating_add(margins.bottom)),
+                    bounds_size
+                        .cols
+                        .saturating_sub(margins.left.saturating_add(margins.right)),
+                );
+                Self::resolve(inset_origin, inset_size, content_rows, content_cols, anchor)
+            }
+            FloatingPlacement::Fixed { row, col } => {
+                let frame_origin = Position::new(
+                    bounds_origin.row.checked_add(row)?,
+                    bounds_origin.col.checked_add(col)?,
+                );
+                Self::resolve_at(
+                    bounds_origin,
+                    bounds_size,
+                    frame_origin,
+                    content_rows,
+                    content_cols,
+                )
+            }
+            FloatingPlacement::NearCursor { cursor } => Self::resolve_near_cursor(
+                bounds_origin,
+                bounds_size,
+                cursor,
+                content_rows,
+                content_cols,
+            ),
+        }
+    }
+
+    /// Resolves a bordered floating frame at a fixed origin inside the bounds.
+    ///
+    /// The origin is preserved while the frame is clipped to the space that
+    /// remains to its bottom and right. A frame smaller than 3x3 cannot render.
+    pub fn resolve_at(
+        bounds_origin: Position,
+        bounds_size: Size,
+        frame_origin: Position,
+        content_rows: u16,
+        content_cols: u16,
+    ) -> Option<Self> {
+        if content_rows == 0 || content_cols == 0 {
+            return None;
+        }
+
+        let row_offset = frame_origin.row.checked_sub(bounds_origin.row)?;
+        let col_offset = frame_origin.col.checked_sub(bounds_origin.col)?;
+        let available_rows = bounds_size.rows.checked_sub(row_offset)?;
+        let available_cols = bounds_size.cols.checked_sub(col_offset)?;
+        let frame_rows = content_rows.checked_add(2)?.min(available_rows);
+        let frame_cols = content_cols.checked_add(2)?.min(available_cols);
+        if frame_rows < 3 || frame_cols < 3 {
+            return None;
+        }
+
+        Some(Self {
+            origin: frame_origin,
+            size: Size::new(frame_rows, frame_cols),
+            content_origin: Position::new(
+                frame_origin.row.checked_add(1)?,
+                frame_origin.col.checked_add(1)?,
+            ),
             content_size: Size::new(frame_rows - 2, frame_cols - 2),
         })
     }
@@ -352,12 +481,18 @@ mod tests {
 
     #[test]
     fn resolve_top_center_frame() {
-        let frame = FloatingWindowFrame::resolve(
+        let frame = FloatingWindowFrame::resolve_placement(
             Position::new(2, 3),
             Size::new(20, 40),
             6,
             10,
-            FloatingAnchor::TopCenter { top_margin: 5 },
+            FloatingPlacement::Anchored {
+                anchor: FloatingAnchor::TopCenter,
+                margins: FloatingMargins {
+                    top: 5,
+                    ..FloatingMargins::default()
+                },
+            },
         )
         .expect("frame should resolve");
 
@@ -367,12 +502,18 @@ mod tests {
 
     #[test]
     fn resolve_top_center_clamps_margin_to_bounds() {
-        let frame = FloatingWindowFrame::resolve(
+        let frame = FloatingWindowFrame::resolve_placement(
             Position::new(2, 3),
             Size::new(10, 40),
             6,
             10,
-            FloatingAnchor::TopCenter { top_margin: 20 },
+            FloatingPlacement::Anchored {
+                anchor: FloatingAnchor::TopCenter,
+                margins: FloatingMargins {
+                    top: 20,
+                    ..FloatingMargins::default()
+                },
+            },
         )
         .expect("frame should resolve");
 
@@ -382,12 +523,14 @@ mod tests {
 
     #[test]
     fn resolve_near_cursor_prefers_below_when_space_allows() {
-        let frame = FloatingWindowFrame::resolve_near_cursor(
+        let frame = FloatingWindowFrame::resolve_placement(
             Position::new(0, 0),
             Size::new(20, 40),
-            Position::new(4, 10),
             4,
             10,
+            FloatingPlacement::NearCursor {
+                cursor: Position::new(4, 10),
+            },
         )
         .expect("frame should resolve");
 
@@ -396,12 +539,14 @@ mod tests {
 
     #[test]
     fn resolve_near_cursor_falls_back_above_when_needed() {
-        let frame = FloatingWindowFrame::resolve_near_cursor(
+        let frame = FloatingWindowFrame::resolve_placement(
             Position::new(0, 0),
             Size::new(8, 40),
-            Position::new(6, 10),
             4,
             10,
+            FloatingPlacement::NearCursor {
+                cursor: Position::new(6, 10),
+            },
         )
         .expect("frame should resolve");
 

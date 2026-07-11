@@ -94,7 +94,14 @@ impl UrvimModuleBuilder {
             "themes".to_string(),
             themes_module(self.plugin.clone(), Rc::clone(&self.contributions)),
         );
-        module.insert("ui".to_string(), ui_module());
+        module.insert(
+            "ui".to_string(),
+            ui_module(
+                self.plugin.clone(),
+                Rc::clone(&self.contributions),
+                Rc::clone(&self.layout),
+            ),
+        );
         module.insert("strings".to_string(), strings_module());
         module.insert("path".to_string(), path_module());
         module.insert(

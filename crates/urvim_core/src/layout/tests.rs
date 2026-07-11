@@ -5,8 +5,8 @@ use crate::background::{
 };
 use crate::buffer::Buffer;
 use crate::buffer::Cursor;
-use crate::config::Config;
-use crate::editor::{Action, ActionKind, ModeKind};
+use crate::config::{Config, KeymapsConfig};
+use crate::editor::{EditorAction, EditorOperation, ModeKind};
 use crate::globals;
 use crate::path::AbsolutePath;
 use crate::ui::{Command, Intent, UiEvent, UiEventResult};
@@ -122,15 +122,21 @@ fn buffer_line_count(view: &crate::window::BufferView) -> usize {
 
 fn pane_buffer_view(node: &LayoutNode) -> &crate::window::BufferView {
     match node {
-        LayoutNode::Pane(pane) => pane.window_group.active_buffer_view(),
-        LayoutNode::Split(_) => panic!("expected pane"),
+        LayoutNode::Pane(pane) => pane
+            .editor_window_group()
+            .expect("expected editor pane")
+            .active_buffer_view(),
+        LayoutNode::Split(_) => panic!("expected buffer pane"),
     }
 }
 
 fn pane_window(node: &LayoutNode) -> &crate::window::Window {
     match node {
-        LayoutNode::Pane(pane) => pane.window_group.active_window(),
-        LayoutNode::Split(_) => panic!("expected pane"),
+        LayoutNode::Pane(pane) => pane
+            .editor_window_group()
+            .expect("expected editor pane")
+            .active_window(),
+        LayoutNode::Split(_) => panic!("expected buffer pane"),
     }
 }
 
@@ -290,6 +296,91 @@ fn test_layout_file_picker_opens_and_closes() {
     let result = layout.route_ui_event(&UiEvent::Key(key(KeyCode::Esc)));
     assert!(result.handled());
     assert!(!layout.file_picker_is_open());
+}
+
+#[test]
+fn test_picker_keeps_local_text_input_before_inherited_application_mappings() {
+    let _config_guard = globals::set_test_config(Config {
+        keymaps: KeymapsConfig {
+            normal: std::collections::BTreeMap::from([
+                ("x".to_string(), "try-quit".to_string()),
+                ("<F7>".to_string(), "try-quit".to_string()),
+            ]),
+            ..Default::default()
+        },
+        ..Default::default()
+    });
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("one")]);
+    assert!(layout.dispatch_intent(&Intent::Command(Command::OpenFilePicker)));
+
+    assert_eq!(
+        layout.route_ui_event(&UiEvent::Key(key(KeyCode::Char('x')))),
+        UiEventResult::Handled(Vec::new())
+    );
+    assert_eq!(layout.file_picker_mut().unwrap().query(), "x");
+    assert_eq!(
+        layout.route_ui_event(&UiEvent::Key(key(KeyCode::F7))),
+        UiEventResult::Handled(vec![Intent::Command(Command::TryQuit)])
+    );
+}
+
+#[test]
+fn test_picker_consumes_failed_inherited_application_sequence() {
+    let _config_guard = globals::set_test_config(Config {
+        keymaps: KeymapsConfig {
+            normal: std::collections::BTreeMap::from([(
+                "<C-x>q".to_string(),
+                "try-quit".to_string(),
+            )]),
+            ..Default::default()
+        },
+        ..Default::default()
+    });
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("one")]);
+    assert!(layout.dispatch_intent(&Intent::Command(Command::OpenFilePicker)));
+
+    let ctrl_x = Key::with_modifiers(KeyCode::Char('x'), Modifiers::CTRL);
+    assert_eq!(
+        layout.route_ui_event(&UiEvent::Key(ctrl_x)),
+        UiEventResult::Handled(Vec::new())
+    );
+    assert_eq!(
+        layout.route_ui_event(&UiEvent::Key(key(KeyCode::Char('z')))),
+        UiEventResult::Handled(Vec::new())
+    );
+    assert_eq!(layout.file_picker_mut().unwrap().query(), "");
+}
+
+#[test]
+fn test_rename_and_confirmation_inherit_application_mappings_after_local_controls() {
+    let _config_guard = globals::set_test_config(Config {
+        keymaps: KeymapsConfig {
+            normal: std::collections::BTreeMap::from([
+                ("<F7>".to_string(), "try-quit".to_string()),
+                ("<Enter>".to_string(), "try-quit".to_string()),
+            ]),
+            ..Default::default()
+        },
+        ..Default::default()
+    });
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("one")]);
+    layout.dialogs.lsp_rename_prompt = Some(crate::ui::lsp_rename::LspRenamePrompt::new("name"));
+
+    assert_eq!(
+        layout.route_ui_event(&UiEvent::Key(key(KeyCode::F7))),
+        UiEventResult::Handled(vec![Intent::Command(Command::TryQuit)])
+    );
+
+    layout.close_all_dialogs();
+    layout.open_confirmation_box("Confirm?", Command::Quit);
+    assert_eq!(
+        layout.route_ui_event(&UiEvent::Key(key(KeyCode::F7))),
+        UiEventResult::Handled(vec![Intent::Command(Command::TryQuit)])
+    );
+    assert_eq!(
+        layout.route_ui_event(&UiEvent::Key(key(KeyCode::Enter))),
+        UiEventResult::Handled(vec![Intent::Command(Command::Quit)])
+    );
 }
 
 #[test]
@@ -484,6 +575,59 @@ fn test_layout_confirmation_box_takes_precedence_over_git_picker() {
 }
 
 #[test]
+fn test_layout_confirmation_takes_input_and_render_precedence_over_plugin_window() {
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("one")]);
+    let id = layout.create_plugin_window(
+        "demo".to_string(),
+        crate::ui::plugin_window::PluginWindowOptions::default(),
+    );
+    layout
+        .plugin_windows_mut()
+        .focus("demo", id)
+        .expect("plugin window should focus");
+    layout.open_confirmation_box("Confirm?", Command::Quit);
+
+    let mut screen = crate::screen::Screen::new(12, 60);
+    layout.render(&mut screen, Position::new(0, 0), Size::new(12, 60));
+    let rendered = (0..12)
+        .flat_map(|row| (0..60).map(move |col| (row, col)))
+        .map(|(row, col)| screen.get_cell_mut(row, col).unwrap().text.clone())
+        .collect::<String>();
+    assert!(rendered.contains("Confirm?"));
+
+    assert_eq!(
+        layout.route_ui_event(&UiEvent::Key(key(KeyCode::Enter))),
+        UiEventResult::Handled(vec![Intent::Command(Command::Quit)])
+    );
+    assert_eq!(layout.plugin_windows().focused(), Some(id));
+}
+
+#[test]
+fn test_picker_cursor_takes_precedence_over_focused_plugin_window() {
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("one")]);
+    let id = layout.create_plugin_window(
+        "demo".to_string(),
+        crate::ui::plugin_window::PluginWindowOptions::default(),
+    );
+    layout
+        .plugin_windows_mut()
+        .focus("demo", id)
+        .expect("plugin window should focus");
+    assert_eq!(layout.visual_cursor(), None);
+
+    assert!(layout.dispatch_intent(&Intent::Command(Command::OpenFiletypePicker)));
+    let mut screen = crate::screen::Screen::new(12, 60);
+    layout.render(&mut screen, Position::new(0, 0), Size::new(12, 60));
+
+    assert!(layout.visual_cursor().is_some());
+    assert_eq!(layout.plugin_windows().focused(), Some(id));
+
+    layout.close_filetype_picker();
+    assert_eq!(layout.visual_cursor(), None);
+    assert_eq!(layout.plugin_windows().focused(), Some(id));
+}
+
+#[test]
 fn test_layout_completion_esc_closes_popup_and_exits_insert_mode() {
     let mut layout = layout_with_buffers(vec![Buffer::from_str("alpha")]);
     layout
@@ -508,7 +652,7 @@ fn test_layout_completion_esc_closes_popup_and_exits_insert_mode() {
     };
 
     match intent {
-        Intent::Action(action) => assert_eq!(action.to_mode, Some(ModeKind::Normal)),
+        Intent::Editor(action) => assert_eq!(action.to_mode, Some(ModeKind::Normal)),
         other => panic!("expected an action intent, got {other:?}"),
     }
 }
@@ -719,7 +863,9 @@ fn test_layout_lsp_hover_closes_on_action() {
 
     assert!(layout.hover_is_open());
 
-    assert!(layout.dispatch_intent(&Intent::Action(Action::new(ActionKind::MoveRight))));
+    assert!(layout.dispatch_intent(&Intent::Editor(EditorAction::new(
+        EditorOperation::MoveRight
+    ))));
     assert!(!layout.hover_is_open());
 }
 
@@ -1203,10 +1349,7 @@ fn test_layout_process_action_delegates_to_window_group() {
         Buffer::from_str("three"),
     ]);
 
-    assert_eq!(
-        dispatch_layout_action(&mut layout, Action::new(ActionKind::NextTab)),
-        ActionResult::Handled
-    );
+    assert!(layout.dispatch_intent(&Intent::Command(Command::NextTab(1))));
     assert_eq!(layout.window_group().active_tab_index(), 1);
 }
 
@@ -1227,7 +1370,9 @@ fn test_layout_vertical_split_creates_second_pane_with_even_weights() {
             assert_eq!(split.split_size.first_weight(), 1);
             assert_eq!(split.split_size.second_weight(), 1);
         }
-        LayoutNode::Pane(_) => panic!("split action should replace the root pane"),
+        LayoutNode::Pane(_) => {
+            panic!("split action should replace the root pane")
+        }
     }
 }
 
@@ -1248,7 +1393,9 @@ fn test_layout_horizontal_split_creates_second_pane_with_even_weights() {
             assert_eq!(split.split_size.first_weight(), 1);
             assert_eq!(split.split_size.second_weight(), 1);
         }
-        LayoutNode::Pane(_) => panic!("split action should replace the root pane"),
+        LayoutNode::Pane(_) => {
+            panic!("split action should replace the root pane")
+        }
     }
 }
 
@@ -1305,7 +1452,9 @@ fn test_layout_split_copies_active_buffer_view_state() {
             assert!(pane_window(&split.first).wrap_enabled());
             assert!(pane_window(&split.second).wrap_enabled());
         }
-        LayoutNode::Pane(_) => panic!("split action should replace the root pane"),
+        LayoutNode::Pane(_) => {
+            panic!("split action should replace the root pane")
+        }
     }
 }
 
@@ -1340,6 +1489,326 @@ fn test_layout_exposes_stable_window_ids_for_visible_panes() {
 }
 
 #[test]
+fn test_layout_cycles_focus_across_panes_and_plugin_windows() {
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("left")]);
+    dispatch_layout_action(&mut layout, Intent::Command(Command::SplitVertical));
+    let first_plugin = layout.create_plugin_window(
+        "demo".to_string(),
+        crate::ui::plugin_window::PluginWindowOptions::default(),
+    );
+    let second_plugin = layout.create_plugin_window(
+        "demo".to_string(),
+        crate::ui::plugin_window::PluginWindowOptions::default(),
+    );
+    layout.focus_pane(PaneId(0));
+
+    let mut screen = crate::screen::Screen::new(8, 20);
+    layout.render(&mut screen, Position::new(0, 0), Size::new(8, 20));
+
+    assert!(layout.focus_next_window());
+    assert_eq!(layout.active_window_id(), Some(PaneId(1)));
+    assert_eq!(layout.plugin_windows().focused(), None);
+
+    assert!(layout.focus_next_window());
+    assert_eq!(layout.plugin_windows().focused(), Some(first_plugin));
+    assert_eq!(layout.active_window_id(), Some(PaneId(1)));
+
+    assert!(layout.focus_next_window());
+    assert_eq!(layout.plugin_windows().focused(), Some(second_plugin));
+
+    assert!(layout.focus_next_window());
+    assert_eq!(layout.active_window_id(), Some(PaneId(0)));
+    assert_eq!(layout.plugin_windows().focused(), None);
+
+    assert!(layout.focus_previous_window());
+    assert_eq!(layout.plugin_windows().focused(), Some(second_plugin));
+}
+
+#[test]
+fn test_layout_creates_and_closes_targeted_plugin_pane() {
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("editor")]);
+    let id = layout
+        .create_plugin_pane(
+            "demo".to_string(),
+            None,
+            SplitAxis::Vertical,
+            SplitSize::new(2, 1),
+            crate::ui::plugin_pane::PluginPaneOptions::default(),
+        )
+        .expect("plugin pane should be created beside the focused pane");
+
+    assert_eq!(layout.focused_plugin_pane(), Some(id));
+    assert_eq!(layout.pane_regions().len(), 2);
+    let root = layout.root.as_ref().expect("layout should keep a root");
+    match root {
+        LayoutNode::Split(split) => {
+            assert_eq!(split.axis, SplitAxis::Vertical);
+            assert_eq!(split.split_size.first_weight(), 2);
+            assert_eq!(split.split_size.second_weight(), 1);
+            assert!(matches!(split.first.as_ref(), LayoutNode::Pane(_)));
+            assert!(
+                matches!(split.second.as_ref(), LayoutNode::Pane(pane) if pane.id == id && pane.is_plugin())
+            );
+        }
+        _ => panic!("plugin pane creation should create a split"),
+    }
+
+    layout
+        .close_plugin_pane("demo", id)
+        .expect("plugin pane should close through its owner");
+    assert_eq!(layout.focused_plugin_pane(), None);
+    assert_eq!(layout.pane_regions().len(), 1);
+}
+
+#[test]
+fn test_plugin_pane_render_updates_header_style_with_focus() {
+    let theme = border_theme();
+    let active_style = theme.resolve_name_with_default("ui.tab.active");
+    let inactive_style = theme.resolve_name_with_default("ui.tab.inactive");
+    let _theme_guard = globals::set_test_active_theme(theme);
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("editor")]);
+    let id = layout
+        .create_plugin_pane(
+            "demo".to_string(),
+            None,
+            SplitAxis::Vertical,
+            SplitSize::even(),
+            crate::ui::plugin_pane::PluginPaneOptions {
+                title: Some("Plugin".to_string()),
+                ..Default::default()
+            },
+        )
+        .expect("plugin pane should be created");
+    layout
+        .set_plugin_pane_content(
+            "demo",
+            id,
+            vec![vec![crate::ui::plugin_window::PluginWindowSegment {
+                text: "content".to_string(),
+                style: None,
+            }]],
+        )
+        .unwrap();
+    let mut screen = crate::screen::Screen::new(4, 21);
+
+    layout.render(&mut screen, Position::new(0, 0), Size::new(4, 21));
+    let region = layout.pane_region(id).unwrap();
+    assert_eq!(
+        screen
+            .get_cell_mut(region.origin.row, region.origin.col)
+            .unwrap()
+            .style,
+        active_style
+    );
+    assert_eq!(
+        screen
+            .get_cell_mut(region.origin.row + 1, region.origin.col)
+            .unwrap()
+            .text,
+        "c"
+    );
+
+    assert!(layout.focus_layout_pane(PaneId(0)));
+    layout.render(&mut screen, Position::new(0, 0), Size::new(4, 21));
+    assert_eq!(
+        screen
+            .get_cell_mut(region.origin.row, region.origin.col)
+            .unwrap()
+            .style,
+        inactive_style
+    );
+}
+
+#[test]
+fn test_command_line_cursor_takes_precedence_over_focused_plugin_pane() {
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("editor")]);
+    let id = layout
+        .create_plugin_pane(
+            "demo".to_string(),
+            None,
+            SplitAxis::Vertical,
+            SplitSize::even(),
+            crate::ui::plugin_pane::PluginPaneOptions::default(),
+        )
+        .expect("plugin pane should be created");
+    assert_eq!(layout.visual_cursor(), None);
+
+    layout.open_command_line();
+    let mut screen = crate::screen::Screen::new(8, 40);
+    layout.render(&mut screen, Position::new(0, 0), Size::new(8, 40));
+
+    assert!(layout.visual_cursor().is_some());
+    assert_eq!(layout.focused_plugin_pane(), Some(id));
+
+    layout.close_command_line();
+    assert_eq!(layout.visual_cursor(), None);
+    assert_eq!(layout.focused_plugin_pane(), Some(id));
+}
+
+#[test]
+fn test_plugin_pane_routes_standard_focus_sequences() {
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("editor")]);
+    let plugin_id = layout
+        .create_plugin_pane(
+            "demo".to_string(),
+            None,
+            SplitAxis::Vertical,
+            SplitSize::even(),
+            crate::ui::plugin_pane::PluginPaneOptions::default(),
+        )
+        .expect("plugin pane should be created");
+    let mut screen = crate::screen::Screen::new(8, 20);
+    layout.render(&mut screen, Position::new(0, 0), Size::new(8, 20));
+
+    let ctrl_w = Key {
+        code: KeyCode::Char('w'),
+        modifiers: Modifiers::CTRL,
+    };
+    assert!(layout.route_ui_event(&UiEvent::Key(ctrl_w)).handled());
+    let result = layout.route_ui_event(&UiEvent::Key(key(KeyCode::Char('h'))));
+    assert_eq!(
+        result,
+        UiEventResult::Handled(vec![Intent::Command(Command::FocusPaneLeft)])
+    );
+    assert!(layout.dispatch_intent(&Intent::Command(Command::FocusPaneLeft)));
+    assert_eq!(layout.focused_plugin_pane(), None);
+    assert_eq!(layout.active_window_id(), Some(PaneId(0)));
+
+    layout.focus_plugin_pane("demo", plugin_id).unwrap();
+    assert!(layout.route_ui_event(&UiEvent::Key(ctrl_w)).handled());
+    assert_eq!(
+        layout.route_ui_event(&UiEvent::Key(key(KeyCode::Char('x')))),
+        UiEventResult::Handled(Vec::new())
+    );
+}
+
+#[test]
+fn test_plugin_pane_consumes_editor_motions_without_mutating_hidden_editor() {
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("one\ntwo\nthree")]);
+    let plugin_id = layout
+        .create_plugin_pane(
+            "demo".to_string(),
+            None,
+            SplitAxis::Vertical,
+            SplitSize::even(),
+            crate::ui::plugin_pane::PluginPaneOptions::default(),
+        )
+        .expect("plugin pane should be created");
+    let before = layout.active_buffer_view().cursor();
+
+    for code in [
+        KeyCode::Char('h'),
+        KeyCode::Char('j'),
+        KeyCode::Char('k'),
+        KeyCode::Char('l'),
+    ] {
+        assert_eq!(
+            layout.route_ui_event(&UiEvent::Key(key(code))),
+            UiEventResult::Handled(Vec::new())
+        );
+    }
+
+    assert_eq!(layout.focused_plugin_pane(), Some(plugin_id));
+    assert_eq!(layout.active_buffer_view().cursor(), before);
+}
+
+#[test]
+fn test_plugin_pane_inherits_rebound_focus_mapping_without_hardcoded_default() {
+    let _config_guard = globals::set_test_config(Config {
+        keymaps: KeymapsConfig {
+            normal: std::collections::BTreeMap::from([
+                ("<C-h>".to_string(), "pane focus-left".to_string()),
+                ("<C-w>h".to_string(), "pane wrap-toggle".to_string()),
+            ]),
+            ..Default::default()
+        },
+        ..Default::default()
+    });
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("editor")]);
+    layout
+        .create_plugin_pane(
+            "demo".to_string(),
+            None,
+            SplitAxis::Vertical,
+            SplitSize::even(),
+            crate::ui::plugin_pane::PluginPaneOptions::default(),
+        )
+        .expect("plugin pane should be created");
+    let mut screen = crate::screen::Screen::new(8, 20);
+    layout.render(&mut screen, Position::new(0, 0), Size::new(8, 20));
+
+    let ctrl_w = Key::with_modifiers(KeyCode::Char('w'), Modifiers::CTRL);
+    assert!(layout.route_ui_event(&UiEvent::Key(ctrl_w)).handled());
+    assert_eq!(
+        layout.route_ui_event(&UiEvent::Key(key(KeyCode::Char('h')))),
+        UiEventResult::Handled(Vec::new())
+    );
+    assert!(layout.focused_plugin_pane().is_some());
+
+    let ctrl_h = Key::with_modifiers(KeyCode::Char('h'), Modifiers::CTRL);
+    let result = layout.route_ui_event(&UiEvent::Key(ctrl_h));
+    assert_eq!(
+        result,
+        UiEventResult::Handled(vec![Intent::Command(Command::FocusPaneLeft)])
+    );
+    assert!(layout.dispatch_intent(&Intent::Command(Command::FocusPaneLeft)));
+    assert_eq!(layout.focused_plugin_pane(), None);
+}
+
+#[test]
+fn test_plugin_pane_local_mapping_wins_over_inherited_mapping() {
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("editor")]);
+    let plugin_id = layout
+        .create_plugin_pane(
+            "demo".to_string(),
+            None,
+            SplitAxis::Vertical,
+            SplitSize::even(),
+            crate::ui::plugin_pane::PluginPaneOptions::default(),
+        )
+        .expect("plugin pane should be created");
+    layout
+        .set_plugin_pane_keymap(
+            "demo",
+            plugin_id,
+            vec!["<C-w>".to_string(), "h".to_string()],
+            "pane wrap-toggle".to_string(),
+            Intent::Command(Command::ToggleWrap),
+        )
+        .expect("local mapping should be installed");
+
+    let ctrl_w = Key::with_modifiers(KeyCode::Char('w'), Modifiers::CTRL);
+    assert_eq!(
+        layout.route_ui_event(&UiEvent::Key(ctrl_w)),
+        UiEventResult::Handled(Vec::new())
+    );
+    assert_eq!(
+        layout.route_ui_event(&UiEvent::Key(key(KeyCode::Char('h')))),
+        UiEventResult::Handled(vec![Intent::Command(Command::ToggleWrap)])
+    );
+    assert_eq!(layout.focused_plugin_pane(), Some(plugin_id));
+}
+
+#[test]
+fn test_plugin_pane_inherits_application_mapping() {
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("editor")]);
+    layout
+        .create_plugin_pane(
+            "demo".to_string(),
+            None,
+            SplitAxis::Vertical,
+            SplitSize::even(),
+            crate::ui::plugin_pane::PluginPaneOptions::default(),
+        )
+        .expect("plugin pane should be created");
+
+    assert_eq!(
+        layout.route_ui_event(&UiEvent::Key(key(KeyCode::F1))),
+        UiEventResult::Handled(vec![Intent::Command(Command::OpenFilePicker)])
+    );
+}
+
+#[test]
 fn test_layout_wrap_toggle_is_window_local() {
     let mut layout = layout_with_buffers(vec![Buffer::from_str("one\ntwo")]);
     assert_eq!(
@@ -1359,7 +1828,9 @@ fn test_layout_wrap_toggle_is_window_local() {
             assert!(!pane_window(&split.first).wrap_enabled());
             assert!(pane_window(&split.second).wrap_enabled());
         }
-        LayoutNode::Pane(_) => panic!("split action should replace the root pane"),
+        LayoutNode::Pane(_) => {
+            panic!("split action should replace the root pane")
+        }
     }
 }
 
@@ -1679,9 +2150,13 @@ fn test_layout_resize_clamps_and_stays_local_to_the_matching_split() {
                     focused_after.size.rows + inner_sibling_after.size.rows
                 );
             }
-            LayoutNode::Pane(_) => panic!("expected nested split on the left side"),
+            LayoutNode::Pane(_) => {
+                panic!("expected nested split on the left side")
+            }
         },
-        LayoutNode::Pane(_) => panic!("resize test should keep the root split"),
+        LayoutNode::Pane(_) => {
+            panic!("resize test should keep the root split")
+        }
     }
 }
 
@@ -2071,7 +2546,7 @@ fn test_layout_prunes_expired_yank_flash_during_tick() {
         layout
             .active_window_group_mut()
             .active_window_mut()
-            .dispatch_action(&Action::new(ActionKind::YankLine)),
+            .dispatch_action(&EditorAction::new(EditorOperation::YankLine)),
         ActionResult::Handled
     );
 

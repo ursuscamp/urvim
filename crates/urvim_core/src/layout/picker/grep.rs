@@ -31,6 +31,7 @@ impl Layout {
             picker.close();
         }
         self.dialogs.grep_picker = None;
+        self.clear_modal_inherited_keys();
     }
 
     /// Returns true when the live grep picker is open.

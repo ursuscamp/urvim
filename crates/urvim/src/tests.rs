@@ -10,7 +10,7 @@ use crate::render::*;
 use crate::startup::*;
 use urvim_core::buffer::{Buffer, BufferId};
 use urvim_core::cli::CliFileSpec;
-use urvim_core::editor::{Action, ActionKind, ModeKind, RepeatReplay};
+use urvim_core::editor::{EditorAction, EditorOperation, ModeKind, RepeatReplay};
 use urvim_core::ui::{Intent, UiEvent};
 use urvim_core::window::VisualSelectionKind;
 use urvim_core::window_group::WindowGroup;
@@ -2145,7 +2145,7 @@ fn plugin_get_pane_state_includes_tabs_and_active_tab() {
     let first_id = layout.active_buffer_view().buffer_id();
     process_intent_queue(
         &mut layout,
-        vec![Intent::Action(Action::new(ActionKind::NextTab))],
+        vec![Intent::Command(Command::NextTab(1))],
     );
     let second_id = layout.active_buffer_view().buffer_id();
 
@@ -2951,7 +2951,7 @@ fn process_intent_queue_dispatches_actions() {
 
     assert!(process_intent_queue(
         &mut layout,
-        vec![Intent::Action(Action::new(ActionKind::NextTab))]
+        vec![Intent::Command(Command::NextTab(1))]
     ));
     assert_eq!(layout.window_group().active_tab_index(), 1);
 }
@@ -2961,7 +2961,7 @@ fn process_intent_queue_records_repeat_state_for_command_actions() {
     let _pool_guard = buffer_pool_lock();
     let _guard = repeat_state_lock();
     globals::set_last_repeat(globals::RepeatState {
-        action: Action::new(ActionKind::NextTab),
+        action: EditorAction::new(EditorOperation::MoveDown),
         count: 99,
         insert_text: Some("stale".to_string()),
     });
@@ -2971,13 +2971,13 @@ fn process_intent_queue_records_repeat_state_for_command_actions() {
 
     assert!(process_intent_queue(
         &mut layout,
-        vec![Intent::Action(Action::new(ActionKind::DeleteLine))]
+        vec![Intent::Editor(EditorAction::new(EditorOperation::DeleteLine))]
     ));
 
     let repeat = globals::get_last_repeat().expect("repeat state should be recorded");
     assert!(matches!(
         repeat.action.kind.as_ref(),
-        Some(ActionKind::DeleteLine)
+        Some(EditorOperation::DeleteLine)
     ));
     assert_eq!(repeat.count, 1);
     assert!(repeat.insert_text.is_none());
@@ -3008,7 +3008,7 @@ fn process_intent_queue_returns_false_when_any_intent_is_unhandled() {
                 level: urvim_core::notification::NotificationLevel::Info,
                 message: "queued".to_string(),
             }),
-            Intent::Action(Action::new(ActionKind::VisualTextObject(
+            Intent::Editor(EditorAction::new(EditorOperation::VisualTextObject(
                 urvim_core::editor::TextObject::InnerWord,
             ))),
         ],
@@ -3361,13 +3361,13 @@ fn raw_paste_action_for_insert_and_normal_modes_inserts_text() {
         .expect("normal mode paste should be handled");
 
     assert!(
-        matches!(insert.kind.as_ref(), Some(ActionKind::InsertRawPaste(text)) if text == "hello")
+        matches!(insert.kind.as_ref(), Some(EditorOperation::InsertRawPaste(text)) if text == "hello")
     );
     assert_eq!(insert.from_mode, Some(ModeKind::Insert));
     assert_eq!(insert.to_mode, None);
 
     assert!(
-        matches!(normal.kind.as_ref(), Some(ActionKind::InsertRawPaste(text)) if text == "hello")
+        matches!(normal.kind.as_ref(), Some(EditorOperation::InsertRawPaste(text)) if text == "hello")
     );
     assert_eq!(normal.from_mode, Some(ModeKind::Normal));
     assert_eq!(normal.to_mode, None);
@@ -3381,13 +3381,13 @@ fn raw_paste_action_for_visual_modes_replaces_selection_then_exits() {
         .expect("visual line mode paste should be handled");
 
     assert!(
-        matches!(visual.kind.as_ref(), Some(ActionKind::ReplaceSelectionRawPaste(text)) if text == "hello")
+        matches!(visual.kind.as_ref(), Some(EditorOperation::ReplaceSelectionRawPaste(text)) if text == "hello")
     );
     assert_eq!(visual.from_mode, Some(ModeKind::Visual));
     assert_eq!(visual.to_mode, Some(ModeKind::Normal));
 
     assert!(
-        matches!(visual_line.kind.as_ref(), Some(ActionKind::ReplaceSelectionRawPaste(text)) if text == "hello")
+        matches!(visual_line.kind.as_ref(), Some(EditorOperation::ReplaceSelectionRawPaste(text)) if text == "hello")
     );
     assert_eq!(visual_line.from_mode, Some(ModeKind::VisualLine));
     assert_eq!(visual_line.to_mode, Some(ModeKind::Normal));
@@ -3397,17 +3397,17 @@ fn raw_paste_action_for_visual_modes_replaces_selection_then_exits() {
 fn resolve_repeat_action_uses_stored_repeat_state() {
     let _guard = repeat_state_lock();
     globals::set_last_repeat(globals::RepeatState {
-        action: Action::new(ActionKind::DeleteLine),
+        action: EditorAction::new(EditorOperation::DeleteLine),
         count: 3,
         insert_text: Some("hello".to_string()),
     });
 
-    let replay = Action::new(ActionKind::RepeatLastChange)
+    let replay = EditorAction::new(EditorOperation::RepeatLastChange)
         .resolve_dot_repeat()
         .expect("repeat should resolve");
     assert!(matches!(
         replay.action.kind.as_ref(),
-        Some(ActionKind::DeleteLine)
+        Some(EditorOperation::DeleteLine)
     ));
     assert_eq!(replay.structural_count, 3);
     assert_eq!(replay.repeat_count, 1);
@@ -3418,17 +3418,17 @@ fn resolve_repeat_action_uses_stored_repeat_state() {
 fn resolve_repeat_action_overrides_the_stored_count() {
     let _guard = repeat_state_lock();
     globals::set_last_repeat(globals::RepeatState {
-        action: Action::new(ActionKind::DeleteLine),
+        action: EditorAction::new(EditorOperation::DeleteLine),
         count: 3,
         insert_text: None,
     });
 
-    let replay = Action::count(2, Box::new(Action::new(ActionKind::RepeatLastChange)))
+    let replay = EditorAction::count(2, Box::new(EditorAction::new(EditorOperation::RepeatLastChange)))
         .resolve_dot_repeat()
         .expect("repeat should resolve");
     assert!(matches!(
         replay.action.kind.as_ref(),
-        Some(ActionKind::DeleteLine)
+        Some(EditorOperation::DeleteLine)
     ));
     assert_eq!(replay.structural_count, 3);
     assert_eq!(replay.repeat_count, 2);
@@ -3442,7 +3442,7 @@ fn replay_repeat_action_applies_structural_count_once_before_insert_text() {
         "line1\nline2\nline3",
     )]));
     let replay = RepeatReplay {
-        action: Action::new(ActionKind::ChangeLine),
+        action: EditorAction::new(EditorOperation::ChangeLine),
         structural_count: 2,
         repeat_count: 1,
         insert_text: Some("hello".to_string()),
@@ -3466,7 +3466,7 @@ fn replay_repeat_action_replays_direct_insert_text() {
     let mut layout =
         urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("world")]));
     let replay = RepeatReplay {
-        action: Action::mode_transition(ModeKind::Insert),
+        action: EditorAction::mode_transition(ModeKind::Insert),
         structural_count: 1,
         repeat_count: 1,
         insert_text: Some("hello ".to_string()),

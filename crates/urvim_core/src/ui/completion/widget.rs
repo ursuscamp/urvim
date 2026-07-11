@@ -8,7 +8,7 @@ use super::{CompletionCandidate, CompletionSourceKind, configured_completion_sou
 use crate::background::{JobManager, JobToken};
 use crate::buffer::{BufferId, Cursor};
 use crate::screen::Screen;
-use crate::ui::floating_window::FloatingWindowFrame;
+use crate::ui::floating_window::{FloatingPlacement, FloatingWindowFrame};
 use crate::ui::{Command, FocusPolicy, Intent, UiContext, UiEvent, UiEventResult, UiRect};
 use crate::widget::Widget;
 use std::collections::{BTreeMap, BTreeSet};
@@ -164,12 +164,14 @@ impl CompletionWidget {
 
         let content_rows = self.visible_rows();
         let content_cols = self.content_cols(rect.size.cols);
-        let Some(frame) = FloatingWindowFrame::resolve_near_cursor(
+        let Some(frame) = FloatingWindowFrame::resolve_placement(
             rect.origin,
             rect.size,
-            self.cursor.unwrap_or_default(),
             content_rows,
             content_cols,
+            FloatingPlacement::NearCursor {
+                cursor: self.cursor.unwrap_or_default(),
+            },
         ) else {
             return;
         };

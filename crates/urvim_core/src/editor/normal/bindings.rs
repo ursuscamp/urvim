@@ -1,7 +1,7 @@
 use crate::buffer::Boundary;
 use crate::editor::{
-    Action, ActionKind, BoundaryMotion, LinewiseMotion, ModeKind, Operator, OperatorTarget,
-    TrieKeymap,
+    BoundaryMotion, EditorAction, EditorOperation, LinewiseMotion, ModeKind, Operator,
+    OperatorTarget, TrieKeymap,
 };
 use crate::ui::Command;
 
@@ -31,8 +31,8 @@ fn insert_operator_sequence(
     to_mode: Option<ModeKind>,
 ) {
     let action = match to_mode {
-        Some(mode) => Action::operation(operator, target).with_to_mode(mode),
-        None => Action::operation(operator, target),
+        Some(mode) => EditorAction::operation(operator, target).with_to_mode(mode),
+        None => EditorAction::operation(operator, target),
     };
     trie_keymap.insert_str(&sequence, action);
 }
@@ -55,128 +55,151 @@ fn insert_operator_sequences(
 }
 
 fn register_cursor_bindings(trie_keymap: &mut TrieKeymap) {
-    trie_keymap.insert_str("h", Action::new(ActionKind::MoveLeft));
-    trie_keymap.insert_str("j", Action::new(ActionKind::MoveDown));
-    trie_keymap.insert_str("k", Action::new(ActionKind::MoveUp));
-    trie_keymap.insert_str("l", Action::new(ActionKind::MoveRight));
+    trie_keymap.insert_str("h", EditorAction::new(EditorOperation::MoveLeft));
+    trie_keymap.insert_str("j", EditorAction::new(EditorOperation::MoveDown));
+    trie_keymap.insert_str("k", EditorAction::new(EditorOperation::MoveUp));
+    trie_keymap.insert_str("l", EditorAction::new(EditorOperation::MoveRight));
 }
 
 fn register_motion_bindings(trie_keymap: &mut TrieKeymap) {
-    trie_keymap.insert_str("w", Action::forward_to(Boundary::Word));
-    trie_keymap.insert_str("b", Action::back_to(Boundary::Word));
-    trie_keymap.insert_str("e", Action::forward_to(Boundary::WordEnd));
+    trie_keymap.insert_str("w", EditorAction::forward_to(Boundary::Word));
+    trie_keymap.insert_str("b", EditorAction::back_to(Boundary::Word));
+    trie_keymap.insert_str("e", EditorAction::forward_to(Boundary::WordEnd));
 
-    trie_keymap.insert_str("W", Action::forward_to(Boundary::BigWord));
-    trie_keymap.insert_str("B", Action::back_to(Boundary::BigWord));
-    trie_keymap.insert_str("E", Action::forward_to(Boundary::BigWordEnd));
+    trie_keymap.insert_str("W", EditorAction::forward_to(Boundary::BigWord));
+    trie_keymap.insert_str("B", EditorAction::back_to(Boundary::BigWord));
+    trie_keymap.insert_str("E", EditorAction::forward_to(Boundary::BigWordEnd));
 
-    trie_keymap.insert_str("$", Action::new(ActionKind::MoveToLineEnd));
-    trie_keymap.insert_str("0", Action::new(ActionKind::MoveToLineStart));
-    trie_keymap.insert_str("^", Action::new(ActionKind::MoveToLineContentStart));
+    trie_keymap.insert_str("$", EditorAction::new(EditorOperation::MoveToLineEnd));
+    trie_keymap.insert_str("0", EditorAction::new(EditorOperation::MoveToLineStart));
+    trie_keymap.insert_str(
+        "^",
+        EditorAction::new(EditorOperation::MoveToLineContentStart),
+    );
 
-    trie_keymap.insert_str("gg", Action::new(ActionKind::MoveToFirstLine));
-    trie_keymap.insert_str("G", Action::new(ActionKind::MoveToLastLine));
-    trie_keymap.insert_str("H", Action::new(ActionKind::MoveToScreenTop));
-    trie_keymap.insert_str("M", Action::new(ActionKind::MoveToScreenMiddle));
-    trie_keymap.insert_str("L", Action::new(ActionKind::MoveToScreenBottom));
-    trie_keymap.insert_str("zt", Action::new(ActionKind::ViewportCursorTop));
-    trie_keymap.insert_str("zz", Action::new(ActionKind::ViewportCursorCenter));
-    trie_keymap.insert_str("zb", Action::new(ActionKind::ViewportCursorBottom));
-    trie_keymap.insert_str("za", Action::new(ActionKind::ToggleFold));
-    trie_keymap.insert_str("zo", Action::new(ActionKind::OpenFold));
-    trie_keymap.insert_str("zc", Action::new(ActionKind::CloseFold));
-    trie_keymap.insert_str("{", Action::new(ActionKind::MoveToPreviousParagraph));
-    trie_keymap.insert_str("}", Action::new(ActionKind::MoveToNextParagraph));
-    trie_keymap.insert_str("[h", Action::new(ActionKind::MoveToPreviousDiffHunk));
-    trie_keymap.insert_str("]h", Action::new(ActionKind::MoveToNextDiffHunk));
-    trie_keymap.insert_str("[H", Action::new(ActionKind::MoveToPreviousDiffHunkEnd));
-    trie_keymap.insert_str("]H", Action::new(ActionKind::MoveToNextDiffHunkEnd));
-    trie_keymap.insert_str("J", Action::new(ActionKind::JoinWithSpace));
-    trie_keymap.insert_str("gJ", Action::new(ActionKind::JoinWithoutSpace));
+    trie_keymap.insert_str("gg", EditorAction::new(EditorOperation::MoveToFirstLine));
+    trie_keymap.insert_str("G", EditorAction::new(EditorOperation::MoveToLastLine));
+    trie_keymap.insert_str("H", EditorAction::new(EditorOperation::MoveToScreenTop));
+    trie_keymap.insert_str("M", EditorAction::new(EditorOperation::MoveToScreenMiddle));
+    trie_keymap.insert_str("L", EditorAction::new(EditorOperation::MoveToScreenBottom));
+    trie_keymap.insert_str("zt", EditorAction::new(EditorOperation::ViewportCursorTop));
+    trie_keymap.insert_str(
+        "zz",
+        EditorAction::new(EditorOperation::ViewportCursorCenter),
+    );
+    trie_keymap.insert_str(
+        "zb",
+        EditorAction::new(EditorOperation::ViewportCursorBottom),
+    );
+    trie_keymap.insert_str("za", EditorAction::new(EditorOperation::ToggleFold));
+    trie_keymap.insert_str("zo", EditorAction::new(EditorOperation::OpenFold));
+    trie_keymap.insert_str("zc", EditorAction::new(EditorOperation::CloseFold));
+    trie_keymap.insert_str(
+        "{",
+        EditorAction::new(EditorOperation::MoveToPreviousParagraph),
+    );
+    trie_keymap.insert_str("}", EditorAction::new(EditorOperation::MoveToNextParagraph));
+    trie_keymap.insert_str(
+        "[h",
+        EditorAction::new(EditorOperation::MoveToPreviousDiffHunk),
+    );
+    trie_keymap.insert_str("]h", EditorAction::new(EditorOperation::MoveToNextDiffHunk));
+    trie_keymap.insert_str(
+        "[H",
+        EditorAction::new(EditorOperation::MoveToPreviousDiffHunkEnd),
+    );
+    trie_keymap.insert_str(
+        "]H",
+        EditorAction::new(EditorOperation::MoveToNextDiffHunkEnd),
+    );
+    trie_keymap.insert_str("J", EditorAction::new(EditorOperation::JoinWithSpace));
+    trie_keymap.insert_str("gJ", EditorAction::new(EditorOperation::JoinWithoutSpace));
     trie_keymap.insert_str("gO", Command::OpenDocumentSymbolsPicker);
     trie_keymap.insert_str("grr", Command::LspReferences);
     trie_keymap.insert_str("grS", Command::OpenWorkspaceSymbolsPicker);
 }
 
 fn register_character_scan_bindings(trie_keymap: &mut TrieKeymap) {
-    trie_keymap.insert_str("f<Space>", Action::find_forward(' '));
-    trie_keymap.insert_str("F<Space>", Action::find_backward(' '));
-    trie_keymap.insert_str("t<Space>", Action::till_forward(' '));
-    trie_keymap.insert_str("T<Space>", Action::till_backward(' '));
+    trie_keymap.insert_str("f<Space>", EditorAction::find_forward(' '));
+    trie_keymap.insert_str("F<Space>", EditorAction::find_backward(' '));
+    trie_keymap.insert_str("t<Space>", EditorAction::till_forward(' '));
+    trie_keymap.insert_str("T<Space>", EditorAction::till_backward(' '));
 }
 
 fn register_mode_bindings(trie_keymap: &mut TrieKeymap) {
-    trie_keymap.insert_str("i", Action::mode_transition(ModeKind::Insert));
-    trie_keymap.insert_str("v", Action::mode_transition(ModeKind::Visual));
-    trie_keymap.insert_str("V", Action::mode_transition(ModeKind::VisualLine));
-    trie_keymap.insert_str("R", Action::mode_transition(ModeKind::Replace));
-    trie_keymap.insert_str("<C-s>", Action::save_buffer(None));
+    trie_keymap.insert_str("i", EditorAction::mode_transition(ModeKind::Insert));
+    trie_keymap.insert_str("v", EditorAction::mode_transition(ModeKind::Visual));
+    trie_keymap.insert_str("V", EditorAction::mode_transition(ModeKind::VisualLine));
+    trie_keymap.insert_str("R", EditorAction::mode_transition(ModeKind::Replace));
+    trie_keymap.insert_str("<C-s>", Command::SaveBuffer(None));
     trie_keymap.insert_str(
         "a",
-        Action::new(ActionKind::AppendAfterCursor).with_to_mode(ModeKind::Insert),
+        EditorAction::new(EditorOperation::AppendAfterCursor).with_to_mode(ModeKind::Insert),
     );
     trie_keymap.insert_str(
         "A",
-        Action::new(ActionKind::AppendToLineEnd).with_to_mode(ModeKind::Insert),
+        EditorAction::new(EditorOperation::AppendToLineEnd).with_to_mode(ModeKind::Insert),
     );
     trie_keymap.insert_str(
         "I",
-        Action::new(ActionKind::InsertAtLineStart).with_to_mode(ModeKind::Insert),
+        EditorAction::new(EditorOperation::InsertAtLineStart).with_to_mode(ModeKind::Insert),
     );
     trie_keymap.insert_str(
         "o",
-        Action::new(ActionKind::OpenLineBelow).with_to_mode(ModeKind::Insert),
+        EditorAction::new(EditorOperation::OpenLineBelow).with_to_mode(ModeKind::Insert),
     );
     trie_keymap.insert_str(
         "O",
-        Action::new(ActionKind::OpenLineAbove).with_to_mode(ModeKind::Insert),
+        EditorAction::new(EditorOperation::OpenLineAbove).with_to_mode(ModeKind::Insert),
     );
     trie_keymap.insert_str(
         "<LessThan><LessThan>",
-        Action::new(ActionKind::IndentDecrease),
+        EditorAction::new(EditorOperation::IndentDecrease),
     );
     trie_keymap.insert_str(
         "<GreaterThan><GreaterThan>",
-        Action::new(ActionKind::IndentIncrease),
+        EditorAction::new(EditorOperation::IndentIncrease),
     );
 }
 
 fn register_window_bindings(trie_keymap: &mut TrieKeymap) {
-    trie_keymap.insert_str("<C-o>", Action::jump_backward());
-    trie_keymap.insert_str("<C-i>", Action::jump_forward());
+    trie_keymap.insert_str("<C-o>", EditorAction::jump_backward());
+    trie_keymap.insert_str("<C-i>", EditorAction::jump_forward());
     trie_keymap.insert_str("<C-w>v", Command::SplitVertical);
     trie_keymap.insert_str("<C-w>s", Command::SplitHorizontal);
     trie_keymap.insert_str("<C-w>h", Command::FocusPaneLeft);
     trie_keymap.insert_str("<C-w>j", Command::FocusPaneDown);
     trie_keymap.insert_str("<C-w>k", Command::FocusPaneUp);
     trie_keymap.insert_str("<C-w>l", Command::FocusPaneRight);
+    trie_keymap.insert_str("<C-w>n", Command::FocusNextWindow);
+    trie_keymap.insert_str("<C-w>p", Command::FocusPreviousWindow);
     trie_keymap.insert_str("<C-w>q", Command::ClosePane);
     trie_keymap.insert_str("<C-w>=", Command::EqualizeSplits);
     trie_keymap.insert_str("<C-w>w", Command::ToggleWrap);
-    trie_keymap.insert_str("<C-w>r", Action::mode_transition(ModeKind::Resizing));
+    trie_keymap.insert_str("<C-w>r", EditorAction::mode_transition(ModeKind::Resizing));
 }
 
 fn register_edit_bindings(trie_keymap: &mut TrieKeymap) {
-    trie_keymap.insert_str("gcc", Action::toggle_line_comment());
+    trie_keymap.insert_str("gcc", EditorAction::toggle_line_comment());
     trie_keymap.insert_str("[d", Command::LspPreviousDiagnostic);
     trie_keymap.insert_str("]d", Command::LspNextDiagnostic);
     trie_keymap.insert_str("[e", Command::LspPreviousErrorDiagnostic);
     trie_keymap.insert_str("]e", Command::LspNextErrorDiagnostic);
-    trie_keymap.insert_str("[b", Action::new(ActionKind::PreviousTab));
-    trie_keymap.insert_str("]b", Action::new(ActionKind::NextTab));
-    trie_keymap.insert_str("x", Action::new(ActionKind::DeleteForward));
-    trie_keymap.insert_str("X", Action::new(ActionKind::DeleteBackward));
-    trie_keymap.insert_str("dd", Action::new(ActionKind::DeleteLine));
-    trie_keymap.insert_str("yy", Action::new(ActionKind::YankLine));
-    trie_keymap.insert_str("p", Action::new(ActionKind::PasteAfter));
-    trie_keymap.insert_str("P", Action::new(ActionKind::PasteBefore));
+    trie_keymap.insert_str("[b", Command::PreviousTab(1));
+    trie_keymap.insert_str("]b", Command::NextTab(1));
+    trie_keymap.insert_str("x", EditorAction::new(EditorOperation::DeleteForward));
+    trie_keymap.insert_str("X", EditorAction::new(EditorOperation::DeleteBackward));
+    trie_keymap.insert_str("dd", EditorAction::new(EditorOperation::DeleteLine));
+    trie_keymap.insert_str("yy", EditorAction::new(EditorOperation::YankLine));
+    trie_keymap.insert_str("p", EditorAction::new(EditorOperation::PasteAfter));
+    trie_keymap.insert_str("P", EditorAction::new(EditorOperation::PasteBefore));
     trie_keymap.insert_str(
         "cc",
-        Action::new(ActionKind::ChangeLine).with_to_mode(ModeKind::Insert),
+        EditorAction::new(EditorOperation::ChangeLine).with_to_mode(ModeKind::Insert),
     );
     trie_keymap.insert_str(
         "C",
-        Action::new(ActionKind::ChangeToLineEnd).with_to_mode(ModeKind::Insert),
+        EditorAction::new(EditorOperation::ChangeToLineEnd).with_to_mode(ModeKind::Insert),
     );
 }
 
@@ -214,22 +237,34 @@ fn register_misc_bindings(trie_keymap: &mut TrieKeymap) {
     trie_keymap.insert_str("gd", Command::LspDefinition);
     trie_keymap.insert_str("gra", Command::LspCodeActions);
     trie_keymap.insert_str("grn", Command::LspRenamePrompt);
-    trie_keymap.insert_str("%", Action::new(ActionKind::MoveToMatchingBracket));
-    trie_keymap.insert_str(";", Action::new(ActionKind::RepeatLastFind));
-    trie_keymap.insert_str(",", Action::new(ActionKind::RepeatLastFindReverse));
+    trie_keymap.insert_str(
+        "%",
+        EditorAction::new(EditorOperation::MoveToMatchingBracket),
+    );
+    trie_keymap.insert_str(";", EditorAction::new(EditorOperation::RepeatLastFind));
+    trie_keymap.insert_str(
+        ",",
+        EditorAction::new(EditorOperation::RepeatLastFindReverse),
+    );
     trie_keymap.insert_str("<C-q>", Command::TryQuit);
-    trie_keymap.insert_str("u", Action::new(ActionKind::Undo));
-    trie_keymap.insert_str("U", Action::new(ActionKind::Redo));
-    trie_keymap.insert_str(".", Action::new(ActionKind::RepeatLastChange));
+    trie_keymap.insert_str("u", EditorAction::new(EditorOperation::Undo));
+    trie_keymap.insert_str("U", EditorAction::new(EditorOperation::Redo));
+    trie_keymap.insert_str(".", EditorAction::new(EditorOperation::RepeatLastChange));
     trie_keymap.insert_str(":", Command::OpenCommandLine);
-    trie_keymap.insert_str("<Left>", Action::new(ActionKind::MoveLeft));
-    trie_keymap.insert_str("<Down>", Action::new(ActionKind::MoveDown));
-    trie_keymap.insert_str("<Up>", Action::new(ActionKind::MoveUp));
-    trie_keymap.insert_str("<Right>", Action::new(ActionKind::MoveRight));
-    trie_keymap.insert_str("<PageUp>", Action::new(ActionKind::MovePageUp));
-    trie_keymap.insert_str("<PageDown>", Action::new(ActionKind::MovePageDown));
-    trie_keymap.insert_str("<C-u>", Action::new(ActionKind::MoveHalfPageUp));
-    trie_keymap.insert_str("<C-d>", Action::new(ActionKind::MoveHalfPageDown));
+    trie_keymap.insert_str("<Left>", EditorAction::new(EditorOperation::MoveLeft));
+    trie_keymap.insert_str("<Down>", EditorAction::new(EditorOperation::MoveDown));
+    trie_keymap.insert_str("<Up>", EditorAction::new(EditorOperation::MoveUp));
+    trie_keymap.insert_str("<Right>", EditorAction::new(EditorOperation::MoveRight));
+    trie_keymap.insert_str("<PageUp>", EditorAction::new(EditorOperation::MovePageUp));
+    trie_keymap.insert_str(
+        "<PageDown>",
+        EditorAction::new(EditorOperation::MovePageDown),
+    );
+    trie_keymap.insert_str("<C-u>", EditorAction::new(EditorOperation::MoveHalfPageUp));
+    trie_keymap.insert_str(
+        "<C-d>",
+        EditorAction::new(EditorOperation::MoveHalfPageDown),
+    );
 }
 
 fn operator_sequences(to_mode: Option<ModeKind>) -> [OperatorSequenceSpec; 11] {

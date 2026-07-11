@@ -1,7 +1,10 @@
 //! LSP rename prompt widget.
 
 use crate::screen::Screen;
-use crate::ui::floating_window::{FloatingAnchor, FloatingWindowFrame, FloatingWindowFrameLabel};
+use crate::ui::floating_window::{
+    FloatingAnchor, FloatingMargins, FloatingPlacement, FloatingWindowFrame,
+    FloatingWindowFrameLabel,
+};
 use crate::ui::inputs::InputWidget;
 use crate::ui::{Command, FocusPolicy, Intent, UiContext, UiEvent, UiEventResult, UiRect};
 use crate::widget::Widget;
@@ -72,12 +75,15 @@ impl LspRenamePrompt {
         let body_style = theme_style("ui.window");
         let content_width = rect.size.cols.min(MAX_PROMPT_CONTENT_WIDTH as u16);
         let content_height = 1;
-        let frame = FloatingWindowFrame::resolve(
+        let frame = FloatingWindowFrame::resolve_placement(
             rect.origin,
             rect.size,
             content_height,
             content_width.saturating_sub(2),
-            FloatingAnchor::Center,
+            FloatingPlacement::Anchored {
+                anchor: FloatingAnchor::Center,
+                margins: FloatingMargins::default(),
+            },
         );
         let Some(frame) = frame else {
             return;

@@ -20,6 +20,7 @@ impl Layout {
     /// Closes the dedicated LSP rename prompt.
     pub(super) fn close_lsp_rename_prompt(&mut self) {
         self.dialogs.lsp_rename_prompt = None;
+        self.clear_modal_inherited_keys();
     }
 
     /// Returns true when the LSP rename prompt is open.

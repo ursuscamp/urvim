@@ -57,6 +57,7 @@ impl Layout {
             picker.close();
         }
         self.dialogs.doc_symbols_picker = None;
+        self.clear_modal_inherited_keys();
     }
 
     /// Closes the LSP workspace symbol picker overlay.
@@ -65,6 +66,7 @@ impl Layout {
             picker.close();
         }
         self.dialogs.workspace_symbols_picker = None;
+        self.clear_modal_inherited_keys();
     }
 
     /// Returns true when the LSP document symbol picker is open.

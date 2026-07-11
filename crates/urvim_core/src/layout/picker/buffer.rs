@@ -26,6 +26,7 @@ impl Layout {
             picker.close();
         }
         self.dialogs.buffer_picker = None;
+        self.clear_modal_inherited_keys();
     }
 
     /// Returns true when the visible-buffer picker is open.

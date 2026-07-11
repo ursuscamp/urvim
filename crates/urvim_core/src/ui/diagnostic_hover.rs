@@ -2,7 +2,7 @@
 
 use crate::lsp::diagnostics::{diagnostic_marker, diagnostic_severity};
 use crate::screen::Screen;
-use crate::ui::floating_window::FloatingWindowFrame;
+use crate::ui::floating_window::{FloatingPlacement, FloatingWindowFrame};
 use crate::ui::text_width::{ClipSide, clip_text};
 use crate::ui::{FocusPolicy, UiContext, UiEvent, UiEventResult, UiRect};
 use crate::widget::Widget;
@@ -75,12 +75,14 @@ impl DiagnosticHoverWidget {
 
     fn resolve_frame(&self, rect: UiRect) -> Option<FloatingWindowFrame> {
         let content_size = self.content_size(rect.size)?;
-        FloatingWindowFrame::resolve_near_cursor(
+        FloatingWindowFrame::resolve_placement(
             rect.origin,
             rect.size,
-            self.anchor,
             content_size.rows,
             content_size.cols,
+            FloatingPlacement::NearCursor {
+                cursor: self.anchor,
+            },
         )
     }
 

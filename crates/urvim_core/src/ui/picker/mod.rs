@@ -18,7 +18,10 @@ pub mod references;
 
 use crate::background::JobManager;
 use crate::screen::Screen;
-use crate::ui::floating_window::{FloatingAnchor, FloatingWindowFrame, FloatingWindowFrameLabel};
+use crate::ui::floating_window::{
+    FloatingAnchor, FloatingMargins, FloatingPlacement, FloatingWindowFrame,
+    FloatingWindowFrameLabel,
+};
 use crate::ui::inputs::{InputWidget, PromptSegment};
 pub use crate::ui::line_format::{
     EllipsisPlacement, FormattedLineSection, FormattedLineSegment, FormattedLineTemplate,
@@ -533,13 +536,17 @@ impl<S: PickerSource> PickerWidget<S> {
             });
         }
 
-        let picker = FloatingWindowFrame::resolve(
+        let picker = FloatingWindowFrame::resolve_placement(
             rect.origin,
             rect.size,
             picker_content_rows as u16,
             picker_content_cols,
-            FloatingAnchor::TopCenter {
-                top_margin: PICKER_TOP_MARGIN,
+            FloatingPlacement::Anchored {
+                anchor: FloatingAnchor::TopCenter,
+                margins: FloatingMargins {
+                    top: PICKER_TOP_MARGIN,
+                    ..FloatingMargins::default()
+                },
             },
         )?;
 
@@ -963,7 +970,9 @@ impl<S: PickerSource> Widget for PickerWidget<S> {
                     }
                     _ => {
                         let before = self.query_input.text().to_string();
-                        let _ = self.query_input.handle_key(*key);
+                        if !self.query_input.handle_key(*key) {
+                            return UiEventResult::NotHandled;
+                        }
                         if self.query_input.text() != before {
                             self.restart_search();
                         }
@@ -2048,12 +2057,15 @@ mod tests {
                 "hello\nworld\n",
             )),
         );
-        let frame = crate::ui::floating_window::FloatingWindowFrame::resolve(
+        let frame = crate::ui::floating_window::FloatingWindowFrame::resolve_placement(
             Position::new(0, 0),
             Size::new(4, 16),
             2,
             14,
-            crate::ui::floating_window::FloatingAnchor::Center,
+            crate::ui::floating_window::FloatingPlacement::Anchored {
+                anchor: crate::ui::floating_window::FloatingAnchor::Center,
+                margins: crate::ui::floating_window::FloatingMargins::default(),
+            },
         )
         .expect("preview frame");
         let mut screen = crate::screen::Screen::new(4, 16);

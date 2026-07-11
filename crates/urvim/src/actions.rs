@@ -1,9 +1,9 @@
 use std::collections::VecDeque;
 use std::io;
 
-use crate::plugin::{BearscriptPluginRuntime, loaded_buffer_ids};
+use crate::plugin::{BearscriptPluginRuntime, SharedLayout, loaded_buffer_ids};
 use urvim_core::buffer::Cursor;
-use urvim_core::editor::{Action, ActionKind, ModeKind, RepeatReplay};
+use urvim_core::editor::{EditorAction, EditorOperation, ModeKind, RepeatReplay};
 use urvim_core::event::EditorEvent;
 use urvim_core::globals;
 use urvim_core::layout::Layout;
@@ -64,7 +64,7 @@ pub(super) fn handle_save_buffer_action_with_outcome(
 pub(super) fn execute_action_intent_with_plugin_runtime(
     layout: &mut Layout,
     _plugin_runtime: &mut BearscriptPluginRuntime,
-    action: Action,
+    action: EditorAction,
 ) -> bool {
     // Plugin events are dispatched centrally from the editor event queue, so
     // action intent execution simply forwards to the non-plugin-aware helper.
@@ -87,7 +87,7 @@ pub(super) fn process_intent_queue_with_plugin_runtime(
     while let Some(intent) = queue.pop_front() {
         saw_intent = true;
         handled_all &= match intent {
-            Intent::Action(action) => match plugin_runtime.as_deref_mut() {
+            Intent::Editor(action) => match plugin_runtime.as_deref_mut() {
                 Some(runtime) => execute_action_intent_with_plugin_runtime(layout, runtime, action),
                 None => execute_action_intent(layout, action),
             },
@@ -105,6 +105,10 @@ pub(super) fn execute_command_intent(
     plugin_runtime: Option<&mut BearscriptPluginRuntime>,
     command: Command,
 ) -> bool {
+    if let Command::SaveBuffer(target) = &command {
+        return handle_save_buffer_action(layout, *target, false);
+    }
+
     if let Command::PluginRequest {
         plugin,
         command,
@@ -267,22 +271,22 @@ pub(super) fn cleanup_orphaned_buffers(layout: &Layout) {
     }
 }
 
-pub(super) fn execute_action_intent(layout: &mut Layout, action: Action) -> bool {
+pub(super) fn execute_action_intent(layout: &mut Layout, action: EditorAction) -> bool {
     let repeat_replay = action.resolve_dot_repeat();
     let dispatch_action = repeat_replay
         .as_ref()
         .map(|replay| replay.action.clone())
         .unwrap_or_else(|| {
             if action.is_repeat_command() {
-                Action::none()
+                EditorAction::none()
             } else {
                 action.clone()
             }
         });
 
     match action.kind.as_ref() {
-        Some(ActionKind::Undo) => apply_undo_redo(layout, false),
-        Some(ActionKind::Redo) => apply_undo_redo(layout, true),
+        Some(EditorOperation::Undo) => apply_undo_redo(layout, false),
+        Some(EditorOperation::Redo) => apply_undo_redo(layout, true),
         _ => {
             let mut handled = false;
             if let Some(replay) = repeat_replay.as_ref() {
@@ -307,16 +311,6 @@ pub(super) fn execute_action_intent(layout: &mut Layout, action: Action) -> bool
 
                 if !handled_by_layout {
                     match dispatch_action.kind.as_ref() {
-                        Some(ActionKind::SaveBuffer(_)) => {
-                            handled = handle_save_buffer_action(
-                                layout,
-                                dispatch_action.kind.as_ref().and_then(|kind| match kind {
-                                    ActionKind::SaveBuffer(target) => *target,
-                                    _ => None,
-                                }),
-                                false,
-                            );
-                        }
                         None => {
                             handled = true;
                         }
@@ -372,11 +366,11 @@ pub(super) fn execute_action_intent(layout: &mut Layout, action: Action) -> bool
 
                     if dispatch_action.from_mode == Some(ModeKind::Insert) {
                         match dispatch_action.kind.as_ref() {
-                            Some(ActionKind::InsertChar(_))
-                            | Some(ActionKind::InsertText(_))
-                            | Some(ActionKind::InsertNewline)
-                            | Some(ActionKind::DeleteBackward)
-                            | Some(ActionKind::DeleteForward) => {
+                            Some(EditorOperation::InsertChar(_))
+                            | Some(EditorOperation::InsertText(_))
+                            | Some(EditorOperation::InsertNewline)
+                            | Some(EditorOperation::DeleteBackward)
+                            | Some(EditorOperation::DeleteForward) => {
                                 layout.handle_insert_completion_change();
                             }
                             _ => layout.cancel_autocomplete(),
@@ -442,7 +436,7 @@ pub(super) fn replay_repeat_action(layout: &mut Layout, replay: &RepeatReplay) -
     }
 
     let structural_action = if replay.structural_count > 1 {
-        Action::count(replay.structural_count, Box::new(replay.action.clone()))
+        EditorAction::count(replay.structural_count, Box::new(replay.action.clone()))
     } else {
         replay.action.clone()
     };
@@ -454,7 +448,7 @@ pub(super) fn replay_repeat_action(layout: &mut Layout, replay: &RepeatReplay) -
             {
                 true
             }
-            _ => process_intent_queue(layout, vec![Intent::Action(structural_action.clone())]),
+            _ => process_intent_queue(layout, vec![Intent::Editor(structural_action.clone())]),
         };
 
         if !handled {
@@ -498,16 +492,23 @@ fn cursor_after_text(mut cursor: Cursor, text: &str) -> Cursor {
 
 #[cfg(test)]
 pub(super) fn handle_ui_result(layout: &mut Layout, result: urvim_core::ui::UiEventResult) -> bool {
-    use std::{cell::RefCell, rc::Rc};
+    if !result.handled() {
+        return false;
+    }
 
-    let mut plugin_runtime = BearscriptPluginRuntime::empty(Rc::new(RefCell::new(Layout::new(
-        urvim_core::WindowGroup::from_buffers(vec![urvim_core::buffer::Buffer::new()]),
-    ))));
-    handle_ui_result_with_plugin_runtime(layout, &mut plugin_runtime, result)
+    let intents = result.into_intents();
+    if !intents.is_empty() {
+        process_intent_queue(layout, intents);
+    }
+
+    true
 }
 
-pub(super) fn handle_ui_result_with_plugin_runtime(
-    layout: &mut Layout,
+/// Processes UI intents without holding a mutable layout borrow across a
+/// plugin callback. Plugin commands can call back into the UI module, so they
+/// must be dispatched through the shared layout rather than a borrowed layout.
+pub(super) fn handle_ui_result_with_shared_layout(
+    layout: &SharedLayout,
     plugin_runtime: &mut BearscriptPluginRuntime,
     result: urvim_core::ui::UiEventResult,
 ) -> bool {
@@ -517,19 +518,68 @@ pub(super) fn handle_ui_result_with_plugin_runtime(
 
     let intents = result.into_intents();
     if !intents.is_empty() {
-        process_intent_queue_with_plugin_runtime(layout, Some(plugin_runtime), intents);
+        process_intents_with_shared_layout(layout, Some(plugin_runtime), intents);
     }
 
     true
 }
 
-pub(super) fn raw_paste_action_for_mode(mode: ModeKind, text: String) -> Option<Action> {
+pub(super) fn process_intents_with_shared_layout(
+    layout: &SharedLayout,
+    plugin_runtime: Option<&mut BearscriptPluginRuntime>,
+    intents: Vec<Intent>,
+) -> bool {
+    let mut handled_all = true;
+    let mut saw_intent = false;
+    let mut plugin_runtime = plugin_runtime;
+
+    for intent in intents {
+        saw_intent = true;
+        handled_all &= match intent {
+            Intent::Command(Command::PluginRequest {
+                plugin,
+                command,
+                args,
+            }) => match plugin_runtime.as_deref_mut() {
+                Some(runtime) => {
+                    match runtime.run_command(&plugin, &command, &args) {
+                        Ok(()) => tracing::debug!(plugin, command, "ran BearScript plugin command"),
+                        Err(error) => {
+                            tracing::warn!(plugin, command, error = %error, "BearScript plugin command failed");
+                            urvim_core::notify_warn!(
+                                "Plugin command {plugin} {command} failed: {error}"
+                            );
+                        }
+                    }
+                    true
+                }
+                None => {
+                    tracing::warn!(plugin, command, "plugin command has no runtime");
+                    urvim_core::notify_warn!(
+                        "Plugin command {plugin} {command} could not run: no runtime"
+                    );
+                    true
+                }
+            },
+            other => process_intent_queue_with_plugin_runtime(
+                &mut layout.borrow_mut(),
+                plugin_runtime.as_deref_mut(),
+                vec![other],
+            ),
+        };
+    }
+
+    saw_intent && handled_all
+}
+
+pub(super) fn raw_paste_action_for_mode(mode: ModeKind, text: String) -> Option<EditorAction> {
     match mode {
         ModeKind::Insert | ModeKind::Replace | ModeKind::Normal => {
-            Some(Action::insert_raw_paste(text).with_from_mode(mode))
+            Some(EditorAction::insert_raw_paste(text).with_from_mode(mode))
         }
         ModeKind::Visual | ModeKind::VisualLine => Some(
-            Action::replace_selection_raw_paste(text).with_mode(Some(mode), Some(ModeKind::Normal)),
+            EditorAction::replace_selection_raw_paste(text)
+                .with_mode(Some(mode), Some(ModeKind::Normal)),
         ),
         ModeKind::Resizing => None,
     }

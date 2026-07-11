@@ -46,6 +46,7 @@ impl Layout {
             picker.close();
         }
         self.dialogs.references_picker = None;
+        self.clear_modal_inherited_keys();
     }
 
     /// Returns true when the LSP references picker is open.

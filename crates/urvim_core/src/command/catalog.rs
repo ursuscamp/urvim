@@ -1,7 +1,7 @@
 use super::{CommandError, CommandInvocation};
 use crate::editor::{
-    Action, ActionKind, BoundaryMotion, DelimiterFamily, LinewiseMotion, ModeKind, Operator,
-    OperatorTarget, QuoteKind, TextObject,
+    BoundaryMotion, DelimiterFamily, EditorAction, EditorOperation, LinewiseMotion, ModeKind,
+    Operator, OperatorTarget, QuoteKind, TextObject,
 };
 use crate::register::RegisterName;
 use crate::ui::{Command, Intent};
@@ -20,6 +20,7 @@ pub fn resolve(invocation: &CommandInvocation) -> Result<Intent, CommandError> {
         "pick" => resolve_pick(&invocation.tokens[1..]),
         "lsp" => resolve_lsp(&invocation.tokens[1..]),
         "pane" => resolve_pane(&invocation.tokens[1..]),
+        "window" => resolve_window(&invocation.tokens[1..]),
         "app" => resolve_app(&invocation.tokens[1..]),
         other => Err(unknown_command(other)),
     }
@@ -69,7 +70,7 @@ fn resolve_write(tokens: &[String]) -> Result<Intent, CommandError> {
 
     match path {
         Some(path) => Ok(Intent::Command(Command::SaveBufferAs(PathBuf::from(path)))),
-        None => Ok(Intent::Action(Action::save_buffer(None))),
+        None => Ok(Intent::Command(Command::SaveBuffer(None))),
     }
 }
 
@@ -115,55 +116,101 @@ fn resolve_cursor(tokens: &[String]) -> Result<Intent, CommandError> {
     };
 
     let intent = match subcommand {
-        "left" => action_intent(Action::new(ActionKind::MoveLeft), tokens, true)?,
-        "right" => action_intent(Action::new(ActionKind::MoveRight), tokens, true)?,
-        "up" => action_intent(Action::new(ActionKind::MoveUp), tokens, true)?,
-        "down" => action_intent(Action::new(ActionKind::MoveDown), tokens, true)?,
-        "page-up" => action_intent(Action::new(ActionKind::MovePageUp), tokens, true)?,
-        "page-down" => action_intent(Action::new(ActionKind::MovePageDown), tokens, true)?,
-        "half-page-up" => action_intent(Action::new(ActionKind::MoveHalfPageUp), tokens, true)?,
-        "half-page-down" => action_intent(Action::new(ActionKind::MoveHalfPageDown), tokens, true)?,
-        "line-start" => action_intent(Action::new(ActionKind::MoveToLineStart), tokens, true)?,
-        "line-end" => action_intent(Action::new(ActionKind::MoveToLineEnd), tokens, true)?,
+        "left" => action_intent(EditorAction::new(EditorOperation::MoveLeft), tokens, true)?,
+        "right" => action_intent(EditorAction::new(EditorOperation::MoveRight), tokens, true)?,
+        "up" => action_intent(EditorAction::new(EditorOperation::MoveUp), tokens, true)?,
+        "down" => action_intent(EditorAction::new(EditorOperation::MoveDown), tokens, true)?,
+        "page-up" => action_intent(EditorAction::new(EditorOperation::MovePageUp), tokens, true)?,
+        "page-down" => action_intent(
+            EditorAction::new(EditorOperation::MovePageDown),
+            tokens,
+            true,
+        )?,
+        "half-page-up" => action_intent(
+            EditorAction::new(EditorOperation::MoveHalfPageUp),
+            tokens,
+            true,
+        )?,
+        "half-page-down" => action_intent(
+            EditorAction::new(EditorOperation::MoveHalfPageDown),
+            tokens,
+            true,
+        )?,
+        "line-start" => action_intent(
+            EditorAction::new(EditorOperation::MoveToLineStart),
+            tokens,
+            true,
+        )?,
+        "line-end" => action_intent(
+            EditorAction::new(EditorOperation::MoveToLineEnd),
+            tokens,
+            true,
+        )?,
         "line-content-start" => action_intent(
-            Action::new(ActionKind::MoveToLineContentStart),
+            EditorAction::new(EditorOperation::MoveToLineContentStart),
             tokens,
             true,
         )?,
-        "file-start" => action_intent(Action::new(ActionKind::MoveToFirstLine), tokens, true)?,
-        "file-end" => action_intent(Action::new(ActionKind::MoveToLastLine), tokens, true)?,
-        "screen-top" => action_intent(Action::new(ActionKind::MoveToScreenTop), tokens, true)?,
-        "screen-middle" => {
-            action_intent(Action::new(ActionKind::MoveToScreenMiddle), tokens, true)?
-        }
-        "screen-bottom" => {
-            action_intent(Action::new(ActionKind::MoveToScreenBottom), tokens, true)?
-        }
+        "file-start" => action_intent(
+            EditorAction::new(EditorOperation::MoveToFirstLine),
+            tokens,
+            true,
+        )?,
+        "file-end" => action_intent(
+            EditorAction::new(EditorOperation::MoveToLastLine),
+            tokens,
+            true,
+        )?,
+        "screen-top" => action_intent(
+            EditorAction::new(EditorOperation::MoveToScreenTop),
+            tokens,
+            true,
+        )?,
+        "screen-middle" => action_intent(
+            EditorAction::new(EditorOperation::MoveToScreenMiddle),
+            tokens,
+            true,
+        )?,
+        "screen-bottom" => action_intent(
+            EditorAction::new(EditorOperation::MoveToScreenBottom),
+            tokens,
+            true,
+        )?,
         "paragraph-previous" => action_intent(
-            Action::new(ActionKind::MoveToPreviousParagraph),
+            EditorAction::new(EditorOperation::MoveToPreviousParagraph),
             tokens,
             true,
         )?,
-        "paragraph-next" => {
-            action_intent(Action::new(ActionKind::MoveToNextParagraph), tokens, true)?
-        }
+        "paragraph-next" => action_intent(
+            EditorAction::new(EditorOperation::MoveToNextParagraph),
+            tokens,
+            true,
+        )?,
         "diff-previous" => action_intent(
-            Action::new(ActionKind::MoveToPreviousDiffHunk),
+            EditorAction::new(EditorOperation::MoveToPreviousDiffHunk),
             tokens,
             true,
         )?,
-        "diff-next" => action_intent(Action::new(ActionKind::MoveToNextDiffHunk), tokens, true)?,
+        "diff-next" => action_intent(
+            EditorAction::new(EditorOperation::MoveToNextDiffHunk),
+            tokens,
+            true,
+        )?,
         "diff-end-previous" => action_intent(
-            Action::new(ActionKind::MoveToPreviousDiffHunkEnd),
+            EditorAction::new(EditorOperation::MoveToPreviousDiffHunkEnd),
             tokens,
             true,
         )?,
-        "diff-end-next" => {
-            action_intent(Action::new(ActionKind::MoveToNextDiffHunkEnd), tokens, true)?
-        }
-        "match-bracket" => {
-            action_intent(Action::new(ActionKind::MoveToMatchingBracket), tokens, true)?
-        }
+        "diff-end-next" => action_intent(
+            EditorAction::new(EditorOperation::MoveToNextDiffHunkEnd),
+            tokens,
+            true,
+        )?,
+        "match-bracket" => action_intent(
+            EditorAction::new(EditorOperation::MoveToMatchingBracket),
+            tokens,
+            true,
+        )?,
         "find-forward" => {
             let mut args = ArgCursor::from_tokens("action cursor find-forward", &tokens[1..])?;
             let target = args
@@ -172,7 +219,7 @@ fn resolve_cursor(tokens: &[String]) -> Result<Intent, CommandError> {
             let register = args.take_register()?;
             let count = args.take_count(true)?;
             args.finish()?;
-            let mut action = Action::find_forward(target);
+            let mut action = EditorAction::find_forward(target);
             if let Some(register) = register {
                 action = action.with_register(register);
             }
@@ -186,7 +233,7 @@ fn resolve_cursor(tokens: &[String]) -> Result<Intent, CommandError> {
                         expected: "countable action",
                     })?;
             }
-            Intent::Action(action)
+            Intent::Editor(action)
         }
         "find-backward" => {
             let mut args = ArgCursor::from_tokens("action cursor find-backward", &tokens[1..])?;
@@ -196,7 +243,7 @@ fn resolve_cursor(tokens: &[String]) -> Result<Intent, CommandError> {
             let register = args.take_register()?;
             let count = args.take_count(true)?;
             args.finish()?;
-            let mut action = Action::find_backward(target);
+            let mut action = EditorAction::find_backward(target);
             if let Some(register) = register {
                 action = action.with_register(register);
             }
@@ -210,7 +257,7 @@ fn resolve_cursor(tokens: &[String]) -> Result<Intent, CommandError> {
                         expected: "countable action",
                     })?;
             }
-            Intent::Action(action)
+            Intent::Editor(action)
         }
         "till-forward" => {
             let mut args = ArgCursor::from_tokens("action cursor till-forward", &tokens[1..])?;
@@ -220,7 +267,7 @@ fn resolve_cursor(tokens: &[String]) -> Result<Intent, CommandError> {
             let register = args.take_register()?;
             let count = args.take_count(true)?;
             args.finish()?;
-            let mut action = Action::till_forward(target);
+            let mut action = EditorAction::till_forward(target);
             if let Some(register) = register {
                 action = action.with_register(register);
             }
@@ -234,7 +281,7 @@ fn resolve_cursor(tokens: &[String]) -> Result<Intent, CommandError> {
                         expected: "countable action",
                     })?;
             }
-            Intent::Action(action)
+            Intent::Editor(action)
         }
         "till-backward" => {
             let mut args = ArgCursor::from_tokens("action cursor till-backward", &tokens[1..])?;
@@ -244,7 +291,7 @@ fn resolve_cursor(tokens: &[String]) -> Result<Intent, CommandError> {
             let register = args.take_register()?;
             let count = args.take_count(true)?;
             args.finish()?;
-            let mut action = Action::till_backward(target);
+            let mut action = EditorAction::till_backward(target);
             if let Some(register) = register {
                 action = action.with_register(register);
             }
@@ -258,12 +305,18 @@ fn resolve_cursor(tokens: &[String]) -> Result<Intent, CommandError> {
                         expected: "countable action",
                     })?;
             }
-            Intent::Action(action)
+            Intent::Editor(action)
         }
-        "repeat-find" => action_intent(Action::new(ActionKind::RepeatLastFind), tokens, true)?,
-        "repeat-find-reverse" => {
-            action_intent(Action::new(ActionKind::RepeatLastFindReverse), tokens, true)?
-        }
+        "repeat-find" => action_intent(
+            EditorAction::new(EditorOperation::RepeatLastFind),
+            tokens,
+            true,
+        )?,
+        "repeat-find-reverse" => action_intent(
+            EditorAction::new(EditorOperation::RepeatLastFindReverse),
+            tokens,
+            true,
+        )?,
         other => {
             return Err(unknown_subcommand("action cursor", other));
         }
@@ -278,63 +331,97 @@ fn resolve_edit_action(tokens: &[String]) -> Result<Intent, CommandError> {
     };
 
     let intent = match subcommand {
-        "delete-forward" => action_intent(Action::new(ActionKind::DeleteForward), tokens, true)?,
-        "delete-backward" => action_intent(Action::new(ActionKind::DeleteBackward), tokens, true)?,
-        "delete-selection" => {
-            action_intent(Action::new(ActionKind::DeleteSelection), tokens, true)?
+        "delete-forward" => action_intent(
+            EditorAction::new(EditorOperation::DeleteForward),
+            tokens,
+            true,
+        )?,
+        "delete-backward" => action_intent(
+            EditorAction::new(EditorOperation::DeleteBackward),
+            tokens,
+            true,
+        )?,
+        "delete-selection" => action_intent(
+            EditorAction::new(EditorOperation::DeleteSelection),
+            tokens,
+            true,
+        )?,
+        "delete-line" => {
+            action_intent(EditorAction::new(EditorOperation::DeleteLine), tokens, true)?
         }
-        "delete-line" => action_intent(Action::new(ActionKind::DeleteLine), tokens, true)?,
-        "yank-line" => action_intent(Action::new(ActionKind::YankLine), tokens, true)?,
-        "yank-selection" => action_intent(Action::new(ActionKind::YankSelection), tokens, true)?,
+        "yank-line" => action_intent(EditorAction::new(EditorOperation::YankLine), tokens, true)?,
+        "yank-selection" => action_intent(
+            EditorAction::new(EditorOperation::YankSelection),
+            tokens,
+            true,
+        )?,
         "change-line" => action_intent(
-            Action::new(ActionKind::ChangeLine).with_to_mode(ModeKind::Insert),
+            EditorAction::new(EditorOperation::ChangeLine).with_to_mode(ModeKind::Insert),
             tokens,
             true,
         )?,
         "change-selection" => action_intent(
-            Action::new(ActionKind::ChangeSelection).with_to_mode(ModeKind::Insert),
+            EditorAction::new(EditorOperation::ChangeSelection).with_to_mode(ModeKind::Insert),
             tokens,
             true,
         )?,
         "change-to-line-end" => action_intent(
-            Action::new(ActionKind::ChangeToLineEnd).with_to_mode(ModeKind::Insert),
+            EditorAction::new(EditorOperation::ChangeToLineEnd).with_to_mode(ModeKind::Insert),
             tokens,
             true,
         )?,
-        "paste-after" => action_intent(Action::paste_after(), tokens, true)?,
-        "paste-before" => action_intent(Action::paste_before(), tokens, true)?,
-        "join-space" => action_intent(Action::new(ActionKind::JoinWithSpace), tokens, true)?,
-        "join-no-space" => action_intent(Action::new(ActionKind::JoinWithoutSpace), tokens, true)?,
-        "indent-decrease" => action_intent(Action::new(ActionKind::IndentDecrease), tokens, true)?,
-        "indent-increase" => action_intent(Action::new(ActionKind::IndentIncrease), tokens, true)?,
-        "toggle-line-comment" => action_intent(Action::toggle_line_comment(), tokens, true)?,
-        "undo" => action_intent(Action::new(ActionKind::Undo), tokens, false)?,
-        "redo" => action_intent(Action::new(ActionKind::Redo), tokens, false)?,
-        "repeat-last-change" => {
-            action_intent(Action::new(ActionKind::RepeatLastChange), tokens, false)?
-        }
+        "paste-after" => action_intent(EditorAction::paste_after(), tokens, true)?,
+        "paste-before" => action_intent(EditorAction::paste_before(), tokens, true)?,
+        "join-space" => action_intent(
+            EditorAction::new(EditorOperation::JoinWithSpace),
+            tokens,
+            true,
+        )?,
+        "join-no-space" => action_intent(
+            EditorAction::new(EditorOperation::JoinWithoutSpace),
+            tokens,
+            true,
+        )?,
+        "indent-decrease" => action_intent(
+            EditorAction::new(EditorOperation::IndentDecrease),
+            tokens,
+            true,
+        )?,
+        "indent-increase" => action_intent(
+            EditorAction::new(EditorOperation::IndentIncrease),
+            tokens,
+            true,
+        )?,
+        "toggle-line-comment" => action_intent(EditorAction::toggle_line_comment(), tokens, true)?,
+        "undo" => action_intent(EditorAction::new(EditorOperation::Undo), tokens, false)?,
+        "redo" => action_intent(EditorAction::new(EditorOperation::Redo), tokens, false)?,
+        "repeat-last-change" => action_intent(
+            EditorAction::new(EditorOperation::RepeatLastChange),
+            tokens,
+            false,
+        )?,
         "append-after-cursor" => action_intent(
-            Action::new(ActionKind::AppendAfterCursor).with_to_mode(ModeKind::Insert),
+            EditorAction::new(EditorOperation::AppendAfterCursor).with_to_mode(ModeKind::Insert),
             tokens,
             true,
         )?,
         "append-to-line-end" => action_intent(
-            Action::new(ActionKind::AppendToLineEnd).with_to_mode(ModeKind::Insert),
+            EditorAction::new(EditorOperation::AppendToLineEnd).with_to_mode(ModeKind::Insert),
             tokens,
             true,
         )?,
         "insert-at-line-start" => action_intent(
-            Action::new(ActionKind::InsertAtLineStart).with_to_mode(ModeKind::Insert),
+            EditorAction::new(EditorOperation::InsertAtLineStart).with_to_mode(ModeKind::Insert),
             tokens,
             true,
         )?,
         "open-line-below" => action_intent(
-            Action::new(ActionKind::OpenLineBelow).with_to_mode(ModeKind::Insert),
+            EditorAction::new(EditorOperation::OpenLineBelow).with_to_mode(ModeKind::Insert),
             tokens,
             true,
         )?,
         "open-line-above" => action_intent(
-            Action::new(ActionKind::OpenLineAbove).with_to_mode(ModeKind::Insert),
+            EditorAction::new(EditorOperation::OpenLineAbove).with_to_mode(ModeKind::Insert),
             tokens,
             true,
         )?,
@@ -355,7 +442,7 @@ fn resolve_mode(tokens: &[String]) -> Result<Intent, CommandError> {
         return Err(unexpected_argument("action mode", &tokens[1]));
     }
 
-    Ok(Intent::Action(Action::mode_transition(mode)))
+    Ok(Intent::Editor(EditorAction::mode_transition(mode)))
 }
 
 fn resolve_operator(tokens: &[String]) -> Result<Intent, CommandError> {
@@ -383,7 +470,7 @@ fn resolve_operator(tokens: &[String]) -> Result<Intent, CommandError> {
     let register = args.take_register()?;
     args.finish()?;
 
-    let mut action = Action::operation(operator, target);
+    let mut action = EditorAction::operation(operator, target);
     if operator == Operator::Change {
         action = action.with_to_mode(ModeKind::Insert);
     }
@@ -401,7 +488,7 @@ fn resolve_operator(tokens: &[String]) -> Result<Intent, CommandError> {
             })?;
     }
 
-    Ok(Intent::Action(action))
+    Ok(Intent::Editor(action))
 }
 
 fn resolve_surround(tokens: &[String]) -> Result<Intent, CommandError> {
@@ -419,14 +506,19 @@ fn resolve_surround(tokens: &[String]) -> Result<Intent, CommandError> {
                 .take_delimiter_family("delimiter")?
                 .ok_or(missing_argument("action surround add", "delimiter"))?;
             args.finish()?;
-            Intent::Action(Action::new(ActionKind::SurroundAdd { target, delimiter }))
+            Intent::Editor(EditorAction::new(EditorOperation::SurroundAdd {
+                target,
+                delimiter,
+            }))
         }
         "delete" => {
             let target = args
                 .take_delimiter_family("target")?
                 .ok_or(missing_argument("action surround delete", "target"))?;
             args.finish()?;
-            Intent::Action(Action::new(ActionKind::SurroundDelete { target }))
+            Intent::Editor(EditorAction::new(EditorOperation::SurroundDelete {
+                target,
+            }))
         }
         "replace" => {
             let target = args
@@ -436,7 +528,7 @@ fn resolve_surround(tokens: &[String]) -> Result<Intent, CommandError> {
                 .take_delimiter_family("replacement")?
                 .ok_or(missing_argument("action surround replace", "replacement"))?;
             args.finish()?;
-            Intent::Action(Action::new(ActionKind::SurroundReplace {
+            Intent::Editor(EditorAction::new(EditorOperation::SurroundReplace {
                 target,
                 replacement,
             }))
@@ -454,9 +546,13 @@ fn resolve_tab(tokens: &[String]) -> Result<Intent, CommandError> {
         return Err(missing_argument("action tab", "subcommand"));
     };
 
+    let mut args = ArgCursor::from_tokens("action tab", &tokens[1..])?;
+    let count = args.take_count(true)?.unwrap_or(1);
+    args.finish()?;
+
     let intent = match subcommand {
-        "previous" => action_intent(Action::new(ActionKind::PreviousTab), tokens, true)?,
-        "next" => action_intent(Action::new(ActionKind::NextTab), tokens, true)?,
+        "previous" => Intent::Command(Command::PreviousTab(count)),
+        "next" => Intent::Command(Command::NextTab(count)),
         other => {
             return Err(unknown_subcommand("action tab", other));
         }
@@ -471,8 +567,8 @@ fn resolve_jump(tokens: &[String]) -> Result<Intent, CommandError> {
     };
 
     let intent = match subcommand {
-        "backward" => action_intent(Action::jump_backward(), tokens, true)?,
-        "forward" => action_intent(Action::jump_forward(), tokens, true)?,
+        "backward" => action_intent(EditorAction::jump_backward(), tokens, true)?,
+        "forward" => action_intent(EditorAction::jump_forward(), tokens, true)?,
         other => {
             return Err(unknown_subcommand("action jump", other));
         }
@@ -574,6 +670,24 @@ fn resolve_pane(tokens: &[String]) -> Result<Intent, CommandError> {
     }
 }
 
+fn resolve_window(tokens: &[String]) -> Result<Intent, CommandError> {
+    let Some(subcommand) = tokens.first().map(String::as_str) else {
+        return Err(missing_argument("window", "subcommand"));
+    };
+
+    let command = match subcommand {
+        "focus-next" => Command::FocusNextWindow,
+        "focus-previous" => Command::FocusPreviousWindow,
+        other => return Err(unknown_subcommand("window", other)),
+    };
+
+    if tokens.len() > 1 {
+        return Err(unexpected_argument("window", &tokens[1]));
+    }
+
+    Ok(Intent::Command(command))
+}
+
 fn resolve_pane_resize(
     constructor: fn(usize) -> Command,
     tokens: &[String],
@@ -605,7 +719,7 @@ fn resolve_app(tokens: &[String]) -> Result<Intent, CommandError> {
 }
 
 fn action_intent(
-    mut action: Action,
+    mut action: EditorAction,
     tokens: &[String],
     allow_positional_count: bool,
 ) -> Result<Intent, CommandError> {
@@ -628,7 +742,7 @@ fn action_intent(
             })?;
     }
 
-    Ok(Intent::Action(action))
+    Ok(Intent::Editor(action))
 }
 
 struct ArgCursor {

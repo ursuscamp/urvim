@@ -1,9 +1,9 @@
-use super::{Action, ActionKind, HandleKeyResult, Mode, ModeKind, TrieKeymap};
+use super::{EditorAction, EditorOperation, HandleKeyResult, Mode, ModeKind, TrieKeymap};
 use crate::buffer::{Buffer, Cursor, IndentDirection};
 use crate::config::{DEFAULT_TAB_WIDTH, TabBehavior, TabInsertion};
 use crate::editor::pairs;
 use crate::globals;
-use crate::ui::Command;
+use crate::ui::{Command, Intent};
 use urvim_terminal::{CursorStyle, Key, KeyCode};
 
 /// Insert mode for text input.
@@ -22,7 +22,7 @@ pub struct InsertMode {
 impl InsertMode {
     /// Creates a new insert mode with an empty repeat capture buffer.
     pub fn new() -> Self {
-        let mut keymap = TrieKeymap::new();
+        let mut keymap = TrieKeymap::<Intent>::new();
         keymap.insert_str("<F1>", Command::OpenFilePicker);
         keymap.insert_str("<F2>", Command::OpenGrepPicker);
         keymap.insert_str("<F3>", Command::OpenBufferPicker);
@@ -30,21 +30,36 @@ impl InsertMode {
         keymap.insert_str("<F5>", Command::OpenColorschemePicker);
         keymap.insert_str("<F6>", Command::OpenFiletypePicker);
         keymap.insert_str("<C-Backspace>", Command::OpenCompletion);
-        keymap.insert_str("<Esc>", Action::mode_transition(ModeKind::Normal));
+        keymap.insert_str("<Esc>", EditorAction::mode_transition(ModeKind::Normal));
         keymap.insert_str("<C-q>", Command::TryQuit);
-        keymap.insert_str("<C-s>", Action::save_buffer(None));
-        keymap.insert_str("<Left>", Action::new(ActionKind::MoveLeft));
-        keymap.insert_str("<Down>", Action::new(ActionKind::MoveDown));
-        keymap.insert_str("<Up>", Action::new(ActionKind::MoveUp));
-        keymap.insert_str("<Right>", Action::new(ActionKind::MoveRight));
-        keymap.insert_str("<PageUp>", Action::new(ActionKind::MovePageUp));
-        keymap.insert_str("<PageDown>", Action::new(ActionKind::MovePageDown));
-        keymap.insert_str("<C-u>", Action::new(ActionKind::MoveHalfPageUp));
-        keymap.insert_str("<C-d>", Action::new(ActionKind::MoveHalfPageDown));
-        keymap.insert_str("<Enter>", Action::insert_newline());
-        keymap.insert_str("<S-Tab>", Action::new(ActionKind::IndentDecrease));
-        keymap.insert_str("<Backspace>", Action::new(ActionKind::DeleteBackward));
-        keymap.insert_str("<Delete>", Action::new(ActionKind::DeleteForward));
+        keymap.insert_str("<C-s>", Command::SaveBuffer(None));
+        keymap.insert_str("<Left>", EditorAction::new(EditorOperation::MoveLeft));
+        keymap.insert_str("<Down>", EditorAction::new(EditorOperation::MoveDown));
+        keymap.insert_str("<Up>", EditorAction::new(EditorOperation::MoveUp));
+        keymap.insert_str("<Right>", EditorAction::new(EditorOperation::MoveRight));
+        keymap.insert_str("<PageUp>", EditorAction::new(EditorOperation::MovePageUp));
+        keymap.insert_str(
+            "<PageDown>",
+            EditorAction::new(EditorOperation::MovePageDown),
+        );
+        keymap.insert_str("<C-u>", EditorAction::new(EditorOperation::MoveHalfPageUp));
+        keymap.insert_str(
+            "<C-d>",
+            EditorAction::new(EditorOperation::MoveHalfPageDown),
+        );
+        keymap.insert_str("<Enter>", EditorAction::insert_newline());
+        keymap.insert_str(
+            "<S-Tab>",
+            EditorAction::new(EditorOperation::IndentDecrease),
+        );
+        keymap.insert_str(
+            "<Backspace>",
+            EditorAction::new(EditorOperation::DeleteBackward),
+        );
+        keymap.insert_str(
+            "<Delete>",
+            EditorAction::new(EditorOperation::DeleteForward),
+        );
         globals::with_opt_config(|config| {
             if let Some(config) = config {
                 keymap.insert_configured(&config.keymaps.insert);
@@ -71,17 +86,17 @@ impl InsertMode {
         }
     }
 
-    fn record_action(&mut self, action: &Action) {
+    fn record_action(&mut self, action: &EditorAction) {
         match action.kind.as_ref() {
-            Some(ActionKind::InsertChar(ch)) => self.record_insert_char(*ch),
-            Some(ActionKind::InsertText(text)) => self.record_insert_text(text),
-            Some(ActionKind::InsertNewline) => self.record_insert_char('\n'),
-            Some(ActionKind::DeleteBackward) => self.record_delete_backward(),
-            Some(ActionKind::DeleteForward) => self.record_delete_forward(),
-            Some(ActionKind::MoveLeft) => self.record_move_left(),
-            Some(ActionKind::MoveRight) => self.record_move_right(),
-            Some(ActionKind::MoveUp) => self.record_move_up(),
-            Some(ActionKind::MoveDown) => self.record_move_down(),
+            Some(EditorOperation::InsertChar(ch)) => self.record_insert_char(*ch),
+            Some(EditorOperation::InsertText(text)) => self.record_insert_text(text),
+            Some(EditorOperation::InsertNewline) => self.record_insert_char('\n'),
+            Some(EditorOperation::DeleteBackward) => self.record_delete_backward(),
+            Some(EditorOperation::DeleteForward) => self.record_delete_forward(),
+            Some(EditorOperation::MoveLeft) => self.record_move_left(),
+            Some(EditorOperation::MoveRight) => self.record_move_right(),
+            Some(EditorOperation::MoveUp) => self.record_move_up(),
+            Some(EditorOperation::MoveDown) => self.record_move_down(),
             _ => {}
         }
     }
@@ -218,8 +233,8 @@ impl InsertMode {
         }
     }
 
-    fn insert_action_for_char(&self, ch: char) -> Action {
-        Action::insert_char(ch)
+    fn insert_action_for_char(&self, ch: char) -> EditorAction {
+        EditorAction::insert_char(ch)
     }
 
     fn insert_text_for_char(&self, ch: char) -> String {
@@ -267,14 +282,14 @@ impl Mode for InsertMode {
             self.buffer.clear();
             self.waiting = false;
             return HandleKeyResult::complete(
-                Action::mode_transition(ModeKind::Normal).with_from_mode(ModeKind::Insert),
+                EditorAction::mode_transition(ModeKind::Normal).with_from_mode(ModeKind::Insert),
             );
         }
 
         if key.code == KeyCode::Enter {
             self.buffer.clear();
             self.waiting = false;
-            let action = Action::insert_newline().with_from_mode(ModeKind::Insert);
+            let action = EditorAction::insert_newline().with_from_mode(ModeKind::Insert);
             self.record_action(&action);
             return HandleKeyResult::complete(action);
         }
@@ -283,7 +298,7 @@ impl Mode for InsertMode {
             self.buffer.clear();
             self.waiting = false;
             let action =
-                Action::insert_text(self.insert_tab_text()).with_from_mode(ModeKind::Insert);
+                EditorAction::insert_text(self.insert_tab_text()).with_from_mode(ModeKind::Insert);
             self.record_action(&action);
             return HandleKeyResult::complete(action);
         }
@@ -294,7 +309,7 @@ impl Mode for InsertMode {
         if let Some(intent) = self.keymap.get_action(&self.buffer) {
             self.buffer.clear();
             self.waiting = false;
-            if let Some(action) = intent.as_action().cloned() {
+            if let Some(action) = intent.as_editor_action().cloned() {
                 self.record_action(&action);
                 return HandleKeyResult::complete(action.with_from_mode(ModeKind::Insert));
             }
@@ -316,7 +331,7 @@ impl Mode for InsertMode {
             self.waiting = false;
             let mut inserted = text;
             inserted.push_str(&self.insert_text_for_char(c));
-            let action = Action::insert_text(inserted).with_from_mode(ModeKind::Insert);
+            let action = EditorAction::insert_text(inserted).with_from_mode(ModeKind::Insert);
             self.record_action(&action);
             return HandleKeyResult::complete(action);
         }

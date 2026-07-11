@@ -7,7 +7,9 @@
 use crate::globals;
 use crate::lsp::runtime::LspServerStatus;
 use crate::screen::Screen;
-use crate::ui::floating_window::{FloatingAnchor, FloatingWindowFrame};
+use crate::ui::floating_window::{
+    FloatingAnchor, FloatingMargins, FloatingPlacement, FloatingWindowFrame,
+};
 use crate::ui::{FocusPolicy, UiContext, UiEvent, UiEventResult, UiRect};
 use crate::widget::Widget;
 use crate::window::{Position, Size};
@@ -343,12 +345,15 @@ fn render_notification_popup(
         return None;
     }
 
-    let frame = FloatingWindowFrame::resolve(
+    let frame = FloatingWindowFrame::resolve_placement(
         origin,
         size,
         popup_height.saturating_sub(2),
         popup_width.saturating_sub(2),
-        FloatingAnchor::TopRight,
+        FloatingPlacement::Anchored {
+            anchor: FloatingAnchor::TopRight,
+            margins: FloatingMargins::default(),
+        },
     );
     let Some(frame) = frame else {
         return None;
@@ -404,12 +409,15 @@ fn render_progress_popup(
         return;
     }
 
-    let frame = FloatingWindowFrame::resolve(
+    let frame = FloatingWindowFrame::resolve_placement(
         origin,
         size,
         popup_height.saturating_sub(2),
         popup_width.saturating_sub(2),
-        FloatingAnchor::BottomRight,
+        FloatingPlacement::Anchored {
+            anchor: FloatingAnchor::BottomRight,
+            margins: FloatingMargins::default(),
+        },
     );
     let Some(frame) = frame else {
         return;

@@ -4,6 +4,8 @@ use crate::session::{SessionFile, SessionNode, SessionPane, SessionSplit, Sessio
 impl Layout {
     /// Converts a live layout into serializable session state.
     pub fn to_session(&self) -> SessionFile {
+        let root = Self::node_to_session(self.root.as_ref().expect("layout root should exist"))
+            .expect("session should contain a buffer pane");
         SessionFile {
             version: crate::session::session_version(),
             cwd: std::env::current_dir()
@@ -11,7 +13,7 @@ impl Layout {
                 .unwrap_or_default(),
             label: crate::session::current_session_label().unwrap_or_else(|| "cwd".to_string()),
             focused_pane: self.focused_pane.0,
-            root: Self::node_to_session(self.root.as_ref().expect("layout root should exist")),
+            root,
         }
     }
 
@@ -22,6 +24,7 @@ impl Layout {
         let mut layout = Self {
             root: Some(root),
             focused_pane,
+            last_editor_pane: focused_pane,
             next_pane_id: 0,
             status_bar: crate::status_bar::StatusBar::new(),
             origin: Default::default(),
@@ -30,6 +33,15 @@ impl Layout {
             jobs: std::sync::Arc::new(crate::background::JobManager::new()),
             inlay_hints: InlayHintState::Idle,
             autocomplete: super::AutocompleteState::default(),
+            plugin_windows: super::PluginWindowManager::new(),
+            plugin_pane_inherited_keymap: crate::editor::InheritedKeymap::new(
+                crate::editor::NormalMode::keymap(),
+            ),
+            plugin_pane_key_sequence: super::PluginPaneKeySequence::None,
+            modal_inherited_keymap: crate::editor::InheritedKeymap::new(
+                crate::editor::NormalMode::keymap(),
+            ),
+            modal_key_sequence: super::ModalKeySequence::None,
         };
         layout.next_pane_id = layout.max_pane_id().map(|id| id.0 + 1).unwrap_or(0);
         if layout.root.is_some() {
@@ -38,28 +50,38 @@ impl Layout {
         layout
     }
 
-    fn node_to_session(node: &LayoutNode) -> SessionNode {
+    fn node_to_session(node: &LayoutNode) -> Option<SessionNode> {
         match node {
-            LayoutNode::Pane(pane) => SessionNode::Pane(SessionPane {
-                pane_id: pane.id.0,
-                window_group: pane.window_group.to_session(),
+            LayoutNode::Pane(pane) => pane.editor_window_group().map(|window_group| {
+                SessionNode::Pane(SessionPane {
+                    pane_id: pane.id.0,
+                    window_group: window_group.to_session(),
+                })
             }),
-            LayoutNode::Split(split) => SessionNode::Split(SessionSplit {
-                axis: split.axis,
-                split_size: SessionSplitSize {
-                    first_weight: split.split_size.first_weight(),
-                    second_weight: split.split_size.second_weight(),
-                },
-                last_focused_pane: split.last_focused_pane.0,
-                first: Box::new(Self::node_to_session(&split.first)),
-                second: Box::new(Self::node_to_session(&split.second)),
-            }),
+            LayoutNode::Split(split) => {
+                let first = Self::node_to_session(&split.first);
+                let second = Self::node_to_session(&split.second);
+                match (first, second) {
+                    (Some(first), Some(second)) => Some(SessionNode::Split(SessionSplit {
+                        axis: split.axis,
+                        split_size: SessionSplitSize {
+                            first_weight: split.split_size.first_weight(),
+                            second_weight: split.split_size.second_weight(),
+                        },
+                        last_focused_pane: split.last_focused_pane.0,
+                        first: Box::new(first),
+                        second: Box::new(second),
+                    })),
+                    (Some(first), None) | (None, Some(first)) => Some(first),
+                    (None, None) => None,
+                }
+            }
         }
     }
 
     fn node_from_session(node: SessionNode) -> LayoutNode {
         match node {
-            SessionNode::Pane(pane) => LayoutNode::Pane(PaneNode::new(
+            SessionNode::Pane(pane) => LayoutNode::Pane(PaneNode::new_editor(
                 PaneId(pane.pane_id),
                 crate::window_group::WindowGroup::from_session(pane.window_group),
             )),

@@ -1,9 +1,10 @@
 //! Reusable styled line formatting.
 
 use crate::ui::text_width::{ClipSide, EllipsisSide, clip_text, display_width, ellipsize_text};
+use std::fmt;
 use urvim_terminal::Style;
 
-/// Error returned when a line template is rendered with the wrong number of values.
+/// Error returned when a line template cannot be rendered.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LineFormatError {
     /// The template and value counts do not match.
@@ -12,18 +13,37 @@ pub enum LineFormatError {
     InvalidFlexWeight { section: usize },
 }
 
-/// Rendered text segment with a resolved style.
+impl fmt::Display for LineFormatError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::MismatchedSectionCount { expected, actual } => write!(
+                formatter,
+                "line formatter expected {expected} values, got {actual}"
+            ),
+            Self::InvalidFlexWeight { section } => {
+                write!(
+                    formatter,
+                    "line formatter section {section} has an invalid flex weight"
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for LineFormatError {}
+
+/// Rendered text segment with an associated style value.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FormattedLineSegment {
+pub struct FormattedLineSegment<S = Style> {
     /// Segment text.
     pub text: String,
     /// Segment style.
-    pub style: Style,
+    pub style: S,
 }
 
-impl FormattedLineSegment {
+impl<S> FormattedLineSegment<S> {
     /// Creates a rendered line segment.
-    pub fn new(text: impl Into<String>, style: Style) -> Self {
+    pub fn new(text: impl Into<String>, style: S) -> Self {
         Self {
             text: text.into(),
             style,
@@ -100,9 +120,9 @@ impl Default for LineSectionOverflow {
 
 /// Template section describing one value in a formatted line.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FormattedLineSection {
+pub struct FormattedLineSection<S = Style> {
     /// Style applied to the section.
-    pub style: Style,
+    pub style: S,
     /// Width policy for the section.
     pub width: LineSectionWidth,
     /// Alignment applied inside the allocated width.
@@ -111,9 +131,9 @@ pub struct FormattedLineSection {
     pub overflow: LineSectionOverflow,
 }
 
-impl FormattedLineSection {
+impl<S> FormattedLineSection<S> {
     /// Creates a fixed-width section.
-    pub fn fixed(width: u16, style: Style) -> Self {
+    pub fn fixed(width: u16, style: S) -> Self {
         Self {
             style,
             width: LineSectionWidth::Fixed(width),
@@ -123,7 +143,7 @@ impl FormattedLineSection {
     }
 
     /// Creates a measured-width section.
-    pub fn measured(style: Style) -> Self {
+    pub fn measured(style: S) -> Self {
         Self {
             style,
             width: LineSectionWidth::Measured,
@@ -133,7 +153,7 @@ impl FormattedLineSection {
     }
 
     /// Creates a flex-width section.
-    pub fn flex(weight: u16, style: Style) -> Self {
+    pub fn flex(weight: u16, style: S) -> Self {
         Self {
             style,
             width: LineSectionWidth::Flex(weight),
@@ -157,18 +177,18 @@ impl FormattedLineSection {
 
 /// Stored line template that formats a matching group of values.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FormattedLineTemplate {
-    sections: Vec<FormattedLineSection>,
+pub struct FormattedLineTemplate<S = Style> {
+    sections: Vec<FormattedLineSection<S>>,
 }
 
-impl FormattedLineTemplate {
+impl<S: Clone> FormattedLineTemplate<S> {
     /// Creates a new line template.
-    pub fn new(sections: Vec<FormattedLineSection>) -> Self {
+    pub fn new(sections: Vec<FormattedLineSection<S>>) -> Self {
         Self { sections }
     }
 
     /// Returns the template sections.
-    pub fn sections(&self) -> &[FormattedLineSection] {
+    pub fn sections(&self) -> &[FormattedLineSection<S>] {
         self.sections.as_slice()
     }
 
@@ -178,14 +198,14 @@ impl FormattedLineTemplate {
     }
 
     /// Renders the template into styled segments.
-    pub fn render_segments<I, S>(
+    pub fn render_segments<I, V>(
         &self,
         values: I,
         available_width: u16,
-    ) -> Result<Vec<FormattedLineSegment>, LineFormatError>
+    ) -> Result<Vec<FormattedLineSegment<S>>, LineFormatError>
     where
-        I: IntoIterator<Item = S>,
-        S: AsRef<str>,
+        I: IntoIterator<Item = V>,
+        V: AsRef<str>,
     {
         let values = values
             .into_iter()
@@ -209,7 +229,7 @@ impl FormattedLineTemplate {
         {
             rendered.push(FormattedLineSegment::new(
                 render_section(value.as_str(), width, section.alignment, section.overflow),
-                section.style,
+                section.style.clone(),
             ));
         }
 
@@ -355,6 +375,7 @@ fn ellipsize_section_text(text: &str, width: usize, placement: EllipsisPlacement
 mod tests {
     use super::*;
     use urvim_terminal::Color;
+    use urvim_theme::Tag;
 
     fn segment_text(segments: &[FormattedLineSegment]) -> String {
         segments
@@ -460,5 +481,24 @@ mod tests {
                 actual: 0,
             }
         );
+    }
+
+    #[test]
+    fn template_supports_theme_tag_segments() {
+        let style = Tag::parse("ui.window").expect("valid theme tag");
+        let template = FormattedLineTemplate::new(vec![
+            FormattedLineSection::fixed(6, Some(style.clone()))
+                .with_alignment(LineSectionAlignment::Right),
+            FormattedLineSection::measured(None),
+        ]);
+
+        let segments = template
+            .render_segments(["name", "ok"], 8)
+            .expect("rendered tagged template");
+
+        assert_eq!(segments[0].text, "  name");
+        assert_eq!(segments[0].style, Some(style));
+        assert_eq!(segments[1].text, "ok");
+        assert_eq!(segments[1].style, None);
     }
 }

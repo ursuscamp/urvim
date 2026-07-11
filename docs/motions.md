@@ -45,6 +45,8 @@ Register behavior is documented separately in [docs/registers.md](docs/registers
 | `Ctrl-W j`  | Move focus to the pane below                                                                          |
 | `Ctrl-W k`  | Move focus to the pane above                                                                          |
 | `Ctrl-W l`  | Move focus to the pane on the right                                                                   |
+| `Ctrl-W n`  | Focus the next persistent editor or plugin window                                                     |
+| `Ctrl-W p`  | Focus the previous persistent editor or plugin window                                                 |
 | `Ctrl-W w`  | Toggle visual wrapping in the focused pane                                                            |
 | `Ctrl-W r`  | Enter resize mode                                                                                     |
 | `Ctrl-W q`  | Close the current pane                                                                                |

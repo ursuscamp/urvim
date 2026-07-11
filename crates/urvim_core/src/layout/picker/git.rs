@@ -32,6 +32,7 @@ impl Layout {
             picker.close();
         }
         self.dialogs.git_picker = None;
+        self.clear_modal_inherited_keys();
     }
 
     /// Returns true when the git picker is open.

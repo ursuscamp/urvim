@@ -5,7 +5,10 @@
 //! positive intent when confirmed.
 
 use crate::screen::Screen;
-use crate::ui::floating_window::{FloatingAnchor, FloatingWindowFrame, FloatingWindowFrameLabel};
+use crate::ui::floating_window::{
+    FloatingAnchor, FloatingMargins, FloatingPlacement, FloatingWindowFrame,
+    FloatingWindowFrameLabel,
+};
 use crate::ui::{FocusPolicy, Intent, UiContext, UiEvent, UiEventResult, UiRect};
 use crate::widget::Widget;
 use unicode_segmentation::UnicodeSegmentation;
@@ -62,7 +65,7 @@ impl ConfirmationBox {
                 {
                     self.cancel()
                 }
-                _ => UiEventResult::Handled(Vec::new()),
+                _ => UiEventResult::NotHandled,
             },
             UiEvent::Paste(_) => UiEventResult::Handled(Vec::new()),
             UiEvent::Resize(_, _) | UiEvent::Tick => UiEventResult::NotHandled,
@@ -98,12 +101,15 @@ impl ConfirmationBox {
             return;
         }
 
-        let frame = FloatingWindowFrame::resolve(
+        let frame = FloatingWindowFrame::resolve_placement(
             rect.origin,
             rect.size,
             content_height as u16,
             content_width as u16,
-            FloatingAnchor::Center,
+            FloatingPlacement::Anchored {
+                anchor: FloatingAnchor::Center,
+                margins: FloatingMargins::default(),
+            },
         );
         let Some(frame) = frame else {
             return;
@@ -336,6 +342,12 @@ mod tests {
         let mut prompt = ConfirmationBox::new("Quit?", Intent::Command(crate::ui::Command::Quit));
         let result = prompt.handle_ui_event(&UiEvent::Paste("ignored".to_string()), &mut ctx);
         assert!(result.into_intents().is_empty());
+
+        let mut prompt = ConfirmationBox::new("Quit?", Intent::Command(crate::ui::Command::Quit));
+        assert_eq!(
+            prompt.handle_ui_event(&UiEvent::Key(key(KeyCode::F7)), &mut ctx),
+            UiEventResult::NotHandled
+        );
     }
 
     #[test]

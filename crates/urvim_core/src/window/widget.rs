@@ -1,15 +1,15 @@
 use super::*;
 use crate::editor::pairs;
-use crate::editor::{ActionKind, ModeKind};
+use crate::editor::{EditorOperation, ModeKind};
 use crate::register::{DefaultRegisterRole, RegisterContentKind};
 
 impl Window {
     /// Dispatches an editor action to this window.
-    pub fn dispatch_action(&mut self, action: &Action) -> ActionResult {
+    pub fn dispatch_action(&mut self, action: &EditorAction) -> ActionResult {
         self.pending_repeat_suffix = None;
         let insert_mode = action.from_mode == Some(ModeKind::Insert);
         let result = match action.kind.as_ref() {
-            Some(ActionKind::MoveLeft) => {
+            Some(EditorOperation::MoveLeft) => {
                 if action.from_mode == Some(ModeKind::Insert) {
                     self.move_cursor_left();
                 } else {
@@ -17,39 +17,39 @@ impl Window {
                 }
                 ActionResult::Handled
             }
-            Some(ActionKind::MoveDown) => {
+            Some(EditorOperation::MoveDown) => {
                 let target_col = self.buffer_view.get_or_compute_target_col();
                 self.move_cursor_down(target_col);
                 self.buffer_view.set_remembered_visual_col(target_col);
                 ActionResult::Handled
             }
-            Some(ActionKind::MoveUp) => {
+            Some(EditorOperation::MoveUp) => {
                 let target_col = self.buffer_view.get_or_compute_target_col();
                 self.move_cursor_up(target_col);
                 self.buffer_view.set_remembered_visual_col(target_col);
                 ActionResult::Handled
             }
-            Some(ActionKind::MovePageUp) => {
+            Some(EditorOperation::MovePageUp) => {
                 self.move_cursor_page_up(self.size.rows as usize);
                 ActionResult::Handled
             }
-            Some(ActionKind::MovePageDown) => {
+            Some(EditorOperation::MovePageDown) => {
                 self.move_cursor_page_down(self.size.rows as usize);
                 ActionResult::Handled
             }
-            Some(ActionKind::MoveHalfPageUp) => {
+            Some(EditorOperation::MoveHalfPageUp) => {
                 self.move_cursor_half_page_up(self.size.rows as usize);
                 ActionResult::Handled
             }
-            Some(ActionKind::MoveHalfPageDown) => {
+            Some(EditorOperation::MoveHalfPageDown) => {
                 self.move_cursor_half_page_down(self.size.rows as usize);
                 ActionResult::Handled
             }
-            Some(ActionKind::MoveRight) => {
+            Some(EditorOperation::MoveRight) => {
                 self.move_cursor_right();
                 ActionResult::Handled
             }
-            Some(ActionKind::InsertChar(c)) => {
+            Some(EditorOperation::InsertChar(c)) => {
                 let cursor = self.buffer_view.cursor();
                 let auto_close_pairs = insert_mode
                     && globals::with_config(|config| config.auto_close_pairs).unwrap_or(true);
@@ -93,7 +93,7 @@ impl Window {
                 }
                 ActionResult::Handled
             }
-            Some(ActionKind::InsertText(text)) => {
+            Some(EditorOperation::InsertText(text)) => {
                 let auto_close_pairs = insert_mode
                     && globals::with_config(|config| config.auto_close_pairs).unwrap_or(true);
                 if auto_close_pairs {
@@ -111,14 +111,14 @@ impl Window {
                 }
                 ActionResult::Handled
             }
-            Some(ActionKind::InsertRawPaste(text)) => {
+            Some(EditorOperation::InsertRawPaste(text)) => {
                 if self.insert_raw_text(text).is_some() {
                     ActionResult::Handled
                 } else {
                     ActionResult::NotHandled
                 }
             }
-            Some(ActionKind::ReplaceSelectionRawPaste(text)) => {
+            Some(EditorOperation::ReplaceSelectionRawPaste(text)) => {
                 if self
                     .replace_visual_selection_with_raw_text(text, action.from_mode)
                     .is_some()
@@ -128,7 +128,7 @@ impl Window {
                     ActionResult::NotHandled
                 }
             }
-            Some(ActionKind::InsertNewline) => {
+            Some(EditorOperation::InsertNewline) => {
                 self.pending_repeat_suffix = if action.from_mode == Some(ModeKind::Replace) {
                     self.replace_newline_at_cursor()
                 } else {
@@ -136,38 +136,38 @@ impl Window {
                 };
                 ActionResult::Handled
             }
-            Some(ActionKind::ForwardTo(boundary)) => {
+            Some(EditorOperation::ForwardTo(boundary)) => {
                 self.move_cursor_forward_to(*boundary);
                 ActionResult::Handled
             }
-            Some(ActionKind::BackTo(boundary)) => {
+            Some(EditorOperation::BackTo(boundary)) => {
                 self.move_cursor_back_to(*boundary);
                 ActionResult::Handled
             }
-            Some(ActionKind::MoveToLineEnd) => {
+            Some(EditorOperation::MoveToLineEnd) => {
                 self.move_cursor_to_line_end();
                 ActionResult::Handled
             }
-            Some(ActionKind::MoveToLineStart) => {
+            Some(EditorOperation::MoveToLineStart) => {
                 self.move_cursor_to_line_start();
                 ActionResult::Handled
             }
-            Some(ActionKind::MoveToLineContentStart) => {
+            Some(EditorOperation::MoveToLineContentStart) => {
                 self.move_cursor_to_line_content_start();
                 ActionResult::Handled
             }
-            Some(ActionKind::MoveToFirstLine) => {
+            Some(EditorOperation::MoveToFirstLine) => {
                 let target_col = self.buffer_view.get_or_compute_target_col();
                 self.set_cursor_to_visual_col_on_line(0, target_col);
                 ActionResult::Handled
             }
-            Some(ActionKind::MoveToLastLine) => {
+            Some(EditorOperation::MoveToLastLine) => {
                 let target_line = self.buffer_view.line_count().saturating_sub(1);
                 let target_col = self.buffer_view.get_or_compute_target_col();
                 self.set_cursor_to_visual_col_on_line(target_line, target_col);
                 ActionResult::Handled
             }
-            Some(ActionKind::MoveToScreenTop) => {
+            Some(EditorOperation::MoveToScreenTop) => {
                 let viewport_rows = self.size.rows as usize;
                 if viewport_rows == 0 {
                     return ActionResult::Handled;
@@ -178,7 +178,7 @@ impl Window {
                 self.set_cursor_to_visual_col_on_line(target_line, target_col);
                 ActionResult::Handled
             }
-            Some(ActionKind::MoveToScreenMiddle) => {
+            Some(EditorOperation::MoveToScreenMiddle) => {
                 let viewport_rows = self.size.rows as usize;
                 if viewport_rows == 0 {
                     return ActionResult::Handled;
@@ -193,7 +193,7 @@ impl Window {
                 self.set_cursor_to_visual_col_on_line(target_line, target_col);
                 ActionResult::Handled
             }
-            Some(ActionKind::MoveToScreenBottom) => {
+            Some(EditorOperation::MoveToScreenBottom) => {
                 let viewport_rows = self.size.rows as usize;
                 if viewport_rows == 0 {
                     return ActionResult::Handled;
@@ -208,31 +208,31 @@ impl Window {
                 self.set_cursor_to_visual_col_on_line(end_line, target_col);
                 ActionResult::Handled
             }
-            Some(ActionKind::ViewportCursorTop) => {
+            Some(EditorOperation::ViewportCursorTop) => {
                 self.align_viewport_cursor_top(self.size.rows as usize);
                 ActionResult::Handled
             }
-            Some(ActionKind::ViewportCursorCenter) => {
+            Some(EditorOperation::ViewportCursorCenter) => {
                 self.align_viewport_cursor_center(self.size.rows as usize);
                 ActionResult::Handled
             }
-            Some(ActionKind::ViewportCursorBottom) => {
+            Some(EditorOperation::ViewportCursorBottom) => {
                 self.align_viewport_cursor_bottom(self.size.rows as usize);
                 ActionResult::Handled
             }
-            Some(ActionKind::ToggleFold) => {
+            Some(EditorOperation::ToggleFold) => {
                 self.buffer_view.toggle_fold_at_cursor();
                 ActionResult::Handled
             }
-            Some(ActionKind::OpenFold) => {
+            Some(EditorOperation::OpenFold) => {
                 self.buffer_view.open_fold_at_cursor();
                 ActionResult::Handled
             }
-            Some(ActionKind::CloseFold) => {
+            Some(EditorOperation::CloseFold) => {
                 self.buffer_view.close_fold_at_cursor();
                 ActionResult::Handled
             }
-            Some(ActionKind::DeleteBackward) => {
+            Some(EditorOperation::DeleteBackward) => {
                 if insert_mode {
                     if !self.delete_insert_indent_before_cursor() {
                         self.delete_insert_char_before_cursor();
@@ -258,7 +258,7 @@ impl Window {
                 }
                 ActionResult::Handled
             }
-            Some(ActionKind::IndentDecrease) => {
+            Some(EditorOperation::IndentDecrease) => {
                 let cursor = self.buffer_view.cursor();
                 if let Some(new_cursor) = self.shift_lines_indentation(
                     cursor.line,
@@ -269,7 +269,7 @@ impl Window {
                 }
                 ActionResult::Handled
             }
-            Some(ActionKind::IndentIncrease) => {
+            Some(EditorOperation::IndentIncrease) => {
                 let cursor = self.buffer_view.cursor();
                 if let Some(new_cursor) = self.shift_lines_indentation(
                     cursor.line,
@@ -280,7 +280,7 @@ impl Window {
                 }
                 ActionResult::Handled
             }
-            Some(ActionKind::DeleteForward) => {
+            Some(EditorOperation::DeleteForward) => {
                 let cursor = self.buffer_view.cursor();
                 let text = self
                     .buffer_view
@@ -296,7 +296,7 @@ impl Window {
                 self.delete_char_at_cursor();
                 ActionResult::Handled
             }
-            Some(ActionKind::DeleteSelection) => {
+            Some(EditorOperation::DeleteSelection) => {
                 if action.from_mode == Some(ModeKind::VisualLine) {
                     let content = self.buffer_view.visual_line_selection_range().and_then(
                         |(start_line, count)| self.capture_linewise_text(start_line, count),
@@ -323,7 +323,7 @@ impl Window {
                 }
                 ActionResult::Handled
             }
-            Some(ActionKind::YankSelection) => {
+            Some(EditorOperation::YankSelection) => {
                 if action.from_mode == Some(ModeKind::VisualLine) {
                     let content = self.buffer_view.visual_line_selection_range().and_then(
                         |(start_line, count)| self.capture_linewise_text(start_line, count),
@@ -348,7 +348,7 @@ impl Window {
                 }
                 ActionResult::Handled
             }
-            Some(ActionKind::YankLine) => {
+            Some(EditorOperation::YankLine) => {
                 let cursor = self.buffer_view.cursor();
                 self.store_register_text(
                     action.register,
@@ -365,30 +365,30 @@ impl Window {
                 );
                 ActionResult::Handled
             }
-            Some(ActionKind::AppendAfterCursor) => {
+            Some(EditorOperation::AppendAfterCursor) => {
                 self.move_cursor_right();
                 ActionResult::Handled
             }
-            Some(ActionKind::AppendToLineEnd) => {
+            Some(EditorOperation::AppendToLineEnd) => {
                 let cursor = self.buffer_view.cursor();
                 let line_len = self.buffer_view.line_len(cursor.line);
                 self.buffer_view
                     .set_cursor(Cursor::new(cursor.line, line_len));
                 ActionResult::Handled
             }
-            Some(ActionKind::InsertAtLineStart) => {
+            Some(EditorOperation::InsertAtLineStart) => {
                 self.move_cursor_to_line_content_start();
                 ActionResult::Handled
             }
-            Some(ActionKind::JoinWithSpace) => {
+            Some(EditorOperation::JoinWithSpace) => {
                 self.join_lines_with_space();
                 ActionResult::Handled
             }
-            Some(ActionKind::JoinWithoutSpace) => {
+            Some(EditorOperation::JoinWithoutSpace) => {
                 self.join_lines_without_space();
                 ActionResult::Handled
             }
-            Some(ActionKind::DeleteLine) => {
+            Some(EditorOperation::DeleteLine) => {
                 let cursor = self.buffer_view.cursor();
                 self.store_register_text(
                     action.register,
@@ -405,7 +405,7 @@ impl Window {
                 }
                 ActionResult::Handled
             }
-            Some(ActionKind::ChangeLine) => {
+            Some(EditorOperation::ChangeLine) => {
                 let cursor = self.buffer_view.cursor();
                 self.store_register_text(
                     action.register,
@@ -415,7 +415,7 @@ impl Window {
                 );
                 self.change_lines_with_auto_indent(1)
             }
-            Some(ActionKind::ChangeSelection) => {
+            Some(EditorOperation::ChangeSelection) => {
                 if action.from_mode == Some(ModeKind::VisualLine) {
                     let content = self.buffer_view.visual_line_selection_range().and_then(
                         |(start_line, count)| self.capture_linewise_text(start_line, count),
@@ -442,13 +442,15 @@ impl Window {
                 }
                 ActionResult::Handled
             }
-            Some(ActionKind::ChangeToLineEnd) => {
+            Some(EditorOperation::ChangeToLineEnd) => {
                 self.handle_count_change_to_line_end(1, action.register);
                 ActionResult::Handled
             }
-            Some(ActionKind::PasteAfter) => self.paste_register_content(action.register, true),
-            Some(ActionKind::PasteBefore) => self.paste_register_content(action.register, false),
-            Some(ActionKind::OpenLineBelow) => {
+            Some(EditorOperation::PasteAfter) => self.paste_register_content(action.register, true),
+            Some(EditorOperation::PasteBefore) => {
+                self.paste_register_content(action.register, false)
+            }
+            Some(EditorOperation::OpenLineBelow) => {
                 let cursor = self.buffer_view.cursor();
                 let prefix = self.inferred_newline_prefix(cursor);
                 let insert_after_line = self
@@ -464,7 +466,7 @@ impl Window {
                 }
                 ActionResult::Handled
             }
-            Some(ActionKind::OpenLineAbove) => {
+            Some(EditorOperation::OpenLineAbove) => {
                 let cursor = self.buffer_view.cursor();
                 let prefix = self.inferred_newline_prefix(cursor);
                 let folded_boundary = self
@@ -481,8 +483,8 @@ impl Window {
                 }
                 ActionResult::Handled
             }
-            Some(ActionKind::ToggleLineComment) => self.handle_count_toggle_line_comment(1),
-            Some(ActionKind::MoveToMatchingBracket) => {
+            Some(EditorOperation::ToggleLineComment) => self.handle_count_toggle_line_comment(1),
+            Some(EditorOperation::MoveToMatchingBracket) => {
                 use crate::motion::bracket_matcher::find_matching_bracket;
                 let cursor = self.buffer_view.cursor();
                 let new_cursor = self
@@ -494,31 +496,31 @@ impl Window {
                 }
                 ActionResult::Handled
             }
-            Some(ActionKind::MoveToPreviousParagraph) => {
+            Some(EditorOperation::MoveToPreviousParagraph) => {
                 self.move_cursor_to_previous_paragraph();
                 ActionResult::Handled
             }
-            Some(ActionKind::MoveToNextParagraph) => {
+            Some(EditorOperation::MoveToNextParagraph) => {
                 self.move_cursor_to_next_paragraph();
                 ActionResult::Handled
             }
-            Some(ActionKind::MoveToPreviousDiffHunk) => {
+            Some(EditorOperation::MoveToPreviousDiffHunk) => {
                 self.move_cursor_to_previous_diff_hunk();
                 ActionResult::Handled
             }
-            Some(ActionKind::MoveToNextDiffHunk) => {
+            Some(EditorOperation::MoveToNextDiffHunk) => {
                 self.move_cursor_to_next_diff_hunk();
                 ActionResult::Handled
             }
-            Some(ActionKind::MoveToPreviousDiffHunkEnd) => {
+            Some(EditorOperation::MoveToPreviousDiffHunkEnd) => {
                 self.move_cursor_to_previous_diff_hunk_end();
                 ActionResult::Handled
             }
-            Some(ActionKind::MoveToNextDiffHunkEnd) => {
+            Some(EditorOperation::MoveToNextDiffHunkEnd) => {
                 self.move_cursor_to_next_diff_hunk_end();
                 ActionResult::Handled
             }
-            Some(ActionKind::FindForward(target)) => {
+            Some(EditorOperation::FindForward(target)) => {
                 globals::set_last_find(globals::FindState {
                     target_char: *target,
                     kind: globals::FindKind::Find,
@@ -527,7 +529,7 @@ impl Window {
                 self.move_cursor_to_char_forward(*target, 1);
                 ActionResult::Handled
             }
-            Some(ActionKind::FindBackward(target)) => {
+            Some(EditorOperation::FindBackward(target)) => {
                 globals::set_last_find(globals::FindState {
                     target_char: *target,
                     kind: globals::FindKind::Find,
@@ -536,7 +538,7 @@ impl Window {
                 self.move_cursor_to_char_backward(*target, 1);
                 ActionResult::Handled
             }
-            Some(ActionKind::TillForward(target)) => {
+            Some(EditorOperation::TillForward(target)) => {
                 globals::set_last_find(globals::FindState {
                     target_char: *target,
                     kind: globals::FindKind::Till,
@@ -545,7 +547,7 @@ impl Window {
                 self.move_cursor_till_forward(*target, 1);
                 ActionResult::Handled
             }
-            Some(ActionKind::TillBackward(target)) => {
+            Some(EditorOperation::TillBackward(target)) => {
                 globals::set_last_find(globals::FindState {
                     target_char: *target,
                     kind: globals::FindKind::Till,
@@ -554,7 +556,7 @@ impl Window {
                 self.move_cursor_till_backward(*target, 1);
                 ActionResult::Handled
             }
-            Some(ActionKind::RepeatLastFind) => {
+            Some(EditorOperation::RepeatLastFind) => {
                 if let Some(find) = globals::get_last_find() {
                     match find.direction {
                         globals::Direction::Forward => {
@@ -575,7 +577,7 @@ impl Window {
                 }
                 ActionResult::Handled
             }
-            Some(ActionKind::RepeatLastFindReverse) => {
+            Some(EditorOperation::RepeatLastFindReverse) => {
                 if let Some(find) = globals::get_last_find() {
                     match find.direction {
                         globals::Direction::Forward => {
@@ -596,23 +598,23 @@ impl Window {
                 }
                 ActionResult::Handled
             }
-            Some(ActionKind::VisualTextObject(text_object)) => {
+            Some(EditorOperation::VisualTextObject(text_object)) => {
                 if action.from_mode != Some(ModeKind::Visual) {
                     ActionResult::NotHandled
                 } else {
                     self.select_visual_text_object(*text_object, 1)
                 }
             }
-            Some(ActionKind::SurroundReplace {
+            Some(EditorOperation::SurroundReplace {
                 target,
                 replacement,
             }) => self.replace_surround(*target, *replacement),
-            Some(ActionKind::ReplaceChar(c)) => {
+            Some(EditorOperation::ReplaceChar(c)) => {
                 self.replace_char_at_cursor(*c);
                 ActionResult::Handled
             }
-            Some(ActionKind::ReplaceBackspaceLast) => self.restore_last_replace_char(),
-            Some(ActionKind::ReplaceBackspace {
+            Some(EditorOperation::ReplaceBackspaceLast) => self.restore_last_replace_char(),
+            Some(EditorOperation::ReplaceBackspace {
                 cursor,
                 replaced,
                 inserted,
@@ -620,31 +622,28 @@ impl Window {
                 self.restore_replace_char(*cursor, *replaced, *inserted);
                 ActionResult::Handled
             }
-            Some(ActionKind::SurroundDelete { target }) => self.delete_surround(*target),
-            Some(ActionKind::SurroundAdd { target, delimiter }) => {
+            Some(EditorOperation::SurroundDelete { target }) => self.delete_surround(*target),
+            Some(EditorOperation::SurroundAdd { target, delimiter }) => {
                 self.add_surround(*target, *delimiter)
             }
-            Some(ActionKind::SurroundAddSelection { delimiter }) => {
+            Some(EditorOperation::SurroundAddSelection { delimiter }) => {
                 self.add_surround_selection(*delimiter, action.from_mode)
             }
-            Some(ActionKind::Count(count, inner)) => {
+            Some(EditorOperation::Count(count, inner)) => {
                 let mut counted_inner = inner.as_ref().clone();
                 if let Some(from_mode) = action.from_mode {
                     counted_inner = counted_inner.with_from_mode(from_mode);
                 }
                 self.handle_count(*count, &counted_inner)
             }
-            Some(ActionKind::Operation(op, target)) => {
+            Some(EditorOperation::Operation(op, target)) => {
                 return self.handle_operation(op, target, action.from_mode, action.register);
             }
-            Some(ActionKind::Undo)
-            | Some(ActionKind::Redo)
-            | Some(ActionKind::SaveBuffer(_))
-            | Some(ActionKind::RepeatLastChange)
-            | Some(ActionKind::JumpBackward)
-            | Some(ActionKind::JumpForward)
-            | Some(ActionKind::PreviousTab)
-            | Some(ActionKind::NextTab)
+            Some(EditorOperation::Undo)
+            | Some(EditorOperation::Redo)
+            | Some(EditorOperation::RepeatLastChange)
+            | Some(EditorOperation::JumpBackward)
+            | Some(EditorOperation::JumpForward)
             | None => ActionResult::NotHandled,
         };
 

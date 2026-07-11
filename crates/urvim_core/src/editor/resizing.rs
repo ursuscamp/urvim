@@ -1,6 +1,6 @@
-use super::{Action, HandleKeyResult, Mode, ModeKind, TrieKeymap};
+use super::{EditorAction, HandleKeyResult, Mode, ModeKind, TrieKeymap};
 use crate::globals;
-use crate::ui::Command;
+use crate::ui::{Command, Intent};
 use urvim_terminal::{CursorStyle, Key};
 
 /// Pane resizing mode for split-layout adjustments.
@@ -19,7 +19,7 @@ impl Default for ResizingMode {
 impl ResizingMode {
     /// Creates a new resizing mode.
     pub fn new() -> Self {
-        let mut keymap = TrieKeymap::new();
+        let mut keymap = TrieKeymap::<Intent>::new();
         keymap.insert_str("h", Command::ResizePaneLeft(1));
         keymap.insert_str("H", Command::ResizePaneLeft(5));
         keymap.insert_str("l", Command::ResizePaneRight(1));
@@ -29,7 +29,7 @@ impl ResizingMode {
         keymap.insert_str("k", Command::ResizePaneUp(1));
         keymap.insert_str("K", Command::ResizePaneUp(5));
         keymap.insert_str("=", Command::EqualizeSplits);
-        keymap.insert_str("<Esc>", Action::mode_transition(ModeKind::Normal));
+        keymap.insert_str("<Esc>", EditorAction::mode_transition(ModeKind::Normal));
         globals::with_opt_config(|config| {
             if let Some(config) = config {
                 keymap.insert_configured(&config.keymaps.resizing);
@@ -55,7 +55,7 @@ impl Mode for ResizingMode {
         self.buffer.push(key.canonical_string());
         if let Some(intent) = self.keymap.get_action(&self.buffer) {
             self.reset();
-            if let Some(action) = intent.as_action().cloned() {
+            if let Some(action) = intent.as_editor_action().cloned() {
                 return HandleKeyResult::complete(action.with_from_mode(ModeKind::Resizing));
             }
             return HandleKeyResult::complete(intent);

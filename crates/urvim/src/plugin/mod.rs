@@ -551,13 +551,29 @@ impl BearscriptPluginRuntime {
         );
 
         let entry = plugin.root().join(plugin.entry());
-        engine
-            .eval_file(entry.to_string_lossy().as_ref())
-            .map_err(|error| error.to_string())?;
+        if let Err(error) = engine.eval_file(entry.to_string_lossy().as_ref()) {
+            self.layout
+                .borrow_mut()
+                .plugin_windows_mut()
+                .close_owned(plugin_name);
+            self.layout
+                .borrow_mut()
+                .close_plugin_panes_owned(plugin_name);
+            return Err(error.to_string());
+        }
         let started = Instant::now();
         let init_result = engine.eval("init();").map_err(|error| error.to_string());
         self.record_callback(plugin_name, "init", started.elapsed());
-        init_result?;
+        if let Err(error) = init_result {
+            self.layout
+                .borrow_mut()
+                .plugin_windows_mut()
+                .close_owned(plugin_name);
+            self.layout
+                .borrow_mut()
+                .close_plugin_panes_owned(plugin_name);
+            return Err(error);
+        }
 
         self.plugins.insert(
             plugin_name.to_string(),
@@ -1256,7 +1272,7 @@ fn execute_command_line_for_plugin(
     let mut handled_all = true;
     for intent in intents {
         handled_all &= match intent {
-            Intent::Action(action) => execute_action_intent(&mut layout.borrow_mut(), action),
+            Intent::Editor(action) => execute_action_intent(&mut layout.borrow_mut(), action),
             Intent::Command(command) => {
                 execute_command_intent(&mut layout.borrow_mut(), None, command)
             }
@@ -1768,6 +1784,7 @@ mod tests {
     use urvim_core::buffer::Buffer;
     use urvim_core::editor::ModeKind;
     use urvim_core::ui::{Command, Intent};
+    use urvim_terminal::{Key, KeyCode};
 
     fn shared_test_layout() -> SharedLayout {
         Rc::new(RefCell::new(Layout::new(WindowGroup::from_buffers(vec![
@@ -4863,6 +4880,589 @@ bg = "bg"
                     }}
                 }}"##
         )
+    }
+
+    #[test]
+    fn ui_windows_module_creates_content_and_owned_plugin_keymaps() {
+        let _guard = buffer_pool_lock();
+        let layout = shared_test_layout();
+        let contributions = Rc::new(RefCell::new(
+            urvim_plugin::PluginContributionRegistry::default(),
+        ));
+        contributions
+            .borrow_mut()
+            .register_command(
+                "demo",
+                urvim_plugin::DynamicPluginCommand {
+                    name: "close".to_string(),
+                    description: None,
+                },
+            )
+            .expect("plugin command should register");
+
+        let mut engine = Engine::new();
+        engine.set_global(
+            "urvim",
+            urvim_module(
+                "demo".to_string(),
+                Rc::clone(&contributions),
+                Rc::new(RefCell::new(BearscriptPluginCallbacks::default())),
+                Rc::clone(&layout),
+                Rc::new(PluginFsRegistry::default()),
+                Rc::new(PluginJobRegistry::default()),
+                test_timers(),
+            ),
+        );
+        engine
+            .eval(
+                r#"
+                let id = urvim.ui.windows.create({
+                    "placement": {
+                        "type": "anchored",
+                        "anchor": "top_right",
+                        "margins": { "top": 1, "right": 2 }
+                    },
+                    "rows": 4,
+                    "cols": 20,
+                    "title": "Demo"
+                })
+                urvim.ui.windows.set_content(id, [
+                    [{ "text": "hello", "style": "syntax.keyword" }]
+                ])
+                urvim.ui.windows.set_keymap(id, "q", "pane wrap-toggle")
+                urvim.ui.windows.configure(id, {
+                    "placement": {
+                        "type": "anchored",
+                        "anchor": "top_right",
+                        "margins": { "bottom": 3, "top": null }
+                    }
+                })
+                "#,
+            )
+            .expect("plugin window API should evaluate");
+
+        let layout = layout.borrow();
+        let id = layout
+            .plugin_windows()
+            .ids()
+            .next()
+            .expect("window should be created");
+        let window = layout
+            .plugin_windows()
+            .owned_window("demo", id)
+            .expect("demo should own its window");
+        assert!(window.is_visible());
+        assert_eq!(window.content().len(), 1);
+        assert_eq!(
+            window.options().placement,
+            urvim_core::ui::floating_window::FloatingPlacement::Anchored {
+                anchor: urvim_core::ui::floating_window::FloatingAnchor::TopRight,
+                margins: urvim_core::ui::floating_window::FloatingMargins {
+                    bottom: 3,
+                    ..Default::default()
+                },
+            }
+        );
+        assert_eq!(
+            layout
+                .plugin_windows()
+                .keymaps("demo", id)
+                .expect("keymaps should be readable"),
+            vec![(vec!["q".to_string()], "pane wrap-toggle".to_string())]
+        );
+    }
+
+    #[test]
+    fn ui_panes_module_creates_targeted_pane_and_content() {
+        let _guard = buffer_pool_lock();
+        let layout = shared_test_layout();
+        let contributions = Rc::new(RefCell::new(
+            urvim_plugin::PluginContributionRegistry::default(),
+        ));
+        let mut engine = Engine::new();
+        engine.set_global(
+            "urvim",
+            urvim_module(
+                "demo".to_string(),
+                Rc::clone(&contributions),
+                Rc::new(RefCell::new(BearscriptPluginCallbacks::default())),
+                Rc::clone(&layout),
+                Rc::new(PluginFsRegistry::default()),
+                Rc::new(PluginJobRegistry::default()),
+                test_timers(),
+            ),
+        );
+        engine
+            .eval(
+                r#"
+                let target = urvim.windows.active()
+                let id = urvim.ui.panes.create(target, {
+                    "axis": "vertical",
+                    "ratio": { "first": 2, "second": 1 },
+                    "title": "Pane Demo"
+                })
+                urvim.ui.panes.set_content(id, [
+                    [{ "text": "hello", "style": "syntax.keyword" }]
+                ])
+                urvim.ui.panes.set_keymap(id, "q", "pane close")
+                "#,
+            )
+            .expect("plugin pane API should evaluate");
+
+        let layout = layout.borrow();
+        let id = layout
+            .plugin_pane_ids("demo")
+            .into_iter()
+            .next()
+            .expect("plugin pane should be created");
+        let pane = layout
+            .plugin_pane("demo", id)
+            .expect("demo should own its pane");
+        assert_eq!(pane.options().title.as_deref(), Some("Pane Demo"));
+        assert_eq!(pane.content().len(), 1);
+        assert_eq!(layout.focused_plugin_pane(), Some(id));
+        assert_eq!(layout.pane_regions().len(), 2);
+        assert_eq!(
+            layout
+                .plugin_pane_keymaps("demo", id)
+                .expect("pane keymaps should be readable"),
+            vec![(vec!["q".to_string()], "pane close".to_string())]
+        );
+    }
+
+    #[test]
+    fn ui_windows_module_rejects_invalid_content() {
+        let _guard = buffer_pool_lock();
+        let mut engine = Engine::new();
+        engine.set_global(
+            "urvim",
+            urvim_module(
+                "demo".to_string(),
+                Rc::new(RefCell::new(
+                    urvim_plugin::PluginContributionRegistry::default(),
+                )),
+                Rc::new(RefCell::new(BearscriptPluginCallbacks::default())),
+                shared_test_layout(),
+                Rc::new(PluginFsRegistry::default()),
+                Rc::new(PluginJobRegistry::default()),
+                test_timers(),
+            ),
+        );
+
+        let error = engine
+            .eval(
+                r#"
+                let id = urvim.ui.windows.create()
+                urvim.ui.windows.set_content(id, [
+                    [{ "text": "bad\nline" }]
+                ])
+                "#,
+            )
+            .expect_err("newlines should be rejected")
+            .to_string();
+        assert!(error.contains("must not contain newlines"));
+    }
+
+    #[test]
+    fn ui_windows_module_validates_placement() {
+        let _guard = buffer_pool_lock();
+        let mut engine = Engine::new();
+        engine.set_global(
+            "urvim",
+            urvim_module(
+                "demo".to_string(),
+                Rc::new(RefCell::new(
+                    urvim_plugin::PluginContributionRegistry::default(),
+                )),
+                Rc::new(RefCell::new(BearscriptPluginCallbacks::default())),
+                shared_test_layout(),
+                Rc::new(PluginFsRegistry::default()),
+                Rc::new(PluginJobRegistry::default()),
+                test_timers(),
+            ),
+        );
+
+        let error = engine
+            .eval(
+                r#"
+                let id = urvim.ui.windows.create({
+                    "placement": {
+                        "type": "anchored",
+                        "anchor": "top_right",
+                        "margins": { "diagonal": 1 }
+                    }
+                })
+                "#,
+            )
+            .expect_err("unknown margin sides should be rejected")
+            .to_string();
+        assert!(error.contains("unknown plugin window margin diagonal"));
+
+        let error = engine
+            .eval(
+                r#"
+                let id = urvim.ui.windows.create({
+                    "placement": {
+                        "type": "anchored",
+                        "anchor": "top_right",
+                        "margins": { "left": -1 }
+                    }
+                })
+                "#,
+            )
+            .expect_err("negative margins should be rejected")
+            .to_string();
+        assert!(error.contains("margins.left must be a non-negative integer or null"));
+
+        let error = engine
+            .eval(
+                r#"
+                let id = urvim.ui.windows.create({
+                    "placement": { "type": "fixed", "row": 3, "col": 5, "margins": null }
+                })
+                "#,
+            )
+            .expect_err("fixed placement should reject margins")
+            .to_string();
+        assert!(error.contains("fixed placement cannot specify anchor or margins"));
+
+        let error = engine
+            .eval(
+                r#"
+                let id = urvim.ui.windows.create({
+                    "placement": { "type": "fixed", "row": -1, "col": 5 }
+                })
+                "#,
+            )
+            .expect_err("negative fixed coordinates should be rejected")
+            .to_string();
+        assert!(error.contains("placement.row must be a non-negative integer"));
+
+        let error = engine
+            .eval(
+                r#"
+                let id = urvim.ui.windows.create({ "anchor": "center" })
+                "#,
+            )
+            .expect_err("legacy placement fields should be rejected")
+            .to_string();
+        assert!(error.contains("unknown plugin window option anchor"));
+
+        let id = engine
+            .eval(
+                r#"
+                urvim.ui.windows.create({
+                    "placement": { "type": "fixed", "row": 3, "col": 5 }
+                })
+                "#,
+            )
+            .expect("fixed placement should be accepted");
+        assert!(matches!(id, Value::Number(_)));
+    }
+
+    #[test]
+    fn ui_line_format_render_returns_window_compatible_content() {
+        let _guard = buffer_pool_lock();
+        let layout = shared_test_layout();
+        let mut engine = Engine::new();
+        engine.set_global(
+            "urvim",
+            urvim_module(
+                "demo".to_string(),
+                Rc::new(RefCell::new(
+                    urvim_plugin::PluginContributionRegistry::default(),
+                )),
+                Rc::new(RefCell::new(BearscriptPluginCallbacks::default())),
+                Rc::clone(&layout),
+                Rc::new(PluginFsRegistry::default()),
+                Rc::new(PluginJobRegistry::default()),
+                test_timers(),
+            ),
+        );
+
+        engine
+            .eval(
+                r#"
+                let content = urvim.ui.line_format.render({
+                    "width": 16,
+                    "values": ["ab", "measured", "abcdef"],
+                    "sections": [
+                        {
+                            "style": "ui.window",
+                            "width": { "type": "fixed", "value": 4 },
+                            "alignment": "right"
+                        },
+                        {
+                            "style": null,
+                            "width": { "type": "measured" }
+                        },
+                        {
+                            "width": { "type": "flex", "weight": 1 },
+                            "overflow": {
+                                "type": "ellipsis",
+                                "placement": "end"
+                            }
+                        }
+                    ]
+                })
+                let id = urvim.ui.windows.create()
+                urvim.ui.windows.set_content(id, content)
+                "#,
+            )
+            .expect("formatted content should be accepted by plugin windows");
+
+        let layout = layout.borrow();
+        let id = layout
+            .plugin_windows()
+            .ids()
+            .next()
+            .expect("window should be created");
+        let content = layout
+            .plugin_windows()
+            .owned_window("demo", id)
+            .expect("demo should own the window")
+            .content();
+
+        assert_eq!(content.len(), 1);
+        assert_eq!(content[0].len(), 3);
+        assert_eq!(content[0][0].text, "  ab");
+        assert_eq!(content[0][0].style.as_ref().unwrap().as_str(), "ui.window");
+        assert_eq!(content[0][1].text, "measured");
+        assert_eq!(content[0][1].style, None);
+        assert_eq!(content[0][2].text, "abc…");
+        assert_eq!(content[0][2].style, None);
+    }
+
+    #[test]
+    fn ui_line_format_render_rejects_invalid_options() {
+        let _guard = buffer_pool_lock();
+        let mut engine = Engine::new();
+        engine.set_global(
+            "urvim",
+            urvim_module(
+                "demo".to_string(),
+                Rc::new(RefCell::new(
+                    urvim_plugin::PluginContributionRegistry::default(),
+                )),
+                Rc::new(RefCell::new(BearscriptPluginCallbacks::default())),
+                shared_test_layout(),
+                Rc::new(PluginFsRegistry::default()),
+                Rc::new(PluginJobRegistry::default()),
+                test_timers(),
+            ),
+        );
+
+        let error = engine
+            .eval(
+                r#"
+                urvim.ui.line_format.render({
+                    "width": 10,
+                    "values": ["value"],
+                    "sections": [
+                        {
+                            "width": { "type": "flex", "weight": 0 }
+                        }
+                    ]
+                })
+                "#,
+            )
+            .expect_err("zero flex weights should be rejected")
+            .to_string();
+        assert!(error.contains("weight must be positive"));
+
+        let error = engine
+            .eval(
+                r#"
+                urvim.ui.line_format.render({
+                    "width": 10,
+                    "values": ["value"],
+                    "sections": [
+                        {
+                            "style": "Invalid.Tag",
+                            "width": { "type": "measured" }
+                        }
+                    ]
+                })
+                "#,
+            )
+            .expect_err("invalid theme tags should be rejected")
+            .to_string();
+        assert!(error.contains("sections[0].style is invalid"));
+    }
+
+    #[test]
+    fn window_demo_example_loads_and_creates_a_focused_window() {
+        let _guard = buffer_pool_lock();
+        let plugin_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../examples/plugins/window-demo");
+        let plugin_config = std::collections::BTreeMap::from([(
+            "window-demo".to_string(),
+            urvim_plugin::PluginConfigEntry {
+                enabled: true,
+                path: plugin_root,
+            },
+        )]);
+        let registry = urvim_plugin::PluginRegistry::load_from_config(&plugin_config)
+            .expect("window demo registry should load");
+        urvim_core::command::install_configured_commands_with_plugins(
+            &urvim_core::config::Config::default(),
+            &registry,
+        )
+        .expect("window demo command namespace should install");
+
+        let layout = shared_test_layout();
+        let plugin = registry
+            .get("window-demo")
+            .expect("window demo plugin should be present");
+        let mut runtime = BearscriptPluginRuntime::empty(Rc::clone(&layout));
+        runtime
+            .load_plugin("window-demo", &plugin)
+            .expect("window demo plugin should load");
+
+        let layout = layout.borrow();
+        let id = layout
+            .plugin_windows()
+            .ids()
+            .next()
+            .expect("window demo should create a window");
+        assert_eq!(layout.plugin_windows().focused(), Some(id));
+        let content = layout
+            .plugin_windows()
+            .owned_window("window-demo", id)
+            .unwrap()
+            .content();
+        assert_eq!(content.len(), 13);
+        assert_eq!(
+            content[0][0].style.as_ref().unwrap().as_str(),
+            "syntax.keyword"
+        );
+        assert_eq!(
+            content[0][1].style.as_ref().unwrap().as_str(),
+            "syntax.type"
+        );
+        assert_eq!(
+            content[6][0].style.as_ref().unwrap().as_str(),
+            "syntax.constant"
+        );
+        assert_eq!(
+            content[12][0].style.as_ref().unwrap().as_str(),
+            "syntax.string"
+        );
+    }
+
+    #[test]
+    fn window_demo_toggles_between_floating_and_docked_representations() {
+        let _guard = buffer_pool_lock();
+        let plugin_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../examples/plugins/window-demo");
+        let plugin_config = std::collections::BTreeMap::from([(
+            "window-demo".to_string(),
+            urvim_plugin::PluginConfigEntry {
+                enabled: true,
+                path: plugin_root,
+            },
+        )]);
+        let registry = urvim_plugin::PluginRegistry::load_from_config(&plugin_config)
+            .expect("window demo registry should load");
+        urvim_core::command::install_configured_commands_with_plugins(
+            &urvim_core::config::Config::default(),
+            &registry,
+        )
+        .expect("window demo command namespace should install");
+
+        let layout = shared_test_layout();
+        let plugin = registry
+            .get("window-demo")
+            .expect("window demo plugin should be present");
+        let mut runtime = BearscriptPluginRuntime::empty(Rc::clone(&layout));
+        runtime
+            .load_plugin("window-demo", plugin)
+            .expect("window demo plugin should load");
+
+        let result = layout
+            .borrow_mut()
+            .route_ui_event(&urvim_core::ui::UiEvent::Key(Key::new(KeyCode::Char('d'))));
+        assert!(crate::actions::handle_ui_result_with_shared_layout(
+            &layout,
+            &mut runtime,
+            result,
+        ));
+        {
+            let layout = layout.borrow();
+            assert!(layout.plugin_windows().ids().next().is_none());
+            assert_eq!(layout.plugin_pane_ids("window-demo").len(), 1);
+            assert!(layout.focused_plugin_pane().is_some());
+        }
+
+        let result = layout
+            .borrow_mut()
+            .route_ui_event(&urvim_core::ui::UiEvent::Key(Key::new(KeyCode::Char('d'))));
+        assert!(crate::actions::handle_ui_result_with_shared_layout(
+            &layout,
+            &mut runtime,
+            result,
+        ));
+        let layout = layout.borrow();
+        assert_eq!(layout.plugin_pane_ids("window-demo").len(), 0);
+        assert_eq!(layout.plugin_windows().ids().count(), 1);
+        assert!(layout.plugin_windows().focused().is_some());
+    }
+
+    #[test]
+    fn focused_plugin_window_command_can_mutate_layout_without_reentrant_borrow() {
+        let _guard = buffer_pool_lock();
+        let plugin_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../examples/plugins/window-demo");
+        let plugin_config = std::collections::BTreeMap::from([(
+            "window-demo".to_string(),
+            urvim_plugin::PluginConfigEntry {
+                enabled: true,
+                path: plugin_root,
+            },
+        )]);
+        let registry = urvim_plugin::PluginRegistry::load_from_config(&plugin_config)
+            .expect("window demo registry should load");
+        urvim_core::command::install_configured_commands_with_plugins(
+            &urvim_core::config::Config::default(),
+            &registry,
+        )
+        .expect("window demo command namespace should install");
+
+        let layout = shared_test_layout();
+        let plugin = registry
+            .get("window-demo")
+            .expect("window demo plugin should be present");
+        let mut runtime = BearscriptPluginRuntime::empty(Rc::clone(&layout));
+        runtime
+            .load_plugin("window-demo", plugin)
+            .expect("window demo plugin should load");
+
+        let result = layout
+            .borrow_mut()
+            .route_ui_event(&urvim_core::ui::UiEvent::Key(Key::new(KeyCode::Char('l'))));
+        assert!(crate::actions::handle_ui_result_with_shared_layout(
+            &layout,
+            &mut runtime,
+            result,
+        ));
+
+        let layout = layout.borrow();
+        let id = layout
+            .plugin_windows()
+            .focused()
+            .expect("window should remain focused");
+        assert!(matches!(
+            layout
+                .plugin_windows()
+                .owned_window("window-demo", id)
+                .expect("demo should own its window")
+                .options()
+                .placement,
+            urvim_core::ui::floating_window::FloatingPlacement::Anchored {
+                anchor: urvim_core::ui::floating_window::FloatingAnchor::TopRight,
+                ..
+            }
+        ));
     }
 
     fn theme_entries_include(entries: &[Value], name: &str, active: bool) -> bool {

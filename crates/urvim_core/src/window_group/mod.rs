@@ -5,7 +5,7 @@
 
 use crate::action::ActionResult;
 use crate::buffer::{Buffer, BufferId, Cursor};
-use crate::editor::Action;
+use crate::editor::EditorAction;
 use crate::globals;
 use crate::icon::FiletypeIcon;
 use crate::jumplist::JumpList;
@@ -694,55 +694,43 @@ impl WindowGroup {
         prefix_width as u16 + rendered_label_width as u16 + 1
     }
 
-    fn handle_previous_tab(&mut self, count: usize) {
+    /// Switches backward through tabs by `count` positions.
+    pub fn previous_tab(&mut self, count: usize) {
         self.move_tabs(count, -1);
     }
 
-    fn handle_next_tab(&mut self, count: usize) {
+    /// Switches forward through tabs by `count` positions.
+    pub fn next_tab(&mut self, count: usize) {
         self.move_tabs(count, 1);
     }
 }
 
 impl WindowGroup {
     /// Dispatches an editor action to the active tab/window.
-    pub fn dispatch_action(&mut self, action: &Action) -> ActionResult {
+    pub fn dispatch_action(&mut self, action: &EditorAction) -> ActionResult {
         let before = self.active_cursor_snapshot();
         let result = match action.kind.as_ref() {
-            Some(crate::editor::ActionKind::PreviousTab) => {
-                self.handle_previous_tab(1);
-                ActionResult::Handled
-            }
-            Some(crate::editor::ActionKind::NextTab) => {
-                self.handle_next_tab(1);
-                ActionResult::Handled
-            }
-            Some(crate::editor::ActionKind::JumpBackward) => {
+            Some(crate::editor::EditorOperation::JumpBackward) => {
                 self.jump_list_back();
                 ActionResult::Handled
             }
-            Some(crate::editor::ActionKind::JumpForward) => {
+            Some(crate::editor::EditorOperation::JumpForward) => {
                 self.jump_list_forward();
                 ActionResult::Handled
             }
-            Some(crate::editor::ActionKind::Count(count, inner)) => match inner.kind.as_ref() {
-                Some(crate::editor::ActionKind::PreviousTab) => {
-                    self.handle_previous_tab(*count);
-                    ActionResult::Handled
+            Some(crate::editor::EditorOperation::Count(count, inner)) => {
+                match inner.kind.as_ref() {
+                    Some(crate::editor::EditorOperation::JumpBackward) => {
+                        self.jump_back_count(*count);
+                        ActionResult::Handled
+                    }
+                    Some(crate::editor::EditorOperation::JumpForward) => {
+                        self.jump_forward_count(*count);
+                        ActionResult::Handled
+                    }
+                    _ => self.active_window_mut().dispatch_action(action),
                 }
-                Some(crate::editor::ActionKind::NextTab) => {
-                    self.handle_next_tab(*count);
-                    ActionResult::Handled
-                }
-                Some(crate::editor::ActionKind::JumpBackward) => {
-                    self.jump_back_count(*count);
-                    ActionResult::Handled
-                }
-                Some(crate::editor::ActionKind::JumpForward) => {
-                    self.jump_forward_count(*count);
-                    ActionResult::Handled
-                }
-                _ => self.active_window_mut().dispatch_action(action),
-            },
+            }
             _ => self.active_window_mut().dispatch_action(action),
         };
 
@@ -756,13 +744,11 @@ impl WindowGroup {
 }
 
 impl WindowGroup {
-    fn should_record_cursor_position(&self, action: &Action) -> bool {
+    fn should_record_cursor_position(&self, action: &EditorAction) -> bool {
         match action.kind.as_ref() {
-            Some(crate::editor::ActionKind::JumpBackward)
-            | Some(crate::editor::ActionKind::JumpForward)
-            | Some(crate::editor::ActionKind::PreviousTab)
-            | Some(crate::editor::ActionKind::NextTab) => false,
-            Some(crate::editor::ActionKind::Count(_, inner)) => {
+            Some(crate::editor::EditorOperation::JumpBackward)
+            | Some(crate::editor::EditorOperation::JumpForward) => false,
+            Some(crate::editor::EditorOperation::Count(_, inner)) => {
                 self.should_record_cursor_position(inner)
             }
             _ => true,

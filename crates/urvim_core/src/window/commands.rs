@@ -3,7 +3,7 @@ use crate::buffer::IndentDirection;
 use crate::config::DefaultRegisters;
 use crate::editor::ModeKind;
 use crate::editor::pairs;
-use crate::editor::{ActionKind, DelimiterFamily, OperatorTarget, TextObject};
+use crate::editor::{DelimiterFamily, EditorOperation, OperatorTarget, TextObject};
 use crate::register::{
     self, DefaultRegisterRole, RegisterContent, RegisterContentKind, RegisterName,
 };
@@ -738,47 +738,53 @@ impl Window {
         }
     }
 
-    pub(crate) fn handle_count(&mut self, count: usize, inner: &Action) -> ActionResult {
+    pub(crate) fn handle_count(&mut self, count: usize, inner: &EditorAction) -> ActionResult {
         match inner.kind.as_ref() {
-            Some(ActionKind::MoveToFirstLine) | Some(ActionKind::MoveToLastLine) => {
+            Some(EditorOperation::MoveToFirstLine) | Some(EditorOperation::MoveToLastLine) => {
                 self.handle_count_line_motion(count, inner)
             }
-            Some(ActionKind::MoveToScreenTop) | Some(ActionKind::MoveToScreenBottom) => {
+            Some(EditorOperation::MoveToScreenTop) | Some(EditorOperation::MoveToScreenBottom) => {
                 self.handle_count_screen_motion(count, inner)
             }
-            Some(ActionKind::JoinWithSpace) | Some(ActionKind::JoinWithoutSpace) => {
+            Some(EditorOperation::JoinWithSpace) | Some(EditorOperation::JoinWithoutSpace) => {
                 self.handle_count_join(count, inner)
             }
-            Some(ActionKind::DeleteLine) => self.handle_count_delete_line(count, inner.register),
-            Some(ActionKind::YankLine) => self.handle_count_yank_line(count, inner.register),
-            Some(ActionKind::ChangeLine) => self.handle_count_change_line(count, inner.register),
-            Some(ActionKind::ChangeToLineEnd) => {
+            Some(EditorOperation::DeleteLine) => {
+                self.handle_count_delete_line(count, inner.register)
+            }
+            Some(EditorOperation::YankLine) => self.handle_count_yank_line(count, inner.register),
+            Some(EditorOperation::ChangeLine) => {
+                self.handle_count_change_line(count, inner.register)
+            }
+            Some(EditorOperation::ChangeToLineEnd) => {
                 self.handle_count_change_to_line_end(count, inner.register)
             }
-            Some(ActionKind::OpenLineBelow) => self.handle_count_open_line_below(count),
-            Some(ActionKind::OpenLineAbove) => self.handle_count_open_line_above(count),
-            Some(ActionKind::IndentDecrease) => {
+            Some(EditorOperation::OpenLineBelow) => self.handle_count_open_line_below(count),
+            Some(EditorOperation::OpenLineAbove) => self.handle_count_open_line_above(count),
+            Some(EditorOperation::IndentDecrease) => {
                 let cursor = self.buffer_view.cursor();
                 self.shift_lines_indentation(cursor.line, count, IndentDirection::Decrease);
                 ActionResult::Handled
             }
-            Some(ActionKind::IndentIncrease) => {
+            Some(EditorOperation::IndentIncrease) => {
                 let cursor = self.buffer_view.cursor();
                 self.shift_lines_indentation(cursor.line, count, IndentDirection::Increase);
                 ActionResult::Handled
             }
-            Some(ActionKind::ToggleLineComment) => self.handle_count_toggle_line_comment(count),
-            Some(ActionKind::VisualTextObject(text_object)) => {
+            Some(EditorOperation::ToggleLineComment) => {
+                self.handle_count_toggle_line_comment(count)
+            }
+            Some(EditorOperation::VisualTextObject(text_object)) => {
                 self.select_visual_text_object(*text_object, count)
             }
-            Some(ActionKind::Operation(_, _)) => self.handle_count_operation(count, inner),
+            Some(EditorOperation::Operation(_, _)) => self.handle_count_operation(count, inner),
             _ if inner.is_line_action() => self.handle_count_line_action(count, inner),
             _ => self.handle_count_repeatable(count, inner),
         }
     }
 
-    fn handle_count_operation(&mut self, count: usize, action: &Action) -> ActionResult {
-        if let Some(ActionKind::Operation(op, target)) = action.kind.as_ref() {
+    fn handle_count_operation(&mut self, count: usize, action: &EditorAction) -> ActionResult {
+        if let Some(EditorOperation::Operation(op, target)) = action.kind.as_ref() {
             return self.handle_operation_with_count(
                 *op,
                 *target,
@@ -790,7 +796,7 @@ impl Window {
         ActionResult::Handled
     }
 
-    fn handle_count_line_motion(&mut self, count: usize, _action: &Action) -> ActionResult {
+    fn handle_count_line_motion(&mut self, count: usize, _action: &EditorAction) -> ActionResult {
         let line_count = self.buffer_view.line_count();
         if line_count == 0 {
             return ActionResult::Handled;
@@ -801,7 +807,7 @@ impl Window {
         ActionResult::Handled
     }
 
-    fn handle_count_screen_motion(&mut self, count: usize, action: &Action) -> ActionResult {
+    fn handle_count_screen_motion(&mut self, count: usize, action: &EditorAction) -> ActionResult {
         let viewport_rows = self.size.rows as usize;
         if viewport_rows == 0 {
             return ActionResult::Handled;
@@ -811,7 +817,8 @@ impl Window {
         if line_count == 0 {
             return ActionResult::Handled;
         }
-        let target_line = if matches!(action.kind.as_ref(), Some(ActionKind::MoveToScreenTop)) {
+        let target_line = if matches!(action.kind.as_ref(), Some(EditorOperation::MoveToScreenTop))
+        {
             let offset = count.saturating_sub(1);
             (start_line + offset)
                 .min(start_line + viewport_rows - 1)
@@ -826,7 +833,7 @@ impl Window {
         ActionResult::Handled
     }
 
-    fn handle_count_line_action(&mut self, count: usize, action: &Action) -> ActionResult {
+    fn handle_count_line_action(&mut self, count: usize, action: &EditorAction) -> ActionResult {
         let target_line = (count as isize - 1).max(0) as usize;
         let current_cursor = self.buffer_view.cursor();
         self.buffer_view
@@ -834,8 +841,8 @@ impl Window {
         self.dispatch_action(action)
     }
 
-    fn handle_count_join(&mut self, count: usize, action: &Action) -> ActionResult {
-        let with_space = matches!(action.kind.as_ref(), Some(ActionKind::JoinWithSpace));
+    fn handle_count_join(&mut self, count: usize, action: &EditorAction) -> ActionResult {
+        let with_space = matches!(action.kind.as_ref(), Some(EditorOperation::JoinWithSpace));
         let cursor = self.buffer_view.cursor();
         let actual_count = count + 1;
         if let Some(new_cursor) = self
@@ -1026,7 +1033,7 @@ impl Window {
         ActionResult::Handled
     }
 
-    fn handle_count_repeatable(&mut self, count: usize, action: &Action) -> ActionResult {
+    fn handle_count_repeatable(&mut self, count: usize, action: &EditorAction) -> ActionResult {
         for _ in 0..count {
             self.dispatch_action(action);
         }

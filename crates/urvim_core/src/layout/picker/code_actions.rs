@@ -47,6 +47,7 @@ impl Layout {
             picker.close();
         }
         self.dialogs.code_actions_picker = None;
+        self.clear_modal_inherited_keys();
     }
 
     /// Returns true when the LSP code actions picker is open.

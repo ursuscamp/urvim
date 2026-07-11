@@ -1,0 +1,315 @@
+let demo_title = "Window Demo"
+let docked = false
+
+fn init() {
+    urvim.commands.register("open", open, "Open and focus the window demo")
+    urvim.commands.register("close", close, "Close the window demo")
+    urvim.commands.register("center", center, "Move the demo to the center")
+    urvim.commands.register("top_center", top_center, "Move the demo to the top center")
+    urvim.commands.register("top_right", top_right, "Move the demo to the top right")
+    urvim.commands.register("bottom_right", bottom_right, "Move the demo to the bottom right")
+    urvim.commands.register("fixed", fixed, "Move the demo to fixed coordinates")
+    urvim.commands.register("higher", higher, "Move the top-center demo higher")
+    urvim.commands.register("lower", lower, "Move the top-center demo lower")
+    urvim.commands.register("refresh", refresh, "Refresh the demo help text")
+    urvim.commands.register("title_update", title_update, "Change the demo title")
+    urvim.commands.register("show", show, "Show the demo window")
+    urvim.commands.register("focus", focus, "Focus the demo window")
+    urvim.commands.register("dock", dock, "Toggle the demo between floating and docked")
+    open([])
+}
+
+fn open(args) {
+    let ids = urvim.ui.windows.list()
+    if len(ids) > 0 {
+        urvim.ui.windows.show(ids[0])
+        urvim.ui.windows.focus(ids[0])
+        return
+    }
+    create_floating()
+}
+
+fn close(args) {
+    let ids = urvim.ui.windows.list()
+    if len(ids) > 0 {
+        urvim.ui.windows.close(ids[0])
+        return
+    }
+    let pane_ids = urvim.ui.panes.list()
+    if len(pane_ids) > 0 {
+        urvim.ui.panes.close(pane_ids[0])
+    }
+}
+
+fn dock(args) {
+    let floating_ids = urvim.ui.windows.list()
+    if len(floating_ids) > 0 {
+        urvim.ui.windows.close(floating_ids[0])
+        create_docked()
+        return
+    }
+
+    let pane_ids = urvim.ui.panes.list()
+    if len(pane_ids) > 0 {
+        urvim.ui.panes.close(pane_ids[0])
+        create_floating()
+    } else {
+        create_floating()
+    }
+}
+
+fn create_floating() {
+    docked = false
+    let id = urvim.ui.windows.create({
+        "placement": { "type": "anchored", "anchor": "center" },
+        "rows": 17,
+        "cols": 62,
+        "title": demo_title,
+        "body_style": "ui.window",
+        "border_style": "ui.window.lines.border",
+        "focused_border_style": "ui.window.lines.resize"
+    })
+    refresh_window(id)
+    bind_window(id)
+    urvim.ui.windows.focus(id)
+}
+
+fn create_docked() {
+    docked = true
+    let id = urvim.ui.panes.create(null, {
+        "axis": "vertical",
+        "ratio": { "first": 2, "second": 1 },
+        "title": demo_title,
+        "body_style": "ui.window",
+        "header_style": "ui.tab.inactive",
+        "focused_header_style": "ui.tab.active"
+    })
+    refresh_pane(id)
+    bind_pane(id)
+    urvim.ui.panes.focus(id)
+}
+
+fn center(args) {
+    configure({ "placement": { "type": "anchored", "anchor": "center" } })
+}
+
+fn top_center(args) {
+    configure({
+        "placement": {
+            "type": "anchored",
+            "anchor": "top_center",
+            "margins": { "top": 1 }
+        }
+    })
+}
+
+fn top_right(args) {
+    configure({
+        "placement": {
+            "type": "anchored",
+            "anchor": "top_right",
+            "margins": { "top": 1, "right": 2 }
+        }
+    })
+}
+
+fn bottom_right(args) {
+    configure({
+        "placement": {
+            "type": "anchored",
+            "anchor": "bottom_right",
+            "margins": { "right": 2, "bottom": 1 }
+        }
+    })
+}
+
+fn fixed(args) {
+    configure({ "placement": { "type": "fixed", "row": 2, "col": 8 } })
+}
+
+fn higher(args) {
+    configure({
+        "placement": {
+            "type": "anchored",
+            "anchor": "top_center",
+            "margins": { "top": 1 }
+        }
+    })
+}
+
+fn lower(args) {
+    configure({
+        "placement": {
+            "type": "anchored",
+            "anchor": "top_center",
+            "margins": { "top": 6 }
+        }
+    })
+}
+
+fn refresh(args) {
+    let ids = urvim.ui.windows.list()
+    if len(ids) > 0 {
+        refresh_window(ids[0])
+        return
+    }
+    let pane_ids = urvim.ui.panes.list()
+    if len(pane_ids) > 0 {
+        refresh_pane(pane_ids[0])
+    }
+}
+
+fn title_update(args) {
+    demo_title = "Window Demo (updated)"
+    configure({ "title": demo_title })
+}
+
+fn show(args) {
+    let ids = urvim.ui.windows.list()
+    if len(ids) > 0 {
+        urvim.ui.windows.show(ids[0])
+    } else {
+        open([])
+    }
+}
+
+fn focus(args) {
+    let ids = urvim.ui.windows.list()
+    if len(ids) > 0 {
+        urvim.ui.windows.focus(ids[0])
+    } else {
+        open([])
+    }
+}
+
+fn configure(opts) {
+    let ids = urvim.ui.windows.list()
+    if len(ids) > 0 {
+        urvim.ui.windows.configure(ids[0], opts)
+        return
+    }
+    let pane_ids = urvim.ui.panes.list()
+    if len(pane_ids) > 0 {
+        urvim.ui.panes.configure(pane_ids[0], opts)
+    }
+}
+
+fn refresh_window(id) {
+    urvim.ui.windows.set_content(id, demo_content())
+}
+
+fn refresh_pane(id) {
+    urvim.ui.panes.set_content(id, demo_content())
+}
+
+fn demo_content() {
+    let mode = "floating"
+    if docked {
+        mode = "docked"
+    }
+    [
+        format_line({
+            "width": 62,
+            "values": ["urvim", mode + " plugin UI demo"],
+            "sections": [
+                {
+                    "style": "syntax.keyword",
+                    "width": { "type": "fixed", "value": 10 },
+                    "alignment": "right"
+                },
+                {
+                    "style": "syntax.type",
+                    "width": { "type": "flex", "weight": 1 },
+                    "overflow": { "type": "ellipsis", "placement": "end" }
+                }
+            ]
+        }),
+        blank_line(),
+        format_line({
+            "width": 62,
+            "values": ["This UI can be ", "floating or docked in a split pane."],
+            "sections": [
+                { "style": "ui.window.lines.resize", "width": { "type": "measured" } },
+                { "style": "ui.window", "width": { "type": "flex", "weight": 1 } }
+            ]
+        }),
+        format_line({
+            "width": 62,
+            "values": ["Its retained content is shared by both representations."],
+            "sections": [{ "style": "syntax.comment", "width": { "type": "measured" } }]
+        }),
+        blank_line(),
+        heading_line("Toggle:", "replace the current representation"),
+        key_line("d", "dock or undock this demo", "syntax.constant"),
+        blank_line(),
+        heading_line("Other actions:", "retained content and focus"),
+        key_line("r", "refresh the retained help text", "syntax.string"),
+        key_line("t", "change the title", "syntax.string"),
+        key_line("q", "close the window or pane", "syntax.string"),
+        format_line({
+            "width": 62,
+            "values": ["Esc", "return focus to the editor or cancel a pane key sequence"],
+            "sections": [
+                { "style": "syntax.string", "width": { "type": "fixed", "value": 8 }, "alignment": "center" },
+                { "style": "ui.window", "width": { "type": "flex", "weight": 1 }, "overflow": { "type": "ellipsis", "placement": "end" } }
+            ]
+        })
+    ]
+}
+
+fn format_line(opts) {
+    urvim.ui.line_format.render(opts)[0]
+}
+
+fn blank_line() {
+    format_line({
+        "width": 62,
+        "values": [""],
+        "sections": [{ "width": { "type": "measured" } }]
+    })
+}
+
+fn heading_line(title, detail) {
+    format_line({
+        "width": 62,
+        "values": [title, detail],
+        "sections": [
+            { "style": "syntax.keyword", "width": { "type": "fixed", "value": 17 } },
+            { "style": "syntax.comment", "width": { "type": "flex", "weight": 1 } }
+        ]
+    })
+}
+
+fn key_line(key, text, style) {
+    format_line({
+        "width": 62,
+        "values": [key, text],
+        "sections": [
+            {
+                "style": style,
+                "width": { "type": "fixed", "value": 8 },
+                "alignment": "center"
+            },
+            { "style": "ui.window", "width": { "type": "flex", "weight": 1 } }
+        ]
+    })
+}
+
+fn bind_window(id) {
+    urvim.ui.windows.set_keymap(id, "h", "plugin window-demo center")
+    urvim.ui.windows.set_keymap(id, "j", "plugin window-demo lower")
+    urvim.ui.windows.set_keymap(id, "k", "plugin window-demo higher")
+    urvim.ui.windows.set_keymap(id, "l", "plugin window-demo top_right")
+    urvim.ui.windows.set_keymap(id, "f", "plugin window-demo fixed")
+    urvim.ui.windows.set_keymap(id, "r", "plugin window-demo refresh")
+    urvim.ui.windows.set_keymap(id, "t", "plugin window-demo title_update")
+    urvim.ui.windows.set_keymap(id, "q", "plugin window-demo close")
+    urvim.ui.windows.set_keymap(id, "d", "plugin window-demo dock")
+}
+
+fn bind_pane(id) {
+    urvim.ui.panes.set_keymap(id, "r", "plugin window-demo refresh")
+    urvim.ui.panes.set_keymap(id, "t", "plugin window-demo title_update")
+    urvim.ui.panes.set_keymap(id, "q", "plugin window-demo close")
+    urvim.ui.panes.set_keymap(id, "d", "plugin window-demo dock")
+}

@@ -1,12 +1,13 @@
 use super::keymap::MAX_COUNT;
 use super::text_object::{self, TextObjectScope};
 use super::{
-    Action, ActionKind, DelimiterFamily, HandleKeyResult, Mode, ModeKind, Operator, OperatorTarget,
-    TextObject, TrieKeymap,
+    DelimiterFamily, EditorAction, EditorOperation, HandleKeyResult, Mode, ModeKind, Operator,
+    OperatorTarget, TextObject, TrieKeymap,
 };
 use crate::globals;
 use crate::globals::{Direction, FindKind};
 use crate::register::RegisterName;
+use crate::ui::Intent;
 use urvim_terminal::{CursorStyle, Key, KeyCode};
 
 mod bindings;
@@ -77,8 +78,21 @@ impl Default for NormalMode {
 }
 
 impl NormalMode {
+    /// Creates normal mode with the effective configured keymap.
     pub fn new() -> Self {
-        let mut keymap = TrieKeymap::new();
+        NormalMode {
+            keymap: Self::keymap(),
+            state: State::Idle,
+            count: 0,
+            register: None,
+            pending_register: false,
+            trie_keys: Vec::new(),
+        }
+    }
+
+    /// Creates the effective normal-mode keymap from defaults and configured overrides.
+    pub fn keymap() -> TrieKeymap {
+        let mut keymap = TrieKeymap::<Intent>::new();
         bindings::register(&mut keymap);
         globals::with_opt_config(|config| {
             if let Some(config) = config {
@@ -86,15 +100,7 @@ impl NormalMode {
             }
         });
         keymap.insert_intents(&globals::plugin_keymap_intents_for_mode(ModeKind::Normal));
-
-        NormalMode {
-            keymap,
-            state: State::Idle,
-            count: 0,
-            register: None,
-            pending_register: false,
-            trie_keys: Vec::new(),
-        }
+        keymap
     }
 
     fn reset(&mut self) {
@@ -128,7 +134,7 @@ impl NormalMode {
         }
     }
 
-    fn apply_register(&self, action: Action) -> Action {
+    fn apply_register(&self, action: EditorAction) -> EditorAction {
         match self.register {
             Some(reg) => action.with_register(reg),
             None => action,
@@ -142,7 +148,7 @@ impl NormalMode {
         )
     }
 
-    fn wrap_count(&self, action: Action) -> Action {
+    fn wrap_count(&self, action: EditorAction) -> EditorAction {
         let mut action = action.with_from_mode(ModeKind::Normal);
         if self.count > 1 {
             if let Some(counted) = action.clone().with_count(self.count) {
@@ -152,7 +158,7 @@ impl NormalMode {
         action
     }
 
-    fn wrap_count_with(&self, action: Action, sub_count: usize) -> Action {
+    fn wrap_count_with(&self, action: EditorAction, sub_count: usize) -> EditorAction {
         let mut action = action.with_from_mode(ModeKind::Normal);
         let total = if self.count > 0 {
             self.count.saturating_mul(sub_count.max(1)).min(MAX_COUNT)
@@ -167,12 +173,12 @@ impl NormalMode {
         action
     }
 
-    fn char_scan_action(kind: FindKind, direction: Direction, target: char) -> Action {
+    fn char_scan_action(kind: FindKind, direction: Direction, target: char) -> EditorAction {
         match (kind, direction) {
-            (FindKind::Find, Direction::Forward) => Action::find_forward(target),
-            (FindKind::Find, Direction::Backward) => Action::find_backward(target),
-            (FindKind::Till, Direction::Forward) => Action::till_forward(target),
-            (FindKind::Till, Direction::Backward) => Action::till_backward(target),
+            (FindKind::Find, Direction::Forward) => EditorAction::find_forward(target),
+            (FindKind::Find, Direction::Backward) => EditorAction::find_backward(target),
+            (FindKind::Till, Direction::Forward) => EditorAction::till_forward(target),
+            (FindKind::Till, Direction::Backward) => EditorAction::till_backward(target),
         }
     }
 
@@ -183,7 +189,7 @@ impl NormalMode {
         sub_count: usize,
         text_object: TextObject,
     ) -> HandleKeyResult {
-        let mut action = Action::operation(operator, OperatorTarget::TextObject(text_object));
+        let mut action = EditorAction::operation(operator, OperatorTarget::TextObject(text_object));
         action = self.apply_register(action);
         if let Some(mode) = to_mode {
             action = action.with_to_mode(mode);
@@ -198,15 +204,15 @@ impl NormalMode {
         target: TextObject,
         delimiter: DelimiterFamily,
     ) -> HandleKeyResult {
-        let action = Action::new(ActionKind::SurroundAdd { target, delimiter })
+        let action = EditorAction::new(EditorOperation::SurroundAdd { target, delimiter })
             .with_from_mode(ModeKind::Normal);
         self.reset();
         HandleKeyResult::Complete(action.into())
     }
 
     fn complete_surround_delete(&mut self, target: DelimiterFamily) -> HandleKeyResult {
-        let action =
-            Action::new(ActionKind::SurroundDelete { target }).with_from_mode(ModeKind::Normal);
+        let action = EditorAction::new(EditorOperation::SurroundDelete { target })
+            .with_from_mode(ModeKind::Normal);
         self.reset();
         HandleKeyResult::Complete(action.into())
     }
@@ -216,7 +222,7 @@ impl NormalMode {
         target: DelimiterFamily,
         replacement: DelimiterFamily,
     ) -> HandleKeyResult {
-        let action = Action::new(ActionKind::SurroundReplace {
+        let action = EditorAction::new(EditorOperation::SurroundReplace {
             target,
             replacement,
         })
@@ -341,7 +347,16 @@ impl NormalMode {
         }
 
         if let Some(intent) = self.keymap.get_action(&self.trie_keys) {
-            let result = match intent.as_action().cloned() {
+            let intent = match intent {
+                Intent::Command(crate::ui::Command::PreviousTab(_)) => {
+                    crate::ui::Command::PreviousTab(self.count.max(1)).into()
+                }
+                Intent::Command(crate::ui::Command::NextTab(_)) => {
+                    crate::ui::Command::NextTab(self.count.max(1)).into()
+                }
+                other => other,
+            };
+            let result = match intent.as_editor_action().cloned() {
                 Some(mut action) => {
                     action = self.apply_register(action);
                     action = self.wrap_count(action);
@@ -381,7 +396,7 @@ impl NormalMode {
         if let KeyCode::Char(c) = key.code
             && !key.modifiers.has_ctrl()
         {
-            let mut action = Action::new(ActionKind::ReplaceChar(c));
+            let mut action = EditorAction::new(EditorOperation::ReplaceChar(c));
             action = self.apply_register(action);
             action = self.wrap_count(action);
             self.reset();
@@ -554,7 +569,7 @@ impl NormalMode {
             .collect();
 
         if let Some(intent) = self.keymap.get_action(&full_keys) {
-            let result = match intent.as_action().cloned() {
+            let result = match intent.as_editor_action().cloned() {
                 Some(mut action) => {
                     action = self.apply_register(action);
                     action = self.wrap_count_with(action, data.sub_count);
@@ -611,7 +626,7 @@ impl NormalMode {
                 direction: data.direction,
             };
             let mut action =
-                Action::operation(data.operator, OperatorTarget::CharacterScan(find_state));
+                EditorAction::operation(data.operator, OperatorTarget::CharacterScan(find_state));
             action = self.apply_register(action);
             if let Some(mode) = data.to_mode {
                 action = action.with_to_mode(mode);

@@ -368,11 +368,23 @@ mod tests {
     fn resolve_mode_and_cursor_commands() {
         assert!(matches!(
             parse("mode insert").expect("mode should resolve"),
-            Intent::Action(action) if action.to_mode == Some(ModeKind::Insert)
+            Intent::Editor(action) if action.to_mode == Some(ModeKind::Insert)
         ));
         assert!(matches!(
             parse("action cursor left count=2").expect("cursor should resolve"),
-            Intent::Action(_)
+            Intent::Editor(_)
+        ));
+    }
+
+    #[test]
+    fn resolve_window_focus_cycle_commands() {
+        assert!(matches!(
+            parse("window focus-next").expect("next window should resolve"),
+            Intent::Command(Command::FocusNextWindow)
+        ));
+        assert!(matches!(
+            parse("window focus-previous").expect("previous window should resolve"),
+            Intent::Command(Command::FocusPreviousWindow)
         ));
     }
 
@@ -380,25 +392,25 @@ mod tests {
     fn resolve_edit_operator_and_surround_commands() {
         assert!(matches!(
             parse("action edit delete-line 3").expect("edit action should resolve"),
-            Intent::Action(action)
-                if matches!(action.kind.as_ref(), Some(crate::editor::ActionKind::Count(3, _)))
+            Intent::Editor(action)
+                if matches!(action.kind.as_ref(), Some(crate::editor::EditorOperation::Count(3, _)))
         ));
         assert!(matches!(
             parse("action operator delete target=word").expect("operator should resolve"),
-            Intent::Action(_)
+            Intent::Editor(_)
         ));
         assert!(matches!(
             parse("action tab next").expect("tab navigation should resolve"),
-            Intent::Action(_)
+            Intent::Command(Command::NextTab(1))
         ));
         assert!(matches!(
             parse("action jump backward").expect("jumplist navigation should resolve"),
-            Intent::Action(_)
+            Intent::Editor(_)
         ));
         assert!(matches!(
             parse("action surround add target=word delimiter=paren")
                 .expect("surround should resolve"),
-            Intent::Action(_)
+            Intent::Editor(_)
         ));
     }
 
@@ -423,8 +435,8 @@ mod tests {
 
         assert!(matches!(
             parse("dl count=2").expect("configured alias should resolve"),
-            Intent::Action(action)
-                if matches!(action.kind.as_ref(), Some(crate::editor::ActionKind::Count(2, _)))
+            Intent::Editor(action)
+                if matches!(action.kind.as_ref(), Some(crate::editor::EditorOperation::Count(2, _)))
         ));
     }
 
@@ -446,7 +458,10 @@ mod tests {
         let intents = parse_many("wq").expect("script should resolve");
 
         assert_eq!(intents.len(), 2);
-        assert!(matches!(intents[0], Intent::Action(_)));
+        assert!(matches!(
+            intents[0],
+            Intent::Command(Command::SaveBuffer(None))
+        ));
         assert!(matches!(intents[1], Intent::Command(Command::Quit)));
     }
 

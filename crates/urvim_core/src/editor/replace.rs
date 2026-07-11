@@ -1,4 +1,5 @@
-use super::{Action, ActionKind, HandleKeyResult, Mode, ModeKind, TrieKeymap};
+use super::{EditorAction, EditorOperation, HandleKeyResult, Mode, ModeKind, TrieKeymap};
+use crate::ui::Intent;
 use urvim_terminal::{CursorStyle, Key, KeyCode};
 
 /// Replace mode for overwriting text character by character.
@@ -11,26 +12,35 @@ pub struct ReplaceMode {
 impl ReplaceMode {
     /// Creates a new replace mode.
     pub fn new() -> Self {
-        let mut keymap = TrieKeymap::new();
+        let mut keymap = TrieKeymap::<Intent>::new();
         keymap.insert_str("<F1>", crate::ui::Command::OpenFilePicker);
         keymap.insert_str("<F2>", crate::ui::Command::OpenGrepPicker);
         keymap.insert_str("<F3>", crate::ui::Command::OpenBufferPicker);
         keymap.insert_str("<F4>", crate::ui::Command::OpenGitPicker);
         keymap.insert_str("<F5>", crate::ui::Command::OpenColorschemePicker);
         keymap.insert_str("<F6>", crate::ui::Command::OpenFiletypePicker);
-        keymap.insert_str("<Esc>", Action::mode_transition(ModeKind::Normal));
+        keymap.insert_str("<Esc>", EditorAction::mode_transition(ModeKind::Normal));
         keymap.insert_str("<C-q>", crate::ui::Command::TryQuit);
-        keymap.insert_str("<C-s>", Action::save_buffer(None));
-        keymap.insert_str("<Left>", Action::new(ActionKind::MoveLeft));
-        keymap.insert_str("<Down>", Action::new(ActionKind::MoveDown));
-        keymap.insert_str("<Up>", Action::new(ActionKind::MoveUp));
-        keymap.insert_str("<Right>", Action::new(ActionKind::MoveRight));
-        keymap.insert_str("<PageUp>", Action::new(ActionKind::MovePageUp));
-        keymap.insert_str("<PageDown>", Action::new(ActionKind::MovePageDown));
-        keymap.insert_str("<C-u>", Action::new(ActionKind::MoveHalfPageUp));
-        keymap.insert_str("<C-d>", Action::new(ActionKind::MoveHalfPageDown));
-        keymap.insert_str("<Enter>", Action::insert_newline());
-        keymap.insert_str("<Delete>", Action::new(ActionKind::DeleteForward));
+        keymap.insert_str("<C-s>", crate::ui::Command::SaveBuffer(None));
+        keymap.insert_str("<Left>", EditorAction::new(EditorOperation::MoveLeft));
+        keymap.insert_str("<Down>", EditorAction::new(EditorOperation::MoveDown));
+        keymap.insert_str("<Up>", EditorAction::new(EditorOperation::MoveUp));
+        keymap.insert_str("<Right>", EditorAction::new(EditorOperation::MoveRight));
+        keymap.insert_str("<PageUp>", EditorAction::new(EditorOperation::MovePageUp));
+        keymap.insert_str(
+            "<PageDown>",
+            EditorAction::new(EditorOperation::MovePageDown),
+        );
+        keymap.insert_str("<C-u>", EditorAction::new(EditorOperation::MoveHalfPageUp));
+        keymap.insert_str(
+            "<C-d>",
+            EditorAction::new(EditorOperation::MoveHalfPageDown),
+        );
+        keymap.insert_str("<Enter>", EditorAction::insert_newline());
+        keymap.insert_str(
+            "<Delete>",
+            EditorAction::new(EditorOperation::DeleteForward),
+        );
 
         ReplaceMode {
             keymap,
@@ -39,13 +49,14 @@ impl ReplaceMode {
         }
     }
 
-    fn replace_action_for_char(&mut self, ch: char) -> Action {
-        Action::new(ActionKind::ReplaceChar(ch)).with_from_mode(ModeKind::Replace)
+    fn replace_action_for_char(&mut self, ch: char) -> EditorAction {
+        EditorAction::new(EditorOperation::ReplaceChar(ch)).with_from_mode(ModeKind::Replace)
     }
 
     fn replace_backspace_action(&mut self) -> HandleKeyResult {
         HandleKeyResult::complete(
-            Action::new(ActionKind::ReplaceBackspaceLast).with_from_mode(ModeKind::Replace),
+            EditorAction::new(EditorOperation::ReplaceBackspaceLast)
+                .with_from_mode(ModeKind::Replace),
         )
     }
 }
@@ -68,7 +79,7 @@ impl Mode for ReplaceMode {
         if let Some(intent) = self.keymap.get_action(&self.buffer) {
             self.buffer.clear();
             self.waiting = false;
-            if let Some(action) = intent.as_action().cloned() {
+            if let Some(action) = intent.as_editor_action().cloned() {
                 return HandleKeyResult::complete(action.with_from_mode(ModeKind::Replace));
             }
             return HandleKeyResult::complete(intent);

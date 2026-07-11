@@ -107,6 +107,30 @@ The global `urvim` module exposes the APIs below. All arguments and return value
 ### Editor and UI
 
 - `urvim.ui.show_message(message, opts)`
+- `urvim.ui.windows.create(opts) -> window_id`
+- `urvim.ui.windows.configure(window_id, opts)`
+- `urvim.ui.windows.set_content(window_id, content)`
+- `urvim.ui.line_format.render(opts) -> content`
+- `urvim.ui.windows.show(window_id)`
+- `urvim.ui.windows.hide(window_id)`
+- `urvim.ui.windows.focus(window_id)`
+- `urvim.ui.windows.blur(window_id)`
+- `urvim.ui.windows.close(window_id)`
+- `urvim.ui.windows.list() -> [window_id]`
+- `urvim.ui.windows.active() -> window_id | null`
+- `urvim.ui.windows.set_keymap(window_id, lhs, rhs)`
+- `urvim.ui.windows.delete_keymap(window_id, lhs)`
+- `urvim.ui.windows.list_keymaps(window_id) -> [keymap]`
+- `urvim.ui.panes.create(target_pane_id, opts) -> pane_id`
+- `urvim.ui.panes.configure(pane_id, opts)`
+- `urvim.ui.panes.set_content(pane_id, content)`
+- `urvim.ui.panes.focus(pane_id)`
+- `urvim.ui.panes.close(pane_id)`
+- `urvim.ui.panes.list() -> [pane_id]`
+- `urvim.ui.panes.active() -> pane_id | null`
+- `urvim.ui.panes.set_keymap(pane_id, lhs, rhs)`
+- `urvim.ui.panes.delete_keymap(pane_id, lhs)`
+- `urvim.ui.panes.list_keymaps(pane_id) -> [keymap]`
 - `urvim.buffers.active() -> buffer_id | null`
 - `urvim.buffers.list() -> [buffer_id]`
 - `urvim.buffers.exists(buffer_id) -> bool`
@@ -241,6 +265,188 @@ Buffer rows and columns are 0-based. `urvim.buffers.lines(buffer_id, start_row, 
 Invalid buffer ids, rows, columns, and argument shapes raise errors. `urvim.buffers.save(buffer_id)` saves through the normal buffer save path and emits the same `BufferSaved` editor event on success.
 
 Window rows and columns are 0-based. Window ids are stable pane ids for currently visible editor windows; an id stays valid for the life of that pane and becomes invalid after the pane is closed. Invalid window ids raise errors. `urvim.windows.open_buffer(buffer_id)` mirrors normal editor behavior by activating an existing visible buffer tab or opening a tab for a loaded hidden buffer in the active window.
+
+### Floating Plugin Windows
+
+`urvim.ui.windows` creates transient floating windows that are separate from
+the buffer-backed windows in `urvim.windows`. They are retained by urvim and
+rendered as UI widgets; plugins do not provide a callback that runs during
+painting.
+
+Create a window with content dimensions and an anchored placement:
+
+```text
+let window_id = urvim.ui.windows.create({
+    "placement": {
+        "type": "anchored",
+        "anchor": "top_right",
+        "margins": { "top": 1, "right": 2 }
+    },
+    "rows": 8,
+    "cols": 40,
+    "title": "My Plugin",
+    "body_style": "ui.window",
+    "border_style": "ui.window.lines.border",
+    "focused_border_style": "ui.window.lines.resize"
+})
+```
+
+Supported anchors are `center`, `top_center`, `top_right`, and
+`bottom_right`. Anchored placement margins optionally accept `top`, `right`,
+`bottom`, and `left` values. An omitted or `null` side is treated as zero.
+Margins inset the available editor area before the anchor is resolved, so they
+apply consistently to every supported anchor.
+
+For fixed placement, `row` and `col` are zero-based coordinates for the
+outer frame's top-left corner, relative to the editor UI area:
+
+```text
+let window_id = urvim.ui.windows.create({
+    "placement": { "type": "fixed", "row": 3, "col": 10 },
+    "rows": 8,
+    "cols": 40
+})
+```
+
+Fixed placement does not accept margins. If a fixed frame extends past the
+available area, its origin remains fixed and its rows or columns are clipped
+to the remaining space. A frame is omitted if fewer than 3 rows or columns
+remain. `rows` and `cols` describe the content area; the border is added
+outside those dimensions. Content is clipped to the available area and is not
+wrapped.
+
+When configuring an existing window, supplying `placement` replaces the
+complete placement. Omitted anchored margins default to zero; omit
+`placement` to leave the current placement unchanged:
+
+```text
+urvim.ui.windows.configure(window_id, {
+    "placement": {
+        "type": "anchored",
+        "anchor": "top_right",
+        "margins": { "top": 1, "right": 2 }
+    }
+})
+```
+
+Content is a list of lines, where each line is a list of styled segments:
+
+```text
+urvim.ui.windows.set_content(window_id, [
+    [
+        { "text": "hello ", "style": "ui.window" },
+        { "text": "world", "style": "syntax.keyword" }
+    ],
+    [{ "text": "plain text" }]
+])
+```
+
+Segment styles are named theme tags. The style is optional and defaults to the
+window body style. Segment text must not contain newlines.
+
+Windows are created visible but unfocused. An unfocused window frame and title
+use `border_style`, which defaults to `ui.window.lines.border`; a focused window
+uses `focused_border_style`, which defaults to `ui.window.lines.resize`. A
+focused window is modal and consumes key and paste events. `<Esc>` blurs the
+window unless it has an explicit keymap binding. Window-local keymaps use the
+normal urvim key syntax and command strings:
+
+```text
+urvim.ui.windows.set_keymap(window_id, "q", "plugin my-plugin close")
+urvim.ui.windows.set_keymap(window_id, "r", "write")
+```
+
+Bindings may invoke ordinary editor commands or commands registered by the
+owning plugin. While a window is focused, its local mappings take precedence,
+then global normal-mode mappings for focus and application commands are
+inherited. Editor-only and unmapped keys are consumed rather than forwarded to
+the last editor pane. A plugin can only access windows it owns. Hiding,
+blurring, or closing the focused window returns focus to the editor. Floating
+plugin windows are not saved in sessions.
+
+### Split Plugin Panes
+
+`urvim.ui.panes` creates retained plugin UI as a first-class split-tree pane.
+The first argument to `create` is a visible editor or plugin pane id; pass
+`null` to split the currently focused pane. The existing pane remains the
+first split child and the new plugin pane is the second child and receives
+focus.
+
+```text
+let pane_id = urvim.ui.panes.create(null, {
+    "axis": "vertical",
+    "ratio": { "first": 2, "second": 1 },
+    "title": "My Plugin",
+    "body_style": "ui.window",
+    "header_style": "ui.tab.inactive",
+    "focused_header_style": "ui.tab.active"
+})
+
+urvim.ui.panes.set_content(pane_id, [
+    [{ "text": "hello", "style": "syntax.keyword" }]
+])
+```
+
+`axis` is `vertical` for side-by-side panes or `horizontal` for stacked
+panes. The optional ratio defaults to `1:1`. Pane content fills the assigned
+leaf and is clipped to the available content area. Pane ids use the same
+numeric identity as editor pane ids, so any visible pane can be used as a
+target. `urvim.ui.panes.list()` only returns panes owned by the current plugin.
+
+Plugin panes support the same retained styled content and local keymaps as
+floating plugin windows. They participate in normal focus, resize, equalize,
+and close operations, but cannot be hidden and are not saved in sessions.
+Closing a pane collapses its parent split. Plugin teardown closes all panes
+owned by that plugin.
+
+Every plugin pane reserves its first row for a header, including panes without a
+title. The optional title is centered and clipped to the available width, and
+retained content starts on the next row. The header uses `focused_header_style`
+while focused and `header_style` while unfocused. They default to
+`ui.tab.active` and `ui.tab.inactive`, respectively. `body_style` controls the
+content area. Unlike floating plugin windows, plugin panes do not accept
+`border_style` because they use the layout's split separators instead of
+drawing a window border.
+
+Plugin panes use the same keymap precedence and inheritance behavior as focused
+plugin windows.
+
+### Line Formatting
+
+`urvim.ui.line_format.render` exposes urvim's reusable line formatter to
+plugins. It formats one line and returns the same nested content value accepted
+by `urvim.ui.windows.set_content`:
+
+```text
+let content = urvim.ui.line_format.render({
+    "width": 40,
+    "values": ["Name", "src/a-very-long-file-name.rs"],
+    "sections": [
+        {
+            "style": "ui.window",
+            "width": { "type": "fixed", "value": 12 },
+            "alignment": "left"
+        },
+        {
+            "style": null,
+            "width": { "type": "flex", "weight": 1 },
+            "overflow": {
+                "type": "ellipsis",
+                "placement": "end"
+            }
+        }
+    ]
+})
+urvim.ui.windows.set_content(window_id, content)
+```
+
+`width` is the available content width for this one-shot render. Each section
+requires a width policy: `fixed` uses `value`, `measured` uses the value's
+display width, and `flex` shares remaining width by `weight`. Sections default
+to left alignment and clipping. Styles are optional theme tag names; `null` or
+an omitted style uses the window body style. Formatting does not automatically
+repeat after a terminal resize, so plugins should render again when they need
+different width allocations.
 
 Filesystem read/write callbacks are delivered later through the normal plugin dispatcher, not from filesystem worker threads. `urvim.fs.read_file`, `urvim.fs.write_file`, and `urvim.fs.read_dir` return a numeric request id immediately and call the callback once with a result payload.
 

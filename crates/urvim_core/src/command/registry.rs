@@ -151,7 +151,9 @@ impl Default for CommandRegistry {
 
 /// Returns the canonical built-in command roots.
 pub fn canonical_roots() -> &'static [&'static str] {
-    &["buffer", "action", "pick", "lsp", "pane", "app", "plugin"]
+    &[
+        "buffer", "action", "pick", "lsp", "pane", "window", "app", "plugin",
+    ]
 }
 
 /// Returns true if `name` is a canonical command root.
