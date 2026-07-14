@@ -154,8 +154,13 @@ pub enum Command {
     WriteAll,
     /// Save the current buffer or a specific buffer when provided.
     SaveBuffer(Option<BufferId>),
-    /// Save the active buffer to a new path.
-    SaveBufferAs(PathBuf),
+    /// Save the active buffer or a specific buffer to a new path.
+    SaveBufferAs {
+        /// Buffer to save, defaulting to the active buffer.
+        buffer_id: Option<BufferId>,
+        /// New path for the buffer.
+        path: PathBuf,
+    },
     /// Close a buffer from the current pane.
     CloseBuffer(Option<BufferId>),
     /// Unload a buffer from every pane and the buffer pool.
@@ -294,7 +299,7 @@ impl Command {
             | Self::OpenFiletypePicker
             | Self::OpenDocumentSymbolsPicker
             | Self::SaveBuffer(_)
-            | Self::SaveBufferAs(_)
+            | Self::SaveBufferAs { .. }
             | Self::CloseBuffer(_)
             | Self::UnloadBuffer { .. }
             | Self::LspHover

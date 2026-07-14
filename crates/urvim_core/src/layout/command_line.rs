@@ -2,6 +2,7 @@
 
 use super::Layout;
 use crate::background::{JobKind, JobToken};
+use crate::buffer::BufferId;
 use crate::command;
 use crate::event::EditorEvent;
 use crate::globals;
@@ -270,7 +271,11 @@ impl Layout {
         }
     }
 
-    pub(super) fn execute_save_as(&mut self, path: &Path) -> Result<(), String> {
+    pub(super) fn execute_save_as(
+        &mut self,
+        buffer_id: Option<BufferId>,
+        path: &Path,
+    ) -> Result<(), String> {
         if path.exists() {
             return Err(format!(
                 "Cannot write: path already exists: {}",
@@ -278,7 +283,7 @@ impl Layout {
             ));
         }
 
-        let buffer_id = self.active_buffer_view().buffer_id();
+        let buffer_id = buffer_id.unwrap_or_else(|| self.active_buffer_view().buffer_id());
         let result =
             crate::globals::with_buffer_pool(|pool| pool.save_buffer_to_path(buffer_id, path))
                 .map_err(|error| format!("Failed to write buffer to {}: {error}", path.display()));

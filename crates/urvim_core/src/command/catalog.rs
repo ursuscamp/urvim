@@ -1,4 +1,5 @@
 use super::{CommandError, CommandInvocation};
+use crate::buffer::BufferId;
 use crate::editor::{
     BoundaryMotion, DelimiterFamily, EditorAction, EditorOperation, LinewiseMotion, ModeKind,
     Operator, OperatorTarget, QuoteKind, TextObject,
@@ -40,37 +41,43 @@ fn resolve_buffer(tokens: &[String]) -> Result<Intent, CommandError> {
         "filetype" | "set-filetype" => {
             let mut args = ArgCursor::from_tokens("buffer filetype", &tokens[1..])?;
             let filetype = args.require_string("filetype")?;
+            let buffer_id = args.take_buffer_id()?;
             args.finish()?;
-            Ok(Intent::Command(Command::SetBufferFiletype(None, filetype)))
+            Ok(Intent::Command(Command::SetBufferFiletype(
+                buffer_id, filetype,
+            )))
         }
         other => Err(unknown_subcommand("buffer", other)),
     }
 }
 
 fn resolve_buffer_close(tokens: &[String]) -> Result<Intent, CommandError> {
-    let args = ArgCursor::from_tokens("buffer close", tokens)?;
+    let mut args = ArgCursor::from_tokens("buffer close", tokens)?;
+    let buffer_id = args.take_buffer_id()?;
     args.finish()?;
-    Ok(Intent::Command(Command::CloseBuffer(None)))
+    Ok(Intent::Command(Command::CloseBuffer(buffer_id)))
 }
 
 fn resolve_buffer_unload(tokens: &[String]) -> Result<Intent, CommandError> {
     let mut args = ArgCursor::from_tokens("buffer unload", tokens)?;
+    let buffer_id = args.take_buffer_id()?;
     let force = args.take_bool("force")?.unwrap_or(false);
     args.finish()?;
-    Ok(Intent::Command(Command::UnloadBuffer {
-        buffer_id: None,
-        force,
-    }))
+    Ok(Intent::Command(Command::UnloadBuffer { buffer_id, force }))
 }
 
 fn resolve_write(tokens: &[String]) -> Result<Intent, CommandError> {
     let mut args = ArgCursor::from_tokens("write", tokens)?;
     let path = args.take_string("path")?;
+    let buffer_id = args.take_buffer_id()?;
     args.finish()?;
 
     match path {
-        Some(path) => Ok(Intent::Command(Command::SaveBufferAs(PathBuf::from(path)))),
-        None => Ok(Intent::Command(Command::SaveBuffer(None))),
+        Some(path) => Ok(Intent::Command(Command::SaveBufferAs {
+            buffer_id,
+            path: PathBuf::from(path),
+        })),
+        None => Ok(Intent::Command(Command::SaveBuffer(buffer_id))),
     }
 }
 
@@ -822,6 +829,21 @@ impl ArgCursor {
     fn take_bool(&mut self, name: &str) -> Result<Option<bool>, CommandError> {
         self.take_named(name)
             .map(|value| parse_bool(&self.command, name, &value))
+            .transpose()
+    }
+
+    fn take_buffer_id(&mut self) -> Result<Option<BufferId>, CommandError> {
+        self.take_named("buffer")
+            .map(|value| {
+                value.parse::<usize>().map(BufferId::new).map_err(|_| {
+                    CommandError::InvalidArgument {
+                        command: self.command.clone(),
+                        name: "buffer".to_string(),
+                        value,
+                        expected: "non-negative integer",
+                    }
+                })
+            })
             .transpose()
     }
 

@@ -4,7 +4,6 @@ This is a list, in no particular order, of things that need to be addressed whic
 
 ## Features
 
-- should panes hold dynamic widgets?
 - build-time compiled themes
 - show code action modification in preview window
 - code action hints for the current line (with ghost text)
@@ -14,12 +13,9 @@ This is a list, in no particular order, of things that need to be addressed whic
 
 # Bugs
 
-- plugin windows on top of quit modal
-
 # Refactors
 
 # Plugin Windows
-
 
 # Plugins
 

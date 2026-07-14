@@ -97,21 +97,29 @@ Shows loaded plugin runtime states, including failures and callback health stati
 - `count=<positive-integer>` repeats countable actions. Countable commands also accept positional shorthand, for example `action cursor left 3`.
 - `register=<character>` applies the action to a register when the action supports registers.
 - `char=<character>` accepts exactly one character. Find and till commands also accept positional shorthand, for example `action cursor find-forward x`.
+- `buffer=<non-negative-integer>` targets a loaded buffer by id. Buffer ids must use the named form and cannot be positional.
 
 ## Buffer
 
 - `buffer write`
+- `buffer write buffer=<buffer-id>`
 - `buffer write path=<path>*`
+- `buffer write path=<path>* buffer=<buffer-id>`
 - `buffer write-all`
 - `buffer write_all`
 - `buffer writeall`
 - `buffer edit`
 - `buffer edit path=<path>*`
 - `buffer close`
+- `buffer close buffer=<buffer-id>`
 - `buffer unload`
 - `buffer unload force=true`
+- `buffer unload buffer=<buffer-id>`
+- `buffer unload buffer=<buffer-id> force=true`
 - `buffer filetype filetype=<filetype>*`
+- `buffer filetype filetype=<filetype>* buffer=<buffer-id>`
 - `buffer set-filetype filetype=<filetype>*`
+- `buffer set-filetype filetype=<filetype>* buffer=<buffer-id>`
 
 ## Action Mode
 

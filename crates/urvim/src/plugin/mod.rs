@@ -3890,6 +3890,123 @@ entry = "plugin.bear"
     }
 
     #[test]
+    fn command_execution_accepts_buffer_id_from_bearscript_api() {
+        let _guard = buffer_pool_lock();
+        globals::clear_editor_events_for_tests();
+        let layout = Layout::new(WindowGroup::from_buffers(vec![Buffer::new()]));
+        let buffer_id = layout.active_buffer_view().buffer_id();
+        globals::set_active_buffer_id(buffer_id);
+        let layout = Rc::new(RefCell::new(layout));
+        let mut engine = Engine::new();
+        engine.set_global(
+            "urvim",
+            urvim_module(
+                "demo".to_string(),
+                Rc::new(RefCell::new(
+                    urvim_plugin::PluginContributionRegistry::default(),
+                )),
+                Rc::new(RefCell::new(BearscriptPluginCallbacks::default())),
+                Rc::clone(&layout),
+                Rc::new(PluginFsRegistry::default()),
+                Rc::new(PluginJobRegistry::default()),
+                test_timers(),
+            ),
+        );
+
+        let value = engine
+            .eval(
+                r#"
+                let id = urvim.buffers.active()
+                urvim.command("buffer filetype rust buffer={id}")
+                "#,
+            )
+            .expect("buffer id should be accepted by command execution");
+
+        assert_eq!(value, Value::Bool(true));
+        assert_eq!(
+            globals::with_buffer(buffer_id, |buffer| buffer.syntax_name().to_string()),
+            Some("rust".to_string())
+        );
+        let events = drain_editor_events();
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(
+                    event,
+                    EditorEvent::BufferFiletypeChanged { buffer_id: id } if *id == buffer_id
+                ))
+                .count(),
+            1
+        );
+
+        engine
+            .eval(
+                r#"
+                let id = urvim.buffers.active()
+                urvim.commands.execute("buffer filetype rust buffer={id}")
+                "#,
+            )
+            .expect("unchanged filetype command should be handled");
+        assert!(drain_editor_events().iter().all(|event| !matches!(
+            event,
+            EditorEvent::BufferFiletypeChanged { buffer_id: id } if *id == buffer_id
+        )));
+    }
+
+    #[test]
+    fn command_execution_reports_missing_buffer_targets_without_events() {
+        let _guard = buffer_pool_lock();
+        globals::clear_editor_events_for_tests();
+        globals::clear_notifications();
+        let layout = Layout::new(WindowGroup::from_buffers(vec![Buffer::new()]));
+        globals::set_active_buffer_id(layout.active_buffer_view().buffer_id());
+        let mut engine = Engine::new();
+        engine.set_global(
+            "urvim",
+            urvim_module(
+                "demo".to_string(),
+                Rc::new(RefCell::new(
+                    urvim_plugin::PluginContributionRegistry::default(),
+                )),
+                Rc::new(RefCell::new(BearscriptPluginCallbacks::default())),
+                Rc::new(RefCell::new(layout)),
+                Rc::new(PluginFsRegistry::default()),
+                Rc::new(PluginJobRegistry::default()),
+                test_timers(),
+            ),
+        );
+        let missing = usize::MAX;
+
+        for command in [
+            format!("buffer close buffer={missing}"),
+            format!("buffer unload force=true buffer={missing}"),
+            format!("buffer filetype rust buffer={missing}"),
+        ] {
+            assert_eq!(
+                engine
+                    .eval(&format!("urvim.command(\"{command}\")"))
+                    .expect("missing target command should be handled"),
+                Value::Bool(true)
+            );
+            assert_eq!(
+                globals::active_notification(std::time::Instant::now())
+                    .expect("missing target should notify")
+                    .text,
+                format!("Unknown buffer: {missing}")
+            );
+            globals::clear_notifications();
+        }
+
+        assert!(drain_editor_events().iter().all(|event| !matches!(
+            event,
+            EditorEvent::BufferClosed { buffer_id }
+                | EditorEvent::BufferUnloaded { buffer_id, .. }
+                | EditorEvent::BufferFiletypeChanged { buffer_id }
+                if buffer_id.get() == missing
+        )));
+    }
+
+    #[test]
     fn command_execution_returns_false_for_unhandled_commands() {
         let _guard = buffer_pool_lock();
         let layout = Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("hello")]));

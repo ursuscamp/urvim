@@ -26,7 +26,9 @@ pub(super) fn handle_save_buffer_action_with_outcome(
     target: Option<urvim_core::buffer::BufferId>,
     force: bool,
 ) -> SaveBufferOutcome {
-    let buffer_id = target.unwrap_or_else(|| layout.active_buffer_view().buffer_id());
+    let Some(buffer_id) = resolve_buffer_target(layout, target) else {
+        return SaveBufferOutcome { handled: true };
+    };
 
     if !force
         && globals::with_buffer_pool(|pool| pool.buffer_needs_overwrite_confirmation(buffer_id))
@@ -139,8 +141,10 @@ pub(super) fn execute_command_intent(
         return true;
     }
 
-    if let Command::SaveBufferAs(path) = command {
-        let buffer_id = layout.active_buffer_view().buffer_id();
+    if let Command::SaveBufferAs { buffer_id, path } = command {
+        let Some(buffer_id) = resolve_buffer_target(layout, buffer_id) else {
+            return true;
+        };
         let handled =
             match globals::with_buffer_pool(|pool| pool.save_buffer_to_path(buffer_id, &path)) {
                 Ok(()) => {
@@ -158,7 +162,9 @@ pub(super) fn execute_command_intent(
     }
 
     if let Command::CloseBuffer(buffer_id) = command {
-        let buffer_id = buffer_id.unwrap_or_else(|| layout.active_buffer_view().buffer_id());
+        let Some(buffer_id) = resolve_buffer_target(layout, buffer_id) else {
+            return true;
+        };
         let closed = if buffer_id == layout.active_buffer_view().buffer_id() {
             layout.close_active_buffer_tab()
         } else {
@@ -172,7 +178,9 @@ pub(super) fn execute_command_intent(
     }
 
     if let Command::UnloadBuffer { buffer_id, force } = command {
-        let buffer_id = buffer_id.unwrap_or_else(|| layout.active_buffer_view().buffer_id());
+        let Some(buffer_id) = resolve_buffer_target(layout, buffer_id) else {
+            return true;
+        };
         let modified =
             globals::with_buffer(buffer_id, |buffer| buffer.is_modified()).unwrap_or(false);
         if modified && !force {
@@ -207,7 +215,13 @@ pub(super) fn execute_command_intent(
     });
     let filetype_target = match &command {
         Command::SetBufferFiletype(buffer_id, _) => {
-            Some(buffer_id.unwrap_or_else(|| layout.active_buffer_view().buffer_id()))
+            let Some(buffer_id) = resolve_buffer_target(layout, *buffer_id) else {
+                return true;
+            };
+            let syntax_name =
+                globals::with_buffer(buffer_id, |buffer| buffer.syntax_name().to_string())
+                    .expect("validated buffer should remain loaded");
+            Some((buffer_id, syntax_name))
         }
         _ => None,
     };
@@ -228,7 +242,10 @@ pub(super) fn execute_command_intent(
                 globals::enqueue_editor_event(EditorEvent::BufferOpened { buffer_id });
             }
         }
-        if let Some(buffer_id) = filetype_target {
+        if let Some((buffer_id, syntax_name)) = filetype_target
+            && globals::with_buffer(buffer_id, |buffer| buffer.syntax_name() != syntax_name)
+                .unwrap_or(false)
+        {
             globals::enqueue_editor_event(EditorEvent::BufferFiletypeChanged { buffer_id });
         }
         for buffer_id in close_targets.unwrap_or_default() {
@@ -240,6 +257,18 @@ pub(super) fn execute_command_intent(
         });
     }
     handled
+}
+
+fn resolve_buffer_target(
+    layout: &Layout,
+    buffer_id: Option<urvim_core::buffer::BufferId>,
+) -> Option<urvim_core::buffer::BufferId> {
+    let buffer_id = buffer_id.unwrap_or_else(|| layout.active_buffer_view().buffer_id());
+    if globals::with_buffer(buffer_id, |_| ()).is_none() {
+        urvim_core::notify_error!("Unknown buffer: {}", buffer_id.get());
+        return None;
+    }
+    Some(buffer_id)
 }
 
 fn closed_pane_buffer_ids(
@@ -589,6 +618,7 @@ pub(super) fn raw_paste_action_for_mode(mode: ModeKind, text: String) -> Option<
 mod tests {
     use super::*;
     use urvim_core::buffer::Buffer;
+    use urvim_core::ui::Command;
     use urvim_core::window_group::WindowGroup;
 
     #[test]
@@ -605,5 +635,43 @@ mod tests {
         for buffer_id in layout.active_window_group().buffer_ids() {
             assert!(ids.contains(&buffer_id));
         }
+    }
+
+    #[test]
+    fn save_as_targets_non_active_buffer() {
+        let mut layout = Layout::new(WindowGroup::from_buffers(vec![
+            Buffer::from_str("first"),
+            Buffer::from_str("second"),
+        ]));
+        let active = layout.active_buffer_view().buffer_id();
+        let target = layout
+            .active_window_group()
+            .buffer_ids()
+            .into_iter()
+            .find(|buffer_id| *buffer_id != active)
+            .expect("layout should contain a non-active buffer");
+        let expected = globals::with_buffer(target, |buffer| buffer.as_str().to_string())
+            .expect("target buffer should exist");
+        let path = std::env::temp_dir().join(format!(
+            "urvim-targeted-save-as-{}-{}.txt",
+            std::process::id(),
+            target.get()
+        ));
+        std::fs::remove_file(&path).ok();
+
+        assert!(process_intent_queue(
+            &mut layout,
+            vec![Intent::Command(Command::SaveBufferAs {
+                buffer_id: Some(target),
+                path: path.clone(),
+            })],
+        ));
+
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("target should be written"),
+            expected
+        );
+        assert!(globals::with_buffer(active, |buffer| buffer.path().is_none()).unwrap_or(false));
+        std::fs::remove_file(path).ok();
     }
 }

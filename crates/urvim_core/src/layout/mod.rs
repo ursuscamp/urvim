@@ -852,13 +852,15 @@ impl Layout {
             // Saving a single buffer is coordinated by the application layer so it can
             // perform overwrite confirmation and emit plugin-facing editor events.
             Command::SaveBuffer(_) => false,
-            Command::SaveBufferAs(path) => self.execute_save_as(path.as_path()).map_or_else(
-                |error| {
-                    crate::notify_error!("Failed to write buffer to {:?}: {}", path, error);
-                    true
-                },
-                |_| true,
-            ),
+            Command::SaveBufferAs { buffer_id, path } => self
+                .execute_save_as(*buffer_id, path.as_path())
+                .map_or_else(
+                    |error| {
+                        crate::notify_error!("Failed to write buffer to {:?}: {}", path, error);
+                        true
+                    },
+                    |_| true,
+                ),
             Command::CloseBuffer(_) | Command::UnloadBuffer { .. } => true,
             Command::OverwriteBuffer(target) => {
                 let buffer_id = (*target).unwrap_or_else(|| self.active_buffer_view().buffer_id());

@@ -171,6 +171,16 @@ The global `urvim` module exposes the APIs below. All arguments and return value
 
 Keymap modes are `normal`, `insert`, `visual`, `visual_line` (or `visual-line`), and `resizing` (or `resize`). Keymap right-hand sides are urvim command lines. The optional keymap options map is currently reserved and must be empty.
 
+Buffer commands accept a named `buffer=<buffer-id>` argument, allowing ids returned by the buffer and window APIs to target non-active buffers. BearScript string interpolation can construct the command line:
+
+```text
+let buffer_id = urvim.windows.buffer(window_id)
+urvim.command("buffer write buffer={buffer_id}")
+urvim.command("buffer filetype rust buffer={buffer_id}")
+```
+
+`urvim.command` and `urvim.commands.execute` return whether the command was handled, not whether the requested operation succeeded. Runtime failures such as an unknown buffer id are reported through editor notifications.
+
 ### Registers and Themes
 
 - `urvim.registers.get(name) -> string`

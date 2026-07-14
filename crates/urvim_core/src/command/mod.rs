@@ -307,6 +307,7 @@ fn quote_command_token(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::buffer::BufferId;
     use crate::config::Config;
     use crate::editor::ModeKind;
     use crate::ui::Command;
@@ -330,11 +331,17 @@ mod tests {
     fn resolve_write_aliases() {
         assert!(matches!(
             parse("write notes.txt").expect("write should resolve"),
-            Intent::Command(Command::SaveBufferAs(_))
+            Intent::Command(Command::SaveBufferAs {
+                buffer_id: None,
+                ..
+            })
         ));
         assert!(matches!(
             parse("buffer write path=notes.txt").expect("buffer write should resolve"),
-            Intent::Command(Command::SaveBufferAs(_))
+            Intent::Command(Command::SaveBufferAs {
+                buffer_id: None,
+                ..
+            })
         ));
         assert!(matches!(
             parse("buffer edit").expect("buffer edit should resolve"),
@@ -362,6 +369,65 @@ mod tests {
             parse("quit").expect("quit should resolve"),
             Intent::Command(Command::Quit)
         ));
+    }
+
+    #[test]
+    fn resolve_buffer_commands_with_explicit_buffer() {
+        let buffer_id = BufferId::new(42);
+
+        assert_eq!(
+            parse("buffer write buffer=42").expect("targeted write should resolve"),
+            Intent::Command(Command::SaveBuffer(Some(buffer_id)))
+        );
+        assert_eq!(
+            parse("buffer write notes.txt buffer=42").expect("targeted write-as should resolve"),
+            Intent::Command(Command::SaveBufferAs {
+                buffer_id: Some(buffer_id),
+                path: PathBuf::from("notes.txt"),
+            })
+        );
+        assert_eq!(
+            parse("buffer close buffer=42").expect("targeted close should resolve"),
+            Intent::Command(Command::CloseBuffer(Some(buffer_id)))
+        );
+        assert_eq!(
+            parse("buffer unload force=true buffer=42").expect("targeted unload should resolve"),
+            Intent::Command(Command::UnloadBuffer {
+                buffer_id: Some(buffer_id),
+                force: true,
+            })
+        );
+        assert_eq!(
+            parse("buffer filetype rust buffer=42").expect("targeted filetype should resolve"),
+            Intent::Command(Command::SetBufferFiletype(
+                Some(buffer_id),
+                "rust".to_string(),
+            ))
+        );
+        assert_eq!(
+            parse("write buffer=42").expect("targeted write alias should resolve"),
+            Intent::Command(Command::SaveBuffer(Some(buffer_id)))
+        );
+    }
+
+    #[test]
+    fn buffer_selector_is_named_and_non_negative() {
+        assert!(matches!(
+            parse("buffer close 42"),
+            Err(CommandError::UnexpectedArgument { .. })
+        ));
+        assert!(matches!(
+            parse("buffer close buffer=-1"),
+            Err(CommandError::InvalidArgument {
+                name,
+                expected: "non-negative integer",
+                ..
+            }) if name == "buffer"
+        ));
+        assert_eq!(
+            parse("buffer close buffer=0").expect("zero is a valid buffer id"),
+            Intent::Command(Command::CloseBuffer(Some(BufferId::new(0))))
+        );
     }
 
     #[test]
@@ -489,7 +555,7 @@ mod tests {
         assert_eq!(intents.len(), 2);
         assert!(matches!(
             &intents[0],
-            Intent::Command(Command::SaveBufferAs(path))
+            Intent::Command(Command::SaveBufferAs { buffer_id: None, path })
                 if path == &PathBuf::from("notes/today file.txt")
         ));
         assert!(matches!(
