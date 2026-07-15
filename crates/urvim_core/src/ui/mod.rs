@@ -181,6 +181,15 @@ pub enum Command {
         /// Raw command arguments.
         args: Vec<String>,
     },
+    /// Resolve a plugin picker with the selected opaque item.
+    PluginPickerSelect {
+        /// Plugin that owns the picker.
+        plugin: String,
+        /// Picker instance identity.
+        picker_id: crate::ui::picker::plugin::PluginPickerId,
+        /// Selected item identity.
+        item_id: crate::ui::picker::plugin::PluginPickerItemId,
+    },
     /// Show loaded plugin runtime statuses.
     PluginStatus,
     /// Run an LSP hover query on the active buffer.
@@ -317,6 +326,7 @@ impl Command {
             | Self::SplitVertical
             | Self::SplitHorizontal => KeymapInheritance::Editor,
             Self::EnqueueNotification { .. }
+            | Self::PluginPickerSelect { .. }
             | Self::OverwriteBuffer(_)
             | Self::LspRename(_)
             | Self::ApplyCompletion(_)

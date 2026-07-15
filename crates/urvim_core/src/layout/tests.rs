@@ -299,6 +299,55 @@ fn test_layout_file_picker_opens_and_closes() {
 }
 
 #[test]
+fn test_layout_plugin_picker_selects_and_cancels() {
+    use crate::ui::picker::plugin::{PluginPickerCancelled, PluginPickerItem};
+
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("one")]);
+    let (sender, receiver) = std::sync::mpsc::channel();
+    layout.open_plugin_picker(
+        "demo".to_string(),
+        4,
+        "Branches".to_string(),
+        vec![PluginPickerItem {
+            id: 8,
+            key: "main".to_string(),
+            label: "main".to_string(),
+            detail: Some("origin/main".to_string()),
+        }],
+        sender,
+    );
+    layout.route_ui_event(&UiEvent::Tick);
+
+    assert_eq!(
+        layout.route_ui_event(&UiEvent::Key(key(KeyCode::Enter))),
+        UiEventResult::Handled(vec![Intent::Command(Command::PluginPickerSelect {
+            plugin: "demo".to_string(),
+            picker_id: 4,
+            item_id: 8,
+        })])
+    );
+    assert!(!layout.plugin_picker_is_open());
+    assert!(receiver.try_recv().is_err());
+
+    let (sender, receiver) = std::sync::mpsc::channel();
+    layout.open_plugin_picker(
+        "demo".to_string(),
+        5,
+        "Empty".to_string(),
+        Vec::new(),
+        sender,
+    );
+    layout.route_ui_event(&UiEvent::Key(key(KeyCode::Esc)));
+    assert_eq!(
+        receiver.try_recv().expect("cancellation"),
+        PluginPickerCancelled {
+            plugin: "demo".to_string(),
+            picker_id: 5,
+        }
+    );
+}
+
+#[test]
 fn test_picker_keeps_local_text_input_before_inherited_application_mappings() {
     let _config_guard = globals::set_test_config(Config {
         keymaps: KeymapsConfig {

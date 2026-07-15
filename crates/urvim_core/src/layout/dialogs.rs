@@ -12,6 +12,7 @@ use crate::ui::picker::file::FilePickerWidget;
 use crate::ui::picker::filetype::FiletypePickerWidget;
 use crate::ui::picker::git::GitPickerWidget;
 use crate::ui::picker::grep::GrepPickerWidget;
+use crate::ui::picker::plugin::PluginPickerWidget;
 use crate::ui::picker::references::ReferencesPickerWidget;
 use crate::window::Position;
 
@@ -32,6 +33,7 @@ pub(in crate::layout) struct Dialogs {
     pub filetype_picker: Option<FiletypePickerWidget>,
     pub git_picker: Option<GitPickerWidget>,
     pub grep_picker: Option<GrepPickerWidget>,
+    pub plugin_picker: Option<PluginPickerWidget>,
     pub confirmation_box: Option<ConfirmationBox>,
     pub hover: Option<HoverWidget>,
     pub diagnostic_hover: Option<DiagnosticHoverWidget>,
@@ -54,6 +56,7 @@ impl Default for Dialogs {
             filetype_picker: None,
             git_picker: None,
             grep_picker: None,
+            plugin_picker: None,
             confirmation_box: None,
             hover: None,
             diagnostic_hover: None,
@@ -104,6 +107,11 @@ impl Dialogs {
             })
             .or_else(|| self.git_picker.as_ref().and_then(|picker| picker.cursor()))
             .or_else(|| {
+                self.plugin_picker
+                    .as_ref()
+                    .and_then(|picker| picker.cursor())
+            })
+            .or_else(|| {
                 self.lsp_rename_prompt
                     .as_ref()
                     .and_then(|prompt| prompt.cursor())
@@ -128,6 +136,7 @@ impl Dialogs {
         self.filetype_picker = None;
         self.git_picker = None;
         self.grep_picker = None;
+        self.plugin_picker = None;
         self.confirmation_box = None;
         self.hover = None;
         self.diagnostic_hover = None;

@@ -132,6 +132,22 @@ pub(super) fn execute_command_intent(
         return true;
     }
 
+    if let Command::PluginPickerSelect {
+        plugin,
+        picker_id,
+        item_id,
+    } = command
+    {
+        let Some(plugin_runtime) = plugin_runtime else {
+            return true;
+        };
+        if let Err(error) = plugin_runtime.run_picker_selection(&plugin, picker_id, item_id) {
+            tracing::warn!(plugin, picker_id, error = %error, "plugin picker selection failed");
+            urvim_core::notify_warn!("Plugin {plugin} picker {picker_id} failed: {error}");
+        }
+        return true;
+    }
+
     if matches!(command, Command::PluginStatus) {
         let status = plugin_runtime
             .as_ref()
@@ -589,6 +605,22 @@ pub(super) fn process_intents_with_shared_layout(
                     );
                     true
                 }
+            },
+            Intent::Command(Command::PluginPickerSelect {
+                plugin,
+                picker_id,
+                item_id,
+            }) => match plugin_runtime.as_deref_mut() {
+                Some(runtime) => {
+                    if let Err(error) = runtime.run_picker_selection(&plugin, picker_id, item_id) {
+                        tracing::warn!(plugin, picker_id, error = %error, "plugin picker selection failed");
+                        urvim_core::notify_warn!(
+                            "Plugin {plugin} picker {picker_id} failed: {error}"
+                        );
+                    }
+                    true
+                }
+                None => true,
             },
             other => process_intent_queue_with_plugin_runtime(
                 &mut layout.borrow_mut(),

@@ -167,6 +167,7 @@ impl Layout {
         self.render_file_picker_overlay(screen, origin, size);
         self.render_filetype_picker_overlay(screen, origin, size);
         self.render_git_picker_overlay(screen, origin, size);
+        self.render_plugin_picker_overlay(screen, origin, size);
         self.render_command_line_overlay(screen, origin, size);
         self.render_lsp_rename_overlay(screen, origin, size);
         self.render_confirmation_box_overlay(screen, origin, size);
@@ -304,6 +305,15 @@ impl Layout {
         let ctx = UiContext;
         let rect = UiRect::new(origin, size);
         picker.render_widget(screen, rect, &ctx);
+    }
+
+    fn render_plugin_picker_overlay(&mut self, screen: &mut Screen, origin: Position, size: Size) {
+        let Some(picker) = self.plugin_picker_mut() else {
+            return;
+        };
+
+        let ctx = UiContext;
+        picker.render_widget(screen, UiRect::new(origin, size), &ctx);
     }
 
     fn render_command_line_overlay(&mut self, screen: &mut Screen, origin: Position, size: Size) {

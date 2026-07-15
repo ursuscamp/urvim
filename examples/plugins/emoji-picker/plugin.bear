@@ -1,0 +1,61 @@
+let emoji_items = [
+    { "key": "grinning-face", "label": "😀 Grinning face", "detail": "smile happy face", "value": "😀" },
+    { "key": "tears-of-joy", "label": "😂 Face with tears of joy", "detail": "laugh funny cry", "value": "😂" },
+    { "key": "smiling-eyes", "label": "😊 Smiling face with smiling eyes", "detail": "happy blush", "value": "😊" },
+    { "key": "heart-eyes", "label": "😍 Smiling face with heart-eyes", "detail": "love crush", "value": "😍" },
+    { "key": "thinking-face", "label": "🤔 Thinking face", "detail": "question consider hmm", "value": "🤔" },
+    { "key": "sunglasses", "label": "😎 Smiling face with sunglasses", "detail": "cool summer", "value": "😎" },
+    { "key": "partying-face", "label": "🥳 Partying face", "detail": "celebrate birthday", "value": "🥳" },
+    { "key": "crying-face", "label": "😢 Crying face", "detail": "sad tear", "value": "😢" },
+    { "key": "angry-face", "label": "😡 Pouting face", "detail": "angry mad", "value": "😡" },
+    { "key": "thumbs-up", "label": "👍 Thumbs up", "detail": "yes approve like", "value": "👍" },
+    { "key": "thumbs-down", "label": "👎 Thumbs down", "detail": "no disapprove dislike", "value": "👎" },
+    { "key": "clapping-hands", "label": "👏 Clapping hands", "detail": "applause congratulations", "value": "👏" },
+    { "key": "raising-hands", "label": "🙌 Raising hands", "detail": "hooray celebrate", "value": "🙌" },
+    { "key": "eyes", "label": "👀 Eyes", "detail": "look watch", "value": "👀" },
+    { "key": "red-heart", "label": "❤️ Red heart", "detail": "love favorite", "value": "❤️" },
+    { "key": "fire", "label": "🔥 Fire", "detail": "hot lit flame", "value": "🔥" },
+    { "key": "sparkles", "label": "✨ Sparkles", "detail": "shine magic clean", "value": "✨" },
+    { "key": "party-popper", "label": "🎉 Party popper", "detail": "celebrate congratulations", "value": "🎉" },
+    { "key": "check-mark", "label": "✅ Check mark button", "detail": "yes done success", "value": "✅" },
+    { "key": "cross-mark", "label": "❌ Cross mark", "detail": "no error failure", "value": "❌" },
+    { "key": "rocket", "label": "🚀 Rocket", "detail": "launch ship deploy", "value": "🚀" },
+    { "key": "light-bulb", "label": "💡 Light bulb", "detail": "idea hint", "value": "💡" },
+    { "key": "bug", "label": "🐛 Bug", "detail": "insect issue debug", "value": "🐛" },
+    { "key": "warning", "label": "⚠️ Warning", "detail": "alert caution", "value": "⚠️" },
+    { "key": "pushpin", "label": "📌 Pushpin", "detail": "pin location important", "value": "📌" },
+    { "key": "memo", "label": "📝 Memo", "detail": "write note document", "value": "📝" },
+    { "key": "laptop", "label": "💻 Laptop", "detail": "computer code work", "value": "💻" },
+    { "key": "glowing-star", "label": "🌟 Glowing star", "detail": "favorite shine", "value": "🌟" },
+    { "key": "handshake", "label": "🤝 Handshake", "detail": "agreement deal", "value": "🤝" },
+    { "key": "folded-hands", "label": "🙏 Folded hands", "detail": "please thanks pray", "value": "🙏" }
+]
+
+fn init() {
+    urvim.commands.register("open", open, "Open the emoji picker")
+}
+
+fn open(args) {
+    urvim.ui.pickers.open({
+        "title": "Emoji",
+        "items": emoji_items,
+        "on_select": insert_emoji
+    })
+}
+
+fn insert_emoji(emoji) {
+    let window_id = urvim.windows.active()
+    if window_id == null {
+        urvim.ui.show_message("No active editor window", { "level": "warn" })
+        return
+    }
+
+    let buffer_id = urvim.windows.buffer(window_id)
+    let cursor = urvim.windows.cursor(window_id)
+    urvim.buffers.replace_range(buffer_id, {
+        "start": cursor,
+        "end": cursor
+    }, emoji)
+    let next_col = cursor["col"] + urvim.strings.byte_len(emoji)
+    urvim.windows.set_cursor(window_id, cursor["row"], next_col)
+}

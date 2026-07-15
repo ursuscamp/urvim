@@ -6,6 +6,7 @@ mod file;
 mod filetype;
 mod git;
 mod grep;
+mod plugin;
 mod references;
 
 use super::Layout;

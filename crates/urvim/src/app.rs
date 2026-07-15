@@ -111,6 +111,10 @@ pub(super) fn run(cli: Cli) -> io::Result<()> {
             needs_redraw = true;
         }
 
+        if plugin_runtime.dispatch_picker_events() {
+            needs_redraw = true;
+        }
+
         if plugin_runtime.refresh_plugin_syntax() {
             needs_redraw = true;
         }
@@ -166,6 +170,9 @@ pub(super) fn run(cli: Cli) -> io::Result<()> {
                     needs_redraw = true;
                 }
                 if plugin_runtime.dispatch_timer_events() {
+                    needs_redraw = true;
+                }
+                if plugin_runtime.dispatch_picker_events() {
                     needs_redraw = true;
                 }
                 if plugin_runtime.refresh_plugin_syntax() {

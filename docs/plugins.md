@@ -276,6 +276,59 @@ Invalid buffer ids, rows, columns, and argument shapes raise errors. `urvim.buff
 
 Window rows and columns are 0-based. Window ids are stable pane ids for currently visible editor windows; an id stays valid for the life of that pane and becomes invalid after the pane is closed. Invalid window ids raise errors. `urvim.windows.open_buffer(buffer_id)` mirrors normal editor behavior by activating an existing visible buffer tab or opening a tab for a loaded hidden buffer in the active window.
 
+### Custom Pickers
+
+`urvim.ui.pickers` opens a modal picker backed by items supplied by a plugin:
+
+- `urvim.ui.pickers.open(opts) -> picker_id`
+- `urvim.ui.pickers.set_items(picker_id, items)`
+- `urvim.ui.pickers.append_items(picker_id, items)`
+- `urvim.ui.pickers.close(picker_id)`
+
+```text
+fn select_branch(branch) {
+    urvim.ui.show_message("Selected {branch}")
+}
+
+fn cancel_branch_picker() {
+    urvim.ui.show_message("No branch selected")
+}
+
+let picker_id = urvim.ui.pickers.open({
+    "title": "Branches",
+    "items": [],
+    "on_select": select_branch,
+    "on_cancel": cancel_branch_picker
+})
+
+urvim.ui.pickers.append_items(picker_id, [{
+    "key": "main",
+    "label": "main",
+    "detail": "origin/main",
+    "value": "main"
+}])
+```
+
+`title` and `items` are optional. `on_select` is required and receives the
+selected item's unchanged `value`. `on_cancel` is optional and is called after
+Esc, Ctrl-C, `close`, or replacement by another dialog. A picker callback is
+delivered at most once.
+
+Each item requires `label` and `value`. `detail` is optional and is displayed
+on the right. Labels and details are both searched. The optional string `key`
+preserves the highlighted item across `set_items` calls; keys must be unique in
+a picker. Without a key, urvim assigns an identity valid only for that update.
+Tab switches between fuzzy and exact matching.
+
+`set_items` replaces the current item set and `append_items` adds to it, so job,
+filesystem, and timer callbacks can update an open picker. Picker ids are owned
+by the creating plugin and become invalid when the picker closes. Only one
+modal picker can be open at a time; opening another dialog cancels the current
+custom picker.
+
+See `examples/plugins/emoji-picker` for a complete picker that inserts the
+selected value into the active buffer.
+
 ### Floating Plugin Windows
 
 `urvim.ui.windows` creates transient floating windows that are separate from

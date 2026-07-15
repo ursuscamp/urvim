@@ -1,0 +1,4 @@
+name = "emoji-picker"
+version = "0.1.0"
+description = "Demonstrates a searchable plugin-owned emoji picker."
+entry = "plugin.bear"

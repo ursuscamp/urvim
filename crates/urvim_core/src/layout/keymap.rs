@@ -31,6 +31,7 @@ impl Layout {
             || self.git_picker_is_open()
             || self.file_picker_is_open()
             || self.filetype_picker_is_open()
+            || self.plugin_picker_is_open()
     }
 
     pub(super) fn clear_modal_inherited_keys(&mut self) {

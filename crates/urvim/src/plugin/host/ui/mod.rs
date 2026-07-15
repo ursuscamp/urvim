@@ -5,20 +5,26 @@ use std::rc::Rc;
 use bearscript::Value;
 use urvim_core::globals;
 
+use super::super::callbacks::BearscriptPluginCallbacks;
 use super::super::{SharedLayout, native_fn};
 
 mod line_format;
 mod panes;
+mod pickers;
 mod windows;
 
 pub(in crate::plugin) fn ui_module(
     plugin: String,
     contributions: Rc<RefCell<urvim_plugin::PluginContributionRegistry>>,
     layout: SharedLayout,
+    callbacks: Rc<RefCell<BearscriptPluginCallbacks>>,
 ) -> Value {
     let panes_plugin = plugin.clone();
     let panes_contributions = Rc::clone(&contributions);
     let panes_layout = Rc::clone(&layout);
+    let windows_plugin = plugin.clone();
+    let windows_contributions = Rc::clone(&contributions);
+    let windows_layout = Rc::clone(&layout);
     Value::Module(
         HashMap::from([
             (
@@ -33,11 +39,15 @@ pub(in crate::plugin) fn ui_module(
             ("line_format".to_string(), line_format::line_format_module()),
             (
                 "windows".to_string(),
-                windows::windows_module(plugin, contributions, layout),
+                windows::windows_module(windows_plugin, windows_contributions, windows_layout),
             ),
             (
                 "panes".to_string(),
                 panes::panes_module(panes_plugin, panes_contributions, panes_layout),
+            ),
+            (
+                "pickers".to_string(),
+                pickers::pickers_module(plugin, callbacks, layout),
             ),
         ])
         .into(),

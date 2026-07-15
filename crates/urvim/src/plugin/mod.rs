@@ -10,6 +10,7 @@ mod fs;
 mod health;
 mod host;
 mod jobs;
+mod pickers;
 mod timers;
 
 use crate::actions::{execute_action_intent, execute_command_intent};
@@ -19,6 +20,7 @@ use urvim_core::buffer::{BufferId, Cursor, SyntaxSpan, TextRef};
 use urvim_core::event::EditorEvent;
 use urvim_core::globals;
 use urvim_core::layout::Layout;
+use urvim_core::ui::picker::plugin::PluginPickerCancelled;
 use urvim_core::ui::{Command, Intent};
 
 use callbacks::{BearscriptPlugin, BearscriptPluginCallbacks};
@@ -27,6 +29,7 @@ use fs::{PluginFsEvent, PluginFsRegistry, fs_event_id, fs_event_to_value};
 use health::{PluginHealth, PluginHealthSummary, slow_threshold};
 use host::{native_fn, urvim_module};
 use jobs::{PluginJobEvent, PluginJobRegistry, job_event_to_value};
+use pickers::PluginPickerEvents;
 use timers::{PluginTimerEvent, PluginTimerKind, PluginTimerRegistry};
 
 pub(super) type SharedLayout = Rc<RefCell<Layout>>;
@@ -40,6 +43,7 @@ pub(super) struct BearscriptPluginRuntime {
     fs: Rc<PluginFsRegistry>,
     jobs: Rc<PluginJobRegistry>,
     timers: Rc<PluginTimerRegistry>,
+    picker_events: PluginPickerEvents,
 }
 
 impl BearscriptPluginRuntime {
@@ -56,6 +60,7 @@ impl BearscriptPluginRuntime {
             fs: Rc::new(PluginFsRegistry::default()),
             jobs: Rc::new(PluginJobRegistry::default()),
             timers: Rc::new(PluginTimerRegistry::default()),
+            picker_events: PluginPickerEvents::default(),
         }
     }
 
@@ -75,6 +80,7 @@ impl BearscriptPluginRuntime {
             fs: Rc::new(PluginFsRegistry::default()),
             jobs: Rc::new(PluginJobRegistry::default()),
             timers: Rc::new(PluginTimerRegistry::default()),
+            picker_events: PluginPickerEvents::default(),
         };
 
         for (plugin_name, plugin) in registry.iter() {
@@ -401,6 +407,92 @@ impl BearscriptPluginRuntime {
         dispatched
     }
 
+    /// Dispatches queued plugin picker cancellation callbacks on the main thread.
+    pub(super) fn dispatch_picker_events(&mut self) -> bool {
+        let mut dispatched = false;
+        while let Some(event) = self.picker_events.poll() {
+            dispatched |= self.dispatch_picker_cancellation(event);
+        }
+        dispatched
+    }
+
+    /// Runs a plugin picker selection callback.
+    pub(super) fn run_picker_selection(
+        &mut self,
+        plugin: &str,
+        picker_id: u64,
+        item_id: u64,
+    ) -> Result<(), String> {
+        let plugin_runtime = self
+            .plugins
+            .get_mut(plugin)
+            .ok_or_else(|| format!("plugin {plugin:?} is not loaded"))?;
+        let picker = plugin_runtime
+            .callbacks
+            .borrow_mut()
+            .pickers
+            .remove(&picker_id)
+            .ok_or_else(|| format!("plugin picker {picker_id} is not open"))?;
+        let value = picker
+            .values
+            .get(&item_id)
+            .cloned()
+            .ok_or_else(|| format!("plugin picker item {item_id} is stale"))?;
+        let started = Instant::now();
+        let result = plugin_runtime
+            .engine
+            .call_value(picker.on_select, vec![value])
+            .map(|_| ())
+            .map_err(|error| error.to_string());
+        self.record_callback(
+            plugin,
+            format!("picker {picker_id} select"),
+            started.elapsed(),
+        );
+        if let Err(error) = &result {
+            self.record_error(plugin, error.clone());
+        }
+        result
+    }
+
+    fn dispatch_picker_cancellation(&mut self, event: PluginPickerCancelled) -> bool {
+        let Some(plugin_runtime) = self.plugins.get_mut(&event.plugin) else {
+            return false;
+        };
+        let Some(picker) = plugin_runtime
+            .callbacks
+            .borrow_mut()
+            .pickers
+            .remove(&event.picker_id)
+        else {
+            return false;
+        };
+        let Some(callback) = picker.on_cancel else {
+            return true;
+        };
+        let started = Instant::now();
+        let result = plugin_runtime
+            .engine
+            .call_value(callback, vec![])
+            .map(|_| ())
+            .map_err(|error| error.to_string());
+        self.record_callback(
+            &event.plugin,
+            format!("picker {} cancel", event.picker_id),
+            started.elapsed(),
+        );
+        if let Err(error) = result {
+            self.record_error(&event.plugin, error.clone());
+            tracing::warn!(plugin = event.plugin, picker_id = event.picker_id, error = %error, "BearScript picker callback failed");
+            urvim_core::notify_warn!(
+                "Plugin {} picker {} callback failed: {error}",
+                event.plugin,
+                event.picker_id
+            );
+        }
+        true
+    }
+
     fn dispatch_fs_event(&mut self, event: PluginFsEvent) -> bool {
         let request_id = fs_event_id(&event);
         let Some(plugin) = self.fs.mark_finished(request_id) else {
@@ -537,6 +629,7 @@ impl BearscriptPluginRuntime {
         let mut engine = Engine::new();
         engine.set_current_dir(plugin.root().to_path_buf());
         let callbacks = Rc::new(RefCell::new(BearscriptPluginCallbacks::default()));
+        callbacks.borrow_mut().picker_cancellation_sender = Some(self.picker_events.sender());
         engine.set_global(
             "urvim",
             urvim_module(
@@ -559,6 +652,9 @@ impl BearscriptPluginRuntime {
             self.layout
                 .borrow_mut()
                 .close_plugin_panes_owned(plugin_name);
+            self.layout
+                .borrow_mut()
+                .close_plugin_picker_owned(plugin_name);
             return Err(error.to_string());
         }
         let started = Instant::now();
@@ -572,6 +668,9 @@ impl BearscriptPluginRuntime {
             self.layout
                 .borrow_mut()
                 .close_plugin_panes_owned(plugin_name);
+            self.layout
+                .borrow_mut()
+                .close_plugin_picker_owned(plugin_name);
             return Err(error);
         }
 
@@ -5090,6 +5189,86 @@ bg = "bg"
     }
 
     #[test]
+    fn ui_pickers_dynamic_items_select_original_value() {
+        globals::clear_notifications();
+        let mut runtime = runtime_with_script(
+            r#"
+            fn selected(value) {
+                urvim.ui.show_message(value)
+            }
+            fn init() {
+                let id = urvim.ui.pickers.open({
+                    "title": "Branches",
+                    "on_select": selected
+                })
+                urvim.ui.pickers.set_items(id, [{
+                    "key": "main",
+                    "label": "main",
+                    "detail": "origin/main",
+                    "value": "selected-main"
+                }])
+                urvim.ui.pickers.append_items(id, [{
+                    "key": "feature",
+                    "label": "feature",
+                    "value": "selected-feature"
+                }])
+            }
+            "#,
+        );
+        let layout = Rc::clone(&runtime.layout);
+        layout
+            .borrow_mut()
+            .route_ui_event(&urvim_core::ui::UiEvent::Tick);
+        let result = layout
+            .borrow_mut()
+            .route_ui_event(&urvim_core::ui::UiEvent::Key(Key::new(KeyCode::Enter)));
+
+        assert!(crate::actions::handle_ui_result_with_shared_layout(
+            &layout,
+            &mut runtime,
+            result,
+        ));
+        assert_eq!(
+            globals::active_notification(Instant::now())
+                .expect("selection notification")
+                .text,
+            "selected-main"
+        );
+    }
+
+    #[test]
+    fn ui_pickers_escape_dispatches_cancel_callback_once() {
+        globals::clear_notifications();
+        let mut runtime = runtime_with_script(
+            r#"
+            fn cancelled() {
+                urvim.ui.show_message("cancelled")
+            }
+            fn selected(value) {}
+            fn init() {
+                urvim.ui.pickers.open({
+                    "on_select": selected,
+                    "on_cancel": cancelled
+                })
+            }
+            "#,
+        );
+        let layout = Rc::clone(&runtime.layout);
+
+        layout
+            .borrow_mut()
+            .route_ui_event(&urvim_core::ui::UiEvent::Key(Key::new(KeyCode::Esc)));
+        assert!(runtime.dispatch_picker_events());
+        assert!(!runtime.dispatch_picker_events());
+        assert_eq!(
+            globals::active_notification(Instant::now())
+                .expect("cancel notification")
+                .text,
+            "cancelled"
+        );
+    }
+
+    #[test]
     fn ui_panes_module_creates_targeted_pane_and_content() {
         let _guard = buffer_pool_lock();
         let layout = shared_test_layout();
@@ -5405,6 +5584,58 @@ bg = "bg"
             .expect_err("invalid theme tags should be rejected")
             .to_string();
         assert!(error.contains("sections[0].style is invalid"));
+    }
+
+    #[test]
+    fn emoji_picker_example_inserts_selected_emoji_at_cursor() {
+        let _guard = buffer_pool_lock();
+        let plugin_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../examples/plugins/emoji-picker");
+        let plugin_config = std::collections::BTreeMap::from([(
+            "emoji-picker".to_string(),
+            urvim_plugin::PluginConfigEntry {
+                enabled: true,
+                path: plugin_root,
+            },
+        )]);
+        let registry = urvim_plugin::PluginRegistry::load_from_config(&plugin_config)
+            .expect("emoji picker registry should load");
+        let layout = Rc::new(RefCell::new(Layout::new(WindowGroup::from_buffers(vec![
+            Buffer::from_str("x"),
+        ]))));
+        let buffer_id = layout.borrow().active_buffer_view().buffer_id();
+        let plugin = registry
+            .get("emoji-picker")
+            .expect("emoji picker plugin should be present");
+        let mut runtime = BearscriptPluginRuntime::empty(Rc::clone(&layout));
+        runtime
+            .load_plugin("emoji-picker", plugin)
+            .expect("emoji picker plugin should load");
+
+        runtime
+            .run_command("emoji-picker", "open", &[])
+            .expect("emoji picker command should run");
+        assert!(layout.borrow().plugin_picker_is_open());
+        layout
+            .borrow_mut()
+            .route_ui_event(&urvim_core::ui::UiEvent::Tick);
+        let result = layout
+            .borrow_mut()
+            .route_ui_event(&urvim_core::ui::UiEvent::Key(Key::new(KeyCode::Enter)));
+        assert!(crate::actions::handle_ui_result_with_shared_layout(
+            &layout,
+            &mut runtime,
+            result,
+        ));
+
+        assert_eq!(
+            globals::with_buffer(buffer_id, |buffer| buffer.as_str()),
+            Some("😀x".to_string())
+        );
+        assert_eq!(
+            layout.borrow().active_buffer_view().cursor(),
+            Cursor::new(0, 4)
+        );
     }
 
     #[test]

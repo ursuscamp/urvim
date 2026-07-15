@@ -100,6 +100,7 @@ impl UrvimModuleBuilder {
                 self.plugin.clone(),
                 Rc::clone(&self.contributions),
                 Rc::clone(&self.layout),
+                Rc::clone(&self.callbacks),
             ),
         );
         module.insert("strings".to_string(), strings_module());

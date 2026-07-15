@@ -12,6 +12,7 @@ pub mod filetype;
 pub mod git;
 pub mod grep;
 pub mod line;
+pub mod plugin;
 pub mod preview;
 pub mod query;
 pub mod references;

@@ -852,6 +852,8 @@ impl Layout {
             // Saving a single buffer is coordinated by the application layer so it can
             // perform overwrite confirmation and emit plugin-facing editor events.
             Command::SaveBuffer(_) => false,
+            // Plugin picker values and callbacks live in the application plugin runtime.
+            Command::PluginPickerSelect { .. } => false,
             Command::SaveBufferAs { buffer_id, path } => self
                 .execute_save_as(*buffer_id, path.as_path())
                 .map_or_else(
@@ -1271,6 +1273,10 @@ impl Layout {
     }
 
     fn route_picker_ui_event(&mut self, event: &UiEvent) -> UiEventResult {
+        if self.plugin_picker_is_open() {
+            return self.handle_plugin_picker_event(event);
+        }
+
         if self.buffer_picker_is_open() {
             return self.handle_buffer_picker_event(event);
         }
