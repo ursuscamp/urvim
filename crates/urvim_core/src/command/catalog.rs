@@ -1,5 +1,5 @@
 use super::{CommandError, CommandInvocation};
-use crate::buffer::BufferId;
+use crate::buffer::{Boundary, BufferId};
 use crate::editor::{
     BoundaryMotion, DelimiterFamily, EditorAction, EditorOperation, LinewiseMotion, ModeKind,
     Operator, OperatorTarget, QuoteKind, TextObject,
@@ -113,6 +113,8 @@ fn resolve_action(tokens: &[String]) -> Result<Intent, CommandError> {
         "jump" => resolve_jump(&tokens[1..]),
         "operator" => resolve_operator(&tokens[1..]),
         "surround" => resolve_surround(&tokens[1..]),
+        "viewport" => resolve_viewport(&tokens[1..]),
+        "fold" => resolve_fold(&tokens[1..]),
         other => Err(unknown_subcommand("action", other)),
     }
 }
@@ -143,6 +145,18 @@ fn resolve_cursor(tokens: &[String]) -> Result<Intent, CommandError> {
             tokens,
             true,
         )?,
+        "word-forward" => action_intent(EditorAction::forward_to(Boundary::Word), tokens, true)?,
+        "word-backward" => action_intent(EditorAction::back_to(Boundary::Word), tokens, true)?,
+        "word-end" => action_intent(EditorAction::forward_to(Boundary::WordEnd), tokens, true)?,
+        "big-word-forward" => {
+            action_intent(EditorAction::forward_to(Boundary::BigWord), tokens, true)?
+        }
+        "big-word-backward" => {
+            action_intent(EditorAction::back_to(Boundary::BigWord), tokens, true)?
+        }
+        "big-word-end" => {
+            action_intent(EditorAction::forward_to(Boundary::BigWordEnd), tokens, true)?
+        }
         "line-start" => action_intent(
             EditorAction::new(EditorOperation::MoveToLineStart),
             tokens,
@@ -432,10 +446,67 @@ fn resolve_edit_action(tokens: &[String]) -> Result<Intent, CommandError> {
             tokens,
             true,
         )?,
+        "replace-char" => {
+            let mut args = ArgCursor::from_tokens("action edit replace-char", &tokens[1..])?;
+            let target = args
+                .take_char("char")?
+                .ok_or(missing_argument("action edit replace-char", "char"))?;
+            let count = args.take_count(true)?;
+            let register = args.take_register()?;
+            args.finish()?;
+
+            let mut action = EditorAction::new(EditorOperation::ReplaceChar(target));
+            if let Some(register) = register {
+                action = action.with_register(register);
+            }
+            if let Some(count) = count {
+                action = action
+                    .with_count(count)
+                    .ok_or_else(|| CommandError::InvalidArgument {
+                        command: "action edit replace-char".to_string(),
+                        name: "count".to_string(),
+                        value: count.to_string(),
+                        expected: "countable action",
+                    })?;
+            }
+            Intent::Editor(action)
+        }
         other => return Err(unknown_subcommand("action edit", other)),
     };
 
     Ok(intent)
+}
+
+fn resolve_viewport(tokens: &[String]) -> Result<Intent, CommandError> {
+    let Some(subcommand) = tokens.first().map(String::as_str) else {
+        return Err(missing_argument("action viewport", "subcommand"));
+    };
+    let operation = match subcommand {
+        "top" => EditorOperation::ViewportCursorTop,
+        "center" => EditorOperation::ViewportCursorCenter,
+        "bottom" => EditorOperation::ViewportCursorBottom,
+        other => return Err(unknown_subcommand("action viewport", other)),
+    };
+    if let Some(argument) = tokens.get(1) {
+        return Err(unexpected_argument("action viewport", argument));
+    }
+    Ok(Intent::Editor(EditorAction::new(operation)))
+}
+
+fn resolve_fold(tokens: &[String]) -> Result<Intent, CommandError> {
+    let Some(subcommand) = tokens.first().map(String::as_str) else {
+        return Err(missing_argument("action fold", "subcommand"));
+    };
+    let operation = match subcommand {
+        "toggle" => EditorOperation::ToggleFold,
+        "open" => EditorOperation::OpenFold,
+        "close" => EditorOperation::CloseFold,
+        other => return Err(unknown_subcommand("action fold", other)),
+    };
+    if let Some(argument) = tokens.get(1) {
+        return Err(unexpected_argument("action fold", argument));
+    }
+    Ok(Intent::Editor(EditorAction::new(operation)))
 }
 
 fn resolve_mode(tokens: &[String]) -> Result<Intent, CommandError> {
@@ -470,9 +541,41 @@ fn resolve_operator(tokens: &[String]) -> Result<Intent, CommandError> {
     };
 
     let mut args = ArgCursor::from_tokens("action operator", &tokens[1..])?;
-    let target = args
-        .take_target("target")?
+    let target_name = args
+        .take_string("target")?
         .ok_or(missing_argument("action operator", "target"))?;
+    let target = match target_name.as_str() {
+        "find-forward" | "find-backward" | "till-forward" | "till-backward" => {
+            let target_char = args
+                .take_char("char")?
+                .ok_or(missing_argument("action operator", "char"))?;
+            let (kind, direction) = match target_name.as_str() {
+                "find-forward" => (
+                    crate::globals::FindKind::Find,
+                    crate::globals::Direction::Forward,
+                ),
+                "find-backward" => (
+                    crate::globals::FindKind::Find,
+                    crate::globals::Direction::Backward,
+                ),
+                "till-forward" => (
+                    crate::globals::FindKind::Till,
+                    crate::globals::Direction::Forward,
+                ),
+                "till-backward" => (
+                    crate::globals::FindKind::Till,
+                    crate::globals::Direction::Backward,
+                ),
+                _ => unreachable!(),
+            };
+            OperatorTarget::CharacterScan(crate::globals::FindState {
+                target_char,
+                kind,
+                direction,
+            })
+        }
+        _ => parse_operator_target("action operator", "target", &target_name)?,
+    };
     let count = args.take_count(true)?;
     let register = args.take_register()?;
     args.finish()?;
@@ -891,17 +994,6 @@ impl ArgCursor {
             .transpose()?)
     }
 
-    fn take_target(&mut self, name: &str) -> Result<Option<OperatorTarget>, CommandError> {
-        if let Some(value) = self.take_named(name) {
-            return Ok(Some(parse_operator_target(&self.command, name, &value)?));
-        }
-
-        Ok(self
-            .take_positional()
-            .map(|value| parse_operator_target(&self.command, name, &value))
-            .transpose()?)
-    }
-
     fn finish(self) -> Result<(), CommandError> {
         if self.next_positional < self.positionals.len() {
             return Err(unexpected_argument(
@@ -1092,6 +1184,24 @@ fn parse_operator_target(
         ))),
         "around-angle" => Ok(OperatorTarget::TextObject(TextObject::AroundBracket(
             crate::editor::BracketKind::Angle,
+        ))),
+        "inner-double-quote" => Ok(OperatorTarget::TextObject(TextObject::InnerQuote(
+            QuoteKind::Double,
+        ))),
+        "around-double-quote" => Ok(OperatorTarget::TextObject(TextObject::AroundQuote(
+            QuoteKind::Double,
+        ))),
+        "inner-single-quote" => Ok(OperatorTarget::TextObject(TextObject::InnerQuote(
+            QuoteKind::Single,
+        ))),
+        "around-single-quote" => Ok(OperatorTarget::TextObject(TextObject::AroundQuote(
+            QuoteKind::Single,
+        ))),
+        "inner-backtick" => Ok(OperatorTarget::TextObject(TextObject::InnerQuote(
+            QuoteKind::Backtick,
+        ))),
+        "around-backtick" => Ok(OperatorTarget::TextObject(TextObject::AroundQuote(
+            QuoteKind::Backtick,
         ))),
         _ => Err(CommandError::InvalidArgument {
             command: command.to_string(),

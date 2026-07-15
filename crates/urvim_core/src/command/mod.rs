@@ -307,9 +307,12 @@ fn quote_command_token(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::buffer::BufferId;
+    use crate::buffer::{Boundary, BufferId};
     use crate::config::Config;
-    use crate::editor::ModeKind;
+    use crate::editor::{
+        EditorAction, EditorOperation, ModeKind, Operator, OperatorTarget, QuoteKind, TextObject,
+    };
+    use crate::globals::{Direction, FindKind, FindState};
     use crate::ui::Command;
     use std::collections::BTreeMap;
     use std::path::PathBuf;
@@ -439,6 +442,188 @@ mod tests {
         assert!(matches!(
             parse("action cursor left count=2").expect("cursor should resolve"),
             Intent::Editor(_)
+        ));
+    }
+
+    #[test]
+    fn resolve_word_viewport_and_fold_commands() {
+        for (command, action) in [
+            (
+                "action cursor word-forward",
+                EditorAction::forward_to(Boundary::Word),
+            ),
+            (
+                "action cursor word-backward",
+                EditorAction::back_to(Boundary::Word),
+            ),
+            (
+                "action cursor word-end",
+                EditorAction::forward_to(Boundary::WordEnd),
+            ),
+            (
+                "action cursor big-word-forward",
+                EditorAction::forward_to(Boundary::BigWord),
+            ),
+            (
+                "action cursor big-word-backward",
+                EditorAction::back_to(Boundary::BigWord),
+            ),
+            (
+                "action cursor big-word-end",
+                EditorAction::forward_to(Boundary::BigWordEnd),
+            ),
+            (
+                "action viewport top",
+                EditorAction::new(EditorOperation::ViewportCursorTop),
+            ),
+            (
+                "action viewport center",
+                EditorAction::new(EditorOperation::ViewportCursorCenter),
+            ),
+            (
+                "action viewport bottom",
+                EditorAction::new(EditorOperation::ViewportCursorBottom),
+            ),
+            (
+                "action fold toggle",
+                EditorAction::new(EditorOperation::ToggleFold),
+            ),
+            (
+                "action fold open",
+                EditorAction::new(EditorOperation::OpenFold),
+            ),
+            (
+                "action fold close",
+                EditorAction::new(EditorOperation::CloseFold),
+            ),
+        ] {
+            assert_eq!(
+                parse(command).expect("command should resolve"),
+                Intent::Editor(action)
+            );
+        }
+
+        assert!(matches!(
+            parse("action cursor word-forward count=2")
+                .expect("counted word motion should resolve"),
+            Intent::Editor(action)
+                if matches!(
+                    action.kind.as_ref(),
+                    Some(EditorOperation::Count(2, inner))
+                        if matches!(
+                            inner.kind.as_ref(),
+                            Some(EditorOperation::ForwardTo(Boundary::Word))
+                        )
+                )
+        ));
+
+        assert!(matches!(
+            parse("action viewport center count=2"),
+            Err(CommandError::UnexpectedArgument { .. })
+        ));
+        assert!(matches!(
+            parse("action fold toggle count=2"),
+            Err(CommandError::UnexpectedArgument { .. })
+        ));
+    }
+
+    #[test]
+    fn resolve_replace_char_command() {
+        assert_eq!(
+            parse("action edit replace-char x").expect("replace-char should resolve"),
+            Intent::Editor(EditorAction::new(EditorOperation::ReplaceChar('x')))
+        );
+        assert!(matches!(
+            parse("action edit replace-char char=x count=3")
+                .expect("counted replace-char should resolve"),
+            Intent::Editor(action)
+                if matches!(
+                    action.kind.as_ref(),
+                    Some(EditorOperation::Count(3, inner))
+                        if matches!(inner.kind.as_ref(), Some(EditorOperation::ReplaceChar('x')))
+                )
+        ));
+        assert!(matches!(
+            parse("action edit replace-char char=xy"),
+            Err(CommandError::InvalidArgument { name, .. }) if name == "char"
+        ));
+    }
+
+    #[test]
+    fn resolve_quote_and_character_scan_operator_targets() {
+        for (name, text_object) in [
+            (
+                "inner-single-quote",
+                TextObject::InnerQuote(QuoteKind::Single),
+            ),
+            (
+                "around-single-quote",
+                TextObject::AroundQuote(QuoteKind::Single),
+            ),
+            (
+                "inner-double-quote",
+                TextObject::InnerQuote(QuoteKind::Double),
+            ),
+            (
+                "around-double-quote",
+                TextObject::AroundQuote(QuoteKind::Double),
+            ),
+            (
+                "inner-backtick",
+                TextObject::InnerQuote(QuoteKind::Backtick),
+            ),
+            (
+                "around-backtick",
+                TextObject::AroundQuote(QuoteKind::Backtick),
+            ),
+        ] {
+            assert_eq!(
+                parse(&format!("action operator delete target={name}"))
+                    .expect("quote operator target should resolve"),
+                Intent::Editor(EditorAction::operation(
+                    Operator::Delete,
+                    OperatorTarget::TextObject(text_object),
+                ))
+            );
+        }
+
+        for (name, kind, direction) in [
+            ("find-forward", FindKind::Find, Direction::Forward),
+            ("find-backward", FindKind::Find, Direction::Backward),
+            ("till-forward", FindKind::Till, Direction::Forward),
+            ("till-backward", FindKind::Till, Direction::Backward),
+        ] {
+            assert_eq!(
+                parse(&format!("action operator delete target={name} char=x"))
+                    .expect("character scan target should resolve"),
+                Intent::Editor(EditorAction::operation(
+                    Operator::Delete,
+                    OperatorTarget::CharacterScan(FindState {
+                        target_char: 'x',
+                        kind,
+                        direction,
+                    }),
+                ))
+            );
+        }
+        assert_eq!(
+            parse("action operator change till-backward x")
+                .expect("positional character scan should resolve"),
+            Intent::Editor(
+                EditorAction::operation(
+                    Operator::Change,
+                    OperatorTarget::CharacterScan(FindState {
+                        target_char: 'x',
+                        kind: FindKind::Till,
+                        direction: Direction::Backward,
+                    }),
+                )
+                .with_to_mode(ModeKind::Insert)
+            )
+        );
+        assert!(matches!(
+            parse("action operator delete target=find-forward"),
+            Err(CommandError::MissingArgument { name, .. }) if name == "char"
         ));
     }
 

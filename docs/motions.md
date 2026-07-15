@@ -285,6 +285,8 @@ Moves the cursor right by one grapheme (Unicode-aware character).
 
 Word motions use the concept of "words" defined as sequences of alphanumeric characters plus underscore.
 
+Semantic commands are available as `action cursor word-forward`, `action cursor word-backward`, and `action cursor word-end`.
+
 ### w - Word Forward
 
 Moves to the start of the next word.
@@ -319,6 +321,8 @@ Example: `hello---world` at first '-' (position 5):
 ## BigWord Motions
 
 BigWord motions treat any non-whitespace sequence as a single word.
+
+Semantic commands are available as `action cursor big-word-forward`, `action cursor big-word-backward`, and `action cursor big-word-end`.
 
 ### W - BigWord Forward
 
@@ -480,6 +484,8 @@ Examples:
 
 Replaces the character under the cursor with the next typed character, then returns to normal mode.
 
+The equivalent fixed-character command is `action edit replace-char char=<character>`.
+
 - **Count**: Yes - replaces `count` characters (e.g., `3ra` replaces three characters with `a`)
 - **Cursor position**: Lands after the last replaced character
 - **End of line**: If the cursor is at the end of the line, appends the character instead
@@ -553,6 +559,8 @@ H, M, and L behave like vertical motions (`j`/`k`) for column preservation:
 
 These `z` commands scroll the viewport around the cursor without moving the cursor.
 
+The equivalent commands are `action viewport top`, `action viewport center`, and `action viewport bottom`.
+
 ### zt - Cursor Line to Top
 
 Scrolls so the cursor line appears at the top of the viewport when possible.
@@ -581,6 +589,8 @@ Scrolls so the cursor line appears at the bottom of the viewport when possible.
 ## Code Folding
 
 Fold points are derived from the syntax when the current language supports syntax-based folding; otherwise they fall back to indentation scopes. Fold state is local to the current window, so separate splits can show the same buffer with different folds.
+
+The equivalent commands are `action fold toggle`, `action fold open`, and `action fold close`.
 
 ### za - Toggle Fold
 
@@ -936,13 +946,15 @@ When `f`, `F`, `t`, or `T` is entered after an operator, urvim treats the charac
 - A failed character scan leaves the buffer unchanged
 - Using a character scan as an operator target still updates the last search state, so `;` and `,` continue to repeat it
 
+Semantic commands use `target=find-forward`, `target=find-backward`, `target=till-forward`, or `target=till-backward` with `char=<character>`, for example `action operator delete target=find-forward char=x`.
+
 Normal-mode navigation for `f`, `F`, `t`, and `T` does not change.
 
 ### Edge Cases
 
 - **Cursor at line start**: `F` and `T` search before the cursor, so starting at column 0 means no characters before to search
 - **Cursor at line end**: `f` and `t` search after the cursor, so starting at the last column means no characters after to search
-- **Count exceeds occurrences**: Lands on the last available occurrence (or stays in place if none found)
+- **Count exceeds occurrences**: The cursor and buffer remain unchanged when the requested occurrence is not found
 - **Till at line boundary**: `t` on last char of line lands on last char; `T` on first char stays at column 0
 
 ## Repeat Character Search Motions
@@ -1090,6 +1102,8 @@ Text objects allow targeted text selection combined with operators. They are tri
 | `a"`        | Around quote text object for double quotes                                          |
 | `i&#96;`    | Inner quote text object for backticks                                               |
 | `a&#96;`    | Around quote text object for backticks                                              |
+
+The equivalent operator command targets are `inner-single-quote`, `around-single-quote`, `inner-double-quote`, `around-double-quote`, `inner-backtick`, and `around-backtick`.
 
 ### Supported Operators
 

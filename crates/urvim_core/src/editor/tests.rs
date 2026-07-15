@@ -119,6 +119,22 @@ fn test_normal_mode_configured_keymap_overrides_builtin() {
 }
 
 #[test]
+fn test_normal_mode_configured_keymap_supports_viewport_command() {
+    let mut config = configured_test_config();
+    config
+        .keymaps
+        .normal
+        .insert("h".to_string(), "action viewport center".to_string());
+    let _guard = set_test_config(config);
+    let mut mode = NormalMode::new();
+
+    assert_eq!(
+        handle_and_unwrap(&mut mode, &key('h')),
+        EditorAction::new(EditorOperation::ViewportCursorCenter)
+    );
+}
+
+#[test]
 fn test_normal_mode_page_keys() {
     let mut mode = NormalMode::new();
 

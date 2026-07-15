@@ -142,6 +142,12 @@ These commands accept `count=<positive-integer>` and `register=<character>` unle
 - `action cursor page-down`
 - `action cursor half-page-up`
 - `action cursor half-page-down`
+- `action cursor word-forward`
+- `action cursor word-backward`
+- `action cursor word-end`
+- `action cursor big-word-forward`
+- `action cursor big-word-backward`
+- `action cursor big-word-end`
 - `action cursor line-start`
 - `action cursor line-end`
 - `action cursor line-content-start`
@@ -192,6 +198,23 @@ These commands accept `count=<positive-integer>` and `register=<character>` unle
 - `action edit insert-at-line-start`
 - `action edit open-line-below`
 - `action edit open-line-above`
+- `action edit replace-char char=<character>*`
+
+## Action Viewport
+
+These commands do not accept counts.
+
+- `action viewport top`
+- `action viewport center`
+- `action viewport bottom`
+
+## Action Fold
+
+These commands do not accept counts.
+
+- `action fold toggle`
+- `action fold open`
+- `action fold close`
 
 ## Action Operator
 
@@ -232,6 +255,18 @@ Operator targets:
 - `around-curly`
 - `inner-angle`
 - `around-angle`
+- `inner-single-quote`
+- `around-single-quote`
+- `inner-double-quote`
+- `around-double-quote`
+- `inner-backtick`
+- `around-backtick`
+- `find-forward`
+- `find-backward`
+- `till-forward`
+- `till-backward`
+
+Character-scan targets require `char=<character>`, for example `action operator delete target=find-forward char=x`. The target and character can also be positional, for example `action operator delete find-forward x`.
 
 ## Action Tab
 
