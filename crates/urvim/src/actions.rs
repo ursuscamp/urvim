@@ -148,6 +148,26 @@ pub(super) fn execute_command_intent(
         return true;
     }
 
+    if let Command::PluginConfirmationSelect {
+        plugin,
+        confirmation_id,
+        selection,
+    } = command
+    {
+        let Some(plugin_runtime) = plugin_runtime else {
+            return true;
+        };
+        if let Err(error) =
+            plugin_runtime.run_confirmation_response(&plugin, confirmation_id, selection)
+        {
+            tracing::warn!(plugin, confirmation_id, error = %error, "plugin confirmation response failed");
+            urvim_core::notify_warn!(
+                "Plugin {plugin} confirmation {confirmation_id} failed: {error}"
+            );
+        }
+        return true;
+    }
+
     if matches!(command, Command::PluginStatus) {
         let status = plugin_runtime
             .as_ref()
@@ -616,6 +636,24 @@ pub(super) fn process_intents_with_shared_layout(
                         tracing::warn!(plugin, picker_id, error = %error, "plugin picker selection failed");
                         urvim_core::notify_warn!(
                             "Plugin {plugin} picker {picker_id} failed: {error}"
+                        );
+                    }
+                    true
+                }
+                None => true,
+            },
+            Intent::Command(Command::PluginConfirmationSelect {
+                plugin,
+                confirmation_id,
+                selection,
+            }) => match plugin_runtime.as_deref_mut() {
+                Some(runtime) => {
+                    if let Err(error) =
+                        runtime.run_confirmation_response(&plugin, confirmation_id, selection)
+                    {
+                        tracing::warn!(plugin, confirmation_id, error = %error, "plugin confirmation response failed");
+                        urvim_core::notify_warn!(
+                            "Plugin {plugin} confirmation {confirmation_id} failed: {error}"
                         );
                     }
                     true

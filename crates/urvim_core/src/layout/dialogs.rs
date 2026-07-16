@@ -1,6 +1,6 @@
 use super::command_line::CommandLineState;
+use super::confirmation::ConfirmationDialog;
 use crate::ui::completion::CompletionWidget;
-use crate::ui::confirmation_box::ConfirmationBox;
 use crate::ui::diagnostic_hover::DiagnosticHoverWidget;
 use crate::ui::hover::HoverWidget;
 use crate::ui::lsp_rename::LspRenamePrompt;
@@ -34,7 +34,7 @@ pub(in crate::layout) struct Dialogs {
     pub git_picker: Option<GitPickerWidget>,
     pub grep_picker: Option<GrepPickerWidget>,
     pub plugin_picker: Option<PluginPickerWidget>,
-    pub confirmation_box: Option<ConfirmationBox>,
+    pub confirmation_box: Option<ConfirmationDialog>,
     pub hover: Option<HoverWidget>,
     pub diagnostic_hover: Option<DiagnosticHoverWidget>,
 }

@@ -8,6 +8,7 @@ use urvim_core::globals;
 use super::super::callbacks::BearscriptPluginCallbacks;
 use super::super::{SharedLayout, native_fn};
 
+mod confirmations;
 mod line_format;
 mod panes;
 mod pickers;
@@ -22,6 +23,11 @@ pub(in crate::plugin) fn ui_module(
     let panes_plugin = plugin.clone();
     let panes_contributions = Rc::clone(&contributions);
     let panes_layout = Rc::clone(&layout);
+    let confirm_plugin = plugin.clone();
+    let confirm_callbacks = Rc::clone(&callbacks);
+    let confirm_layout = Rc::clone(&layout);
+    let close_confirmation_plugin = plugin.clone();
+    let close_confirmation_layout = Rc::clone(&layout);
     let windows_plugin = plugin.clone();
     let windows_contributions = Rc::clone(&contributions);
     let windows_layout = Rc::clone(&layout);
@@ -35,6 +41,17 @@ pub(in crate::plugin) fn ui_module(
                     globals::enqueue_notification(level, message);
                     Ok(())
                 }),
+            ),
+            (
+                "confirm".to_string(),
+                confirmations::confirm_fn(confirm_plugin, confirm_callbacks, confirm_layout),
+            ),
+            (
+                "close_confirmation".to_string(),
+                confirmations::close_confirmation_fn(
+                    close_confirmation_plugin,
+                    close_confirmation_layout,
+                ),
             ),
             ("line_format".to_string(), line_format::line_format_module()),
             (

@@ -190,6 +190,15 @@ pub enum Command {
         /// Selected item identity.
         item_id: crate::ui::picker::plugin::PluginPickerItemId,
     },
+    /// Resolve a plugin confirmation with the selected response.
+    PluginConfirmationSelect {
+        /// Plugin that owns the confirmation.
+        plugin: String,
+        /// Confirmation instance identity.
+        confirmation_id: crate::ui::confirmation_box::PluginConfirmationId,
+        /// Selected response.
+        selection: crate::ui::confirmation_box::PluginConfirmationSelection,
+    },
     /// Show loaded plugin runtime statuses.
     PluginStatus,
     /// Run an LSP hover query on the active buffer.
@@ -327,6 +336,7 @@ impl Command {
             | Self::SplitHorizontal => KeymapInheritance::Editor,
             Self::EnqueueNotification { .. }
             | Self::PluginPickerSelect { .. }
+            | Self::PluginConfirmationSelect { .. }
             | Self::OverwriteBuffer(_)
             | Self::LspRename(_)
             | Self::ApplyCompletion(_)

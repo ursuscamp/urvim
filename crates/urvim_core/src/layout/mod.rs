@@ -853,7 +853,7 @@ impl Layout {
             // perform overwrite confirmation and emit plugin-facing editor events.
             Command::SaveBuffer(_) => false,
             // Plugin picker values and callbacks live in the application plugin runtime.
-            Command::PluginPickerSelect { .. } => false,
+            Command::PluginPickerSelect { .. } | Command::PluginConfirmationSelect { .. } => false,
             Command::SaveBufferAs { buffer_id, path } => self
                 .execute_save_as(*buffer_id, path.as_path())
                 .map_or_else(

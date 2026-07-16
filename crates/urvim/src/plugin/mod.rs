@@ -5,6 +5,7 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 mod callbacks;
+mod confirmations;
 mod conversion;
 mod event;
 mod fs;
@@ -21,10 +22,12 @@ use urvim_core::buffer::{BufferId, Cursor, SyntaxSpan, TextRef};
 use urvim_core::event::EditorEvent;
 use urvim_core::globals;
 use urvim_core::layout::Layout;
+use urvim_core::ui::confirmation_box::{PluginConfirmationCancelled, PluginConfirmationSelection};
 use urvim_core::ui::picker::plugin::PluginPickerCancelled;
 use urvim_core::ui::{Command, Intent};
 
 use callbacks::{BearscriptPlugin, BearscriptPluginCallbacks};
+use confirmations::PluginConfirmationEvents;
 use conversion::{BearNumber, BearValueRef, FromBearValue};
 use event::{bear_args, event_constants, event_payload};
 use fs::{PluginFsEvent, PluginFsRegistry, fs_event_id, fs_event_to_value};
@@ -46,6 +49,7 @@ pub(super) struct BearscriptPluginRuntime {
     jobs: Rc<PluginJobRegistry>,
     timers: Rc<PluginTimerRegistry>,
     picker_events: PluginPickerEvents,
+    confirmation_events: PluginConfirmationEvents,
 }
 
 impl BearscriptPluginRuntime {
@@ -63,6 +67,7 @@ impl BearscriptPluginRuntime {
             jobs: Rc::new(PluginJobRegistry::default()),
             timers: Rc::new(PluginTimerRegistry::default()),
             picker_events: PluginPickerEvents::default(),
+            confirmation_events: PluginConfirmationEvents::default(),
         }
     }
 
@@ -83,6 +88,7 @@ impl BearscriptPluginRuntime {
             jobs: Rc::new(PluginJobRegistry::default()),
             timers: Rc::new(PluginTimerRegistry::default()),
             picker_events: PluginPickerEvents::default(),
+            confirmation_events: PluginConfirmationEvents::default(),
         };
 
         for (plugin_name, plugin) in registry.iter() {
@@ -418,6 +424,53 @@ impl BearscriptPluginRuntime {
         dispatched
     }
 
+    /// Dispatches queued plugin confirmation cancellation callbacks on the main thread.
+    pub(super) fn dispatch_confirmation_events(&mut self) -> bool {
+        let mut dispatched = false;
+        while let Some(event) = self.confirmation_events.poll() {
+            dispatched |= self.dispatch_confirmation_cancellation(event);
+        }
+        dispatched
+    }
+
+    /// Runs a plugin confirmation response callback.
+    pub(super) fn run_confirmation_response(
+        &mut self,
+        plugin: &str,
+        confirmation_id: u64,
+        selection: PluginConfirmationSelection,
+    ) -> Result<(), String> {
+        let plugin_runtime = self
+            .plugins
+            .get_mut(plugin)
+            .ok_or_else(|| format!("plugin {plugin:?} is not loaded"))?;
+        let confirmation = plugin_runtime
+            .callbacks
+            .borrow_mut()
+            .confirmations
+            .remove(&confirmation_id)
+            .ok_or_else(|| format!("plugin confirmation {confirmation_id} is not open"))?;
+        let value = match selection {
+            PluginConfirmationSelection::Primary => confirmation.primary_value,
+            PluginConfirmationSelection::Secondary => confirmation.secondary_value,
+        };
+        let started = Instant::now();
+        let result = plugin_runtime
+            .engine
+            .call_value(confirmation.on_response, vec![value])
+            .map(|_| ())
+            .map_err(|error| error.to_string());
+        self.record_callback(
+            plugin,
+            format!("confirmation {confirmation_id} response"),
+            started.elapsed(),
+        );
+        if let Err(error) = &result {
+            self.record_error(plugin, error.clone());
+        }
+        result
+    }
+
     /// Runs a plugin picker selection callback.
     pub(super) fn run_picker_selection(
         &mut self,
@@ -490,6 +543,44 @@ impl BearscriptPluginRuntime {
                 "Plugin {} picker {} callback failed: {error}",
                 event.plugin,
                 event.picker_id
+            );
+        }
+        true
+    }
+
+    fn dispatch_confirmation_cancellation(&mut self, event: PluginConfirmationCancelled) -> bool {
+        let Some(plugin_runtime) = self.plugins.get_mut(&event.plugin) else {
+            return false;
+        };
+        let Some(confirmation) = plugin_runtime
+            .callbacks
+            .borrow_mut()
+            .confirmations
+            .remove(&event.confirmation_id)
+        else {
+            return false;
+        };
+        let Some(callback) = confirmation.on_cancel else {
+            return true;
+        };
+        let started = Instant::now();
+        let result = plugin_runtime
+            .engine
+            .call_value(callback, vec![])
+            .map(|_| ())
+            .map_err(|error| error.to_string());
+        self.record_callback(
+            &event.plugin,
+            format!("confirmation {} cancel", event.confirmation_id),
+            started.elapsed(),
+        );
+        if let Err(error) = result {
+            self.record_error(&event.plugin, error.clone());
+            tracing::warn!(plugin = event.plugin, confirmation_id = event.confirmation_id, error = %error, "BearScript confirmation callback failed");
+            urvim_core::notify_warn!(
+                "Plugin {} confirmation {} callback failed: {error}",
+                event.plugin,
+                event.confirmation_id
             );
         }
         true
@@ -632,6 +723,8 @@ impl BearscriptPluginRuntime {
         engine.set_current_dir(plugin.root().to_path_buf());
         let callbacks = Rc::new(RefCell::new(BearscriptPluginCallbacks::default()));
         callbacks.borrow_mut().picker_cancellation_sender = Some(self.picker_events.sender());
+        callbacks.borrow_mut().confirmation_cancellation_sender =
+            Some(self.confirmation_events.sender());
         engine.set_global(
             "urvim",
             urvim_module(
@@ -657,6 +750,9 @@ impl BearscriptPluginRuntime {
             self.layout
                 .borrow_mut()
                 .close_plugin_picker_owned(plugin_name);
+            self.layout
+                .borrow_mut()
+                .close_plugin_confirmation_owned(plugin_name);
             return Err(error.to_string());
         }
         let started = Instant::now();
@@ -673,6 +769,9 @@ impl BearscriptPluginRuntime {
             self.layout
                 .borrow_mut()
                 .close_plugin_picker_owned(plugin_name);
+            self.layout
+                .borrow_mut()
+                .close_plugin_confirmation_owned(plugin_name);
             return Err(error);
         }
 
@@ -5255,6 +5354,155 @@ bg = "bg"
                 .expect("cancel notification")
                 .text,
             "cancelled"
+        );
+    }
+
+    #[test]
+    fn ui_confirm_returns_custom_primary_response_value() {
+        let _guard = buffer_pool_lock();
+        globals::clear_notifications();
+        let mut runtime = runtime_with_script(
+            r#"
+            fn responded(value) {
+                urvim.ui.show_message(value)
+            }
+            fn init() {
+                urvim.ui.confirm({
+                    "title": "Delete",
+                    "message": "Delete this file?",
+                    "confirm": {
+                        "label": "Delete",
+                        "key": "d",
+                        "value": "deleted"
+                    },
+                    "reject": {
+                        "label": "Keep",
+                        "key": "k",
+                        "value": "kept"
+                    },
+                    "on_response": responded
+                })
+            }
+            "#,
+        );
+        let layout = Rc::clone(&runtime.layout);
+        let result = layout
+            .borrow_mut()
+            .route_ui_event(&urvim_core::ui::UiEvent::Key(Key::new(KeyCode::Char('d'))));
+
+        assert!(crate::actions::handle_ui_result_with_shared_layout(
+            &layout,
+            &mut runtime,
+            result,
+        ));
+        assert_eq!(
+            globals::active_notification(Instant::now())
+                .expect("response notification")
+                .text,
+            "deleted"
+        );
+        assert!(!runtime.dispatch_confirmation_events());
+    }
+
+    #[test]
+    fn ui_confirm_secondary_response_is_not_cancellation() {
+        let _guard = buffer_pool_lock();
+        globals::clear_notifications();
+        let mut runtime = runtime_with_script(
+            r#"
+            fn responded(value) {
+                urvim.ui.show_message(value)
+            }
+            fn cancelled() {
+                urvim.ui.show_message("cancelled")
+            }
+            fn init() {
+                urvim.ui.confirm({
+                    "message": "Continue?",
+                    "reject": { "label": "Stop", "key": "s", "value": "stopped" },
+                    "on_response": responded,
+                    "on_cancel": cancelled
+                })
+            }
+            "#,
+        );
+        let layout = Rc::clone(&runtime.layout);
+        let result = layout
+            .borrow_mut()
+            .route_ui_event(&urvim_core::ui::UiEvent::Key(Key::new(KeyCode::Char('s'))));
+
+        crate::actions::handle_ui_result_with_shared_layout(&layout, &mut runtime, result);
+        assert_eq!(
+            globals::active_notification(Instant::now())
+                .expect("response notification")
+                .text,
+            "stopped"
+        );
+        assert!(!runtime.dispatch_confirmation_events());
+    }
+
+    #[test]
+    fn ui_confirm_escape_dispatches_cancel_callback_once() {
+        let _guard = buffer_pool_lock();
+        globals::clear_notifications();
+        let mut runtime = runtime_with_script(
+            r#"
+            fn responded(value) {}
+            fn cancelled() {
+                urvim.ui.show_message("cancelled")
+            }
+            fn init() {
+                urvim.ui.confirm({
+                    "message": "Continue?",
+                    "on_response": responded,
+                    "on_cancel": cancelled
+                })
+            }
+            "#,
+        );
+        let layout = Rc::clone(&runtime.layout);
+
+        layout
+            .borrow_mut()
+            .route_ui_event(&urvim_core::ui::UiEvent::Key(Key::new(KeyCode::Esc)));
+        assert!(runtime.dispatch_confirmation_events());
+        assert!(!runtime.dispatch_confirmation_events());
+        assert_eq!(
+            globals::active_notification(Instant::now())
+                .expect("cancel notification")
+                .text,
+            "cancelled"
+        );
+    }
+
+    #[test]
+    fn ui_close_confirmation_dispatches_cancel_callback_once() {
+        let _guard = buffer_pool_lock();
+        globals::clear_notifications();
+        let mut runtime = runtime_with_script(
+            r#"
+            fn responded(value) {}
+            fn cancelled() {
+                urvim.ui.show_message("closed")
+            }
+            fn init() {
+                let id = urvim.ui.confirm({
+                    "message": "Continue?",
+                    "on_response": responded,
+                    "on_cancel": cancelled
+                })
+                urvim.ui.close_confirmation(id)
+            }
+            "#,
+        );
+
+        assert!(runtime.dispatch_confirmation_events());
+        assert!(!runtime.dispatch_confirmation_events());
+        assert_eq!(
+            globals::active_notification(Instant::now())
+                .expect("cancel notification")
+                .text,
+            "closed"
         );
     }
 

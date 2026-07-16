@@ -107,6 +107,8 @@ The global `urvim` module exposes the APIs below. All arguments and return value
 ### Editor and UI
 
 - `urvim.ui.show_message(message, opts)`
+- `urvim.ui.confirm(opts) -> confirmation_id`
+- `urvim.ui.close_confirmation(confirmation_id)`
 - `urvim.ui.windows.create(opts) -> window_id`
 - `urvim.ui.windows.configure(window_id, opts)`
 - `urvim.ui.windows.set_content(window_id, content)`
@@ -275,6 +277,52 @@ Buffer rows and columns are 0-based. `urvim.buffers.lines(buffer_id, start_row, 
 Invalid buffer ids, rows, columns, and argument shapes raise errors. `urvim.buffers.save(buffer_id)` saves through the normal buffer save path and emits the same `BufferSaved` editor event on success.
 
 Window rows and columns are 0-based. Window ids are stable pane ids for currently visible editor windows; an id stays valid for the life of that pane and becomes invalid after the pane is closed. Invalid window ids raise errors. `urvim.windows.open_buffer(buffer_id)` mirrors normal editor behavior by activating an existing visible buffer tab or opening a tab for a loaded hidden buffer in the active window.
+
+### Confirmations
+
+`urvim.ui.confirm(opts)` opens a modal binary confirmation and returns its id:
+
+```text
+fn handle_response(response) {
+    if response == "delete" {
+        urvim.ui.show_message("Deleted")
+    }
+}
+
+fn handle_cancel() {
+    urvim.ui.show_message("Dismissed")
+}
+
+let confirmation_id = urvim.ui.confirm({
+    "title": "Delete file?",
+    "message": "This cannot be undone.",
+    "confirm": {
+        "label": "Delete",
+        "key": "d",
+        "value": "delete"
+    },
+    "reject": {
+        "label": "Keep",
+        "key": "k",
+        "value": "keep"
+    },
+    "on_response": handle_response,
+    "on_cancel": handle_cancel
+})
+```
+
+`message` and `on_response` are required. `title` defaults to `Confirm`. The
+`confirm` and `reject` response maps are optional and default to `Yes`/`y`/`true`
+and `No`/`n`/`false`. Each response map can override `label`, its
+single-character `key`, and any BearScript `value`. Response keys must be
+different. Enter selects the confirm response. Selecting either response calls
+`on_response` with its unchanged value.
+
+`on_cancel` is optional and is called after Esc,
+`urvim.ui.close_confirmation(confirmation_id)`, or replacement by another
+dialog. A response or cancellation callback is delivered at most once.
+Confirmation ids are owned by the creating plugin and become invalid when the
+dialog closes. See `examples/plugins/confirmation-demo` for a complete example.
 
 ### Custom Pickers
 

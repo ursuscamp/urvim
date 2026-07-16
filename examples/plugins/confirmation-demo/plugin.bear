@@ -1,0 +1,30 @@
+fn init() {
+    urvim.commands.register("open", open, "Open the confirmation demo")
+}
+
+fn open(args) {
+    urvim.ui.confirm({
+        "title": "Apply changes?",
+        "message": "Choose whether to apply or keep the current content.",
+        "confirm": {
+            "label": "Apply",
+            "key": "a",
+            "value": "apply"
+        },
+        "reject": {
+            "label": "Keep",
+            "key": "k",
+            "value": "keep"
+        },
+        "on_response": handle_response,
+        "on_cancel": handle_cancel
+    })
+}
+
+fn handle_response(response) {
+    urvim.ui.show_message("Confirmation response: {response}")
+}
+
+fn handle_cancel() {
+    urvim.ui.show_message("Confirmation dismissed")
+}
