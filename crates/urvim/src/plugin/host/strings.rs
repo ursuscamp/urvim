@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use bearscript::Value;
 
 use super::native_fn;
+use crate::plugin::conversion::{BearNumber, BearValueRef};
 
 pub(in crate::plugin) fn strings_module() -> Value {
     Value::Module(
@@ -134,10 +135,9 @@ pub(in crate::plugin) fn strings_module() -> Value {
 }
 
 fn byte_index_from_number(value: f64, label: &str) -> Result<usize, String> {
-    if !value.is_finite() || value < 0.0 || value.fract() != 0.0 || value > usize::MAX as f64 {
-        return Err(format!("{label} must be a non-negative integer"));
-    }
-    Ok(value as usize)
+    BearNumber::new(value, label)
+        .non_negative_usize()
+        .map_err(|error| error.to_string())
 }
 
 pub(in crate::plugin) fn string_list(value: Value, label: &str) -> Result<Vec<String>, String> {
@@ -147,9 +147,9 @@ pub(in crate::plugin) fn string_list(value: Value, label: &str) -> Result<Vec<St
     values
         .into_vec()
         .into_iter()
-        .map(|value| match value {
-            Value::String(text) => Ok(text.to_string()),
-            other => Err(format!("{label} must be a list of strings, got {other}")),
+        .map(|value| match BearValueRef::new(&value, label).string() {
+            Ok(text) => Ok(text),
+            Err(_) => Err(format!("{label} must be a list of strings, got {value}")),
         })
         .collect()
 }

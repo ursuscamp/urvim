@@ -11,6 +11,7 @@ use urvim_core::ui::plugin_window::{
 };
 
 use super::super::super::{SharedLayout, native_fn, validate_plugin_command_execution_intent};
+use crate::plugin::conversion::{BearValueRef, FromBearValue};
 
 pub(in crate::plugin::host::ui) fn windows_module(
     plugin: String,
@@ -417,25 +418,15 @@ pub(super) fn parse_window_command(
 }
 
 fn dimension_value(value: &Value, label: &str) -> Result<u16, String> {
-    let number = match value {
-        Value::Number(number) => *number,
-        _ => return Err(format!("{label} must be a positive integer")),
-    };
-    if !number.is_finite() || number <= 0.0 || number.fract() != 0.0 || number > u16::MAX as f64 {
-        return Err(format!("{label} must be a positive integer"));
-    }
-    Ok(number as u16)
+    BearValueRef::new(value, label)
+        .number()
+        .and_then(|number| number.positive_u16())
+        .map_err(|_| format!("{label} must be a positive integer"))
 }
 
 fn coordinate_value(value: &Value, label: &str) -> Result<u16, String> {
-    let number = match value {
-        Value::Number(number) => *number,
-        _ => return Err(format!("{label} must be a non-negative integer")),
-    };
-    if !number.is_finite() || number < 0.0 || number.fract() != 0.0 || number > u16::MAX as f64 {
-        return Err(format!("{label} must be a non-negative integer"));
-    }
-    Ok(number as u16)
+    u16::from_bear(BearValueRef::new(value, label))
+        .map_err(|_| format!("{label} must be a non-negative integer"))
 }
 
 fn margins_from_value(
@@ -472,28 +463,18 @@ fn optional_margin_value(value: &Value, label: &str) -> Result<Option<u16>, Stri
     if matches!(value, Value::Null) {
         return Ok(None);
     }
-    let Value::Number(number) = value else {
-        return Err(format!("{label} must be a non-negative integer or null"));
-    };
-    if !number.is_finite() || *number < 0.0 || number.fract() != 0.0 || *number > u16::MAX as f64 {
-        return Err(format!("{label} must be a non-negative integer or null"));
-    }
-    Ok(Some(*number as u16))
+    u16::from_bear(BearValueRef::new(value, label))
+        .map(Some)
+        .map_err(|_| format!("{label} must be a non-negative integer or null"))
 }
 
 fn string_value(value: &Value, label: &str) -> Result<String, String> {
-    match value {
-        Value::String(value) => Ok(value.to_string()),
-        _ => Err(format!("{label} must be a string")),
-    }
+    String::from_bear(BearValueRef::new(value, label)).map_err(|error| error.to_string())
 }
 
 fn optional_string_value(value: &Value, label: &str) -> Result<Option<String>, String> {
-    match value {
-        Value::Null => Ok(None),
-        Value::String(value) => Ok(Some(value.to_string())),
-        _ => Err(format!("{label} must be a string or null")),
-    }
+    Option::<String>::from_bear(BearValueRef::new(value, label))
+        .map_err(|_| format!("{label} must be a string or null"))
 }
 
 fn parse_tag(value: String, label: &str) -> Result<urvim_theme::Tag, String> {

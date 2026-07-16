@@ -5,6 +5,8 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
+use super::conversion::BearNumber;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::plugin) enum PluginTimerKind {
     Defer,
@@ -166,19 +168,13 @@ impl PluginTimerRegistry {
 }
 
 pub(in crate::plugin) fn timer_id_from_number(value: f64) -> Result<u64, String> {
-    if !value.is_finite() || value < 0.0 || value.fract() != 0.0 || value > u64::MAX as f64 {
-        return Err(format!(
-            "timer id must be a non-negative integer, got {value}"
-        ));
-    }
-    Ok(value as u64)
+    BearNumber::new(value, "timer id")
+        .non_negative_u64()
+        .map_err(|_| format!("timer id must be a non-negative integer, got {value}"))
 }
 
 pub(in crate::plugin) fn timer_ms_from_number(value: f64) -> Result<u64, String> {
-    if !value.is_finite() || value < 0.0 || value.fract() != 0.0 || value > u64::MAX as f64 {
-        return Err(format!(
-            "timer delay must be a non-negative integer, got {value}"
-        ));
-    }
-    Ok(value as u64)
+    BearNumber::new(value, "timer delay")
+        .non_negative_u64()
+        .map_err(|_| format!("timer delay must be a non-negative integer, got {value}"))
 }

@@ -9,6 +9,7 @@ use urvim_core::ui::plugin_window::{id_from_number, parse_key_sequence};
 
 use super::super::super::{SharedLayout, native_fn};
 use super::windows::{content_from_value, parse_window_command};
+use crate::plugin::conversion::BearValueRef;
 
 pub(in crate::plugin::host::ui) fn panes_module(
     plugin: String,
@@ -284,13 +285,13 @@ fn parse_style(value: &Value, label: &str) -> Result<urvim_theme::Tag, String> {
 }
 
 fn positive_u16(value: Option<&Value>, label: &str) -> Result<u16, String> {
-    let Some(Value::Number(number)) = value else {
+    let Some(value) = value else {
         return Err(format!("{label} must be a positive integer"));
     };
-    if !number.is_finite() || *number <= 0.0 || number.fract() != 0.0 || *number > u16::MAX as f64 {
-        return Err(format!("{label} must be a positive integer"));
-    }
-    Ok(*number as u16)
+    BearValueRef::new(value, label)
+        .number()
+        .and_then(|number| number.positive_u16())
+        .map_err(|_| format!("{label} must be a positive integer"))
 }
 
 #[cfg(test)]

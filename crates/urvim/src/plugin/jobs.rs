@@ -9,6 +9,8 @@ use std::time::{Duration, Instant};
 
 use bearscript::Value;
 
+use super::conversion::{BearMapRef, BearNumber, BearValueError, BearValueRef, FromBearValue};
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::plugin) enum PluginJobStatus {
     Running,
@@ -273,20 +275,27 @@ impl PluginJobRegistry {
 
 impl PluginJobSpec {
     fn from_value(value: Value) -> Result<Self, String> {
-        let Value::Map(mut map) = value else {
+        if !matches!(value, Value::Map(_)) {
             return Err("jobs.spawn opts must be a map".to_string());
-        };
-        let cmd = required_string(&mut map, "cmd")?;
-        let args = optional_string_list(&mut map, "args")?;
-        let cwd = optional_string(&mut map, "cwd")?;
-        let env = optional_env(&mut map)?;
-        let stdin = optional_string(&mut map, "stdin")?;
-        let timeout_ms = optional_u64(&mut map, "timeout_ms")?;
-        let callbacks = PluginJobCallbacks {
-            on_stdout: optional_callback(&mut map, "on_stdout")?,
-            on_stderr: optional_callback(&mut map, "on_stderr")?,
-            on_exit: optional_callback(&mut map, "on_exit")?,
-        };
+        }
+        Self::from_bear(BearValueRef::new(&value, "jobs.spawn")).map_err(|error| error.to_string())
+    }
+}
+
+impl FromBearValue for PluginJobSpec {
+    fn from_bear(value: BearValueRef<'_>) -> Result<Self, BearValueError> {
+        let map = value.map()?;
+        let cmd_value = map.required("cmd")?;
+        let cmd_path = cmd_value.path().to_string();
+        let cmd = cmd_value.string()?;
+        if cmd.is_empty() {
+            return Err(BearValueError::new(cmd_path, "must be a non-empty string"));
+        }
+        let args = optional_field::<Vec<String>>(&map, "args")?.unwrap_or_default();
+        let cwd = optional_field::<String>(&map, "cwd")?;
+        let env = optional_env(&map)?;
+        let stdin = optional_field::<String>(&map, "stdin")?;
+        let timeout_ms = optional_field::<u64>(&map, "timeout_ms")?;
         Ok(Self {
             cmd,
             args,
@@ -294,81 +303,47 @@ impl PluginJobSpec {
             env,
             stdin,
             timeout_ms,
-            callbacks,
+            callbacks: PluginJobCallbacks {
+                on_stdout: optional_callback(&map, "on_stdout")?,
+                on_stderr: optional_callback(&map, "on_stderr")?,
+                on_exit: optional_callback(&map, "on_exit")?,
+            },
         })
     }
 }
 
-fn required_string(map: &mut HashMap<String, Value>, key: &str) -> Result<String, String> {
-    match map.remove(key) {
-        Some(Value::String(value)) if !value.is_empty() => Ok(value.to_string()),
-        Some(_) => Err(format!("jobs.spawn {key} must be a non-empty string")),
-        None => Err(format!("jobs.spawn requires {key}")),
-    }
-}
-
-fn optional_string(map: &mut HashMap<String, Value>, key: &str) -> Result<Option<String>, String> {
-    match map.remove(key) {
-        Some(Value::String(value)) => Ok(Some(value.to_string())),
-        Some(Value::Null) | None => Ok(None),
-        Some(_) => Err(format!("jobs.spawn {key} must be a string")),
-    }
-}
-
-fn optional_string_list(
-    map: &mut HashMap<String, Value>,
+fn optional_field<T: FromBearValue>(
+    map: &BearMapRef<'_>,
     key: &str,
-) -> Result<Vec<String>, String> {
-    match map.remove(key) {
-        Some(Value::List(items)) => items
-            .into_vec()
-            .into_iter()
-            .enumerate()
-            .map(|(index, item)| match item {
-                Value::String(value) => Ok(value.to_string()),
-                _ => Err(format!("jobs.spawn {key}[{index}] must be a string")),
-            })
-            .collect(),
-        Some(Value::Null) | None => Ok(Vec::new()),
-        Some(_) => Err(format!("jobs.spawn {key} must be a list")),
+) -> Result<Option<T>, BearValueError> {
+    match map.optional(key)? {
+        Some(value) => Option::<T>::from_bear(value),
+        None => Ok(None),
     }
 }
 
-fn optional_env(map: &mut HashMap<String, Value>) -> Result<Vec<(String, String)>, String> {
-    match map.remove("env") {
-        Some(Value::Map(env)) => env
-            .into_map()
-            .into_iter()
-            .map(|(key, value)| match value {
-                Value::String(value) => Ok((key, value.to_string())),
-                _ => Err(format!("jobs.spawn env.{key} must be a string")),
-            })
-            .collect(),
-        Some(Value::Null) | None => Ok(Vec::new()),
-        Some(_) => Err("jobs.spawn env must be a map".to_string()),
+fn optional_env(map: &BearMapRef<'_>) -> Result<Vec<(String, String)>, BearValueError> {
+    let Some(value) = map.optional("env")? else {
+        return Ok(Vec::new());
+    };
+    if value.is_null() {
+        return Ok(Vec::new());
     }
+    value
+        .map()?
+        .iter()
+        .map(|(key, value)| String::from_bear(value).map(|value| (key.to_string(), value)))
+        .collect()
 }
 
-fn optional_u64(map: &mut HashMap<String, Value>, key: &str) -> Result<Option<u64>, String> {
-    match map.remove(key) {
-        Some(Value::Number(value))
-            if value.is_finite()
-                && value >= 0.0
-                && value.fract() == 0.0
-                && value <= u64::MAX as f64 =>
-        {
-            Ok(Some(value as u64))
-        }
-        Some(Value::Null) | None => Ok(None),
-        Some(_) => Err(format!("jobs.spawn {key} must be a non-negative integer")),
-    }
-}
-
-fn optional_callback(map: &mut HashMap<String, Value>, key: &str) -> Result<Option<Value>, String> {
-    match map.remove(key) {
-        Some(callback @ (Value::ScriptFn(_) | Value::NativeFn(_))) => Ok(Some(callback)),
-        Some(Value::Null) | None => Ok(None),
-        Some(_) => Err(format!("jobs.spawn {key} must be a function")),
+fn optional_callback(map: &BearMapRef<'_>, key: &str) -> Result<Option<Value>, BearValueError> {
+    let Some(value) = map.optional(key)? else {
+        return Ok(None);
+    };
+    match value.value() {
+        Value::Null => Ok(None),
+        callback @ (Value::ScriptFn(_) | Value::NativeFn(_)) => Ok(Some(callback.clone())),
+        _ => Err(BearValueError::new(value.path(), "must be a function")),
     }
 }
 
@@ -503,10 +478,50 @@ pub(in crate::plugin) fn job_event_to_value(event: &PluginJobEvent) -> Value {
 }
 
 pub(in crate::plugin) fn job_id_from_number(value: f64) -> Result<u64, String> {
-    if !value.is_finite() || value < 0.0 || value.fract() != 0.0 || value > u64::MAX as f64 {
-        return Err(format!(
-            "job id must be a non-negative integer, got {value}"
-        ));
+    BearNumber::new(value, "job id")
+        .non_negative_u64()
+        .map_err(|_| format!("job id must be a non-negative integer, got {value}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn job_spec_reports_nested_argument_path() {
+        let value = Value::Map(
+            HashMap::from([
+                ("cmd".to_string(), Value::String("echo".into())),
+                (
+                    "args".to_string(),
+                    Value::List(vec![Value::String("ok".into()), Value::Bool(false)].into()),
+                ),
+            ])
+            .into(),
+        );
+
+        assert_eq!(
+            PluginJobSpec::from_value(value).err().unwrap(),
+            "jobs.spawn.args[1] must be a string"
+        );
     }
-    Ok(value as u64)
+
+    #[test]
+    fn job_spec_decodes_nullable_optional_fields() {
+        let value = Value::Map(
+            HashMap::from([
+                ("cmd".to_string(), Value::String("echo".into())),
+                ("args".to_string(), Value::Null),
+                ("cwd".to_string(), Value::Null),
+                ("timeout_ms".to_string(), Value::Number(10.0)),
+            ])
+            .into(),
+        );
+
+        let spec = PluginJobSpec::from_value(value).unwrap();
+
+        assert!(spec.args.is_empty());
+        assert_eq!(spec.cwd, None);
+        assert_eq!(spec.timeout_ms, Some(10));
+    }
 }

@@ -8,6 +8,7 @@ use urvim_core::ui::line_format::{
 use urvim_theme::Tag;
 
 use super::super::native_fn;
+use crate::plugin::conversion::{BearValueRef, FromBearValue};
 
 pub(in crate::plugin::host::ui) fn line_format_module() -> Value {
     Value::Module(
@@ -234,19 +235,10 @@ fn parse_tag(value: &Value, label: &str) -> Result<Tag, String> {
 }
 
 fn string_value(value: &Value, label: &str) -> Result<String, String> {
-    match value {
-        Value::String(value) => Ok(value.to_string()),
-        _ => Err(format!("{label} must be a string")),
-    }
+    String::from_bear(BearValueRef::new(value, label)).map_err(|error| error.to_string())
 }
 
 fn non_negative_u16(value: &Value, label: &str) -> Result<u16, String> {
-    let number = match value {
-        Value::Number(number) => *number,
-        _ => return Err(format!("{label} must be a non-negative integer")),
-    };
-    if !number.is_finite() || number < 0.0 || number.fract() != 0.0 || number > u16::MAX as f64 {
-        return Err(format!("{label} must be a non-negative integer"));
-    }
-    Ok(number as u16)
+    u16::from_bear(BearValueRef::new(value, label))
+        .map_err(|_| format!("{label} must be a non-negative integer"))
 }

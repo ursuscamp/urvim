@@ -5,6 +5,7 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 mod callbacks;
+mod conversion;
 mod event;
 mod fs;
 mod health;
@@ -24,6 +25,7 @@ use urvim_core::ui::picker::plugin::PluginPickerCancelled;
 use urvim_core::ui::{Command, Intent};
 
 use callbacks::{BearscriptPlugin, BearscriptPluginCallbacks};
+use conversion::{BearNumber, BearValueRef, FromBearValue};
 use event::{bear_args, event_constants, event_payload};
 use fs::{PluginFsEvent, PluginFsRegistry, fs_event_id, fs_event_to_value};
 use health::{PluginHealth, PluginHealthSummary, slow_threshold};
@@ -1419,14 +1421,8 @@ fn window_id_from_value(value: &Value) -> Result<urvim_core::layout::PaneId, Str
 }
 
 fn usize_from_value(value: &Value, label: &str) -> Result<usize, String> {
-    let Value::Number(number) = value else {
-        return Err(format!("{label} must be a non-negative integer"));
-    };
-    if !number.is_finite() || *number < 0.0 || number.fract() != 0.0 || *number > usize::MAX as f64
-    {
-        return Err(format!("{label} must be a non-negative integer"));
-    }
-    Ok(*number as usize)
+    usize::from_bear(BearValueRef::new(value, label))
+        .map_err(|_| format!("{label} must be a non-negative integer"))
 }
 
 fn with_existing_buffer<R>(
@@ -1727,21 +1723,15 @@ pub(in crate::plugin) fn validate_callback(callback: &Value, label: &str) -> Res
 }
 
 fn hook_id_from_number(value: f64) -> Result<u64, String> {
-    if !value.is_finite() || value < 0.0 || value.fract() != 0.0 || value > u64::MAX as f64 {
-        return Err(format!(
-            "event hook id must be a non-negative integer, got {value}"
-        ));
-    }
-    Ok(value as u64)
+    BearNumber::new(value, "event hook id")
+        .non_negative_u64()
+        .map_err(|_| format!("event hook id must be a non-negative integer, got {value}"))
 }
 
 pub(in crate::plugin) fn provider_id_from_number(value: f64) -> Result<u64, String> {
-    if !value.is_finite() || value < 0.0 || value.fract() != 0.0 || value > u64::MAX as f64 {
-        return Err(format!(
-            "syntax provider id must be a non-negative integer, got {value}"
-        ));
-    }
-    Ok(value as u64)
+    BearNumber::new(value, "syntax provider id")
+        .non_negative_u64()
+        .map_err(|_| format!("syntax provider id must be a non-negative integer, got {value}"))
 }
 
 fn syntax_snapshot_to_value(

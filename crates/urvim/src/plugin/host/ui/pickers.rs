@@ -7,6 +7,7 @@ use urvim_core::ui::picker::plugin::{PluginPickerId, PluginPickerItem};
 
 use super::super::super::{SharedLayout, native_fn, validate_callback};
 use crate::plugin::callbacks::{BearscriptPluginCallbacks, PluginPickerCallbacks};
+use crate::plugin::conversion::BearNumber;
 
 pub(in crate::plugin::host::ui) fn pickers_module(
     plugin: String,
@@ -259,10 +260,7 @@ fn optional_string(value: Option<&Value>, label: &str) -> Result<Option<String>,
 }
 
 fn picker_id_from_number(value: f64) -> Result<PluginPickerId, String> {
-    if !value.is_finite() || value < 0.0 || value.fract() != 0.0 || value > u64::MAX as f64 {
-        return Err(format!(
-            "plugin picker id must be a non-negative integer, got {value}"
-        ));
-    }
-    Ok(value as PluginPickerId)
+    BearNumber::new(value, "plugin picker id")
+        .non_negative_u64()
+        .map_err(|_| format!("plugin picker id must be a non-negative integer, got {value}"))
 }

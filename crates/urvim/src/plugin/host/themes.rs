@@ -1,5 +1,5 @@
 use std::cell::RefCell;
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use std::rc::Rc;
 
@@ -8,6 +8,7 @@ use urvim_core::globals;
 use urvim_theme::{RawColorValue, RawStyle, RawTheme};
 
 use super::native_fn;
+use crate::plugin::conversion::{BearMapRef, BearNumber, BearValueRef, FromBearValue};
 
 pub(in crate::plugin) fn themes_module(
     plugin: String,
@@ -210,16 +211,29 @@ fn unregister_theme(
 }
 
 fn raw_theme_from_value(value: Value) -> Result<RawTheme, String> {
-    let Value::Map(map) = value else {
-        return Err("theme must be a map".to_string());
-    };
+    let map = BearValueRef::new(&value, "theme")
+        .map()
+        .map_err(|error| error.to_string())?;
     reject_unknown_keys(&map, &["name", "palette", "default", "highlights"], "theme")?;
 
-    let name = required_string(&map, "name", "theme.name")?;
-    let palette = raw_palette_from_value(required_field(&map, "palette", "theme")?)?;
-    let default = raw_style_from_value(required_field(&map, "default", "theme")?, "theme.default")?;
-    let highlights = match map.get("highlights") {
-        Some(value) => raw_highlights_from_value(value)?,
+    let name = String::from_bear(map.required("name").map_err(|error| error.to_string())?)
+        .map_err(|error| error.to_string())?;
+    let palette = raw_palette_from_value(
+        map.required("palette")
+            .map_err(|error| error.to_string())?
+            .value(),
+    )?;
+    let default = raw_style_from_value(
+        map.required("default")
+            .map_err(|error| error.to_string())?
+            .value(),
+        "theme.default",
+    )?;
+    let highlights = match map
+        .optional("highlights")
+        .map_err(|error| error.to_string())?
+    {
+        Some(value) => raw_highlights_from_value(value.value())?,
         None => BTreeMap::new(),
     };
 
@@ -272,11 +286,11 @@ fn raw_highlights_from_value(value: &Value) -> Result<BTreeMap<String, RawStyle>
 }
 
 fn raw_style_from_value(value: &Value, label: &str) -> Result<RawStyle, String> {
-    let Value::Map(map) = value else {
-        return Err(format!("{label} must be a map"));
-    };
+    let map = BearValueRef::new(value, label)
+        .map()
+        .map_err(|error| error.to_string())?;
     reject_unknown_keys(
-        map,
+        &map,
         &[
             "fg",
             "bg",
@@ -296,78 +310,47 @@ fn raw_style_from_value(value: &Value, label: &str) -> Result<RawStyle, String> 
     )?;
 
     Ok(RawStyle {
-        fg: optional_string(map, "fg", label)?,
-        bg: optional_string(map, "bg", label)?,
-        underline_color: optional_string(map, "underline_color", label)?,
-        bold: optional_bool(map, "bold", label)?,
-        italic: optional_bool(map, "italic", label)?,
-        underline: optional_bool(map, "underline", label)?,
-        double_underline: optional_bool(map, "double_underline", label)?,
-        dim: optional_bool(map, "dim", label)?,
-        reverse: optional_bool(map, "reverse", label)?,
-        blink: optional_bool(map, "blink", label)?,
-        strikethrough: optional_bool(map, "strikethrough", label)?,
-        overline: optional_bool(map, "overline", label)?,
-        overlay: optional_bool(map, "overlay", label)?.unwrap_or(false),
+        fg: optional_string(&map, "fg")?,
+        bg: optional_string(&map, "bg")?,
+        underline_color: optional_string(&map, "underline_color")?,
+        bold: optional_bool(&map, "bold")?,
+        italic: optional_bool(&map, "italic")?,
+        underline: optional_bool(&map, "underline")?,
+        double_underline: optional_bool(&map, "double_underline")?,
+        dim: optional_bool(&map, "dim")?,
+        reverse: optional_bool(&map, "reverse")?,
+        blink: optional_bool(&map, "blink")?,
+        strikethrough: optional_bool(&map, "strikethrough")?,
+        overline: optional_bool(&map, "overline")?,
+        overlay: optional_bool(&map, "overlay")?.unwrap_or(false),
     })
 }
 
-fn reject_unknown_keys(
-    map: &HashMap<String, Value>,
-    allowed: &[&str],
-    label: &str,
-) -> Result<(), String> {
-    let allowed = allowed.iter().copied().collect::<BTreeSet<_>>();
-    if let Some(key) = map.keys().find(|key| !allowed.contains(key.as_str())) {
-        return Err(format!("unknown {label} field {key:?}"));
-    }
-    Ok(())
+fn reject_unknown_keys(map: &BearMapRef<'_>, allowed: &[&str], label: &str) -> Result<(), String> {
+    map.reject_unknown(allowed).map_err(|error| {
+        let key = error.path().rsplit('.').next().unwrap_or(error.path());
+        format!("unknown {label} field {key:?}")
+    })
 }
 
-fn required_field<'a>(
-    map: &'a HashMap<String, Value>,
-    key: &str,
-    label: &str,
-) -> Result<&'a Value, String> {
-    map.get(key)
-        .ok_or_else(|| format!("{label} requires {key}"))
+fn optional_string(map: &BearMapRef<'_>, key: &str) -> Result<Option<String>, String> {
+    map.optional(key)
+        .map_err(|error| error.to_string())?
+        .map(String::from_bear)
+        .transpose()
+        .map_err(|error| error.to_string())
 }
 
-fn required_string(map: &HashMap<String, Value>, key: &str, label: &str) -> Result<String, String> {
-    let value = required_field(map, key, "theme")?;
-    let Value::String(value) = value else {
-        return Err(format!("{label} must be a string"));
-    };
-    Ok(value.to_string())
-}
-
-fn optional_string(
-    map: &HashMap<String, Value>,
-    key: &str,
-    label: &str,
-) -> Result<Option<String>, String> {
-    match map.get(key) {
-        Some(Value::String(value)) => Ok(Some(value.to_string())),
-        Some(_) => Err(format!("{label}.{key} must be a string")),
-        None => Ok(None),
-    }
-}
-
-fn optional_bool(
-    map: &HashMap<String, Value>,
-    key: &str,
-    label: &str,
-) -> Result<Option<bool>, String> {
-    match map.get(key) {
-        Some(Value::Bool(value)) => Ok(Some(*value)),
-        Some(_) => Err(format!("{label}.{key} must be a bool")),
-        None => Ok(None),
-    }
+fn optional_bool(map: &BearMapRef<'_>, key: &str) -> Result<Option<bool>, String> {
+    map.optional(key)
+        .map_err(|error| error.to_string())?
+        .map(bool::from_bear)
+        .transpose()
+        .map_err(|error| error.to_string())
 }
 
 fn u8_from_number(number: f64, label: &str) -> Result<u8, String> {
-    if !number.is_finite() || number.fract() != 0.0 || !(0.0..=255.0).contains(&number) {
-        return Err(format!("{label} must be an integer from 0 to 255"));
-    }
-    Ok(number as u8)
+    BearNumber::new(number, label)
+        .byte()
+        .map_err(|error| error.to_string())
 }

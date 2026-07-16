@@ -20,7 +20,5 @@ This is a list, in no particular order, of things that need to be addressed whic
 # Plugins
 
 - can plugins expose APIs to each other?
-- there are lots of utility functions that convert script values to other types. can that be a trait?
 - we need to look for more opportunities for events for plugins to react to
 - confirmation-style dialogs
-- resolve: which is more critical: plugin name in user config, or plugin in plugin config?
