@@ -11,6 +11,7 @@ mod event;
 mod fs;
 mod health;
 mod host;
+mod inputs;
 mod jobs;
 mod pickers;
 mod timers;
@@ -23,6 +24,7 @@ use urvim_core::event::EditorEvent;
 use urvim_core::globals;
 use urvim_core::layout::Layout;
 use urvim_core::ui::confirmation_box::{PluginConfirmationCancelled, PluginConfirmationSelection};
+use urvim_core::ui::input_box::PluginInputCancelled;
 use urvim_core::ui::picker::plugin::PluginPickerCancelled;
 use urvim_core::ui::{Command, Intent};
 
@@ -33,6 +35,7 @@ use event::{bear_args, event_constants, event_payload};
 use fs::{PluginFsEvent, PluginFsRegistry, fs_event_id, fs_event_to_value};
 use health::{PluginHealth, PluginHealthSummary, slow_threshold};
 use host::{native_fn, urvim_module};
+use inputs::PluginInputEvents;
 use jobs::{PluginJobEvent, PluginJobRegistry, job_event_to_value};
 use pickers::PluginPickerEvents;
 use timers::{PluginTimerEvent, PluginTimerKind, PluginTimerRegistry};
@@ -50,6 +53,7 @@ pub(super) struct BearscriptPluginRuntime {
     timers: Rc<PluginTimerRegistry>,
     picker_events: PluginPickerEvents,
     confirmation_events: PluginConfirmationEvents,
+    input_events: PluginInputEvents,
 }
 
 impl BearscriptPluginRuntime {
@@ -68,6 +72,7 @@ impl BearscriptPluginRuntime {
             timers: Rc::new(PluginTimerRegistry::default()),
             picker_events: PluginPickerEvents::default(),
             confirmation_events: PluginConfirmationEvents::default(),
+            input_events: PluginInputEvents::default(),
         }
     }
 
@@ -89,6 +94,7 @@ impl BearscriptPluginRuntime {
             timers: Rc::new(PluginTimerRegistry::default()),
             picker_events: PluginPickerEvents::default(),
             confirmation_events: PluginConfirmationEvents::default(),
+            input_events: PluginInputEvents::default(),
         };
 
         for (plugin_name, plugin) in registry.iter() {
@@ -433,6 +439,49 @@ impl BearscriptPluginRuntime {
         dispatched
     }
 
+    /// Dispatches queued plugin input cancellation callbacks on the main thread.
+    pub(super) fn dispatch_input_events(&mut self) -> bool {
+        let mut dispatched = false;
+        while let Some(event) = self.input_events.poll() {
+            dispatched |= self.dispatch_input_cancellation(event);
+        }
+        dispatched
+    }
+
+    /// Runs a plugin input submission callback.
+    pub(super) fn run_input_submission(
+        &mut self,
+        plugin: &str,
+        input_id: u64,
+        text: String,
+    ) -> Result<(), String> {
+        let plugin_runtime = self
+            .plugins
+            .get_mut(plugin)
+            .ok_or_else(|| format!("plugin {plugin:?} is not loaded"))?;
+        let input = plugin_runtime
+            .callbacks
+            .borrow_mut()
+            .inputs
+            .remove(&input_id)
+            .ok_or_else(|| format!("plugin input {input_id} is not open"))?;
+        let started = Instant::now();
+        let result = plugin_runtime
+            .engine
+            .call_value(input.on_submit, vec![Value::String(text.into())])
+            .map(|_| ())
+            .map_err(|error| error.to_string());
+        self.record_callback(
+            plugin,
+            format!("input {input_id} submit"),
+            started.elapsed(),
+        );
+        if let Err(error) = &result {
+            self.record_error(plugin, error.clone());
+        }
+        result
+    }
+
     /// Runs a plugin confirmation response callback.
     pub(super) fn run_confirmation_response(
         &mut self,
@@ -586,6 +635,44 @@ impl BearscriptPluginRuntime {
         true
     }
 
+    fn dispatch_input_cancellation(&mut self, event: PluginInputCancelled) -> bool {
+        let Some(plugin_runtime) = self.plugins.get_mut(&event.plugin) else {
+            return false;
+        };
+        let Some(input) = plugin_runtime
+            .callbacks
+            .borrow_mut()
+            .inputs
+            .remove(&event.input_id)
+        else {
+            return false;
+        };
+        let Some(callback) = input.on_cancel else {
+            return true;
+        };
+        let started = Instant::now();
+        let result = plugin_runtime
+            .engine
+            .call_value(callback, vec![])
+            .map(|_| ())
+            .map_err(|error| error.to_string());
+        self.record_callback(
+            &event.plugin,
+            format!("input {} cancel", event.input_id),
+            started.elapsed(),
+        );
+        if let Err(error) = result {
+            self.record_error(&event.plugin, error.clone());
+            tracing::warn!(plugin = event.plugin, input_id = event.input_id, error = %error, "BearScript input callback failed");
+            urvim_core::notify_warn!(
+                "Plugin {} input {} callback failed: {error}",
+                event.plugin,
+                event.input_id
+            );
+        }
+        true
+    }
+
     fn dispatch_fs_event(&mut self, event: PluginFsEvent) -> bool {
         let request_id = fs_event_id(&event);
         let Some(plugin) = self.fs.mark_finished(request_id) else {
@@ -725,6 +812,7 @@ impl BearscriptPluginRuntime {
         callbacks.borrow_mut().picker_cancellation_sender = Some(self.picker_events.sender());
         callbacks.borrow_mut().confirmation_cancellation_sender =
             Some(self.confirmation_events.sender());
+        callbacks.borrow_mut().input_cancellation_sender = Some(self.input_events.sender());
         engine.set_global(
             "urvim",
             urvim_module(
@@ -753,6 +841,9 @@ impl BearscriptPluginRuntime {
             self.layout
                 .borrow_mut()
                 .close_plugin_confirmation_owned(plugin_name);
+            self.layout
+                .borrow_mut()
+                .close_plugin_input_owned(plugin_name);
             return Err(error.to_string());
         }
         let started = Instant::now();
@@ -772,6 +863,9 @@ impl BearscriptPluginRuntime {
             self.layout
                 .borrow_mut()
                 .close_plugin_confirmation_owned(plugin_name);
+            self.layout
+                .borrow_mut()
+                .close_plugin_input_owned(plugin_name);
             return Err(error);
         }
 
@@ -5498,6 +5592,115 @@ bg = "bg"
 
         assert!(runtime.dispatch_confirmation_events());
         assert!(!runtime.dispatch_confirmation_events());
+        assert_eq!(
+            globals::active_notification(Instant::now())
+                .expect("cancel notification")
+                .text,
+            "closed"
+        );
+    }
+
+    #[test]
+    fn ui_input_submits_normalized_text_without_cancelling() {
+        let _guard = buffer_pool_lock();
+        globals::clear_notifications();
+        let mut runtime = runtime_with_script(
+            r#"
+            fn submitted(value) {
+                urvim.ui.show_message(value)
+            }
+            fn cancelled() {
+                urvim.ui.show_message("cancelled")
+            }
+            fn init() {
+                urvim.ui.input({
+                    "title": "Name",
+                    "prompt": "Value: ",
+                    "initial": "start:",
+                    "on_submit": submitted,
+                    "on_cancel": cancelled
+                })
+            }
+            "#,
+        );
+        let layout = Rc::clone(&runtime.layout);
+        layout
+            .borrow_mut()
+            .route_ui_event(&urvim_core::ui::UiEvent::Paste("one\r\ntwo".to_string()));
+        let result = layout
+            .borrow_mut()
+            .route_ui_event(&urvim_core::ui::UiEvent::Key(Key::new(KeyCode::Enter)));
+
+        assert!(crate::actions::handle_ui_result_with_shared_layout(
+            &layout,
+            &mut runtime,
+            result,
+        ));
+        assert_eq!(
+            globals::active_notification(Instant::now())
+                .expect("submit notification")
+                .text,
+            "start:one two"
+        );
+        assert!(!runtime.dispatch_input_events());
+    }
+
+    #[test]
+    fn ui_input_escape_dispatches_cancel_callback_once() {
+        let _guard = buffer_pool_lock();
+        globals::clear_notifications();
+        let mut runtime = runtime_with_script(
+            r#"
+            fn submitted(value) {}
+            fn cancelled() {
+                urvim.ui.show_message("cancelled")
+            }
+            fn init() {
+                urvim.ui.input({
+                    "on_submit": submitted,
+                    "on_cancel": cancelled
+                })
+            }
+            "#,
+        );
+
+        runtime
+            .layout
+            .borrow_mut()
+            .route_ui_event(&urvim_core::ui::UiEvent::Key(Key::new(KeyCode::Esc)));
+
+        assert!(runtime.dispatch_input_events());
+        assert!(!runtime.dispatch_input_events());
+        assert_eq!(
+            globals::active_notification(Instant::now())
+                .expect("cancel notification")
+                .text,
+            "cancelled"
+        );
+    }
+
+    #[test]
+    fn ui_close_input_dispatches_cancel_callback_once() {
+        let _guard = buffer_pool_lock();
+        globals::clear_notifications();
+        let mut runtime = runtime_with_script(
+            r#"
+            fn submitted(value) {}
+            fn cancelled() {
+                urvim.ui.show_message("closed")
+            }
+            fn init() {
+                let id = urvim.ui.input({
+                    "on_submit": submitted,
+                    "on_cancel": cancelled
+                })
+                urvim.ui.close_input(id)
+            }
+            "#,
+        );
+
+        assert!(runtime.dispatch_input_events());
+        assert!(!runtime.dispatch_input_events());
         assert_eq!(
             globals::active_notification(Instant::now())
                 .expect("cancel notification")

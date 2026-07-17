@@ -109,6 +109,8 @@ The global `urvim` module exposes the APIs below. All arguments and return value
 - `urvim.ui.show_message(message, opts)`
 - `urvim.ui.confirm(opts) -> confirmation_id`
 - `urvim.ui.close_confirmation(confirmation_id)`
+- `urvim.ui.input(opts) -> input_id`
+- `urvim.ui.close_input(input_id)`
 - `urvim.ui.windows.create(opts) -> window_id`
 - `urvim.ui.windows.configure(window_id, opts)`
 - `urvim.ui.windows.set_content(window_id, content)`
@@ -323,6 +325,39 @@ different. Enter selects the confirm response. Selecting either response calls
 dialog. A response or cancellation callback is delivered at most once.
 Confirmation ids are owned by the creating plugin and become invalid when the
 dialog closes. See `examples/plugins/confirmation-demo` for a complete example.
+
+### Input Dialogs
+
+`urvim.ui.input(opts)` opens a modal single-line input dialog and returns its id:
+
+```text
+fn handle_submit(text) {
+    urvim.ui.show_message("Entered: {text}")
+}
+
+fn handle_cancel() {
+    urvim.ui.show_message("Dismissed")
+}
+
+let input_id = urvim.ui.input({
+    "title": "Rename",
+    "prompt": "Name: ",
+    "initial": "old_name",
+    "on_submit": handle_submit,
+    "on_cancel": handle_cancel
+})
+```
+
+`on_submit` is required. `title` defaults to `Input`; `prompt` and `initial`
+default to empty strings. Enter calls `on_submit` with the exact input text,
+including an empty string. Pasted line-break runs are converted to spaces so the
+value remains single-line.
+
+`on_cancel` is optional and is called after Esc,
+`urvim.ui.close_input(input_id)`, or replacement by another dialog. A submit or
+cancellation callback is delivered at most once. Input ids are owned by the
+creating plugin and become invalid when the dialog closes. See
+`examples/plugins/input-demo` for a complete example.
 
 ### Custom Pickers
 

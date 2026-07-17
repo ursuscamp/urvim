@@ -21,4 +21,3 @@ This is a list, in no particular order, of things that need to be addressed whic
 
 - can plugins expose APIs to each other?
 - we need to look for more opportunities for events for plugins to react to
-- input dialogs

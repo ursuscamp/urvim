@@ -9,6 +9,7 @@ use super::super::callbacks::BearscriptPluginCallbacks;
 use super::super::{SharedLayout, native_fn};
 
 mod confirmations;
+mod inputs;
 mod line_format;
 mod panes;
 mod pickers;
@@ -28,6 +29,11 @@ pub(in crate::plugin) fn ui_module(
     let confirm_layout = Rc::clone(&layout);
     let close_confirmation_plugin = plugin.clone();
     let close_confirmation_layout = Rc::clone(&layout);
+    let input_plugin = plugin.clone();
+    let input_callbacks = Rc::clone(&callbacks);
+    let input_layout = Rc::clone(&layout);
+    let close_input_plugin = plugin.clone();
+    let close_input_layout = Rc::clone(&layout);
     let windows_plugin = plugin.clone();
     let windows_contributions = Rc::clone(&contributions);
     let windows_layout = Rc::clone(&layout);
@@ -52,6 +58,14 @@ pub(in crate::plugin) fn ui_module(
                     close_confirmation_plugin,
                     close_confirmation_layout,
                 ),
+            ),
+            (
+                "input".to_string(),
+                inputs::input_fn(input_plugin, input_callbacks, input_layout),
+            ),
+            (
+                "close_input".to_string(),
+                inputs::close_input_fn(close_input_plugin, close_input_layout),
             ),
             ("line_format".to_string(), line_format::line_format_module()),
             (

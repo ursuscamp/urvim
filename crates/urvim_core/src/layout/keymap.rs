@@ -17,7 +17,9 @@ impl Layout {
     }
 
     pub(super) fn overlay_modal_is_open(&self) -> bool {
-        self.confirmation_box_is_open() || self.lsp_rename_prompt_is_open()
+        self.confirmation_box_is_open()
+            || self.input_box_is_open()
+            || self.lsp_rename_prompt_is_open()
     }
 
     pub(super) fn picker_is_open(&self) -> bool {

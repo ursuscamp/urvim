@@ -117,6 +117,9 @@ pub(super) fn run(cli: Cli) -> io::Result<()> {
         if plugin_runtime.dispatch_confirmation_events() {
             needs_redraw = true;
         }
+        if plugin_runtime.dispatch_input_events() {
+            needs_redraw = true;
+        }
 
         if plugin_runtime.refresh_plugin_syntax() {
             needs_redraw = true;
@@ -179,6 +182,9 @@ pub(super) fn run(cli: Cli) -> io::Result<()> {
                     needs_redraw = true;
                 }
                 if plugin_runtime.dispatch_confirmation_events() {
+                    needs_redraw = true;
+                }
+                if plugin_runtime.dispatch_input_events() {
                     needs_redraw = true;
                 }
                 if plugin_runtime.refresh_plugin_syntax() {

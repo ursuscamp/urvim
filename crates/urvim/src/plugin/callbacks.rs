@@ -4,6 +4,7 @@ use std::rc::Rc;
 
 use bearscript::{Engine, Value};
 use urvim_core::ui::confirmation_box::PluginConfirmationCancelled;
+use urvim_core::ui::input_box::PluginInputCancelled;
 use urvim_core::ui::picker::plugin::PluginPickerCancelled;
 
 use super::jobs::PluginJobCallbacks;
@@ -23,16 +24,25 @@ pub(in crate::plugin) struct BearscriptPluginCallbacks {
     pub(in crate::plugin) timers: HashMap<u64, Value>,
     pub(in crate::plugin) pickers: HashMap<u64, PluginPickerCallbacks>,
     pub(in crate::plugin) confirmations: HashMap<u64, PluginConfirmationCallbacks>,
+    pub(in crate::plugin) inputs: HashMap<u64, PluginInputCallbacks>,
     pub(in crate::plugin) next_hook_id: u64,
     pub(in crate::plugin) next_syntax_provider_id: u64,
     pub(in crate::plugin) next_picker_id: u64,
     pub(in crate::plugin) next_picker_item_id: u64,
     pub(in crate::plugin) next_confirmation_id: u64,
+    pub(in crate::plugin) next_input_id: u64,
     pub(in crate::plugin) picker_cancellation_sender:
         Option<std::sync::mpsc::Sender<PluginPickerCancelled>>,
     pub(in crate::plugin) confirmation_cancellation_sender:
         Option<std::sync::mpsc::Sender<PluginConfirmationCancelled>>,
+    pub(in crate::plugin) input_cancellation_sender:
+        Option<std::sync::mpsc::Sender<PluginInputCancelled>>,
     pub(in crate::plugin) syntax_refresh_requests: BTreeSet<urvim_core::buffer::BufferId>,
+}
+
+pub(in crate::plugin) struct PluginInputCallbacks {
+    pub(in crate::plugin) on_submit: Value,
+    pub(in crate::plugin) on_cancel: Option<Value>,
 }
 
 pub(in crate::plugin) struct PluginConfirmationCallbacks {

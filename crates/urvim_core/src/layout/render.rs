@@ -170,6 +170,7 @@ impl Layout {
         self.render_plugin_picker_overlay(screen, origin, size);
         self.render_command_line_overlay(screen, origin, size);
         self.render_lsp_rename_overlay(screen, origin, size);
+        self.render_input_box_overlay(screen, origin, size);
         self.render_confirmation_box_overlay(screen, origin, size);
 
         if self.inlay_hint_request_pending() {
@@ -438,6 +439,15 @@ impl Layout {
 
         let ctx = UiContext;
         prompt.render_widget(screen, UiRect::new(origin, size), &ctx);
+    }
+
+    fn render_input_box_overlay(&mut self, screen: &mut Screen, origin: Position, size: Size) {
+        let Some(input) = self.input_box_mut() else {
+            return;
+        };
+
+        let ctx = UiContext;
+        input.render_widget(screen, UiRect::new(origin, size), &ctx);
     }
 
     fn render_hover_overlay(&mut self, screen: &mut Screen, origin: Position, size: Size) {

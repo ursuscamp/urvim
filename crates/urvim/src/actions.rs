@@ -168,6 +168,22 @@ pub(super) fn execute_command_intent(
         return true;
     }
 
+    if let Command::PluginInputSubmit {
+        plugin,
+        input_id,
+        text,
+    } = command
+    {
+        let Some(plugin_runtime) = plugin_runtime else {
+            return true;
+        };
+        if let Err(error) = plugin_runtime.run_input_submission(&plugin, input_id, text.clone()) {
+            tracing::warn!(plugin, input_id, error = %error, "plugin input submission failed");
+            urvim_core::notify_warn!("Plugin {plugin} input {input_id} failed: {error}");
+        }
+        return true;
+    }
+
     if matches!(command, Command::PluginStatus) {
         let status = plugin_runtime
             .as_ref()

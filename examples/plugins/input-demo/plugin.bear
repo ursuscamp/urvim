@@ -1,0 +1,21 @@
+fn init() {
+    urvim.commands.register("open", open, "Open the input dialog demo")
+}
+
+fn open(args) {
+    urvim.ui.input({
+        "title": "Display name",
+        "prompt": "Name: ",
+        "initial": "urvim user",
+        "on_submit": handle_submit,
+        "on_cancel": handle_cancel
+    })
+}
+
+fn handle_submit(text) {
+    urvim.ui.show_message("Input submitted: {text}")
+}
+
+fn handle_cancel() {
+    urvim.ui.show_message("Input dismissed")
+}

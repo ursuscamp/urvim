@@ -1,5 +1,6 @@
 use super::command_line::CommandLineState;
 use super::confirmation::ConfirmationDialog;
+use super::input_box::InputDialog;
 use crate::ui::completion::CompletionWidget;
 use crate::ui::diagnostic_hover::DiagnosticHoverWidget;
 use crate::ui::hover::HoverWidget;
@@ -35,6 +36,7 @@ pub(in crate::layout) struct Dialogs {
     pub grep_picker: Option<GrepPickerWidget>,
     pub plugin_picker: Option<PluginPickerWidget>,
     pub confirmation_box: Option<ConfirmationDialog>,
+    pub input_box: Option<InputDialog>,
     pub hover: Option<HoverWidget>,
     pub diagnostic_hover: Option<DiagnosticHoverWidget>,
 }
@@ -58,6 +60,7 @@ impl Default for Dialogs {
             grep_picker: None,
             plugin_picker: None,
             confirmation_box: None,
+            input_box: None,
             hover: None,
             diagnostic_hover: None,
         }
@@ -116,6 +119,11 @@ impl Dialogs {
                     .as_ref()
                     .and_then(|prompt| prompt.cursor())
             })
+            .or_else(|| {
+                self.input_box
+                    .as_ref()
+                    .and_then(|dialog| dialog.widget.cursor())
+            })
             .or_else(|| self.command_line.cursor())
     }
 
@@ -138,6 +146,7 @@ impl Dialogs {
         self.grep_picker = None;
         self.plugin_picker = None;
         self.confirmation_box = None;
+        self.input_box = None;
         self.hover = None;
         self.diagnostic_hover = None;
         self.lsp_rename_prompt = None;

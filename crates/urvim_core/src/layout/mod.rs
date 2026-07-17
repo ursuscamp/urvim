@@ -10,6 +10,7 @@ mod confirmation;
 mod dialogs;
 mod geometry;
 mod hover;
+mod input_box;
 mod keymap;
 mod lsp;
 mod lsp_rename;
@@ -853,7 +854,9 @@ impl Layout {
             // perform overwrite confirmation and emit plugin-facing editor events.
             Command::SaveBuffer(_) => false,
             // Plugin picker values and callbacks live in the application plugin runtime.
-            Command::PluginPickerSelect { .. } | Command::PluginConfirmationSelect { .. } => false,
+            Command::PluginPickerSelect { .. }
+            | Command::PluginConfirmationSelect { .. }
+            | Command::PluginInputSubmit { .. } => false,
             Command::SaveBufferAs { buffer_id, path } => self
                 .execute_save_as(*buffer_id, path.as_path())
                 .map_or_else(
@@ -1215,6 +1218,8 @@ impl Layout {
             UiEvent::Key(key) => {
                 if self.confirmation_box_is_open() {
                     self.handle_confirmation_box_event(event)
+                } else if self.input_box_is_open() {
+                    self.handle_input_box_event(event)
                 } else if self.lsp_rename_prompt_is_open() {
                     self.handle_lsp_rename_event(event)
                 } else if self.dialogs.completion.is_some() {
@@ -1228,6 +1233,8 @@ impl Layout {
             UiEvent::Paste(text) => {
                 if self.confirmation_box_is_open() {
                     self.handle_confirmation_box_event(event)
+                } else if self.input_box_is_open() {
+                    self.handle_input_box_event(event)
                 } else if self.lsp_rename_prompt_is_open() {
                     self.handle_lsp_rename_event(event)
                 } else if self.completion_is_open() {

@@ -8,6 +8,7 @@ pub mod confirmation_box;
 pub mod diagnostic_hover;
 pub mod floating_window;
 pub mod hover;
+pub mod input_box;
 pub mod inputs;
 pub mod line_format;
 pub mod lsp_rename;
@@ -199,6 +200,15 @@ pub enum Command {
         /// Selected response.
         selection: crate::ui::confirmation_box::PluginConfirmationSelection,
     },
+    /// Submit text entered into a plugin-owned input box.
+    PluginInputSubmit {
+        /// Plugin that owns the input box.
+        plugin: String,
+        /// Input box instance identity.
+        input_id: crate::ui::input_box::PluginInputId,
+        /// Exact submitted text.
+        text: String,
+    },
     /// Show loaded plugin runtime statuses.
     PluginStatus,
     /// Run an LSP hover query on the active buffer.
@@ -337,6 +347,7 @@ impl Command {
             Self::EnqueueNotification { .. }
             | Self::PluginPickerSelect { .. }
             | Self::PluginConfirmationSelect { .. }
+            | Self::PluginInputSubmit { .. }
             | Self::OverwriteBuffer(_)
             | Self::LspRename(_)
             | Self::ApplyCompletion(_)
