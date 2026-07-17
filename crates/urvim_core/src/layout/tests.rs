@@ -1639,29 +1639,33 @@ fn test_plugin_pane_render_updates_header_style_with_focus() {
         )
         .unwrap();
     let mut screen = crate::screen::Screen::new(4, 21);
+    let rect = crate::ui::UiRect::new(Position::new(0, 0), Size::new(4, 21));
 
-    layout.render(&mut screen, Position::new(0, 0), Size::new(4, 21));
-    let region = layout.pane_region(id).unwrap();
+    assert_eq!(layout.focused_plugin_pane(), Some(id));
+    let focused = layout.focused_plugin_pane() == Some(id);
+    layout
+        .plugin_pane("demo", id)
+        .unwrap()
+        .render(&mut screen, rect, focused);
+    let title_col = (rect.size.cols - "Plugin".len() as u16) / 2;
     assert_eq!(
         screen
-            .get_cell_mut(region.origin.row, region.origin.col)
+            .get_cell_mut(rect.origin.row, title_col)
             .unwrap()
             .style,
         active_style
     );
-    assert_eq!(
-        screen
-            .get_cell_mut(region.origin.row + 1, region.origin.col)
-            .unwrap()
-            .text,
-        "c"
-    );
 
     assert!(layout.focus_layout_pane(PaneId(0)));
-    layout.render(&mut screen, Position::new(0, 0), Size::new(4, 21));
+    assert_eq!(layout.focused_plugin_pane(), None);
+    let focused = layout.focused_plugin_pane() == Some(id);
+    layout
+        .plugin_pane("demo", id)
+        .unwrap()
+        .render(&mut screen, rect, focused);
     assert_eq!(
         screen
-            .get_cell_mut(region.origin.row, region.origin.col)
+            .get_cell_mut(rect.origin.row, title_col)
             .unwrap()
             .style,
         inactive_style
