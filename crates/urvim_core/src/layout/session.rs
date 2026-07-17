@@ -45,8 +45,9 @@ impl Layout {
         };
         layout.next_pane_id = layout.max_pane_id().map(|id| id.0 + 1).unwrap_or(0);
         if layout.root.is_some() {
-            let _ = layout.focus_pane(focused_pane);
+            layout.focus_pane(focused_pane);
         }
+        layout.emit_initial_lifecycle_events();
         layout
     }
 

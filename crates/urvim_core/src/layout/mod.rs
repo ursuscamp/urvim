@@ -26,6 +26,8 @@ use crate::action::ActionResult;
 use crate::background::{JobEvent, JobKind, JobManager};
 use crate::buffer::BufferId;
 use crate::editor::{EditorAction, InheritedKeymap, ModeKind, NormalMode};
+use crate::event::{BufferEventSnapshot, EditorEvent};
+use crate::globals;
 use crate::screen::Screen;
 use crate::status_bar::StatusBar;
 use crate::ui::plugin_pane::{PluginPane, PluginPaneOptions};
@@ -33,7 +35,8 @@ use crate::ui::plugin_window::{
     PluginWindowContent, PluginWindowId, PluginWindowManager, PluginWindowOptions,
 };
 use crate::ui::{Command, Intent, KeymapInheritance, UiEvent, UiEventResult};
-use crate::window::{BufferView, Position, Size};
+use crate::window::{BufferView, Position, Size, TabId};
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
@@ -67,6 +70,8 @@ pub struct VisibleRangeSnapshot {
 /// Snapshot of a tab in a pane.
 #[derive(Debug, Clone)]
 pub struct PaneTabSnapshot {
+    /// Stable runtime identifier for this tab.
+    pub tab_id: TabId,
     /// Buffer identifier for this tab.
     pub buffer_id: BufferId,
     /// Whether this tab is the active tab in its pane.
@@ -132,6 +137,32 @@ pub struct Layout {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+struct LayoutEventWindowSnapshot {
+    id: PaneId,
+    tabs: Vec<(TabId, BufferId)>,
+    active_tab_id: Option<TabId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct LayoutEventSnapshot {
+    windows: Vec<LayoutEventWindowSnapshot>,
+    focused_window_id: Option<PaneId>,
+    active_buffer_id: Option<BufferId>,
+    buffers: BTreeMap<BufferId, (usize, BufferEventSnapshot)>,
+}
+
+impl LayoutEventSnapshot {
+    fn empty() -> Self {
+        Self {
+            windows: Vec::new(),
+            focused_window_id: None,
+            active_buffer_id: None,
+            buffers: BTreeMap::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct InlayHintRequestParams {
     pub buffer_id: BufferId,
     pub start_line: usize,
@@ -191,7 +222,7 @@ impl Layout {
     /// Creates a layout from an existing window group.
     pub fn new(window_group: crate::window_group::WindowGroup) -> Self {
         let focused_pane = PaneId(0);
-        Self {
+        let layout = Self {
             root: Some(LayoutNode::Pane(PaneNode::new_editor(
                 focused_pane,
                 window_group,
@@ -211,6 +242,233 @@ impl Layout {
             plugin_pane_key_sequence: PluginPaneKeySequence::None,
             modal_inherited_keymap: InheritedKeymap::new(NormalMode::keymap()),
             modal_key_sequence: ModalKeySequence::None,
+        };
+        layout.emit_initial_lifecycle_events();
+        layout
+    }
+
+    fn emit_initial_lifecycle_events(&self) {
+        self.emit_event_transition(LayoutEventSnapshot::empty(), self.event_snapshot());
+    }
+
+    fn with_event_transition<R>(&mut self, transition: impl FnOnce(&mut Self) -> R) -> R {
+        let before = self.event_snapshot();
+        let result = transition(self);
+        let after = self.event_snapshot();
+        self.emit_event_transition(before, after);
+        result
+    }
+
+    fn event_snapshot(&self) -> LayoutEventSnapshot {
+        let mut windows = Vec::new();
+        if let Some(root) = self.root.as_ref() {
+            Self::collect_event_windows(root, &mut windows);
+        }
+
+        let active_buffer_id = self
+            .root
+            .as_ref()
+            .and_then(|root| Self::find_pane(root, self.last_editor_pane))
+            .and_then(PaneNode::editor_window_group)
+            .filter(|group| !group.is_empty())
+            .map(|group| group.active_buffer_view().buffer_id());
+        let mut buffers = BTreeMap::new();
+        for window in &windows {
+            for &(_, buffer_id) in &window.tabs {
+                let entry = buffers.entry(buffer_id).or_insert_with(|| {
+                    let snapshot = globals::with_buffer(buffer_id, |buffer| {
+                        BufferEventSnapshot::from_buffer(buffer_id, buffer)
+                    })
+                    .unwrap_or_else(|| {
+                        tracing::warn!(
+                            ?buffer_id,
+                            "visible buffer was unavailable while capturing an event snapshot"
+                        );
+                        BufferEventSnapshot::from_buffer(buffer_id, &crate::buffer::Buffer::new())
+                    });
+                    (0, snapshot)
+                });
+                entry.0 += 1;
+            }
+        }
+
+        LayoutEventSnapshot {
+            windows,
+            focused_window_id: self.active_window_id(),
+            active_buffer_id,
+            buffers,
+        }
+    }
+
+    fn collect_event_windows(node: &LayoutNode, windows: &mut Vec<LayoutEventWindowSnapshot>) {
+        match node {
+            LayoutNode::Pane(pane) => {
+                if let Some(group) = pane.editor_window_group() {
+                    windows.push(LayoutEventWindowSnapshot {
+                        id: pane.id,
+                        tabs: group.tab_ids_and_buffer_ids(),
+                        active_tab_id: group.active_tab_id(),
+                    });
+                }
+            }
+            LayoutNode::Split(split) => {
+                Self::collect_event_windows(&split.first, windows);
+                Self::collect_event_windows(&split.second, windows);
+            }
+        }
+    }
+
+    fn active_event_tab(window: &LayoutEventWindowSnapshot) -> Option<(TabId, BufferId)> {
+        let tab_id = window.active_tab_id?;
+        window
+            .tabs
+            .iter()
+            .find_map(|(id, buffer_id)| (*id == tab_id).then_some((tab_id, *buffer_id)))
+    }
+
+    fn emit_event_transition(&self, before: LayoutEventSnapshot, after: LayoutEventSnapshot) {
+        if before.active_buffer_id != after.active_buffer_id
+            && before.active_buffer_id.is_some()
+            && let Some(buffer_id) = after.active_buffer_id
+        {
+            globals::set_active_buffer_id(buffer_id);
+        }
+
+        let before_windows: BTreeMap<_, _> = before
+            .windows
+            .iter()
+            .map(|window| (window.id, window))
+            .collect();
+        let after_windows: BTreeMap<_, _> = after
+            .windows
+            .iter()
+            .map(|window| (window.id, window))
+            .collect();
+
+        for window in &before.windows {
+            let after_tabs: BTreeSet<_> = after_windows
+                .get(&window.id)
+                .map(|window| window.tabs.iter().map(|(id, _)| *id).collect())
+                .unwrap_or_default();
+            for &(tab_id, buffer_id) in &window.tabs {
+                if !after_tabs.contains(&tab_id) {
+                    let snapshot = before
+                        .buffers
+                        .get(&buffer_id)
+                        .map(|(_, snapshot)| snapshot.clone())
+                        .expect("closed tab buffer should have a pre-transition snapshot");
+                    globals::enqueue_editor_event(EditorEvent::TabClosed {
+                        window_id: window.id,
+                        tab_id,
+                        snapshot,
+                    });
+                }
+            }
+        }
+        for (&buffer_id, (_, snapshot)) in &before.buffers {
+            if !after.buffers.contains_key(&buffer_id) {
+                globals::enqueue_editor_event(EditorEvent::BufferClosed {
+                    snapshot: snapshot.clone(),
+                });
+            }
+        }
+        for window in &before.windows {
+            if !after_windows.contains_key(&window.id) {
+                let (tab_id, buffer_id) = Self::active_event_tab(window)
+                    .expect("closed editor window should have a final active tab");
+                globals::enqueue_editor_event(EditorEvent::WindowClosed {
+                    window_id: window.id,
+                    buffer_id,
+                    tab_id,
+                });
+            }
+        }
+        for window in &after.windows {
+            if !before_windows.contains_key(&window.id) {
+                let (tab_id, buffer_id) = Self::active_event_tab(window)
+                    .expect("created editor window should have an active tab");
+                globals::enqueue_editor_event(EditorEvent::WindowCreated {
+                    window_id: window.id,
+                    buffer_id,
+                    tab_id,
+                });
+            }
+        }
+        for window in &after.windows {
+            let before_tabs: BTreeSet<_> = before_windows
+                .get(&window.id)
+                .map(|window| window.tabs.iter().map(|(id, _)| *id).collect())
+                .unwrap_or_default();
+            for &(tab_id, buffer_id) in &window.tabs {
+                if !before_tabs.contains(&tab_id) {
+                    let snapshot = after
+                        .buffers
+                        .get(&buffer_id)
+                        .map(|(_, snapshot)| snapshot.clone())
+                        .expect("opened tab buffer should have a post-transition snapshot");
+                    globals::enqueue_editor_event(EditorEvent::TabOpened {
+                        window_id: window.id,
+                        tab_id,
+                        snapshot,
+                    });
+                }
+            }
+        }
+        for (&buffer_id, (_, snapshot)) in &after.buffers {
+            if !before.buffers.contains_key(&buffer_id) {
+                globals::enqueue_editor_event(EditorEvent::BufferOpened {
+                    snapshot: snapshot.clone(),
+                });
+            }
+        }
+        if before.focused_window_id != after.focused_window_id
+            && let Some(window_id) = after.focused_window_id
+        {
+            let window = after_windows
+                .get(&window_id)
+                .expect("focused window should be present after transition");
+            let (tab_id, buffer_id) = Self::active_event_tab(window)
+                .expect("focused editor window should have an active tab");
+            globals::enqueue_editor_event(EditorEvent::WindowFocused {
+                previous_window_id: before.focused_window_id,
+                window_id,
+                buffer_id,
+                tab_id,
+            });
+        }
+        for window in &after.windows {
+            let previous_tab_id = before_windows
+                .get(&window.id)
+                .and_then(|window| window.active_tab_id);
+            if previous_tab_id != window.active_tab_id
+                && let Some((tab_id, buffer_id)) = Self::active_event_tab(window)
+            {
+                globals::enqueue_editor_event(EditorEvent::TabActivated {
+                    previous_tab_id,
+                    window_id: window.id,
+                    tab_id,
+                    buffer_id,
+                });
+            }
+        }
+        if before.active_buffer_id != after.active_buffer_id
+            && let Some(buffer_id) = after.active_buffer_id
+        {
+            let window_id = after
+                .focused_window_id
+                .expect("an active buffer change should have a focused editor window");
+            let window = after_windows
+                .get(&window_id)
+                .expect("active buffer window should be present after transition");
+            let (tab_id, active_buffer_id) = Self::active_event_tab(window)
+                .expect("active buffer window should have an active tab");
+            debug_assert_eq!(active_buffer_id, buffer_id);
+            globals::enqueue_editor_event(EditorEvent::ActiveBufferChanged {
+                previous_buffer_id: before.active_buffer_id,
+                buffer_id,
+                window_id,
+                tab_id,
+            });
         }
     }
 
@@ -589,11 +847,12 @@ impl Layout {
     }
 
     pub(super) fn focus_layout_pane(&mut self, id: PaneId) -> bool {
-        if self.is_plugin_pane(id) {
-            self.plugin_windows.blur_focused();
-            return self.focus_pane(id);
-        }
-        self.focus_pane(id)
+        self.with_event_transition(|layout| {
+            if layout.is_plugin_pane(id) {
+                layout.plugin_windows.blur_focused();
+            }
+            layout.focus_pane(id)
+        })
     }
 
     /// Creates a plugin-owned floating window.
@@ -736,9 +995,8 @@ impl Layout {
                     buffer_id, ..
                 } => {
                     if let Some(buffer_id) = buffer_id
-                        && self.close_buffer_tabs(buffer_id)
+                        && self.close_buffer_tabs_and_prune(buffer_id)
                     {
-                        self.prune_empty_panes();
                         accepted_redraw = true;
                     }
                 }
@@ -758,10 +1016,19 @@ impl Layout {
 
     /// Dispatches a unified intent through the root layout.
     pub fn dispatch_intent(&mut self, intent: &Intent) -> bool {
-        match intent {
-            Intent::Editor(action) => self.dispatch_action(action),
-            Intent::Command(command) => self.dispatch_command(command),
-        }
+        self.with_event_transition(|layout| match intent {
+            Intent::Editor(action) => layout.dispatch_action(action),
+            Intent::Command(command) => layout.dispatch_command(command),
+        })
+    }
+
+    /// Activates an existing tab for a buffer or opens and activates a new tab.
+    pub fn activate_or_open_buffer(&mut self, buffer_id: BufferId) {
+        self.with_event_transition(|layout| {
+            layout
+                .active_window_group_mut()
+                .activate_or_open_buffer(buffer_id);
+        });
     }
 
     fn dispatch_command(&mut self, command: &Command) -> bool {
@@ -1723,10 +1990,12 @@ impl Layout {
             let active_tab_index = window_group.active_tab_index();
             let buffer_ids = window_group.buffer_ids();
 
-            let tabs: Vec<PaneTabSnapshot> = buffer_ids
+            let tabs: Vec<PaneTabSnapshot> = window_group
+                .tab_ids_and_buffer_ids()
                 .iter()
                 .enumerate()
-                .map(|(index, &buffer_id)| PaneTabSnapshot {
+                .map(|(index, &(tab_id, buffer_id))| PaneTabSnapshot {
+                    tab_id,
                     buffer_id,
                     active: index == active_tab_index,
                 })

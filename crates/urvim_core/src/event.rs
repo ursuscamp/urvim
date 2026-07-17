@@ -11,6 +11,8 @@
 use std::path::PathBuf;
 
 use crate::buffer::{Buffer, BufferId};
+use crate::layout::PaneId;
+use crate::window::TabId;
 
 /// Snapshot of buffer metadata captured when a buffer event is enqueued.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -76,6 +78,75 @@ pub enum EditorEvent {
     BufferFiletypeChanged {
         /// Buffer metadata at enqueue time.
         snapshot: BufferEventSnapshot,
+    },
+    /// An editor window was created.
+    WindowCreated {
+        /// Stable window identifier.
+        window_id: PaneId,
+        /// Buffer shown by the window's active tab.
+        buffer_id: BufferId,
+        /// Active tab's stable runtime identifier.
+        tab_id: TabId,
+    },
+    /// An editor window was closed.
+    WindowClosed {
+        /// Stable window identifier.
+        window_id: PaneId,
+        /// Buffer shown by the window's final active tab.
+        buffer_id: BufferId,
+        /// Final active tab's stable runtime identifier.
+        tab_id: TabId,
+    },
+    /// An editor window received focus.
+    WindowFocused {
+        /// Previously focused window, or `None` when there was none.
+        previous_window_id: Option<PaneId>,
+        /// Stable window identifier.
+        window_id: PaneId,
+        /// Buffer shown by the focused window's active tab.
+        buffer_id: BufferId,
+        /// Focused window's active tab identifier.
+        tab_id: TabId,
+    },
+    /// A tab was opened in an editor window.
+    TabOpened {
+        /// Stable window identifier.
+        window_id: PaneId,
+        /// Stable runtime tab identifier.
+        tab_id: TabId,
+        /// Buffer metadata at enqueue time.
+        snapshot: BufferEventSnapshot,
+    },
+    /// A tab was closed in an editor window.
+    TabClosed {
+        /// Stable window identifier.
+        window_id: PaneId,
+        /// Stable runtime tab identifier.
+        tab_id: TabId,
+        /// Buffer metadata captured before the tab was removed.
+        snapshot: BufferEventSnapshot,
+    },
+    /// A different tab became active in an editor window.
+    TabActivated {
+        /// Previously active tab, or `None` for a newly created window.
+        previous_tab_id: Option<TabId>,
+        /// Stable window identifier.
+        window_id: PaneId,
+        /// Stable runtime tab identifier.
+        tab_id: TabId,
+        /// Buffer shown by the tab.
+        buffer_id: BufferId,
+    },
+    /// The active editor buffer changed.
+    ActiveBufferChanged {
+        /// Previously active buffer, or `None` when there was none.
+        previous_buffer_id: Option<BufferId>,
+        /// Newly active buffer.
+        buffer_id: BufferId,
+        /// Window containing the newly active buffer.
+        window_id: PaneId,
+        /// Active tab showing the newly active buffer.
+        tab_id: TabId,
     },
     /// A non-plugin command was executed successfully.
     CommandExecuted {

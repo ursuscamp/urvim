@@ -649,6 +649,13 @@ Currently emitted event names:
 - `BufferClosed`
 - `BufferUnloaded`
 - `BufferFiletypeChanged`
+- `WindowCreated`
+- `WindowClosed`
+- `WindowFocused`
+- `TabOpened`
+- `TabClosed`
+- `TabActivated`
+- `ActiveBufferChanged`
 - `CommandExecuted`
 - `DiagnosticsChanged`
 
@@ -663,6 +670,26 @@ The buffer lifecycle events `BufferOpened`, `BufferLoaded`, `BufferSaved`, `Buff
 - `file_name`: path file name, or `null` for an unnamed buffer
 - `filetype`: canonical filetype string
 - `modified`: whether the buffer was modified
+
+`BufferOpened` means a buffer changed from having zero visible tabs across the entire layout to having at least one. `BufferClosed` means its final visible tab was closed. Opening or closing another tab for a buffer that remains visible does not emit either event.
+
+Window and tab ids are stable for the current editor process. Tab ids are newly allocated when session state is restored rather than persisted. Window lifecycle payloads are:
+
+- `WindowCreated`: `window_id`, `buffer_id`, and `tab_id` for the initial active tab
+- `WindowClosed`: `window_id`, `buffer_id`, and `tab_id` for the final active tab
+- `WindowFocused`: `previous_window_id` (`null` when absent), `window_id`, `buffer_id`, and `tab_id`
+
+Tab lifecycle payloads are:
+
+- `TabOpened`: `window_id`, `tab_id`, and the buffer snapshot fields listed above
+- `TabClosed`: `window_id`, `tab_id`, and the buffer snapshot fields captured before removal
+- `TabActivated`: `previous_tab_id` (`null` for a newly created window), `tab_id`, `window_id`, and `buffer_id`
+
+`ActiveBufferChanged` contains `previous_buffer_id` (`null` when absent), `buffer_id`, `window_id`, and `tab_id`.
+
+Events produced by one layout transition are enqueued in this order: closed tabs, globally closed buffers, closed windows, created windows, opened tabs, globally opened buffers, focused window, activated tabs, then active buffer change. Items within a category follow layout and tab order. Thus a whole-pane close emits all `TabClosed` events, then applicable `BufferClosed` events, then `WindowClosed`, followed by focus, tab activation, and active-buffer events. A split emits `WindowCreated`, `TabOpened`, applicable `BufferOpened`, `WindowFocused`, and `TabActivated` for its initial tab.
+
+Fresh and session-restored layouts emit their initial state as one transition from an empty layout. Initial `WindowCreated`, `TabOpened`, `BufferOpened`, `WindowFocused`, `TabActivated`, and `ActiveBufferChanged` events are queued in the order above before `EditorStarted`.
 
 `DiagnosticsChanged` contains `buffer_id`. `CommandExecuted` contains `command`, the executed command's debug representation. `EditorStarted` has no additional fields.
 

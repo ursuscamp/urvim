@@ -26,6 +26,7 @@ use crate::lsp::diagnostics::{diagnostic_severity, diagnostic_severity_rank};
 use crate::screen::Screen;
 use lsp_types::DiagnosticSeverity;
 use std::fmt;
+use std::sync::atomic::{AtomicU64, Ordering};
 use urvim_terminal::Color;
 use urvim_terminal::CursorStyle;
 use urvim_terminal::Key;
@@ -36,6 +37,30 @@ pub use buffer_view::{
 };
 
 const FOLD_SIGN_WIDTH: u16 = 2;
+
+static NEXT_TAB_ID: AtomicU64 = AtomicU64::new(1);
+
+/// Stable identifier for a tab during the current editor process.
+///
+/// Tab identifiers are allocated when a live [`Window`] is created and are not
+/// written to session state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct TabId(u64);
+
+impl TabId {
+    fn allocate() -> Self {
+        Self(
+            NEXT_TAB_ID
+                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
+                .expect("runtime tab identifiers exhausted"),
+        )
+    }
+
+    /// Returns the numeric identifier.
+    pub fn get(self) -> u64 {
+        self.0
+    }
+}
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Position {
@@ -138,6 +163,7 @@ pub struct RenderData {
 }
 
 pub struct Window {
+    tab_id: TabId,
     buffer_view: BufferView,
     render_data: RenderData,
     size: Size,
@@ -157,6 +183,7 @@ struct ReplaceEdit {
 impl fmt::Debug for Window {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Window")
+            .field("tab_id", &self.tab_id)
             .field("buffer_view", &self.buffer_view)
             .field("render_data", &self.render_data)
             .field("size", &self.size)
@@ -174,6 +201,7 @@ impl Window {
     pub fn new(buffer: Buffer) -> Self {
         let buffer_view = BufferView::new(buffer);
         Self {
+            tab_id: TabId::allocate(),
             buffer_view,
             render_data: RenderData::new(0),
             size: Size::default(),
@@ -187,6 +215,7 @@ impl Window {
     /// Creates a window backed by an owned buffer that stays outside the global pool.
     pub fn from_owned_buffer(buffer: Buffer) -> Self {
         Self {
+            tab_id: TabId::allocate(),
             buffer_view: BufferView::from_owned_buffer(buffer),
             render_data: RenderData::new(0),
             size: Size::default(),
@@ -200,6 +229,7 @@ impl Window {
     /// Creates a window from an existing buffer ID in the global buffer pool.
     pub fn from_buffer_id(buffer_id: BufferId) -> Self {
         Self {
+            tab_id: TabId::allocate(),
             buffer_view: BufferView::from_buffer_id(buffer_id),
             render_data: RenderData::new(0),
             size: Size::default(),
@@ -208,6 +238,11 @@ impl Window {
             replace_history: Vec::new(),
             mode: Box::new(NormalMode::new()),
         }
+    }
+
+    /// Returns this tab's stable runtime identifier.
+    pub fn tab_id(&self) -> TabId {
+        self.tab_id
     }
 
     pub fn buffer_view(&self) -> &BufferView {

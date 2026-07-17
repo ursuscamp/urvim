@@ -1307,9 +1307,7 @@ fn windows_module(layout: SharedLayout) -> Value {
                     }
                     open_buffer_layout
                         .borrow_mut()
-                        .window_group_mut()
                         .activate_or_open_buffer(buffer_id);
-                    globals::set_active_buffer_id(buffer_id);
                     Ok(())
                 }),
             ),

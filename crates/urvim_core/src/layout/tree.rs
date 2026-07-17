@@ -244,6 +244,10 @@ impl Layout {
     }
 
     pub fn close_buffer_tabs(&mut self, buffer_id: BufferId) -> bool {
+        self.with_event_transition(|layout| layout.close_buffer_tabs_raw(buffer_id))
+    }
+
+    fn close_buffer_tabs_raw(&mut self, buffer_id: BufferId) -> bool {
         let Some(root) = self.root.as_mut() else {
             return false;
         };
@@ -252,20 +256,35 @@ impl Layout {
     }
 
     pub fn close_buffer_tabs_and_prune(&mut self, buffer_id: BufferId) -> bool {
-        let closed = self.close_buffer_tabs(buffer_id);
-        if closed {
-            self.prune_empty_panes();
-        }
-        closed
+        self.with_event_transition(|layout| {
+            let closed = layout.close_buffer_tabs_raw(buffer_id);
+            if closed {
+                layout.prune_empty_panes();
+            }
+            closed
+        })
     }
 
     pub fn close_active_buffer_tab(&mut self) -> bool {
-        let buffer_id = self.active_buffer_view().buffer_id();
-        let closed = self.active_window_group_mut().close_buffer_tab(buffer_id);
-        if closed {
-            self.prune_empty_panes();
-        }
-        closed
+        self.with_event_transition(|layout| {
+            let buffer_id = layout.active_buffer_view().buffer_id();
+            let closed = layout.active_window_group_mut().close_buffer_tab(buffer_id);
+            if closed {
+                layout.prune_empty_panes();
+            }
+            closed
+        })
+    }
+
+    /// Closes a buffer tab in the active editor window and prunes an empty pane.
+    pub fn close_buffer_tab_in_active_window(&mut self, buffer_id: BufferId) -> bool {
+        self.with_event_transition(|layout| {
+            let closed = layout.active_window_group_mut().close_buffer_tab(buffer_id);
+            if closed {
+                layout.prune_empty_panes();
+            }
+            closed
+        })
     }
 
     pub(super) fn resize_focused_pane(

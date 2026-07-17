@@ -2658,3 +2658,395 @@ fn test_layout_process_workspace_file_operations_closes_deleted_tabs() {
     assert!(layout.process_workspace_file_operations());
     assert!(layout.should_exit());
 }
+
+fn drain_editor_events() -> Vec<EditorEvent> {
+    std::iter::from_fn(globals::take_editor_event).collect()
+}
+
+fn initial_lifecycle_event_names(events: &[EditorEvent]) -> Vec<&'static str> {
+    events
+        .iter()
+        .filter_map(|event| match event {
+            EditorEvent::WindowCreated { .. } => Some("WindowCreated"),
+            EditorEvent::TabOpened { .. } => Some("TabOpened"),
+            EditorEvent::BufferOpened { .. } => Some("BufferOpened"),
+            EditorEvent::WindowFocused { .. } => Some("WindowFocused"),
+            EditorEvent::TabActivated { .. } => Some("TabActivated"),
+            EditorEvent::ActiveBufferChanged { .. } => Some("ActiveBufferChanged"),
+            EditorEvent::EditorStarted => Some("EditorStarted"),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn fresh_layout_emits_initial_lifecycle_before_editor_started() {
+    let _lock = globals::buffer_pool_test_lock();
+    globals::with_buffer_pool(|pool| *pool = crate::buffer::BufferPool::new());
+    let window_group =
+        WindowGroup::from_buffers(vec![Buffer::from_str("first"), Buffer::from_str("second")]);
+    drain_editor_events();
+
+    let layout = Layout::new(window_group);
+    globals::enqueue_editor_event(EditorEvent::EditorStarted);
+
+    let events = drain_editor_events();
+    assert_eq!(
+        initial_lifecycle_event_names(&events),
+        vec![
+            "WindowCreated",
+            "TabOpened",
+            "TabOpened",
+            "BufferOpened",
+            "BufferOpened",
+            "WindowFocused",
+            "TabActivated",
+            "ActiveBufferChanged",
+            "EditorStarted",
+        ]
+    );
+    let active_buffer_id = layout.active_buffer_view().buffer_id();
+    assert_eq!(
+        globals::with_active_buffer_id(|id| id),
+        Some(active_buffer_id)
+    );
+    assert!(matches!(
+        events.as_slice(),
+        [
+            EditorEvent::WindowCreated {
+                window_id: PaneId(0),
+                tab_id: created_tab_id,
+                buffer_id: created_buffer_id,
+            },
+            EditorEvent::TabOpened {
+                window_id: PaneId(0),
+                tab_id: first_tab_id,
+                snapshot: first_snapshot,
+            },
+            EditorEvent::TabOpened { .. },
+            EditorEvent::BufferOpened { .. },
+            EditorEvent::BufferOpened { .. },
+            EditorEvent::WindowFocused {
+                previous_window_id: None,
+                window_id: PaneId(0),
+                tab_id: focused_tab_id,
+                buffer_id: focused_buffer_id,
+            },
+            EditorEvent::TabActivated {
+                previous_tab_id: None,
+                window_id: PaneId(0),
+                tab_id: activated_tab_id,
+                buffer_id: activated_buffer_id,
+            },
+            EditorEvent::ActiveBufferChanged {
+                previous_buffer_id: None,
+                window_id: PaneId(0),
+                tab_id: active_tab_id,
+                buffer_id,
+            },
+            EditorEvent::EditorStarted,
+        ] if *created_tab_id == *first_tab_id
+            && *first_tab_id == *focused_tab_id
+            && *focused_tab_id == *activated_tab_id
+            && *activated_tab_id == *active_tab_id
+            && *created_buffer_id == first_snapshot.buffer_id
+            && *created_buffer_id == *focused_buffer_id
+            && *focused_buffer_id == *activated_buffer_id
+            && *activated_buffer_id == *buffer_id
+    ));
+}
+
+#[test]
+fn restored_multi_pane_layout_emits_initial_lifecycle_once_in_order() {
+    let _lock = globals::buffer_pool_test_lock();
+    globals::with_buffer_pool(|pool| *pool = crate::buffer::BufferPool::new());
+    let temp_dir = std::env::temp_dir().join(format!(
+        "urvim-initial-layout-events-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir_all(&temp_dir).unwrap();
+    let first_path = temp_dir.join("first.txt");
+    let second_path = temp_dir.join("second.txt");
+    fs::write(&first_path, "first").unwrap();
+    fs::write(&second_path, "second").unwrap();
+
+    let mut source = Layout::new(WindowGroup::from_paths(std::slice::from_ref(&first_path)));
+    assert!(source.dispatch_intent(&Intent::Command(Command::SplitVertical)));
+    let second_buffer_id =
+        globals::with_buffer_pool(|pool| pool.open_buffer(&second_path)).unwrap();
+    source.activate_or_open_buffer(second_buffer_id);
+    let session = source.to_session();
+    drain_editor_events();
+
+    let restored = Layout::from_session(session);
+    globals::enqueue_editor_event(EditorEvent::EditorStarted);
+
+    let events = drain_editor_events();
+    assert_eq!(
+        initial_lifecycle_event_names(&events),
+        vec![
+            "WindowCreated",
+            "WindowCreated",
+            "TabOpened",
+            "TabOpened",
+            "TabOpened",
+            "BufferOpened",
+            "BufferOpened",
+            "WindowFocused",
+            "TabActivated",
+            "TabActivated",
+            "ActiveBufferChanged",
+            "EditorStarted",
+        ]
+    );
+    assert_eq!(restored.active_window_id(), Some(PaneId(1)));
+    assert_eq!(
+        globals::with_active_buffer_id(|id| id),
+        Some(restored.active_buffer_view().buffer_id())
+    );
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| matches!(event, EditorEvent::WindowFocused { .. }))
+            .count(),
+        1
+    );
+
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+#[test]
+fn layout_open_buffer_emits_ordered_tab_buffer_and_active_events() {
+    let _lock = globals::buffer_pool_test_lock();
+    globals::with_buffer_pool(|pool| *pool = crate::buffer::BufferPool::new());
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("visible")]);
+    let previous_buffer_id = layout.active_buffer_view().buffer_id();
+    let previous_tab_id = layout.active_window_group().active_tab_id().unwrap();
+    let buffer_id = globals::with_buffer_pool(|pool| pool.create_buffer());
+    drain_editor_events();
+
+    layout.activate_or_open_buffer(buffer_id);
+
+    let events = drain_editor_events();
+    assert!(matches!(
+        events.as_slice(),
+        [
+            EditorEvent::TabOpened {
+                window_id: PaneId(0),
+                tab_id: opened_tab_id,
+                snapshot: opened_snapshot,
+            },
+            EditorEvent::BufferOpened { snapshot },
+            EditorEvent::TabActivated {
+                window_id: PaneId(0),
+                previous_tab_id: Some(previous_tab),
+                tab_id: activated_tab_id,
+                buffer_id: activated_buffer_id,
+            },
+            EditorEvent::ActiveBufferChanged {
+                previous_buffer_id: Some(previous),
+                buffer_id: active_buffer_id,
+                window_id: PaneId(0),
+                tab_id: active_tab_id,
+            }
+        ] if opened_snapshot.buffer_id == buffer_id
+            && snapshot.buffer_id == buffer_id
+            && *previous_tab == previous_tab_id
+            && *opened_tab_id == *activated_tab_id
+            && *activated_tab_id == *active_tab_id
+            && *activated_buffer_id == buffer_id
+            && *previous == previous_buffer_id
+            && *active_buffer_id == buffer_id
+    ));
+}
+
+#[test]
+fn layout_split_emits_window_before_tab_then_focus_without_buffer_open() {
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("shared")]);
+    let buffer_id = layout.active_buffer_view().buffer_id();
+    let previous_tab_id = layout.active_window_group().active_tab_id().unwrap();
+    drain_editor_events();
+
+    assert!(layout.dispatch_intent(&Intent::Command(Command::SplitVertical)));
+
+    let events = drain_editor_events();
+    assert!(matches!(
+        events.as_slice(),
+        [
+            EditorEvent::WindowCreated {
+                window_id: PaneId(1),
+                buffer_id: created_buffer_id,
+                tab_id: created_tab_id,
+            },
+            EditorEvent::TabOpened {
+                window_id: PaneId(1),
+                tab_id: opened_tab_id,
+                snapshot: opened_snapshot,
+            },
+            EditorEvent::WindowFocused {
+                previous_window_id: Some(PaneId(0)),
+                window_id: PaneId(1),
+                buffer_id: focused_buffer_id,
+                tab_id: focused_tab_id,
+            },
+            EditorEvent::TabActivated {
+                previous_tab_id: None,
+                window_id: PaneId(1),
+                tab_id: activated_tab_id,
+                buffer_id: activated_buffer_id,
+            }
+        ] if *created_buffer_id == buffer_id
+            && opened_snapshot.buffer_id == buffer_id
+            && *focused_buffer_id == buffer_id
+            && *activated_buffer_id == buffer_id
+            && *created_tab_id == *opened_tab_id
+            && *opened_tab_id == *focused_tab_id
+            && *focused_tab_id == *activated_tab_id
+            && *created_tab_id != previous_tab_id
+    ));
+}
+
+#[test]
+fn closing_duplicate_split_tab_does_not_close_globally_visible_buffer() {
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("shared")]);
+    assert!(layout.dispatch_intent(&Intent::Command(Command::SplitVertical)));
+    let closed_tab_id = layout.active_window_group().active_tab_id().unwrap();
+    let buffer_id = layout.active_buffer_view().buffer_id();
+    assert!(layout.focus_pane(PaneId(0)));
+    let focused_tab_id = layout.active_window_group().active_tab_id().unwrap();
+    assert!(layout.focus_pane(PaneId(1)));
+    drain_editor_events();
+
+    assert!(layout.dispatch_intent(&Intent::Command(Command::ClosePane)));
+
+    let events = drain_editor_events();
+    assert!(matches!(
+        events.as_slice(),
+        [
+            EditorEvent::TabClosed {
+                window_id: PaneId(1),
+                tab_id,
+                snapshot,
+            },
+            EditorEvent::WindowClosed {
+                window_id: PaneId(1),
+                buffer_id: closed_buffer_id,
+                tab_id: final_tab_id,
+            },
+            EditorEvent::WindowFocused {
+                previous_window_id: Some(PaneId(1)),
+                window_id: PaneId(0),
+                buffer_id: focused_buffer_id,
+                tab_id: new_focused_tab_id,
+            }
+        ] if *tab_id == closed_tab_id
+            && snapshot.buffer_id == buffer_id
+            && *closed_buffer_id == buffer_id
+            && *final_tab_id == closed_tab_id
+            && *focused_buffer_id == buffer_id
+            && *new_focused_tab_id == focused_tab_id
+    ));
+}
+
+#[test]
+fn closing_whole_pane_closes_buffers_before_window() {
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("shared")]);
+    let shared_buffer_id = layout.active_buffer_view().buffer_id();
+    assert!(layout.dispatch_intent(&Intent::Command(Command::SplitVertical)));
+    let unique_buffer_id = globals::with_buffer_pool(|pool| pool.create_buffer());
+    layout.activate_or_open_buffer(unique_buffer_id);
+    let final_tab_id = layout.active_window_group().active_tab_id().unwrap();
+    drain_editor_events();
+
+    assert!(layout.dispatch_intent(&Intent::Command(Command::ClosePane)));
+
+    let events = drain_editor_events();
+    assert!(matches!(
+        events.as_slice(),
+        [
+            EditorEvent::TabClosed {
+                snapshot: shared_snapshot,
+                ..
+            },
+            EditorEvent::TabClosed {
+                tab_id: closed_final_tab_id,
+                snapshot: unique_snapshot,
+                ..
+            },
+            EditorEvent::BufferClosed { snapshot },
+            EditorEvent::WindowClosed {
+                window_id: PaneId(1),
+                buffer_id: closed_buffer_id,
+                tab_id: window_final_tab_id,
+            },
+            EditorEvent::WindowFocused {
+                previous_window_id: Some(PaneId(1)),
+                window_id: PaneId(0),
+                buffer_id: focused_buffer_id,
+                ..
+            },
+            EditorEvent::ActiveBufferChanged {
+                previous_buffer_id: Some(previous_buffer_id),
+                buffer_id: active_buffer_id,
+                window_id: PaneId(0),
+                ..
+            }
+        ] if shared_snapshot.buffer_id == shared_buffer_id
+            && unique_snapshot.buffer_id == unique_buffer_id
+            && snapshot.buffer_id == unique_buffer_id
+            && *closed_final_tab_id == final_tab_id
+            && *closed_buffer_id == unique_buffer_id
+            && *window_final_tab_id == final_tab_id
+            && *focused_buffer_id == shared_buffer_id
+            && *previous_buffer_id == unique_buffer_id
+            && *active_buffer_id == shared_buffer_id
+    ));
+}
+
+#[test]
+fn closing_active_tab_snapshots_buffer_before_activation_changes() {
+    let mut layout =
+        layout_with_buffers(vec![Buffer::from_str("first"), Buffer::from_str("second")]);
+    let closed_buffer_id = layout.active_buffer_view().buffer_id();
+    let closed_tab_id = layout.active_window_group().active_tab_id().unwrap();
+    let next_buffer_id = layout.active_window_group().buffer_ids()[1];
+    drain_editor_events();
+
+    assert!(layout.close_active_buffer_tab());
+
+    let events = drain_editor_events();
+    assert!(matches!(
+        events.as_slice(),
+        [
+            EditorEvent::TabClosed {
+                tab_id,
+                snapshot: closed_snapshot,
+                ..
+            },
+            EditorEvent::BufferClosed { snapshot },
+            EditorEvent::TabActivated {
+                previous_tab_id: Some(previous_tab),
+                tab_id: activated_tab_id,
+                buffer_id: activated_buffer_id,
+                ..
+            },
+            EditorEvent::ActiveBufferChanged {
+                previous_buffer_id: Some(previous),
+                buffer_id: active_buffer_id,
+                tab_id: active_tab_id,
+                ..
+            }
+        ] if *tab_id == closed_tab_id
+            && closed_snapshot.buffer_id == closed_buffer_id
+            && snapshot.buffer_id == closed_buffer_id
+            && *previous_tab == closed_tab_id
+            && *activated_tab_id == *active_tab_id
+            && *activated_buffer_id == next_buffer_id
+            && *previous == closed_buffer_id
+            && *active_buffer_id == next_buffer_id
+    ));
+}

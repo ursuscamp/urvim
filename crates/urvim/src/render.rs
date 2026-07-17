@@ -2,7 +2,6 @@ use std::io;
 
 use rustix::fd::AsFd;
 
-use urvim_core::globals;
 use urvim_core::screen::Screen;
 use urvim_core::window::{Position, Size};
 use urvim_terminal::Terminal;
@@ -40,7 +39,6 @@ fn render_frame<I: io::Read + AsFd, O: io::Write + AsFd>(
     rows: u16,
     cols: u16,
 ) -> io::Result<()> {
-    globals::set_active_buffer_id(layout.active_buffer_view().buffer_id());
     screen.clear();
     layout.render(screen, Position::new(0, 0), Size::new(rows, cols));
     screen.render(terminal)?;

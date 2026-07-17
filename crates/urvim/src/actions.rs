@@ -224,12 +224,9 @@ pub(super) fn execute_command_intent(
         let closed = if buffer_id == layout.active_buffer_view().buffer_id() {
             layout.close_active_buffer_tab()
         } else {
-            layout.active_window_group_mut().close_buffer_tab(buffer_id)
+            layout.close_buffer_tab_in_active_window(buffer_id)
         };
         if closed {
-            globals::enqueue_editor_event(EditorEvent::BufferClosed {
-                snapshot: buffer_event_snapshot(buffer_id),
-            });
             cleanup_orphaned_buffers(layout);
         }
         return true;
@@ -248,13 +245,7 @@ pub(super) fn execute_command_intent(
             );
             return true;
         }
-        let was_visible = layout.visible_buffer_ids().contains(&buffer_id);
         let _closed = layout.close_buffer_tabs_and_prune(buffer_id);
-        if was_visible {
-            globals::enqueue_editor_event(EditorEvent::BufferClosed {
-                snapshot: buffer_event_snapshot(buffer_id),
-            });
-        }
         globals::with_buffer_pool(|pool| {
             pool.remove_buffer(buffer_id);
         });
@@ -262,17 +253,6 @@ pub(super) fn execute_command_intent(
     }
 
     let command_for_event = format!("{:?}", command);
-    let opened_before = matches!(
-        command,
-        Command::OpenUnnamedBuffer | Command::OpenFile(_) | Command::OpenFileAtCursor(_, _)
-    )
-    .then(|| {
-        layout
-            .active_window_group()
-            .buffer_ids()
-            .into_iter()
-            .collect::<std::collections::BTreeSet<_>>()
-    });
     let filetype_target = match &command {
         Command::SetBufferFiletype(buffer_id, _) => {
             let Some(buffer_id) = resolve_buffer_target(layout, *buffer_id) else {
@@ -285,35 +265,13 @@ pub(super) fn execute_command_intent(
         }
         _ => None,
     };
-    let close_targets =
-        matches!(command, Command::ClosePane).then(|| closed_pane_buffer_ids(layout));
-
     let handled = layout.dispatch_intent(&Intent::Command(command));
     if handled {
-        if let Some(before) = opened_before.as_ref() {
-            for buffer_id in layout
-                .active_window_group()
-                .buffer_ids()
-                .into_iter()
-                .collect::<std::collections::BTreeSet<_>>()
-                .difference(before)
-                .copied()
-            {
-                globals::enqueue_editor_event(EditorEvent::BufferOpened {
-                    snapshot: buffer_event_snapshot(buffer_id),
-                });
-            }
-        }
         if let Some((buffer_id, syntax_name)) = filetype_target
             && globals::with_buffer(buffer_id, |buffer| buffer.syntax_name() != syntax_name)
                 .unwrap_or(false)
         {
             globals::enqueue_editor_event(EditorEvent::BufferFiletypeChanged {
-                snapshot: buffer_event_snapshot(buffer_id),
-            });
-        }
-        for buffer_id in close_targets.unwrap_or_default() {
-            globals::enqueue_editor_event(EditorEvent::BufferClosed {
                 snapshot: buffer_event_snapshot(buffer_id),
             });
         }
@@ -342,16 +300,6 @@ fn resolve_buffer_target(
         return None;
     }
     Some(buffer_id)
-}
-
-fn closed_pane_buffer_ids(
-    layout: &Layout,
-) -> std::collections::BTreeSet<urvim_core::buffer::BufferId> {
-    layout
-        .active_window_group()
-        .buffer_ids()
-        .into_iter()
-        .collect()
 }
 
 pub(super) fn cleanup_orphaned_buffers(layout: &Layout) {
@@ -409,7 +357,8 @@ pub(super) fn execute_action_intent(layout: &mut Layout, action: EditorAction) -
                     }
                 }
             } else {
-                let handled_by_layout = layout.dispatch_action(&dispatch_action);
+                let handled_by_layout =
+                    layout.dispatch_intent(&Intent::Editor(dispatch_action.clone()));
 
                 if !handled_by_layout {
                     match dispatch_action.kind.as_ref() {
@@ -727,22 +676,6 @@ mod tests {
     use urvim_core::buffer::Buffer;
     use urvim_core::ui::Command;
     use urvim_core::window_group::WindowGroup;
-
-    #[test]
-    fn closed_pane_buffer_ids_include_every_tab_in_focused_pane() {
-        let layout = Layout::new(WindowGroup::from_buffers(vec![
-            Buffer::from_str("one"),
-            Buffer::from_str("two"),
-            Buffer::from_str("three"),
-        ]));
-
-        let ids = closed_pane_buffer_ids(&layout);
-
-        assert_eq!(ids.len(), 3);
-        for buffer_id in layout.active_window_group().buffer_ids() {
-            assert!(ids.contains(&buffer_id));
-        }
-    }
 
     #[test]
     fn save_as_targets_non_active_buffer() {

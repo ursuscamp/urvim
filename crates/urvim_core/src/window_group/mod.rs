@@ -11,7 +11,7 @@ use crate::icon::FiletypeIcon;
 use crate::jumplist::JumpList;
 use crate::screen::Screen;
 use crate::ui::text_width::{ClipSide, clip_text};
-use crate::window::{BufferView, Position, Size, Window};
+use crate::window::{BufferView, Position, Size, TabId, Window};
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -190,6 +190,19 @@ impl WindowGroup {
             .iter()
             .map(|window| window.buffer_view().buffer_id())
             .collect()
+    }
+
+    /// Returns each tab's stable runtime identifier and buffer identifier.
+    pub fn tab_ids_and_buffer_ids(&self) -> Vec<(TabId, BufferId)> {
+        self.tabs
+            .iter()
+            .map(|window| (window.tab_id(), window.buffer_view().buffer_id()))
+            .collect()
+    }
+
+    /// Returns the active tab's stable runtime identifier.
+    pub fn active_tab_id(&self) -> Option<TabId> {
+        (!self.tabs.is_empty()).then(|| self.active_window().tab_id())
     }
 
     /// Closes the active tab and returns true when the window group becomes empty.

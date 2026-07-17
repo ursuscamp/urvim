@@ -4,7 +4,7 @@ use crate::ui::plugin_pane::{PluginPane, PluginPaneOptions};
 use crate::window_group::WindowGroup;
 
 /// Stable identifier for a pane in the layout split tree.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PaneId(pub usize);
 
 /// Orientation of a binary split node.

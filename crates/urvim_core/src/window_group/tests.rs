@@ -38,6 +38,20 @@ fn window_group_with_labels(labels: &[&str]) -> WindowGroup {
     )
 }
 
+#[test]
+fn tab_ids_are_unique_and_stable_across_activation() {
+    let mut group = window_group_with_labels(&["first", "second"]);
+    let ids = group.tab_ids_and_buffer_ids();
+
+    assert_ne!(ids[0].0, ids[1].0);
+    let first_id = ids[0].0;
+    group.next_tab(1);
+    group.previous_tab(1);
+
+    assert_eq!(group.active_tab_id(), Some(first_id));
+    assert_eq!(group.tab_ids_and_buffer_ids(), ids);
+}
+
 fn themed_group() -> Theme {
     let default_style = Style::new().fg(Color::ansi(10)).bg(Color::ansi(20));
     let mut highlights = HighlightStyles::default();
@@ -133,11 +147,13 @@ fn test_window_group_session_skips_missing_files_during_restore() {
     fs::write(&second, "beta").unwrap();
 
     let group = WindowGroup::from_paths(&[first.clone(), second.clone()]);
+    let original_tab_id = group.tabs[0].tab_id();
     let session = group.to_session();
     fs::remove_file(&second).unwrap();
 
     let restored = WindowGroup::from_session(session);
     assert_eq!(restored.tabs.len(), 1);
+    assert_ne!(restored.tabs[0].tab_id(), original_tab_id);
     assert_eq!(
         buffer_file_name(restored.active_window().buffer_view()).unwrap(),
         first.file_name().unwrap()
