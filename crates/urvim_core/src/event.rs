@@ -5,19 +5,17 @@
 //! notifications. Production code never dispatches plugin events directly.
 //!
 //! This module owns the [`EditorEvent`] enum and the [`BufferEventSnapshot`]
-//! helper used to preserve buffer metadata for events that may be dispatched
-//! after the buffer has been removed from the pool.
+//! helper used to preserve buffer metadata as it existed when an event was
+//! enqueued.
 
 use std::path::PathBuf;
 
 use crate::buffer::{Buffer, BufferId};
 
-/// Snapshot of buffer metadata captured before a buffer is removed from the
-/// pool. Used to populate payloads for events such as `BufferUnloaded` that
-/// may be dispatched after the buffer is gone.
+/// Snapshot of buffer metadata captured when a buffer event is enqueued.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BufferEventSnapshot {
-    /// Identifier of the removed buffer.
+    /// Identifier of the buffer.
     pub buffer_id: BufferId,
     /// Resolved absolute path of the buffer, if one was set.
     pub path: Option<PathBuf>,
@@ -51,35 +49,33 @@ pub enum EditorEvent {
     EditorStarted,
     /// A buffer was loaded into the buffer pool.
     BufferLoaded {
-        /// Identifier of the newly loaded buffer.
-        buffer_id: BufferId,
+        /// Buffer metadata at enqueue time.
+        snapshot: BufferEventSnapshot,
     },
     /// A buffer was added to a UI pane.
     BufferOpened {
-        /// Identifier of the buffer now visible in the pane.
-        buffer_id: BufferId,
+        /// Buffer metadata at enqueue time.
+        snapshot: BufferEventSnapshot,
     },
     /// A buffer was saved successfully.
     BufferSaved {
-        /// Identifier of the saved buffer.
-        buffer_id: BufferId,
+        /// Buffer metadata at enqueue time.
+        snapshot: BufferEventSnapshot,
     },
     /// A buffer tab/view was closed from the UI.
     BufferClosed {
-        /// Identifier of the closed buffer.
-        buffer_id: BufferId,
+        /// Buffer metadata at enqueue time.
+        snapshot: BufferEventSnapshot,
     },
     /// A buffer was removed from the buffer pool.
     BufferUnloaded {
-        /// Identifier of the removed buffer.
-        buffer_id: BufferId,
         /// Snapshot of buffer metadata captured before removal.
         snapshot: BufferEventSnapshot,
     },
     /// A buffer filetype changed.
     BufferFiletypeChanged {
-        /// Identifier of the buffer whose filetype changed.
-        buffer_id: BufferId,
+        /// Buffer metadata at enqueue time.
+        snapshot: BufferEventSnapshot,
     },
     /// A non-plugin command was executed successfully.
     CommandExecuted {

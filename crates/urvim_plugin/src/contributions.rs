@@ -60,12 +60,60 @@ pub enum PluginEventKind {
     BufferLoaded,
     /// A buffer was saved successfully.
     BufferSaved,
+    /// A buffer save failed.
+    BufferSaveFailed,
+    /// Opening a buffer failed.
+    BufferOpenFailed,
     /// A buffer was closed.
     BufferClosed,
     /// A buffer was unloaded from the buffer pool.
     BufferUnloaded,
+    /// A buffer path changed.
+    BufferPathChanged,
+    /// A buffer was reloaded from disk.
+    BufferReloaded,
+    /// A buffer conflicted with an externally changed file.
+    ExternalFileConflict,
+    /// A buffer's contents changed.
+    BufferChanged,
+    /// A buffer's modified state changed.
+    BufferModifiedChanged,
     /// A buffer filetype changed.
     BufferFiletypeChanged,
+    /// A window was created.
+    WindowCreated,
+    /// A window was closed.
+    WindowClosed,
+    /// A window received focus.
+    WindowFocused,
+    /// A tab was opened.
+    TabOpened,
+    /// A tab was closed.
+    TabClosed,
+    /// A tab was activated.
+    TabActivated,
+    /// The active buffer changed.
+    ActiveBufferChanged,
+    /// The editor mode changed.
+    ModeChanged,
+    /// The cursor moved.
+    CursorMoved,
+    /// The selection changed.
+    SelectionChanged,
+    /// The editor is about to shut down.
+    EditorWillShutdown,
+    /// The active theme changed.
+    ThemeChanged,
+    /// An LSP server started.
+    LspServerStarted,
+    /// An LSP server failed to start.
+    LspServerStartFailed,
+    /// An LSP server stopped.
+    LspServerStopped,
+    /// An LSP server attached to a buffer.
+    LspBufferAttached,
+    /// An LSP server detached from a buffer.
+    LspBufferDetached,
     /// A command was executed.
     CommandExecuted,
     /// Diagnostics changed for a buffer.
@@ -73,6 +121,43 @@ pub enum PluginEventKind {
 }
 
 impl PluginEventKind {
+    /// Complete catalog of stable plugin event names.
+    pub const ALL: &'static [Self] = &[
+        Self::EditorStarted,
+        Self::BufferOpened,
+        Self::BufferLoaded,
+        Self::BufferSaved,
+        Self::BufferSaveFailed,
+        Self::BufferOpenFailed,
+        Self::BufferClosed,
+        Self::BufferUnloaded,
+        Self::BufferPathChanged,
+        Self::BufferReloaded,
+        Self::ExternalFileConflict,
+        Self::BufferChanged,
+        Self::BufferModifiedChanged,
+        Self::BufferFiletypeChanged,
+        Self::WindowCreated,
+        Self::WindowClosed,
+        Self::WindowFocused,
+        Self::TabOpened,
+        Self::TabClosed,
+        Self::TabActivated,
+        Self::ActiveBufferChanged,
+        Self::ModeChanged,
+        Self::CursorMoved,
+        Self::SelectionChanged,
+        Self::EditorWillShutdown,
+        Self::ThemeChanged,
+        Self::LspServerStarted,
+        Self::LspServerStartFailed,
+        Self::LspServerStopped,
+        Self::LspBufferAttached,
+        Self::LspBufferDetached,
+        Self::CommandExecuted,
+        Self::DiagnosticsChanged,
+    ];
+
     /// Returns the stable event name.
     pub fn as_str(self) -> &'static str {
         match self {
@@ -80,9 +165,33 @@ impl PluginEventKind {
             Self::BufferOpened => "BufferOpened",
             Self::BufferLoaded => "BufferLoaded",
             Self::BufferSaved => "BufferSaved",
+            Self::BufferSaveFailed => "BufferSaveFailed",
+            Self::BufferOpenFailed => "BufferOpenFailed",
             Self::BufferClosed => "BufferClosed",
             Self::BufferUnloaded => "BufferUnloaded",
+            Self::BufferPathChanged => "BufferPathChanged",
+            Self::BufferReloaded => "BufferReloaded",
+            Self::ExternalFileConflict => "ExternalFileConflict",
+            Self::BufferChanged => "BufferChanged",
+            Self::BufferModifiedChanged => "BufferModifiedChanged",
             Self::BufferFiletypeChanged => "BufferFiletypeChanged",
+            Self::WindowCreated => "WindowCreated",
+            Self::WindowClosed => "WindowClosed",
+            Self::WindowFocused => "WindowFocused",
+            Self::TabOpened => "TabOpened",
+            Self::TabClosed => "TabClosed",
+            Self::TabActivated => "TabActivated",
+            Self::ActiveBufferChanged => "ActiveBufferChanged",
+            Self::ModeChanged => "ModeChanged",
+            Self::CursorMoved => "CursorMoved",
+            Self::SelectionChanged => "SelectionChanged",
+            Self::EditorWillShutdown => "EditorWillShutdown",
+            Self::ThemeChanged => "ThemeChanged",
+            Self::LspServerStarted => "LspServerStarted",
+            Self::LspServerStartFailed => "LspServerStartFailed",
+            Self::LspServerStopped => "LspServerStopped",
+            Self::LspBufferAttached => "LspBufferAttached",
+            Self::LspBufferDetached => "LspBufferDetached",
             Self::CommandExecuted => "CommandExecuted",
             Self::DiagnosticsChanged => "DiagnosticsChanged",
         }
@@ -104,9 +213,33 @@ impl FromStr for PluginEventKind {
             "BufferOpened" => Ok(Self::BufferOpened),
             "BufferLoaded" => Ok(Self::BufferLoaded),
             "BufferSaved" => Ok(Self::BufferSaved),
+            "BufferSaveFailed" => Ok(Self::BufferSaveFailed),
+            "BufferOpenFailed" => Ok(Self::BufferOpenFailed),
             "BufferClosed" => Ok(Self::BufferClosed),
             "BufferUnloaded" => Ok(Self::BufferUnloaded),
+            "BufferPathChanged" => Ok(Self::BufferPathChanged),
+            "BufferReloaded" => Ok(Self::BufferReloaded),
+            "ExternalFileConflict" => Ok(Self::ExternalFileConflict),
+            "BufferChanged" => Ok(Self::BufferChanged),
+            "BufferModifiedChanged" => Ok(Self::BufferModifiedChanged),
             "BufferFiletypeChanged" => Ok(Self::BufferFiletypeChanged),
+            "WindowCreated" => Ok(Self::WindowCreated),
+            "WindowClosed" => Ok(Self::WindowClosed),
+            "WindowFocused" => Ok(Self::WindowFocused),
+            "TabOpened" => Ok(Self::TabOpened),
+            "TabClosed" => Ok(Self::TabClosed),
+            "TabActivated" => Ok(Self::TabActivated),
+            "ActiveBufferChanged" => Ok(Self::ActiveBufferChanged),
+            "ModeChanged" => Ok(Self::ModeChanged),
+            "CursorMoved" => Ok(Self::CursorMoved),
+            "SelectionChanged" => Ok(Self::SelectionChanged),
+            "EditorWillShutdown" => Ok(Self::EditorWillShutdown),
+            "ThemeChanged" => Ok(Self::ThemeChanged),
+            "LspServerStarted" => Ok(Self::LspServerStarted),
+            "LspServerStartFailed" => Ok(Self::LspServerStartFailed),
+            "LspServerStopped" => Ok(Self::LspServerStopped),
+            "LspBufferAttached" => Ok(Self::LspBufferAttached),
+            "LspBufferDetached" => Ok(Self::LspBufferDetached),
             "CommandExecuted" => Ok(Self::CommandExecuted),
             "DiagnosticsChanged" => Ok(Self::DiagnosticsChanged),
             other => Err(format!("unknown plugin event {other:?}")),
@@ -453,6 +586,14 @@ pub fn validate_contribution_name(name: &str, label: &str) -> Result<(), String>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn all_event_names_round_trip() {
+        for &event in PluginEventKind::ALL {
+            assert_eq!(event.as_str().parse::<PluginEventKind>(), Ok(event));
+            assert_eq!(event.to_string(), event.as_str());
+        }
+    }
 
     #[test]
     fn registers_replaces_and_unregisters_commands() {

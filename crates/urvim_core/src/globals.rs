@@ -1290,10 +1290,16 @@ mod tests {
 
         enqueue_editor_event(EditorEvent::EditorStarted);
         enqueue_editor_event(EditorEvent::BufferLoaded {
-            buffer_id: BufferId::new(1),
+            snapshot: crate::event::BufferEventSnapshot::from_buffer(
+                BufferId::new(1),
+                &Buffer::new(),
+            ),
         });
         enqueue_editor_event(EditorEvent::BufferSaved {
-            buffer_id: BufferId::new(1),
+            snapshot: crate::event::BufferEventSnapshot::from_buffer(
+                BufferId::new(1),
+                &Buffer::new(),
+            ),
         });
         enqueue_editor_event(EditorEvent::CommandExecuted {
             command: "Write".to_string(),
@@ -1308,11 +1314,13 @@ mod tests {
         assert!(matches!(first, Some(EditorEvent::EditorStarted)));
         assert!(matches!(
             second,
-            Some(EditorEvent::BufferLoaded { buffer_id }) if buffer_id == BufferId::new(1)
+            Some(EditorEvent::BufferLoaded { snapshot })
+                if snapshot.buffer_id == BufferId::new(1)
         ));
         assert!(matches!(
             third,
-            Some(EditorEvent::BufferSaved { buffer_id }) if buffer_id == BufferId::new(1)
+            Some(EditorEvent::BufferSaved { snapshot })
+                if snapshot.buffer_id == BufferId::new(1)
         ));
         assert!(matches!(
             fourth,
@@ -1328,7 +1336,10 @@ mod tests {
         clear_editor_events_for_tests();
         enqueue_editor_event(EditorEvent::EditorStarted);
         enqueue_editor_event(EditorEvent::BufferLoaded {
-            buffer_id: BufferId::new(2),
+            snapshot: crate::event::BufferEventSnapshot::from_buffer(
+                BufferId::new(2),
+                &Buffer::new(),
+            ),
         });
         assert!(take_editor_event().is_some());
 

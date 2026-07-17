@@ -982,8 +982,12 @@ fn buffers_module() -> Value {
                     })
                     .ok_or_else(|| unknown_buffer_error(buffer_id))?;
                     if changed {
+                        let snapshot = globals::with_buffer(buffer_id, |buffer| {
+                            urvim_core::event::BufferEventSnapshot::from_buffer(buffer_id, buffer)
+                        })
+                        .expect("changed buffer should remain loaded");
                         globals::enqueue_editor_event(EditorEvent::BufferFiletypeChanged {
-                            buffer_id,
+                            snapshot,
                         });
                     }
                     Ok(())
@@ -1890,7 +1894,11 @@ fn save_buffer_for_plugin(buffer_id: BufferId) -> Result<(), String> {
     match save_result {
         Ok(()) => {
             globals::with_lsp_runtime_mut(|runtime| runtime.did_save_buffer(buffer_id));
-            globals::enqueue_editor_event(EditorEvent::BufferSaved { buffer_id });
+            let snapshot = globals::with_buffer(buffer_id, |buffer| {
+                urvim_core::event::BufferEventSnapshot::from_buffer(buffer_id, buffer)
+            })
+            .expect("saved buffer should remain loaded");
+            globals::enqueue_editor_event(EditorEvent::BufferSaved { snapshot });
             Ok(())
         }
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
@@ -2226,17 +2234,7 @@ entry = "plugin.bear"
             panic!("events should be a module");
         };
 
-        for event in [
-            urvim_plugin::PluginEventKind::EditorStarted,
-            urvim_plugin::PluginEventKind::BufferOpened,
-            urvim_plugin::PluginEventKind::BufferLoaded,
-            urvim_plugin::PluginEventKind::BufferSaved,
-            urvim_plugin::PluginEventKind::BufferClosed,
-            urvim_plugin::PluginEventKind::BufferUnloaded,
-            urvim_plugin::PluginEventKind::BufferFiletypeChanged,
-            urvim_plugin::PluginEventKind::CommandExecuted,
-            urvim_plugin::PluginEventKind::DiagnosticsChanged,
-        ] {
+        for event in urvim_plugin::PluginEventKind::ALL {
             assert_eq!(
                 events.get(event.as_str()),
                 Some(&Value::String(event.as_str().into()))
@@ -2804,7 +2802,7 @@ entry = "plugin.bear"
         let events = drain_editor_events();
         assert!(events.iter().any(|event| matches!(
             event,
-            EditorEvent::BufferSaved { buffer_id: id } if *id == buffer_id
+            EditorEvent::BufferSaved { snapshot } if snapshot.buffer_id == buffer_id
         )));
         std::fs::remove_file(path).ok();
     }
@@ -4215,7 +4213,8 @@ entry = "plugin.bear"
                 .iter()
                 .filter(|event| matches!(
                     event,
-                    EditorEvent::BufferFiletypeChanged { buffer_id: id } if *id == buffer_id
+                    EditorEvent::BufferFiletypeChanged { snapshot }
+                        if snapshot.buffer_id == buffer_id
                 ))
                 .count(),
             1
@@ -4231,7 +4230,8 @@ entry = "plugin.bear"
             .expect("unchanged filetype command should be handled");
         assert!(drain_editor_events().iter().all(|event| !matches!(
             event,
-            EditorEvent::BufferFiletypeChanged { buffer_id: id } if *id == buffer_id
+            EditorEvent::BufferFiletypeChanged { snapshot }
+                if snapshot.buffer_id == buffer_id
         )));
     }
 
@@ -4281,10 +4281,10 @@ entry = "plugin.bear"
 
         assert!(drain_editor_events().iter().all(|event| !matches!(
             event,
-            EditorEvent::BufferClosed { buffer_id }
-                | EditorEvent::BufferUnloaded { buffer_id, .. }
-                | EditorEvent::BufferFiletypeChanged { buffer_id }
-                if buffer_id.get() == missing
+            EditorEvent::BufferClosed { snapshot }
+                | EditorEvent::BufferUnloaded { snapshot }
+                | EditorEvent::BufferFiletypeChanged { snapshot }
+                if snapshot.buffer_id.get() == missing
         )));
     }
 

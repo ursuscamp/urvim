@@ -640,7 +640,7 @@ Span ranges are 0-based byte offsets. A span may cross lines; urvim splits multi
 
 ## Event Hooks
 
-Supported event names:
+Currently emitted event names:
 
 - `EditorStarted`
 - `BufferOpened`
@@ -653,6 +653,20 @@ Supported event names:
 - `DiagnosticsChanged`
 
 `register_event_hook` returns a numeric hook id that can be passed to `unregister_event_hook`. Hooks are best-effort and run synchronously in the editor loop. They should stay quick.
+
+All event payloads are maps with an `event` field containing the event name.
+
+The buffer lifecycle events `BufferOpened`, `BufferLoaded`, `BufferSaved`, `BufferClosed`, `BufferUnloaded`, and `BufferFiletypeChanged` also contain these fields, captured when the event is enqueued:
+
+- `buffer_id`: numeric buffer id
+- `path`: absolute path string, or `null` for an unnamed buffer
+- `file_name`: path file name, or `null` for an unnamed buffer
+- `filetype`: canonical filetype string
+- `modified`: whether the buffer was modified
+
+`DiagnosticsChanged` contains `buffer_id`. `CommandExecuted` contains `command`, the executed command's debug representation. `EditorStarted` has no additional fields.
+
+`urvim.events` may expose reserved event-name constants for later plugin phases. Reserved events are not emitted and are not supported for hooks until listed above.
 
 ## Status
 

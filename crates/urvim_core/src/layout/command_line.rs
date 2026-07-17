@@ -288,7 +288,11 @@ impl Layout {
             crate::globals::with_buffer_pool(|pool| pool.save_buffer_to_path(buffer_id, path))
                 .map_err(|error| format!("Failed to write buffer to {}: {error}", path.display()));
         if result.is_ok() {
-            globals::enqueue_editor_event(EditorEvent::BufferSaved { buffer_id });
+            let snapshot = globals::with_buffer(buffer_id, |buffer| {
+                crate::event::BufferEventSnapshot::from_buffer(buffer_id, buffer)
+            })
+            .expect("saved buffer should remain loaded");
+            globals::enqueue_editor_event(EditorEvent::BufferSaved { snapshot });
         }
         result
     }
@@ -317,7 +321,11 @@ impl Layout {
 
             crate::globals::with_buffer_pool(|pool| pool.save_buffer(buffer_id))
                 .map_err(|error| format!("Failed to write buffer {:?}: {error}", buffer_id))?;
-            globals::enqueue_editor_event(EditorEvent::BufferSaved { buffer_id });
+            let snapshot = globals::with_buffer(buffer_id, |buffer| {
+                crate::event::BufferEventSnapshot::from_buffer(buffer_id, buffer)
+            })
+            .expect("saved buffer should remain loaded");
+            globals::enqueue_editor_event(EditorEvent::BufferSaved { snapshot });
             saved_buffer_ids.push(buffer_id);
         }
 

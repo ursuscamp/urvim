@@ -4,7 +4,7 @@ use std::io;
 use crate::plugin::{BearscriptPluginRuntime, SharedLayout, loaded_buffer_ids};
 use urvim_core::buffer::Cursor;
 use urvim_core::editor::{EditorAction, EditorOperation, ModeKind, RepeatReplay};
-use urvim_core::event::EditorEvent;
+use urvim_core::event::{BufferEventSnapshot, EditorEvent};
 use urvim_core::globals;
 use urvim_core::layout::Layout;
 use urvim_core::ui::{Command, Intent};
@@ -50,7 +50,9 @@ pub(super) fn handle_save_buffer_action_with_outcome(
             .unwrap_or_else(|| "Untitled".to_string());
             globals::with_lsp_runtime_mut(|runtime| runtime.did_save_buffer(buffer_id));
             urvim_core::notify_info!("Saved {}", label);
-            globals::enqueue_editor_event(EditorEvent::BufferSaved { buffer_id });
+            globals::enqueue_editor_event(EditorEvent::BufferSaved {
+                snapshot: buffer_event_snapshot(buffer_id),
+            });
         }
         Err(error) if error.kind() == io::ErrorKind::InvalidInput => {
             tracing::info!("Skipping save for unnamed buffer {:?}", buffer_id);
@@ -202,7 +204,9 @@ pub(super) fn execute_command_intent(
                 Ok(()) => {
                     globals::with_lsp_runtime_mut(|runtime| runtime.did_save_buffer(buffer_id));
                     urvim_core::notify_info!("Saved {}", path.display());
-                    globals::enqueue_editor_event(EditorEvent::BufferSaved { buffer_id });
+                    globals::enqueue_editor_event(EditorEvent::BufferSaved {
+                        snapshot: buffer_event_snapshot(buffer_id),
+                    });
                     true
                 }
                 Err(error) => {
@@ -223,7 +227,9 @@ pub(super) fn execute_command_intent(
             layout.active_window_group_mut().close_buffer_tab(buffer_id)
         };
         if closed {
-            globals::enqueue_editor_event(EditorEvent::BufferClosed { buffer_id });
+            globals::enqueue_editor_event(EditorEvent::BufferClosed {
+                snapshot: buffer_event_snapshot(buffer_id),
+            });
             cleanup_orphaned_buffers(layout);
         }
         return true;
@@ -245,7 +251,9 @@ pub(super) fn execute_command_intent(
         let was_visible = layout.visible_buffer_ids().contains(&buffer_id);
         let _closed = layout.close_buffer_tabs_and_prune(buffer_id);
         if was_visible {
-            globals::enqueue_editor_event(EditorEvent::BufferClosed { buffer_id });
+            globals::enqueue_editor_event(EditorEvent::BufferClosed {
+                snapshot: buffer_event_snapshot(buffer_id),
+            });
         }
         globals::with_buffer_pool(|pool| {
             pool.remove_buffer(buffer_id);
@@ -291,17 +299,23 @@ pub(super) fn execute_command_intent(
                 .difference(before)
                 .copied()
             {
-                globals::enqueue_editor_event(EditorEvent::BufferOpened { buffer_id });
+                globals::enqueue_editor_event(EditorEvent::BufferOpened {
+                    snapshot: buffer_event_snapshot(buffer_id),
+                });
             }
         }
         if let Some((buffer_id, syntax_name)) = filetype_target
             && globals::with_buffer(buffer_id, |buffer| buffer.syntax_name() != syntax_name)
                 .unwrap_or(false)
         {
-            globals::enqueue_editor_event(EditorEvent::BufferFiletypeChanged { buffer_id });
+            globals::enqueue_editor_event(EditorEvent::BufferFiletypeChanged {
+                snapshot: buffer_event_snapshot(buffer_id),
+            });
         }
         for buffer_id in close_targets.unwrap_or_default() {
-            globals::enqueue_editor_event(EditorEvent::BufferClosed { buffer_id });
+            globals::enqueue_editor_event(EditorEvent::BufferClosed {
+                snapshot: buffer_event_snapshot(buffer_id),
+            });
         }
         cleanup_orphaned_buffers(layout);
         globals::enqueue_editor_event(EditorEvent::CommandExecuted {
@@ -309,6 +323,13 @@ pub(super) fn execute_command_intent(
         });
     }
     handled
+}
+
+fn buffer_event_snapshot(buffer_id: urvim_core::buffer::BufferId) -> BufferEventSnapshot {
+    globals::with_buffer(buffer_id, |buffer| {
+        BufferEventSnapshot::from_buffer(buffer_id, buffer)
+    })
+    .expect("event buffer should remain loaded while its event is enqueued")
 }
 
 fn resolve_buffer_target(

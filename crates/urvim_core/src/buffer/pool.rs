@@ -160,10 +160,7 @@ impl BufferPool {
             self.paths.remove(&path);
         }
         let snapshot = BufferEventSnapshot::from_buffer(id, &buffer);
-        globals::enqueue_editor_event(EditorEvent::BufferUnloaded {
-            buffer_id: id,
-            snapshot,
-        });
+        globals::enqueue_editor_event(EditorEvent::BufferUnloaded { snapshot });
         Some(buffer)
     }
 
@@ -585,7 +582,8 @@ impl BufferPool {
             self.paths.insert(path, id);
         }
         self.buffers.insert(id, buffer);
-        globals::enqueue_editor_event(EditorEvent::BufferLoaded { buffer_id: id });
+        let snapshot = BufferEventSnapshot::from_buffer(id, &self.buffers[&id]);
+        globals::enqueue_editor_event(EditorEvent::BufferLoaded { snapshot });
         id
     }
 }
@@ -948,7 +946,9 @@ mod tests {
         let mut retained = Vec::new();
         while let Some(event) = globals::take_editor_event() {
             match event {
-                crate::event::EditorEvent::BufferLoaded { buffer_id } => ids.push(buffer_id),
+                crate::event::EditorEvent::BufferLoaded { snapshot } => {
+                    ids.push(snapshot.buffer_id)
+                }
                 event => retained.push(event),
             }
         }
@@ -963,10 +963,9 @@ mod tests {
         let mut retained = Vec::new();
         while let Some(event) = globals::take_editor_event() {
             match event {
-                crate::event::EditorEvent::BufferUnloaded {
-                    buffer_id,
-                    snapshot,
-                } => ids.push((buffer_id, snapshot)),
+                crate::event::EditorEvent::BufferUnloaded { snapshot } => {
+                    ids.push((snapshot.buffer_id, snapshot))
+                }
                 event => retained.push(event),
             }
         }
