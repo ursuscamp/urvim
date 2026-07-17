@@ -170,14 +170,99 @@ pub(in crate::plugin) fn event_payload(
             urvim_plugin::PluginEventKind::BufferFiletypeChanged,
             snapshot,
         )),
-        EditorEvent::DiagnosticsChanged { buffer_id, .. } => {
+        EditorEvent::LspServerStarted {
+            server_name,
+            workspace_root,
+        } => {
+            let kind = urvim_plugin::PluginEventKind::LspServerStarted;
+            lsp_session_fields(&mut payload, server_name, workspace_root);
+            Some(kind_payload(&mut payload, kind))
+        }
+        EditorEvent::LspServerStartFailed {
+            server_name,
+            workspace_root,
+            error,
+        } => {
+            let kind = urvim_plugin::PluginEventKind::LspServerStartFailed;
+            lsp_session_fields(&mut payload, server_name, workspace_root);
+            payload.insert("error".to_string(), Value::String(error.into()));
+            Some(kind_payload(&mut payload, kind))
+        }
+        EditorEvent::LspServerStopped {
+            server_name,
+            workspace_root,
+            reason,
+        } => {
+            let kind = urvim_plugin::PluginEventKind::LspServerStopped;
+            lsp_session_fields(&mut payload, server_name, workspace_root);
+            payload.insert("reason".to_string(), Value::String(reason.into()));
+            Some(kind_payload(&mut payload, kind))
+        }
+        EditorEvent::LspBufferAttached {
+            server_name,
+            workspace_root,
+            buffer_id,
+            uri,
+            language_id,
+        } => {
+            let kind = urvim_plugin::PluginEventKind::LspBufferAttached;
+            lsp_buffer_fields(
+                &mut payload,
+                server_name,
+                workspace_root,
+                buffer_id,
+                uri,
+                language_id,
+            );
+            Some(kind_payload(&mut payload, kind))
+        }
+        EditorEvent::LspBufferDetached {
+            server_name,
+            workspace_root,
+            buffer_id,
+            uri,
+            language_id,
+            reason,
+        } => {
+            let kind = urvim_plugin::PluginEventKind::LspBufferDetached;
+            lsp_buffer_fields(
+                &mut payload,
+                server_name,
+                workspace_root,
+                buffer_id,
+                uri,
+                language_id,
+            );
+            payload.insert("reason".to_string(), Value::String(reason.into()));
+            Some(kind_payload(&mut payload, kind))
+        }
+        EditorEvent::DiagnosticsChanged { snapshot } => {
             let kind = urvim_plugin::PluginEventKind::DiagnosticsChanged;
-            payload.insert("event".to_string(), Value::String(kind.as_str().into()));
             payload.insert(
                 "buffer_id".to_string(),
-                Value::Number(buffer_id.get() as f64),
+                Value::Number(snapshot.buffer_id.get() as f64),
             );
-            Some((kind, Value::Map(payload.into())))
+            payload.insert("source".to_string(), Value::String(snapshot.source.into()));
+            payload.insert("cleared".to_string(), Value::Bool(snapshot.cleared));
+            payload.insert(
+                "source_count".to_string(),
+                Value::Number(snapshot.source_count as f64),
+            );
+            payload.insert(
+                "total_count".to_string(),
+                Value::Number(snapshot.total_count as f64),
+            );
+            payload.insert("errors".to_string(), Value::Number(snapshot.errors as f64));
+            payload.insert(
+                "warnings".to_string(),
+                Value::Number(snapshot.warnings as f64),
+            );
+            payload.insert(
+                "information".to_string(),
+                Value::Number(snapshot.information as f64),
+            );
+            payload.insert("hints".to_string(), Value::Number(snapshot.hints as f64));
+            Some(kind_payload(&mut payload, kind))
         }
         EditorEvent::CommandExecuted {
             command,
@@ -372,6 +457,35 @@ fn kind_payload(
     (kind, Value::Map(std::mem::take(payload).into()))
 }
 
+fn lsp_session_fields(
+    payload: &mut HashMap<String, Value>,
+    server_name: String,
+    workspace_root: std::path::PathBuf,
+) {
+    payload.insert("server_name".to_string(), Value::String(server_name.into()));
+    payload.insert(
+        "workspace_root".to_string(),
+        Value::String(workspace_root.to_string_lossy().into_owned().into()),
+    );
+}
+
+fn lsp_buffer_fields(
+    payload: &mut HashMap<String, Value>,
+    server_name: String,
+    workspace_root: std::path::PathBuf,
+    buffer_id: urvim_core::buffer::BufferId,
+    uri: String,
+    language_id: String,
+) {
+    lsp_session_fields(payload, server_name, workspace_root);
+    payload.insert(
+        "buffer_id".to_string(),
+        Value::Number(buffer_id.get() as f64),
+    );
+    payload.insert("uri".to_string(), Value::String(uri.into()));
+    payload.insert("language_id".to_string(), Value::String(language_id.into()));
+}
+
 fn pane_event_fields(
     payload: &mut HashMap<String, Value>,
     window_id: urvim_core::layout::PaneId,
@@ -545,7 +659,8 @@ mod tests {
     use std::path::PathBuf;
     use urvim_core::buffer::BufferId;
     use urvim_core::event::{
-        BufferErrorSnapshot, BufferPathChangeSnapshot, ShutdownReason, ThemeChangeSource,
+        BufferErrorSnapshot, BufferPathChangeSnapshot, DiagnosticsEventSnapshot, ShutdownReason,
+        ThemeChangeSource,
     };
 
     #[test]
@@ -606,6 +721,85 @@ mod tests {
             ))
         );
         assert_eq!(payload.get("session_enabled"), Some(&Value::Bool(true)));
+    }
+
+    #[test]
+    fn lsp_lifecycle_payloads_include_stable_session_and_document_identity() {
+        let (_, Value::Map(started)) = event_payload(EditorEvent::LspServerStarted {
+            server_name: "rust-analyzer".to_string(),
+            workspace_root: PathBuf::from("/tmp/project"),
+        })
+        .expect("started payload") else {
+            panic!("started payload should be a map");
+        };
+        assert_eq!(
+            started.get("server_name"),
+            Some(&Value::String("rust-analyzer".into()))
+        );
+        assert_eq!(
+            started.get("workspace_root"),
+            Some(&Value::String("/tmp/project".into()))
+        );
+
+        let (_, Value::Map(failed)) = event_payload(EditorEvent::LspServerStartFailed {
+            server_name: "rust-analyzer".to_string(),
+            workspace_root: PathBuf::from("/tmp/project"),
+            error: "executable not found".to_string(),
+        })
+        .expect("failed payload") else {
+            panic!("failed payload should be a map");
+        };
+        assert_eq!(
+            failed.get("error"),
+            Some(&Value::String("executable not found".into()))
+        );
+        assert!(!failed.contains_key("failure"));
+
+        let (kind, Value::Map(detached)) = event_payload(EditorEvent::LspBufferDetached {
+            server_name: "rust-analyzer".to_string(),
+            workspace_root: PathBuf::from("/tmp/project"),
+            buffer_id: BufferId::new(12),
+            uri: "file:///tmp/project/main.rs".to_string(),
+            language_id: "rust".to_string(),
+            reason: "shutdown".to_string(),
+        })
+        .expect("detached payload") else {
+            panic!("detached payload should be a map");
+        };
+        assert_eq!(kind, urvim_plugin::PluginEventKind::LspBufferDetached);
+        assert_eq!(detached.get("buffer_id"), Some(&Value::Number(12.0)));
+        assert_eq!(
+            detached.get("language_id"),
+            Some(&Value::String("rust".into()))
+        );
+        assert_eq!(
+            detached.get("reason"),
+            Some(&Value::String("shutdown".into()))
+        );
+    }
+
+    #[test]
+    fn diagnostics_payload_contains_aggregate_snapshot_without_diagnostics() {
+        let (_, Value::Map(payload)) = event_payload(EditorEvent::DiagnosticsChanged {
+            snapshot: DiagnosticsEventSnapshot {
+                buffer_id: BufferId::new(5),
+                source: "plugin-lint".to_string(),
+                cleared: false,
+                source_count: 2,
+                total_count: 4,
+                errors: 1,
+                warnings: 2,
+                information: 1,
+                hints: 0,
+            },
+        })
+        .expect("diagnostics payload") else {
+            panic!("diagnostics payload should be a map");
+        };
+        assert_eq!(payload.get("source_count"), Some(&Value::Number(2.0)));
+        assert_eq!(payload.get("total_count"), Some(&Value::Number(4.0)));
+        assert_eq!(payload.get("warnings"), Some(&Value::Number(2.0)));
+        assert!(!payload.contains_key("diagnostics"));
     }
 
     #[test]

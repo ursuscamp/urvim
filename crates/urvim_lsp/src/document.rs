@@ -46,6 +46,59 @@ pub struct LspTextEdit {
 /// effects via a channel and core drains them through `apply_lsp_effect`.
 #[derive(Debug, Clone)]
 pub enum LspRuntimeEffect {
+    /// An initialized server session started.
+    ServerStarted {
+        /// Configured server name.
+        server_name: String,
+        /// Workspace root that identifies the session with the server name.
+        workspace_root: PathBuf,
+    },
+    /// A server session failed to start or initialize.
+    ServerStartFailed {
+        /// Configured server name.
+        server_name: String,
+        /// Workspace root that identifies the failed session state.
+        workspace_root: PathBuf,
+        /// Human-readable process or initialization failure.
+        error: String,
+    },
+    /// A server session stopped.
+    ServerStopped {
+        /// Configured server name.
+        server_name: String,
+        /// Workspace root that identifies the session with the server name.
+        workspace_root: PathBuf,
+        /// Stable reason the runtime stopped the session.
+        reason: String,
+    },
+    /// A buffer was successfully opened in a server session.
+    BufferAttached {
+        /// Configured server name.
+        server_name: String,
+        /// Workspace root that identifies the session with the server name.
+        workspace_root: PathBuf,
+        /// Attached buffer identity.
+        buffer_id: BufferId,
+        /// URI sent to the server.
+        uri: String,
+        /// Language identifier sent to the server.
+        language_id: String,
+    },
+    /// An existing buffer attachment was removed from a server session.
+    BufferDetached {
+        /// Configured server name.
+        server_name: String,
+        /// Workspace root that identifies the session with the server name.
+        workspace_root: PathBuf,
+        /// Detached buffer identity.
+        buffer_id: BufferId,
+        /// URI previously sent to the server.
+        uri: String,
+        /// Language identifier previously sent to the server.
+        language_id: String,
+        /// Stable reason the attachment was removed.
+        reason: String,
+    },
     /// Diagnostics received for a buffer.
     ///
     /// The diagnostics carry raw LSP positions; core converts them to buffer
@@ -76,6 +129,8 @@ pub enum LspRuntimeEffect {
     /// `TextRange` positions to buffer cursors using the negotiated position
     /// encoding, and applies the edits.
     ApplyTextEdits {
+        /// Server that produced the edit when known.
+        server_name: Option<String>,
         /// The file path to edit.
         path: PathBuf,
         /// The edits to apply.

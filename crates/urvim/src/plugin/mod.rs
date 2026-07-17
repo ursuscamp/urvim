@@ -1474,13 +1474,15 @@ fn diagnostics_module() -> Value {
                         let buffer_id = buffer_id_from_value(&buffer_id)?;
                         ensure_buffer_exists(buffer_id)?;
                         let diagnostics = diagnostics_from_value(&diagnostics, buffer_id)?;
-                        globals::with_diagnostics_store(|store| {
-                            store.set(buffer_id, namespace, diagnostics);
+                        let snapshot = globals::with_diagnostics_store(|store| {
+                            store.set(buffer_id, namespace, diagnostics)
                         })
                         .ok_or_else(|| "diagnostics store is unavailable".to_string())?;
-                        globals::enqueue_editor_event(EditorEvent::DiagnosticsChanged {
-                            buffer_id,
-                        });
+                        if let Some(snapshot) = snapshot {
+                            globals::enqueue_editor_event(EditorEvent::DiagnosticsChanged {
+                                snapshot,
+                            });
+                        }
                         Ok(())
                     },
                 ),
@@ -1492,13 +1494,15 @@ fn diagnostics_module() -> Value {
                     |namespace: String, buffer_id: Value| {
                         let buffer_id = buffer_id_from_value(&buffer_id)?;
                         ensure_buffer_exists(buffer_id)?;
-                        globals::with_diagnostics_store(|store| {
-                            store.clear(buffer_id, &namespace);
+                        let snapshot = globals::with_diagnostics_store(|store| {
+                            store.clear(buffer_id, &namespace)
                         })
                         .ok_or_else(|| "diagnostics store is unavailable".to_string())?;
-                        globals::enqueue_editor_event(EditorEvent::DiagnosticsChanged {
-                            buffer_id,
-                        });
+                        if let Some(snapshot) = snapshot {
+                            globals::enqueue_editor_event(EditorEvent::DiagnosticsChanged {
+                                snapshot,
+                            });
+                        }
                         Ok(())
                     },
                 ),
@@ -4660,7 +4664,7 @@ entry = "plugin.bear"
         let events = drain_editor_events();
         assert!(events.iter().any(|event| matches!(
             event,
-            EditorEvent::DiagnosticsChanged { buffer_id: id } if *id == buffer_id
+            EditorEvent::DiagnosticsChanged { snapshot } if snapshot.buffer_id == buffer_id
         )));
     }
 

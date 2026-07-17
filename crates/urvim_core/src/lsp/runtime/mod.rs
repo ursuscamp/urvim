@@ -225,6 +225,7 @@ impl LspRuntime {
     /// Shuts down all running LSP sessions.
     pub fn shutdown(&mut self) {
         self.runtime.shutdown();
+        self.drain_effects();
     }
 
     /// Notifies attached sessions that a buffer has been saved.
@@ -608,7 +609,11 @@ impl LspRuntime {
         let Some(edit) = edit else {
             return Err("rename returned no workspace edit".to_string());
         };
-        let effects = workspace_edit_to_effects(&edit)?;
+        let mut effects = workspace_edit_to_effects(&edit)?;
+        set_text_edit_effect_server(
+            &mut effects,
+            self.runtime.server_name_for_buffer(snapshot.id),
+        );
         let has_file_ops = effects.iter().any(|e| {
             matches!(
                 e,
@@ -795,7 +800,11 @@ impl LspRuntime {
 
         let mut has_file_ops = false;
         if let Some(edit) = action.edit.as_ref() {
-            let effects = workspace_edit_to_effects(edit)?;
+            let mut effects = workspace_edit_to_effects(edit)?;
+            set_text_edit_effect_server(
+                &mut effects,
+                self.runtime.server_name_for_buffer(buffer_id),
+            );
             has_file_ops = effects.iter().any(|e| {
                 matches!(
                     e,
@@ -837,6 +846,21 @@ impl LspRuntime {
                 globals::with_buffer(id, |buffer| snapshot_for_buffer(buffer, id, 0)).flatten()
             })
             .collect()
+    }
+}
+
+fn set_text_edit_effect_server(
+    effects: &mut [urvim_lsp::document::LspRuntimeEffect],
+    server_name: Option<String>,
+) {
+    for effect in effects {
+        if let urvim_lsp::document::LspRuntimeEffect::ApplyTextEdits {
+            server_name: effect_server,
+            ..
+        } = effect
+        {
+            effect_server.clone_from(&server_name);
+        }
     }
 }
 

@@ -165,6 +165,29 @@ pub struct BufferPathChangeSnapshot {
     pub previous_path: Option<PathBuf>,
 }
 
+/// Aggregate diagnostics state captured immediately after one source mutation.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DiagnosticsEventSnapshot {
+    /// Buffer whose diagnostics changed.
+    pub buffer_id: BufferId,
+    /// Plugin namespace or LSP server that was mutated.
+    pub source: String,
+    /// Whether the mutation cleared this source rather than replacing it.
+    pub cleared: bool,
+    /// Diagnostics remaining for the mutated source.
+    pub source_count: usize,
+    /// Diagnostics remaining across all sources for the buffer.
+    pub total_count: usize,
+    /// Remaining error diagnostics across all sources.
+    pub errors: usize,
+    /// Remaining warning diagnostics across all sources.
+    pub warnings: usize,
+    /// Remaining information diagnostics across all sources.
+    pub information: usize,
+    /// Remaining hint diagnostics across all sources.
+    pub hints: usize,
+}
+
 /// Returns the stable lowercase name for an I/O error category.
 pub fn io_error_kind_name(kind: io::ErrorKind) -> &'static str {
     match kind {
@@ -424,10 +447,63 @@ pub enum EditorEvent {
         /// Failure detail, or `None` on success.
         error: Option<String>,
     },
+    /// An initialized LSP server session started.
+    LspServerStarted {
+        /// Configured server name.
+        server_name: String,
+        /// Workspace root identifying the session with the server name.
+        workspace_root: PathBuf,
+    },
+    /// An LSP server session failed to start or initialize.
+    LspServerStartFailed {
+        /// Configured server name.
+        server_name: String,
+        /// Workspace root identifying the failed session state.
+        workspace_root: PathBuf,
+        /// Human-readable process or initialization failure.
+        error: String,
+    },
+    /// An LSP server session stopped.
+    LspServerStopped {
+        /// Configured server name.
+        server_name: String,
+        /// Workspace root identifying the session with the server name.
+        workspace_root: PathBuf,
+        /// Stable stop reason.
+        reason: String,
+    },
+    /// An LSP server session attached to a buffer.
+    LspBufferAttached {
+        /// Configured server name.
+        server_name: String,
+        /// Workspace root identifying the session with the server name.
+        workspace_root: PathBuf,
+        /// Attached buffer identity.
+        buffer_id: BufferId,
+        /// URI opened in the server.
+        uri: String,
+        /// Language identifier opened in the server.
+        language_id: String,
+    },
+    /// An LSP server session detached from a buffer.
+    LspBufferDetached {
+        /// Configured server name.
+        server_name: String,
+        /// Workspace root identifying the session with the server name.
+        workspace_root: PathBuf,
+        /// Detached buffer identity.
+        buffer_id: BufferId,
+        /// URI previously opened in the server.
+        uri: String,
+        /// Language identifier previously opened in the server.
+        language_id: String,
+        /// Stable detach reason.
+        reason: String,
+    },
     /// Diagnostics changed for a buffer.
     DiagnosticsChanged {
-        /// Identifier of the buffer whose diagnostics changed.
-        buffer_id: BufferId,
+        /// Post-mutation aggregate state.
+        snapshot: DiagnosticsEventSnapshot,
     },
 }
 

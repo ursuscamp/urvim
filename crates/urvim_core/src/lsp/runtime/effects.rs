@@ -25,15 +25,69 @@ impl LspRuntime {
     }
 
     pub(super) fn apply_effects(&mut self, effects: Vec<LspRuntimeEffect>) {
-        let _transaction =
-            crate::event::EventTransaction::new(crate::event::EventSource::lsp(None::<String>));
         for effect in effects {
+            let server_name = effect_server_name(&effect).map(str::to_string);
+            let _transaction =
+                crate::event::EventTransaction::new(crate::event::EventSource::lsp(server_name));
             self.apply_lsp_effect(effect);
         }
     }
 
     fn apply_lsp_effect(&mut self, effect: LspRuntimeEffect) {
         match effect {
+            LspRuntimeEffect::ServerStarted {
+                server_name,
+                workspace_root,
+            } => globals::enqueue_editor_event(EditorEvent::LspServerStarted {
+                server_name,
+                workspace_root,
+            }),
+            LspRuntimeEffect::ServerStartFailed {
+                server_name,
+                workspace_root,
+                error,
+            } => globals::enqueue_editor_event(EditorEvent::LspServerStartFailed {
+                server_name,
+                workspace_root,
+                error,
+            }),
+            LspRuntimeEffect::ServerStopped {
+                server_name,
+                workspace_root,
+                reason,
+            } => globals::enqueue_editor_event(EditorEvent::LspServerStopped {
+                server_name,
+                workspace_root,
+                reason,
+            }),
+            LspRuntimeEffect::BufferAttached {
+                server_name,
+                workspace_root,
+                buffer_id,
+                uri,
+                language_id,
+            } => globals::enqueue_editor_event(EditorEvent::LspBufferAttached {
+                server_name,
+                workspace_root,
+                buffer_id,
+                uri,
+                language_id,
+            }),
+            LspRuntimeEffect::BufferDetached {
+                server_name,
+                workspace_root,
+                buffer_id,
+                uri,
+                language_id,
+                reason,
+            } => globals::enqueue_editor_event(EditorEvent::LspBufferDetached {
+                server_name,
+                workspace_root,
+                buffer_id,
+                uri,
+                language_id,
+                reason,
+            }),
             LspRuntimeEffect::Diagnostics {
                 buffer_id,
                 server_name,
@@ -45,10 +99,13 @@ impl LspRuntime {
                         .into_iter()
                         .filter_map(|d| convert_diagnostic(&lines, d, encoding.clone()))
                         .collect();
-                    globals::with_diagnostics_store(|store| {
+                    let snapshot = globals::with_diagnostics_store(|store| {
                         store.set(buffer_id, &server_name, converted)
-                    });
-                    globals::enqueue_editor_event(EditorEvent::DiagnosticsChanged { buffer_id });
+                    })
+                    .flatten();
+                    if let Some(snapshot) = snapshot {
+                        globals::enqueue_editor_event(EditorEvent::DiagnosticsChanged { snapshot });
+                    }
                 }
                 globals::request_inlay_hint_retry();
                 globals::request_notification_redraw();
@@ -57,15 +114,19 @@ impl LspRuntime {
                 buffer_id,
                 server_name,
             } => {
-                globals::with_diagnostics_store(|store| store.clear(buffer_id, &server_name));
-                globals::enqueue_editor_event(EditorEvent::DiagnosticsChanged { buffer_id });
+                let snapshot =
+                    globals::with_diagnostics_store(|store| store.clear(buffer_id, &server_name))
+                        .flatten();
+                if let Some(snapshot) = snapshot {
+                    globals::enqueue_editor_event(EditorEvent::DiagnosticsChanged { snapshot });
+                }
             }
             LspRuntimeEffect::OpenDocument { path } => {
                 if let Err(error) = globals::open_buffer(&path) {
                     tracing::warn!(?error, path = ?path, "failed to open buffer for LSP effect");
                 }
             }
-            LspRuntimeEffect::ApplyTextEdits { path, edits } => {
+            LspRuntimeEffect::ApplyTextEdits { path, edits, .. } => {
                 if let Err(error) = self.apply_text_edits_to_buffer(&path, &edits) {
                     tracing::warn!(?error, path = ?path, "failed to apply LSP text edits");
                 }
@@ -301,6 +362,20 @@ impl LspRuntime {
     }
 }
 
+fn effect_server_name(effect: &LspRuntimeEffect) -> Option<&str> {
+    match effect {
+        LspRuntimeEffect::ServerStarted { server_name, .. }
+        | LspRuntimeEffect::ServerStartFailed { server_name, .. }
+        | LspRuntimeEffect::ServerStopped { server_name, .. }
+        | LspRuntimeEffect::BufferAttached { server_name, .. }
+        | LspRuntimeEffect::BufferDetached { server_name, .. }
+        | LspRuntimeEffect::Diagnostics { server_name, .. }
+        | LspRuntimeEffect::ClearDiagnostics { server_name, .. } => Some(server_name),
+        LspRuntimeEffect::ApplyTextEdits { server_name, .. } => server_name.as_deref(),
+        _ => None,
+    }
+}
+
 fn remove_path(path: &Path) -> Result<(), String> {
     let metadata = fs::symlink_metadata(path).map_err(|e| e.to_string())?;
     if metadata.is_dir() {
@@ -345,6 +420,92 @@ mod tests {
 
     fn empty_runtime() -> LspRuntime {
         LspRuntime::new(&Config::default())
+    }
+
+    #[test]
+    fn lifecycle_effects_translate_in_fifo_order() {
+        crate::globals::clear_editor_events_for_tests();
+        let mut runtime = empty_runtime();
+        let root = PathBuf::from("/tmp/workspace");
+        runtime.apply_effects(vec![
+            LspRuntimeEffect::ServerStarted {
+                server_name: "rust-analyzer".to_string(),
+                workspace_root: root.clone(),
+            },
+            LspRuntimeEffect::BufferAttached {
+                server_name: "rust-analyzer".to_string(),
+                workspace_root: root.clone(),
+                buffer_id: crate::buffer::BufferId::new(4),
+                uri: "file:///tmp/workspace/main.rs".to_string(),
+                language_id: "rust".to_string(),
+            },
+            LspRuntimeEffect::BufferDetached {
+                server_name: "rust-analyzer".to_string(),
+                workspace_root: root.clone(),
+                buffer_id: crate::buffer::BufferId::new(4),
+                uri: "file:///tmp/workspace/main.rs".to_string(),
+                language_id: "rust".to_string(),
+                reason: "shutdown".to_string(),
+            },
+            LspRuntimeEffect::ServerStopped {
+                server_name: "rust-analyzer".to_string(),
+                workspace_root: root,
+                reason: "shutdown".to_string(),
+            },
+        ]);
+
+        assert!(matches!(
+            crate::globals::take_editor_event_batch().as_slice(),
+            [
+                EditorEvent::LspServerStarted { .. },
+                EditorEvent::LspBufferAttached { .. },
+                EditorEvent::LspBufferDetached { .. },
+                EditorEvent::LspServerStopped { .. }
+            ]
+        ));
+    }
+
+    #[test]
+    fn named_text_edit_effect_emits_named_lsp_buffer_source() {
+        let _lock = crate::globals::buffer_pool_test_lock();
+        crate::globals::with_buffer_pool(|pool| *pool = crate::buffer::BufferPool::new());
+        crate::globals::clear_editor_events_for_tests();
+        let temp = temp_dir("named-source");
+        std::fs::create_dir_all(&temp).expect("root");
+        let path = temp.join("sample.rs");
+        std::fs::write(&path, "old").expect("write");
+        let mut runtime = empty_runtime();
+
+        runtime.apply_effects(vec![LspRuntimeEffect::ApplyTextEdits {
+            server_name: Some("rust-analyzer".to_string()),
+            path,
+            edits: vec![LspTextEdit {
+                range: urvim_text::TextRange {
+                    start: urvim_text::TextPosition {
+                        line: 0,
+                        character: 0,
+                    },
+                    end: urvim_text::TextPosition {
+                        line: 0,
+                        character: 3,
+                    },
+                },
+                text: "new".to_string(),
+            }],
+        }]);
+
+        assert!(
+            crate::globals::take_editor_event_batch()
+                .iter()
+                .any(|event| {
+                    matches!(
+                        event,
+                        EditorEvent::BufferChanged { source, .. }
+                            if *source == crate::event::EventSource::lsp(Some("rust-analyzer"))
+                    )
+                })
+        );
+        std::fs::remove_dir_all(temp).ok();
     }
 
     #[test]

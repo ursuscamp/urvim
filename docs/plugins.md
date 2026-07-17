@@ -668,6 +668,11 @@ Currently emitted event names:
 - `ModeChanged`
 - `CursorMoved`
 - `SelectionChanged`
+- `LspServerStarted`
+- `LspServerStartFailed`
+- `LspServerStopped`
+- `LspBufferAttached`
+- `LspBufferDetached`
 - `CommandExecuted`
 - `DiagnosticsChanged`
 
@@ -703,7 +708,7 @@ Tab lifecycle payloads are:
 
 `ActiveBufferChanged` contains `previous_buffer_id` (`null` when absent), `buffer_id`, `window_id`, and `tab_id`.
 
-High-frequency events are coalesced independently for each buffer or window over one completed terminal key, paste, maintenance/tick batch, plugin callback, or LSP effect batch. `BufferChanged` contains `buffer_id` and `changed_range`; the range is the UTF-8-safe minimal replacement `{ start, old_end, new_end }`. Each position is `{ row, col }`, with zero-based rows and zero-based UTF-8 byte columns. `BufferModifiedChanged` contains `buffer_id`, `previous_modified`, and `modified`.
+High-frequency events are coalesced independently for each buffer or window over one completed terminal key, paste, maintenance/tick batch, plugin callback, or LSP effect. `BufferChanged` contains `buffer_id` and `changed_range`; the range is the UTF-8-safe minimal replacement `{ start, old_end, new_end }`. Each position is `{ row, col }`, with zero-based rows and zero-based UTF-8 byte columns. `BufferModifiedChanged` contains `buffer_id`, `previous_modified`, and `modified`.
 
 `ModeChanged` contains `window_id`, `buffer_id`, `previous_mode`, and `mode`. `CursorMoved` contains `window_id`, `buffer_id`, `previous_position`, and `position`. `SelectionChanged` contains `window_id`, `buffer_id`, `previous_selection`, and `selection`; either selection may be `null`, otherwise it is `{ anchor, cursor, linewise }` using the same byte-column positions. Net no-ops do not emit an event, and changes to text, modified state, mode, cursor, and selection are separate events.
 
@@ -717,9 +722,15 @@ Fresh and session-restored layouts emit their initial state as one transition fr
 
 `ThemeChanged` is emitted only when the committed theme name changes. Its payload contains `previous_theme`, `theme`, and `source`; stable source values are `picker`, `plugin`, and `fallback`. Picker highlight previews and cancel rollback are transient and do not emit events. Startup establishes the initial theme without emitting this event.
 
-`EditorWillShutdown` is an observational, non-cancellable final notification. Its payload contains `reason` (`quit`, `last_window_closed`, or `error`), sorted `modified_buffer_ids`, and `session_enabled`. Rejected `TryQuit` commands do not emit it. Once shutdown begins, urvim emits it exactly once and drains all hook-generated editor-event waves with the normal 32-wave protection while plugin APIs and the LSP runtime remain available. It then shuts down LSP, saves the session, and resets the terminal; commands issued by shutdown hooks cannot cancel this sequence.
+`EditorWillShutdown` is an observational, non-cancellable final notification. Its payload contains `reason` (`quit`, `last_window_closed`, or `error`), sorted `modified_buffer_ids`, and `session_enabled`. Rejected `TryQuit` commands do not emit it. Once shutdown begins, urvim emits it exactly once and drains all hook-generated editor-event waves with the normal 32-wave protection while plugin APIs and the LSP runtime remain available. It then shuts down LSP and drains the resulting `LspBufferDetached`, diagnostics, and `LspServerStopped` events while plugin callbacks and editor APIs remain available. Session saving and terminal teardown happen only after those callbacks finish; commands issued by shutdown hooks cannot cancel this sequence.
 
-`DiagnosticsChanged` contains `buffer_id`. `CommandExecuted` contains `command`, a stable dotted and kebab-case semantic identifier, `success`, and `error` (`null` on success). Examples include `buffer.save`, `buffer.save-as`, `buffer.close`, `window.next-tab`, and `lsp.hover`. Plugin commands include their identifiers as `plugin.<plugin>.<command>`, preserving the plugin and command text. Accepted asynchronous commands report success immediately. Buffer domain events are queued before the command completion event.
+An LSP session is identified by `server_name` plus `workspace_root`. `LspServerStarted` contains those fields and is emitted only after initialization succeeds. `LspServerStartFailed` additionally contains `error`; one event is emitted for a failed live session state even if document synchronization repeats. Removing all matching documents clears that failed state, so a later matching document can produce a new attempt and failure event. `LspServerStopped` additionally contains `reason`, currently `shutdown`.
+
+`LspBufferAttached` contains the session identity plus `buffer_id`, `uri`, and `language_id`, and is emitted only after `didOpen` succeeds and the attachment is recorded. `LspBufferDetached` contains the same fields plus `reason` (`no_longer_eligible`, `file_deleted`, or `shutdown`) and is emitted only when an existing attachment is removed. Final shutdown emits all detach events for a session before its stop event. urvim does not currently emit lifecycle events for unexpected process crashes or supervise server restarts.
+
+`DiagnosticsChanged` is a compact post-mutation snapshot. It contains `buffer_id`, `source` (an LSP server name or plugin diagnostics namespace), `cleared`, `source_count`, `total_count`, `errors`, `warnings`, `information`, and `hints`. Counts are captured after the source replacement or clear; severity counts aggregate all sources for that buffer. The full diagnostics are deliberately omitted and remain available through `urvim.diagnostics.get`. Replacing a source with identical diagnostics and clearing an absent source are no-ops and do not emit this event.
+
+`CommandExecuted` contains `command`, a stable dotted and kebab-case semantic identifier, `success`, and `error` (`null` on success). Examples include `buffer.save`, `buffer.save-as`, `buffer.close`, `window.next-tab`, and `lsp.hover`. Plugin commands include their identifiers as `plugin.<plugin>.<command>`, preserving the plugin and command text. Accepted asynchronous commands report success immediately. Buffer domain events are queued before the command completion event.
 
 Internal notification enqueueing, completion application, overwrite and git-discard confirmation results, and plugin picker, input, or confirmation responses do not emit `CommandExecuted`. `EditorStarted` has no additional fields.
 

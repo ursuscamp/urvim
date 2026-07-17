@@ -49,6 +49,7 @@ pub struct LspRuntime {
     pub servers: BTreeMap<String, ServerRuntime>,
     effect_sender: mpsc::Sender<LspRuntimeEffect>,
     effect_receiver: mpsc::Receiver<LspRuntimeEffect>,
+    shutting_down: bool,
 }
 
 impl LspRuntime {
@@ -72,6 +73,7 @@ impl LspRuntime {
             servers,
             effect_sender,
             effect_receiver,
+            shutting_down: false,
         }
     }
 
@@ -103,36 +105,52 @@ impl LspRuntime {
     /// for changed documents, and cleans up detached buffers (emitting
     /// `ClearDiagnostics` effects for core to apply).
     pub fn sync_documents(&mut self, documents: &[LspDocumentSnapshot]) {
+        if self.shutting_down {
+            return;
+        }
+
         for (server_name, server) in &mut self.servers {
             if !server.config.enabled {
                 continue;
             }
 
-            let mut live_targets = BTreeSet::new();
+            let live_targets = documents
+                .iter()
+                .filter(|doc| server.matches_filetype(&doc.language_id))
+                .filter_map(|doc| {
+                    resolve_workspace_root(&doc.path, &server.config.root_markers)
+                        .map(|root| (doc, root))
+                })
+                .collect::<Vec<_>>();
+            let live_roots = live_targets
+                .iter()
+                .map(|(_, root)| root.clone())
+                .collect::<BTreeSet<_>>();
+            server
+                .failed_sessions
+                .retain(|root, _| live_roots.contains(root));
 
-            for doc in documents {
-                if !server.matches_filetype(&doc.language_id) {
+            for (doc, root) in &live_targets {
+                if server.failed_sessions.contains_key(root) {
                     continue;
                 }
 
-                let Some(root) = resolve_workspace_root(&doc.path, &server.config.root_markers)
-                else {
-                    continue;
-                };
-
-                live_targets.insert((doc.id, root.clone()));
-
-                if !server.sessions.contains_key(&root) {
+                if !server.sessions.contains_key(root) {
                     match LspServerSession::spawn(
                         server_name,
                         &server.config,
-                        &root,
+                        root,
                         server.progress.clone(),
                         self.effect_sender.clone(),
                     ) {
                         Ok(session) => {
-                            server.failed_sessions.remove(&root);
                             server.sessions.insert(root.clone(), session);
+                            self.effect_sender
+                                .send(LspRuntimeEffect::ServerStarted {
+                                    server_name: server_name.clone(),
+                                    workspace_root: root.clone(),
+                                })
+                                .ok();
                         }
                         Err(error) => {
                             tracing::warn!(
@@ -141,35 +159,52 @@ impl LspRuntime {
                                 error = %error,
                                 "failed to start lsp server"
                             );
-                            server
-                                .failed_sessions
-                                .insert(root.clone(), error.to_string());
+                            let error = error.to_string();
+                            server.failed_sessions.insert(root.clone(), error.clone());
+                            self.effect_sender
+                                .send(LspRuntimeEffect::ServerStartFailed {
+                                    server_name: server_name.clone(),
+                                    workspace_root: root.clone(),
+                                    error,
+                                })
+                                .ok();
                             continue;
                         }
                     }
                 }
 
-                if let Some(session) = server.sessions.get_mut(&root) {
+                if let Some(session) = server.sessions.get_mut(root) {
                     let text = buffer_text_from_lines(&doc.text);
-                    session.sync_document(
-                        doc.id,
-                        &doc.path,
-                        doc.generation,
-                        &doc.language_id,
-                        &text,
-                    );
+                    session
+                        .sync_document(doc.id, &doc.path, doc.generation, &doc.language_id, &text)
+                        .ok();
                 }
             }
 
+            let live_targets = live_targets
+                .into_iter()
+                .map(|(doc, root)| (doc.id, root))
+                .collect::<BTreeSet<_>>();
             server.cleanup_detached_buffers(&live_targets);
         }
     }
 
     /// Shuts down all running LSP sessions.
     pub fn shutdown(&mut self) {
-        for server in self.servers.values_mut() {
+        self.shutting_down = true;
+        for (server_name, server) in &mut self.servers {
             for session in server.sessions.values_mut() {
+                for buffer_id in session.attached_buffer_ids() {
+                    session.close_buffer(buffer_id, "shutdown");
+                }
                 session.shutdown().ok();
+                self.effect_sender
+                    .send(LspRuntimeEffect::ServerStopped {
+                        server_name: server_name.clone(),
+                        workspace_root: session.root.clone(),
+                        reason: "shutdown".to_string(),
+                    })
+                    .ok();
             }
             server.sessions.clear();
             server.failed_sessions.clear();
@@ -215,6 +250,17 @@ impl LspRuntime {
         PositionEncodingKind::UTF16
     }
 
+    /// Returns the configured name of the first server attached to a buffer.
+    pub fn server_name_for_buffer(&self, buffer_id: BufferId) -> Option<String> {
+        self.servers.iter().find_map(|(server_name, server)| {
+            server
+                .sessions
+                .values()
+                .any(|session| session.contains_buffer(buffer_id))
+                .then(|| server_name.clone())
+        })
+    }
+
     /// Notifies all sessions that a file was renamed, updating attachments.
     ///
     /// Core calls this after applying a `WorkspaceFileOperation::Rename` effect.
@@ -234,7 +280,7 @@ impl LspRuntime {
         for server in self.servers.values_mut() {
             for session in server.sessions.values_mut() {
                 if session.contains_buffer(buffer_id) {
-                    session.close_buffer(buffer_id);
+                    session.close_buffer(buffer_id, "file_deleted");
                 }
             }
         }
@@ -524,5 +570,84 @@ impl LspRuntime {
             }
         }
         Err("no attached LSP server for active buffer".to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::LspServerConfig;
+    use std::collections::BTreeMap;
+    use std::path::PathBuf;
+
+    fn temp_document() -> (PathBuf, LspDocumentSnapshot) {
+        let root = std::env::temp_dir().join(format!(
+            "urvim-lsp-lifecycle-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).expect("create test root");
+        let path = root.join("sample.rs");
+        std::fs::write(&path, "fn main() {}\n").expect("write document");
+        let uri = url::Url::from_file_path(&path)
+            .expect("file URI")
+            .to_string();
+        let document = LspDocumentSnapshot {
+            id: BufferId::new(7),
+            uri,
+            path,
+            language_id: "rust".to_string(),
+            version: 1,
+            generation: 1,
+            text: PieceTable::from_text("fn main() {}\n"),
+        };
+        (root, document)
+    }
+
+    #[test]
+    fn failed_start_emits_once_per_live_failed_state() {
+        let (root, document) = temp_document();
+        let config = LspConfig {
+            servers: BTreeMap::from([(
+                "missing".to_string(),
+                LspServerConfig {
+                    enabled: true,
+                    command: root.join("does-not-exist").to_string_lossy().into_owned(),
+                    filetypes: vec!["rust".to_string()],
+                    ..LspServerConfig::default()
+                },
+            )]),
+        };
+        let mut runtime = LspRuntime::new(&config);
+
+        runtime.sync_documents(std::slice::from_ref(&document));
+        assert!(matches!(
+            runtime.drain_effects().as_slice(),
+            [LspRuntimeEffect::ServerStartFailed {
+                server_name,
+                workspace_root,
+                error,
+            }] if server_name == "missing"
+                && workspace_root == &root
+                && !error.is_empty()
+        ));
+
+        runtime.sync_documents(std::slice::from_ref(&document));
+        assert!(runtime.drain_effects().is_empty());
+
+        runtime.sync_documents(&[]);
+        runtime.sync_documents(std::slice::from_ref(&document));
+        assert!(matches!(
+            runtime.drain_effects().as_slice(),
+            [LspRuntimeEffect::ServerStartFailed { .. }]
+        ));
+
+        runtime.shutdown();
+        runtime.sync_documents(&[document]);
+        assert!(runtime.drain_effects().is_empty());
+        std::fs::remove_dir_all(root).ok();
     }
 }

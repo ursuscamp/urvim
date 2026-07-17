@@ -36,6 +36,7 @@ pub fn workspace_edit_to_effects(
                 })
                 .collect::<Vec<_>>();
             effects.push(LspRuntimeEffect::ApplyTextEdits {
+                server_name: None,
                 path,
                 edits: lsp_edits,
             });
@@ -69,6 +70,7 @@ pub fn workspace_edit_to_effects(
                         })
                         .collect::<Vec<_>>();
                     effects.push(LspRuntimeEffect::ApplyTextEdits {
+                        server_name: None,
                         path,
                         edits: lsp_edits,
                     });
@@ -98,6 +100,7 @@ pub fn workspace_edit_to_effects(
                                 })
                                 .collect::<Vec<_>>();
                             effects.push(LspRuntimeEffect::ApplyTextEdits {
+                                server_name: None,
                                 path,
                                 edits: lsp_edits,
                             });

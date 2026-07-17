@@ -6,6 +6,7 @@
 //! and applies the effects.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
+#[cfg(not(test))]
 use std::fs::OpenOptions;
 use std::io::{self, BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
@@ -140,12 +141,12 @@ impl ServerRuntime {
     }
 
     pub fn cleanup_detached_buffers(&mut self, live_targets: &BTreeSet<(BufferId, PathBuf)>) {
-        let live_buffers = live_targets
-            .iter()
-            .map(|(buffer_id, _)| *buffer_id)
-            .collect::<BTreeSet<_>>();
-
-        for session in self.sessions.values_mut() {
+        for (root, session) in &mut self.sessions {
+            let live_buffers = live_targets
+                .iter()
+                .filter(|(_, target_root)| target_root == root)
+                .map(|(buffer_id, _)| *buffer_id)
+                .collect::<BTreeSet<_>>();
             session.cleanup_detached_buffers(&live_buffers);
         }
     }
@@ -205,6 +206,7 @@ impl LspServerSession {
             Ok(result) => result,
             Err(error) => {
                 session.state = LspSessionState::Failed;
+                session.child.kill().ok();
                 return Err(error);
             }
         };
@@ -338,11 +340,14 @@ impl LspServerSession {
     }
 
     pub fn attached_buffer_ids(&self) -> Vec<BufferId> {
-        self.attachments
+        let mut ids: Vec<_> = self
+            .attachments
             .lock()
             .ok()
             .map(|attachments| attachments.keys().copied().collect())
-            .unwrap_or_default()
+            .unwrap_or_default();
+        ids.sort();
+        ids
     }
 
     fn remove_buffer(&self, buffer_id: BufferId) -> Option<BufferAttachment> {
@@ -399,21 +404,19 @@ impl LspServerSession {
         generation: u64,
         syntax_name: &str,
         text: &str,
-    ) {
+    ) -> io::Result<()> {
         if !matches!(self.state, LspSessionState::Running) {
-            return;
+            return Ok(());
         }
 
         if matches!(
             self.negotiated.text_document_sync,
             Some(TextDocumentSyncKind::NONE)
         ) {
-            return;
+            return Ok(());
         }
 
-        let Some(uri) = file_uri_string(path).ok() else {
-            return;
-        };
+        let uri = file_uri_string(path)?;
 
         let attachment_exists = self
             .attachments
@@ -430,22 +433,33 @@ impl LspServerSession {
                     "text": text,
                 }
             });
-            self.notify("textDocument/didOpen", Some(params)).ok();
-            if let Ok(mut attachments) = self.attachments.lock() {
-                attachments.insert(
+            self.notify("textDocument/didOpen", Some(params))?;
+            let attachment = BufferAttachment {
+                uri: uri.clone(),
+                version: 1,
+                generation,
+                language_id: syntax_name.to_string(),
+            };
+            let mut attachments = self
+                .attachments
+                .lock()
+                .map_err(|_| io::Error::new(io::ErrorKind::Other, "attachments lock poisoned"))?;
+            let mut map = self
+                .uri_to_buffer
+                .lock()
+                .map_err(|_| io::Error::new(io::ErrorKind::Other, "URI map lock poisoned"))?;
+            attachments.insert(buffer_id, attachment);
+            map.insert(uri.clone(), buffer_id);
+            self.effect_sender
+                .send(LspRuntimeEffect::BufferAttached {
+                    server_name: self.server_name.clone(),
+                    workspace_root: self.root.clone(),
                     buffer_id,
-                    BufferAttachment {
-                        uri: uri.clone(),
-                        version: 1,
-                        generation,
-                        language_id: syntax_name.to_string(),
-                    },
-                );
-            }
-            if let Ok(mut map) = self.uri_to_buffer.lock() {
-                map.insert(uri, buffer_id);
-            }
-            return;
+                    uri,
+                    language_id: syntax_name.to_string(),
+                })
+                .ok();
+            return Ok(());
         }
 
         if let Ok(mut attachments) = self.attachments.lock()
@@ -463,6 +477,7 @@ impl LspServerSession {
             });
             self.notify("textDocument/didChange", Some(params)).ok();
         }
+        Ok(())
     }
 
     pub fn did_save_buffer(&self, buffer_id: BufferId) {
@@ -560,19 +575,21 @@ impl LspServerSession {
 
     pub fn shutdown(&mut self) -> io::Result<()> {
         self.state = LspSessionState::ShuttingDown;
-        let response = self.request_raw("shutdown", None)?;
-        if response.is_none() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "shutdown returned no result",
-            ));
-        }
-        self.notify("exit", None)?;
+        let result = (|| {
+            let response = self.request_raw("shutdown", None)?;
+            if response.is_none() {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "shutdown returned no result",
+                ));
+            }
+            self.notify("exit", None)
+        })();
         self.child.kill().ok();
         if let Ok(mut progress) = self.progress.lock() {
             progress.clear();
         }
-        Ok(())
+        result
     }
 
     fn cleanup_detached_buffers(&mut self, live_buffers: &BTreeSet<BufferId>) {
@@ -590,16 +607,26 @@ impl LspServerSession {
             .unwrap_or_default();
 
         for buffer_id in to_remove {
-            self.close_buffer(buffer_id);
+            self.close_buffer(buffer_id, "no_longer_eligible");
         }
     }
 
     /// Detaches a buffer: removes the attachment, sends didClose, and emits a
     /// `ClearDiagnostics` effect for core to apply.
-    pub fn close_buffer(&mut self, buffer_id: BufferId) {
+    pub fn close_buffer(&mut self, buffer_id: BufferId, reason: &str) {
         if let Some(attachment) = self.remove_buffer(buffer_id) {
-            let params = json!({"textDocument": {"uri": attachment.uri}});
+            let params = json!({"textDocument": {"uri": attachment.uri.clone()}});
             self.notify("textDocument/didClose", Some(params)).ok();
+            self.effect_sender
+                .send(LspRuntimeEffect::BufferDetached {
+                    server_name: self.server_name.clone(),
+                    workspace_root: self.root.clone(),
+                    buffer_id,
+                    uri: attachment.uri,
+                    language_id: attachment.language_id,
+                    reason: reason.to_string(),
+                })
+                .ok();
             self.effect_sender
                 .send(LspRuntimeEffect::ClearDiagnostics {
                     buffer_id,
@@ -881,6 +908,12 @@ pub fn range_text(
 }
 
 fn open_lsp_log_stderr() -> Stdio {
+    #[cfg(test)]
+    {
+        return Stdio::null();
+    }
+
+    #[cfg(not(test))]
     match OpenOptions::new().create(true).append(true).open("lsp.log") {
         Ok(file) => Stdio::from(file),
         Err(error) => {
@@ -994,4 +1027,89 @@ fn initialize_params(root_uri: &str, workspace_name: &str, initialization_option
             "name": workspace_name
         }]
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn writable_test_session() -> (LspServerSession, mpsc::Receiver<LspRuntimeEffect>) {
+        let mut child = Command::new("cat")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn local pipe consumer");
+        let stdin = child.stdin.take().expect("child stdin");
+        let (effect_sender, effect_receiver) = mpsc::channel();
+        let mut negotiated = NegotiatedCapabilities::default();
+        negotiated.text_document_sync = Some(TextDocumentSyncKind::FULL);
+        (
+            LspServerSession {
+                state: LspSessionState::Running,
+                child,
+                stdin: Arc::new(Mutex::new(stdin)),
+                pending: Arc::new(Mutex::new(HashMap::new())),
+                next_request_id: AtomicU64::new(1),
+                attachments: Arc::new(Mutex::new(HashMap::new())),
+                uri_to_buffer: Arc::new(Mutex::new(HashMap::new())),
+                progress: Arc::new(Mutex::new(ServerProgressState::default())),
+                root: PathBuf::from("/tmp/project"),
+                server_name: "test-server".to_string(),
+                negotiated,
+                position_encoding: Arc::new(Mutex::new(PositionEncodingKind::UTF16)),
+                initialization_options: Value::Null,
+                effect_sender,
+            },
+            effect_receiver,
+        )
+    }
+
+    #[test]
+    fn attach_and_detach_effects_follow_successful_state_changes_once() {
+        let (mut session, effects) = writable_test_session();
+        let buffer_id = BufferId::new(3);
+        let path = Path::new("/tmp/project/main.rs");
+
+        session
+            .sync_document(buffer_id, path, 1, "rust", "fn main() {}\n")
+            .expect("didOpen succeeds");
+        assert!(session.contains_buffer(buffer_id));
+        assert!(matches!(
+            effects.try_recv(),
+            Ok(LspRuntimeEffect::BufferAttached {
+                server_name,
+                workspace_root,
+                buffer_id: id,
+                language_id,
+                ..
+            }) if server_name == "test-server"
+                && workspace_root == PathBuf::from("/tmp/project")
+                && id == buffer_id
+                && language_id == "rust"
+        ));
+
+        session
+            .sync_document(buffer_id, path, 1, "rust", "fn main() {}\n")
+            .expect("repeat sync succeeds");
+        assert!(effects.try_recv().is_err());
+
+        session.close_buffer(buffer_id, "shutdown");
+        assert!(!session.contains_buffer(buffer_id));
+        assert!(matches!(
+            effects.try_recv(),
+            Ok(LspRuntimeEffect::BufferDetached {
+                buffer_id: id,
+                reason,
+                ..
+            }) if id == buffer_id && reason == "shutdown"
+        ));
+        assert!(matches!(
+            effects.try_recv(),
+            Ok(LspRuntimeEffect::ClearDiagnostics { buffer_id: id, .. }) if id == buffer_id
+        ));
+        session.close_buffer(buffer_id, "shutdown");
+        assert!(effects.try_recv().is_err());
+        session.child.kill().ok();
+    }
 }

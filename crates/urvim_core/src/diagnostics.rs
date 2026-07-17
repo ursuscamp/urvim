@@ -1,6 +1,7 @@
 //! Editor-facing diagnostics storage and navigation helpers.
 
 use crate::buffer::{BufferId, Cursor};
+use crate::event::DiagnosticsEventSnapshot;
 use crate::lsp::diagnostics::{DiagnosticCounts, diagnostic_severity};
 use lsp_types::{Diagnostic, DiagnosticSeverity, Position};
 use std::collections::BTreeMap;
@@ -24,32 +25,51 @@ impl DiagnosticsStore {
         Self::default()
     }
 
-    /// Replaces diagnostics for a buffer and source server.
+    /// Replaces diagnostics for a buffer and source, returning changed aggregate state.
     pub fn set(
         &self,
         buffer_id: BufferId,
         server_name: impl Into<String>,
         diagnostics: Vec<Diagnostic>,
-    ) {
-        if let Ok(mut store) = self.diagnostics.lock() {
-            store.insert(
-                DiagnosticKey {
-                    buffer_id,
-                    server_name: server_name.into(),
-                },
-                diagnostics,
-            );
+    ) -> Option<DiagnosticsEventSnapshot> {
+        let source = server_name.into();
+        let key = DiagnosticKey {
+            buffer_id,
+            server_name: source.clone(),
+        };
+        let mut store = self.diagnostics.lock().ok()?;
+        if store
+            .get(&key)
+            .is_some_and(|current| current == &diagnostics)
+        {
+            return None;
         }
+        store.insert(key, diagnostics);
+        Some(diagnostics_snapshot(&store, buffer_id, source, false))
     }
 
     /// Clears diagnostics for a buffer and source server.
-    pub fn clear(&self, buffer_id: BufferId, server_name: &str) {
-        if let Ok(mut store) = self.diagnostics.lock() {
-            store.remove(&DiagnosticKey {
+    pub fn clear(
+        &self,
+        buffer_id: BufferId,
+        server_name: &str,
+    ) -> Option<DiagnosticsEventSnapshot> {
+        let mut store = self.diagnostics.lock().ok()?;
+        if store
+            .remove(&DiagnosticKey {
                 buffer_id,
                 server_name: server_name.to_string(),
-            });
+            })
+            .is_none()
+        {
+            return None;
         }
+        Some(diagnostics_snapshot(
+            &store,
+            buffer_id,
+            server_name.to_string(),
+            true,
+        ))
     }
 
     /// Clears all diagnostics for a buffer.
@@ -176,6 +196,45 @@ impl DiagnosticsStore {
     }
 }
 
+fn diagnostics_snapshot(
+    store: &BTreeMap<DiagnosticKey, Vec<Diagnostic>>,
+    buffer_id: BufferId,
+    source: String,
+    cleared: bool,
+) -> DiagnosticsEventSnapshot {
+    let source_count = store
+        .get(&DiagnosticKey {
+            buffer_id,
+            server_name: source.clone(),
+        })
+        .map_or(0, Vec::len);
+    let mut snapshot = DiagnosticsEventSnapshot {
+        buffer_id,
+        source,
+        cleared,
+        source_count,
+        total_count: 0,
+        errors: 0,
+        warnings: 0,
+        information: 0,
+        hints: 0,
+    };
+    for diagnostic in store
+        .iter()
+        .filter(|(key, _)| key.buffer_id == buffer_id)
+        .flat_map(|(_, diagnostics)| diagnostics)
+    {
+        snapshot.total_count += 1;
+        match diagnostic_severity(diagnostic) {
+            DiagnosticSeverity::ERROR => snapshot.errors += 1,
+            DiagnosticSeverity::WARNING => snapshot.warnings += 1,
+            DiagnosticSeverity::HINT => snapshot.hints += 1,
+            _ => snapshot.information += 1,
+        }
+    }
+    snapshot
+}
+
 fn position_from_cursor(cursor: Cursor) -> Position {
     Position::new(cursor.line as u32, cursor.col as u32)
 }
@@ -271,6 +330,37 @@ mod tests {
             }
         );
         assert_eq!(store.diagnostics_for_buffer(buffer_id).len(), 2);
+    }
+
+    #[test]
+    fn mutation_snapshot_is_post_change_and_suppresses_no_ops() {
+        let store = DiagnosticsStore::new();
+        let buffer_id = BufferId::new(9);
+        let errors = vec![diagnostic(0, 0, 1, DiagnosticSeverity::ERROR)];
+
+        let first = store
+            .set(buffer_id, "server-a", errors.clone())
+            .expect("first replacement changes the store");
+        assert_eq!(first.source, "server-a");
+        assert_eq!(first.source_count, 1);
+        assert_eq!(first.total_count, 1);
+        assert_eq!(first.errors, 1);
+        assert!(!first.cleared);
+        assert!(store.set(buffer_id, "server-a", errors).is_none());
+
+        store.set(
+            buffer_id,
+            "plugin-ns",
+            vec![diagnostic(1, 0, 1, DiagnosticSeverity::WARNING)],
+        );
+        let cleared = store
+            .clear(buffer_id, "server-a")
+            .expect("existing source is removed");
+        assert!(cleared.cleared);
+        assert_eq!(cleared.source_count, 0);
+        assert_eq!(cleared.total_count, 1);
+        assert_eq!(cleared.warnings, 1);
+        assert!(store.clear(buffer_id, "server-a").is_none());
     }
 
     #[test]

@@ -77,7 +77,7 @@ struct ShutdownFinalizer {
 fn run_shutdown_finalization(
     finalizer: &mut ShutdownFinalizer,
     event: EditorEvent,
-    mut dispatch_event_waves: impl FnMut(EditorEvent),
+    mut dispatch_event_waves: impl FnMut(Option<EditorEvent>),
     mut shutdown_lsp: impl FnMut(),
     mut save_session: impl FnMut(),
     mut reset_terminal: impl FnMut() -> io::Result<()>,
@@ -87,8 +87,9 @@ fn run_shutdown_finalization(
     }
     finalizer.started = true;
 
-    dispatch_event_waves(event);
+    dispatch_event_waves(Some(event));
     shutdown_lsp();
+    dispatch_event_waves(None);
     save_session();
     reset_terminal()
 }
@@ -208,7 +209,9 @@ pub(super) fn run(cli: Cli) -> io::Result<()> {
         &mut finalizer,
         shutdown_event,
         |event| {
-            globals::enqueue_editor_event(event);
+            if let Some(event) = event {
+                globals::enqueue_editor_event(event);
+            }
             drain_all_editor_events(&mut plugin_runtime);
         },
         globals::shutdown_lsp_runtime,
@@ -565,11 +568,15 @@ mod tests {
             run_shutdown_finalization(
                 &mut finalizer,
                 shutdown_event(),
-                |_| {
+                |event| {
                     assert!(plugin_available.get());
-                    assert!(lsp_available.get());
                     dispatched.set(dispatched.get() + 1);
-                    order.borrow_mut().push("event_waves");
+                    if event.is_some() {
+                        assert!(lsp_available.get());
+                        order.borrow_mut().push("event_waves");
+                    } else {
+                        order.borrow_mut().push("lsp_events");
+                    }
                 },
                 || {
                     lsp_available.set(false);
@@ -587,10 +594,10 @@ mod tests {
         run().unwrap();
         run().unwrap();
 
-        assert_eq!(dispatched.get(), 1);
+        assert_eq!(dispatched.get(), 2);
         assert_eq!(
             order.into_inner(),
-            vec!["event_waves", "lsp", "session", "terminal"]
+            vec!["event_waves", "lsp", "lsp_events", "session", "terminal"]
         );
     }
 
