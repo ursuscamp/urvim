@@ -22,6 +22,7 @@ use crate::buffer::Cursor;
 use crate::editor::EditorAction;
 use crate::notification::NotificationLevel;
 use crate::window::{Position, Size};
+use std::borrow::Cow;
 use std::path::PathBuf;
 use urvim_terminal::{Event, Key};
 
@@ -295,6 +296,92 @@ pub enum Command {
 }
 
 impl Command {
+    /// Returns the stable semantic identifier exposed by command lifecycle events.
+    ///
+    /// Static commands use dotted, kebab-case names. Plugin commands preserve
+    /// their plugin and command identifiers in `plugin.<plugin>.<command>`.
+    pub fn event_name(&self) -> Cow<'_, str> {
+        match self {
+            Self::EnqueueNotification { .. } => Cow::Borrowed("notification.enqueue"),
+            Self::OpenCommandLine => Cow::Borrowed("command-line.open"),
+            Self::OpenUnnamedBuffer => Cow::Borrowed("buffer.new"),
+            Self::OpenCompletion => Cow::Borrowed("completion.open"),
+            Self::OpenBufferPicker => Cow::Borrowed("picker.buffer"),
+            Self::OpenFilePicker => Cow::Borrowed("picker.file"),
+            Self::OpenGitPicker => Cow::Borrowed("picker.git"),
+            Self::OpenColorschemePicker => Cow::Borrowed("picker.colorscheme"),
+            Self::OpenFiletypePicker => Cow::Borrowed("picker.filetype"),
+            Self::OpenDocumentSymbolsPicker => Cow::Borrowed("picker.document-symbols"),
+            Self::OpenWorkspaceSymbolsPicker => Cow::Borrowed("picker.workspace-symbols"),
+            Self::OpenGrepPicker => Cow::Borrowed("picker.grep"),
+            Self::WriteAll => Cow::Borrowed("buffer.save-all"),
+            Self::SaveBuffer(_) => Cow::Borrowed("buffer.save"),
+            Self::SaveBufferAs { .. } => Cow::Borrowed("buffer.save-as"),
+            Self::CloseBuffer(_) => Cow::Borrowed("buffer.close"),
+            Self::UnloadBuffer { .. } => Cow::Borrowed("buffer.unload"),
+            Self::OverwriteBuffer(_) => Cow::Borrowed("buffer.overwrite"),
+            Self::PluginRequest {
+                plugin, command, ..
+            } => Cow::Owned(format!("plugin.{plugin}.{command}")),
+            Self::PluginPickerSelect { .. } => Cow::Borrowed("plugin.picker-select"),
+            Self::PluginConfirmationSelect { .. } => Cow::Borrowed("plugin.confirmation-select"),
+            Self::PluginInputSubmit { .. } => Cow::Borrowed("plugin.input-submit"),
+            Self::PluginStatus => Cow::Borrowed("plugin.status"),
+            Self::LspHover => Cow::Borrowed("lsp.hover"),
+            Self::LspDefinition => Cow::Borrowed("lsp.definition"),
+            Self::LspReferences => Cow::Borrowed("lsp.references"),
+            Self::LspPreviousDiagnostic => Cow::Borrowed("lsp.previous-diagnostic"),
+            Self::LspNextDiagnostic => Cow::Borrowed("lsp.next-diagnostic"),
+            Self::LspPreviousErrorDiagnostic => Cow::Borrowed("lsp.previous-error"),
+            Self::LspNextErrorDiagnostic => Cow::Borrowed("lsp.next-error"),
+            Self::LspRenamePrompt => Cow::Borrowed("lsp.rename-prompt"),
+            Self::LspRename(_) => Cow::Borrowed("lsp.rename"),
+            Self::ApplyCompletion(_) => Cow::Borrowed("completion.apply"),
+            Self::LspCodeActions => Cow::Borrowed("lsp.code-actions"),
+            Self::LspApplyCodeAction { .. } => Cow::Borrowed("lsp.apply-code-action"),
+            Self::OpenFile(_) => Cow::Borrowed("buffer.open"),
+            Self::OpenFileAtCursor(_, _) => Cow::Borrowed("buffer.open-at-cursor"),
+            Self::FocusBuffer(_) => Cow::Borrowed("buffer.focus"),
+            Self::SetBufferFiletype(_, _) => Cow::Borrowed("buffer.set-filetype"),
+            Self::GitPickerToggleStage(_) => Cow::Borrowed("git.toggle-stage"),
+            Self::GitPickerDiscard(_) => Cow::Borrowed("git.discard"),
+            Self::GitPickerDiscardConfirmed(_) => Cow::Borrowed("git.discard-confirmed"),
+            Self::ResizePaneLeft(_) => Cow::Borrowed("window.resize-left"),
+            Self::ResizePaneRight(_) => Cow::Borrowed("window.resize-right"),
+            Self::ResizePaneUp(_) => Cow::Borrowed("window.resize-up"),
+            Self::ResizePaneDown(_) => Cow::Borrowed("window.resize-down"),
+            Self::EqualizeSplits => Cow::Borrowed("window.equalize-splits"),
+            Self::PreviousTab(_) => Cow::Borrowed("window.previous-tab"),
+            Self::NextTab(_) => Cow::Borrowed("window.next-tab"),
+            Self::ToggleWrap => Cow::Borrowed("window.toggle-wrap"),
+            Self::SplitVertical => Cow::Borrowed("window.split-vertical"),
+            Self::SplitHorizontal => Cow::Borrowed("window.split-horizontal"),
+            Self::FocusPaneLeft => Cow::Borrowed("window.focus-left"),
+            Self::FocusPaneDown => Cow::Borrowed("window.focus-down"),
+            Self::FocusPaneUp => Cow::Borrowed("window.focus-up"),
+            Self::FocusPaneRight => Cow::Borrowed("window.focus-right"),
+            Self::FocusNextWindow => Cow::Borrowed("window.focus-next"),
+            Self::FocusPreviousWindow => Cow::Borrowed("window.focus-previous"),
+            Self::ClosePane => Cow::Borrowed("window.close"),
+            Self::TryQuit => Cow::Borrowed("editor.try-quit"),
+            Self::Quit => Cow::Borrowed("editor.quit"),
+        }
+    }
+
+    /// Returns whether this command represents an internal UI response.
+    pub fn is_internal_response(&self) -> bool {
+        matches!(
+            self,
+            Self::EnqueueNotification { .. }
+                | Self::ApplyCompletion(_)
+                | Self::OverwriteBuffer(_)
+                | Self::GitPickerDiscardConfirmed(_)
+                | Self::PluginPickerSelect { .. }
+                | Self::PluginConfirmationSelect { .. }
+                | Self::PluginInputSubmit { .. }
+        )
+    }
+
     /// Returns where a global mapping for this command may be inherited.
     pub fn keymap_inheritance(&self) -> KeymapInheritance {
         match self {
@@ -492,6 +579,56 @@ mod tests {
             .keymap_inheritance(),
             KeymapInheritance::Explicit
         );
+    }
+
+    #[test]
+    fn command_event_names_are_stable_semantic_identifiers() {
+        assert_eq!(Command::SaveBuffer(None).event_name(), "buffer.save");
+        assert_eq!(
+            Command::SaveBufferAs {
+                buffer_id: None,
+                path: PathBuf::from("file.txt"),
+            }
+            .event_name(),
+            "buffer.save-as"
+        );
+        assert_eq!(Command::CloseBuffer(None).event_name(), "buffer.close");
+        assert_eq!(Command::NextTab(1).event_name(), "window.next-tab");
+        assert_eq!(Command::LspHover.event_name(), "lsp.hover");
+        assert_eq!(
+            Command::PluginRequest {
+                plugin: "acme-tools".to_string(),
+                command: "sync.now".to_string(),
+                args: Vec::new(),
+            }
+            .event_name(),
+            "plugin.acme-tools.sync.now"
+        );
+    }
+
+    #[test]
+    fn internal_commands_are_excluded_from_command_events() {
+        assert!(
+            Command::EnqueueNotification {
+                level: NotificationLevel::Info,
+                message: String::new(),
+            }
+            .is_internal_response()
+        );
+        assert!(
+            Command::ApplyCompletion(ApplyCompletion {
+                range: crate::buffer::TextObjectRange {
+                    start: Cursor::new(0, 0),
+                    end: Cursor::new(0, 0),
+                },
+                text: String::new(),
+                additional_text_edits: Vec::new(),
+                lsp_completion_item: None,
+                format: crate::ui::completion::CompletionInsertFormat::PlainText,
+            })
+            .is_internal_response()
+        );
+        assert!(Command::OverwriteBuffer(None).is_internal_response());
     }
 
     #[test]

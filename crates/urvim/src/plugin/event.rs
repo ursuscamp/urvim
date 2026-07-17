@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use bearscript::Value;
-use urvim_core::event::{BufferEventSnapshot, EditorEvent};
+use urvim_core::event::{BufferErrorSnapshot, BufferEventSnapshot, EditorEvent};
 
 pub(in crate::plugin) fn bear_args(args: &[String]) -> Value {
     Value::List(
@@ -43,6 +43,40 @@ pub(in crate::plugin) fn event_payload(
             urvim_plugin::PluginEventKind::BufferSaved,
             snapshot,
         )),
+        EditorEvent::BufferSaveFailed { error } => Some(buffer_error_payload(
+            &mut payload,
+            urvim_plugin::PluginEventKind::BufferSaveFailed,
+            error,
+        )),
+        EditorEvent::BufferOpenFailed { error } => Some(buffer_error_payload(
+            &mut payload,
+            urvim_plugin::PluginEventKind::BufferOpenFailed,
+            error,
+        )),
+        EditorEvent::BufferPathChanged { snapshot } => {
+            payload.insert(
+                "previous_path".to_string(),
+                snapshot
+                    .previous_path
+                    .map(|path| Value::String(path.to_string_lossy().into_owned().into()))
+                    .unwrap_or(Value::Null),
+            );
+            Some(buffer_event_payload(
+                &mut payload,
+                urvim_plugin::PluginEventKind::BufferPathChanged,
+                snapshot.buffer,
+            ))
+        }
+        EditorEvent::BufferReloaded { snapshot } => Some(buffer_event_payload(
+            &mut payload,
+            urvim_plugin::PluginEventKind::BufferReloaded,
+            snapshot,
+        )),
+        EditorEvent::ExternalFileConflict { snapshot } => Some(buffer_event_payload(
+            &mut payload,
+            urvim_plugin::PluginEventKind::ExternalFileConflict,
+            snapshot,
+        )),
         EditorEvent::BufferClosed { snapshot } => Some(buffer_event_payload(
             &mut payload,
             urvim_plugin::PluginEventKind::BufferClosed,
@@ -72,7 +106,11 @@ pub(in crate::plugin) fn event_payload(
             );
             Some((kind, Value::Map(payload.into())))
         }
-        EditorEvent::CommandExecuted { command } => {
+        EditorEvent::CommandExecuted {
+            command,
+            success,
+            error,
+        } => {
             payload.insert(
                 "event".to_string(),
                 Value::String(
@@ -84,6 +122,13 @@ pub(in crate::plugin) fn event_payload(
             payload.insert(
                 "command".to_string(),
                 Value::String(command.into_boxed_str().into()),
+            );
+            payload.insert("success".to_string(), Value::Bool(success));
+            payload.insert(
+                "error".to_string(),
+                error
+                    .map(|error| Value::String(error.into_boxed_str().into()))
+                    .unwrap_or(Value::Null),
             );
             Some((
                 urvim_plugin::PluginEventKind::CommandExecuted,
@@ -198,6 +243,37 @@ pub(in crate::plugin) fn event_payload(
     }
 }
 
+fn buffer_error_payload(
+    payload: &mut HashMap<String, Value>,
+    kind: urvim_plugin::PluginEventKind,
+    error: BufferErrorSnapshot,
+) -> (urvim_plugin::PluginEventKind, Value) {
+    payload.insert("event".to_string(), Value::String(kind.as_str().into()));
+    payload.insert(
+        "buffer_id".to_string(),
+        error
+            .buffer_id
+            .map(|id| Value::Number(id.get() as f64))
+            .unwrap_or(Value::Null),
+    );
+    payload.insert(
+        "path".to_string(),
+        error
+            .path
+            .map(|path| Value::String(path.to_string_lossy().into_owned().into()))
+            .unwrap_or(Value::Null),
+    );
+    payload.insert(
+        "error_kind".to_string(),
+        Value::String(error.error_kind.into_boxed_str().into()),
+    );
+    payload.insert(
+        "error".to_string(),
+        Value::String(error.message.into_boxed_str().into()),
+    );
+    (kind, Value::Map(std::mem::take(payload).into()))
+}
+
 fn window_tab_event_payload(
     payload: &mut HashMap<String, Value>,
     kind: urvim_plugin::PluginEventKind,
@@ -276,6 +352,7 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
     use urvim_core::buffer::BufferId;
+    use urvim_core::event::{BufferErrorSnapshot, BufferPathChangeSnapshot};
 
     #[test]
     fn event_constants_include_the_complete_catalog() {
@@ -345,6 +422,88 @@ mod tests {
         assert_eq!(payload.get("path"), Some(&Value::Null));
         assert_eq!(payload.get("file_name"), Some(&Value::Null));
         assert_eq!(payload.get("modified"), Some(&Value::Bool(false)));
+    }
+
+    #[test]
+    fn save_failure_payload_contains_stable_error_details() {
+        let (kind, Value::Map(payload)) = event_payload(EditorEvent::BufferSaveFailed {
+            error: BufferErrorSnapshot {
+                buffer_id: Some(BufferId::new(9)),
+                path: Some(PathBuf::from("/tmp/failed.rs")),
+                error_kind: "permission_denied".to_string(),
+                message: "access denied".to_string(),
+            },
+        })
+        .expect("save failure should have a payload") else {
+            panic!("save failure payload should be a map");
+        };
+
+        assert_eq!(kind, urvim_plugin::PluginEventKind::BufferSaveFailed);
+        assert_eq!(payload.get("buffer_id"), Some(&Value::Number(9.0)));
+        assert_eq!(
+            payload.get("path"),
+            Some(&Value::String("/tmp/failed.rs".into()))
+        );
+        assert_eq!(
+            payload.get("error_kind"),
+            Some(&Value::String("permission_denied".into()))
+        );
+        assert_eq!(
+            payload.get("error"),
+            Some(&Value::String("access denied".into()))
+        );
+    }
+
+    #[test]
+    fn path_changed_payload_contains_previous_and_current_paths() {
+        let snapshot = BufferEventSnapshot {
+            buffer_id: BufferId::new(5),
+            path: Some(PathBuf::from("/tmp/new.rs")),
+            file_name: Some("new.rs".to_string()),
+            filetype: "rust".to_string(),
+            modified: false,
+        };
+        let (kind, Value::Map(payload)) = event_payload(EditorEvent::BufferPathChanged {
+            snapshot: BufferPathChangeSnapshot {
+                buffer: snapshot,
+                previous_path: Some(PathBuf::from("/tmp/old.rs")),
+            },
+        })
+        .expect("path change should have a payload") else {
+            panic!("path change payload should be a map");
+        };
+
+        assert_eq!(kind, urvim_plugin::PluginEventKind::BufferPathChanged);
+        assert_eq!(
+            payload.get("previous_path"),
+            Some(&Value::String("/tmp/old.rs".into()))
+        );
+        assert_eq!(
+            payload.get("path"),
+            Some(&Value::String("/tmp/new.rs".into()))
+        );
+    }
+
+    #[test]
+    fn command_payload_uses_stable_name_and_result() {
+        let (_, Value::Map(payload)) = event_payload(EditorEvent::CommandExecuted {
+            command: "buffer.save".to_string(),
+            success: false,
+            error: Some("buffer has no path".to_string()),
+        })
+        .expect("command should have a payload") else {
+            panic!("command payload should be a map");
+        };
+
+        assert_eq!(
+            payload.get("command"),
+            Some(&Value::String("buffer.save".into()))
+        );
+        assert_eq!(payload.get("success"), Some(&Value::Bool(false)));
+        assert_eq!(
+            payload.get("error"),
+            Some(&Value::String("buffer has no path".into()))
+        );
     }
 
     #[test]

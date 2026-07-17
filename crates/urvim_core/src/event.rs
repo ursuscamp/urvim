@@ -8,6 +8,7 @@
 //! helper used to preserve buffer metadata as it existed when an event was
 //! enqueued.
 
+use std::io;
 use std::path::PathBuf;
 
 use crate::buffer::{Buffer, BufferId};
@@ -44,6 +45,88 @@ impl BufferEventSnapshot {
     }
 }
 
+/// Snapshot of a failed buffer filesystem operation.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BufferErrorSnapshot {
+    /// Buffer involved in the operation, if one was identified.
+    pub buffer_id: Option<BufferId>,
+    /// Attempted absolute path, when path resolution succeeded.
+    pub path: Option<PathBuf>,
+    /// Stable, lowercase error category.
+    pub error_kind: String,
+    /// Human-readable operating-system or validation error.
+    pub message: String,
+}
+
+impl BufferErrorSnapshot {
+    /// Builds an error snapshot from an I/O error.
+    pub fn from_io_error(
+        buffer_id: Option<BufferId>,
+        path: Option<PathBuf>,
+        error: &io::Error,
+    ) -> Self {
+        Self {
+            buffer_id,
+            path,
+            error_kind: io_error_kind_name(error.kind()).to_string(),
+            message: error.to_string(),
+        }
+    }
+}
+
+/// Snapshot of a successful buffer path change.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BufferPathChangeSnapshot {
+    /// Buffer metadata after the path changed.
+    pub buffer: BufferEventSnapshot,
+    /// Previous absolute path, or `None` for a previously unnamed buffer.
+    pub previous_path: Option<PathBuf>,
+}
+
+/// Returns the stable lowercase name for an I/O error category.
+pub fn io_error_kind_name(kind: io::ErrorKind) -> &'static str {
+    match kind {
+        io::ErrorKind::NotFound => "not_found",
+        io::ErrorKind::PermissionDenied => "permission_denied",
+        io::ErrorKind::ConnectionRefused => "connection_refused",
+        io::ErrorKind::ConnectionReset => "connection_reset",
+        io::ErrorKind::HostUnreachable => "host_unreachable",
+        io::ErrorKind::NetworkUnreachable => "network_unreachable",
+        io::ErrorKind::ConnectionAborted => "connection_aborted",
+        io::ErrorKind::NotConnected => "not_connected",
+        io::ErrorKind::AddrInUse => "address_in_use",
+        io::ErrorKind::AddrNotAvailable => "address_not_available",
+        io::ErrorKind::NetworkDown => "network_down",
+        io::ErrorKind::BrokenPipe => "broken_pipe",
+        io::ErrorKind::AlreadyExists => "already_exists",
+        io::ErrorKind::WouldBlock => "would_block",
+        io::ErrorKind::NotADirectory => "not_a_directory",
+        io::ErrorKind::IsADirectory => "is_a_directory",
+        io::ErrorKind::DirectoryNotEmpty => "directory_not_empty",
+        io::ErrorKind::ReadOnlyFilesystem => "read_only_filesystem",
+        io::ErrorKind::StaleNetworkFileHandle => "stale_network_file_handle",
+        io::ErrorKind::InvalidInput => "invalid_input",
+        io::ErrorKind::InvalidData => "invalid_data",
+        io::ErrorKind::TimedOut => "timed_out",
+        io::ErrorKind::WriteZero => "write_zero",
+        io::ErrorKind::StorageFull => "storage_full",
+        io::ErrorKind::NotSeekable => "not_seekable",
+        io::ErrorKind::FileTooLarge => "file_too_large",
+        io::ErrorKind::ResourceBusy => "resource_busy",
+        io::ErrorKind::ExecutableFileBusy => "executable_file_busy",
+        io::ErrorKind::Deadlock => "deadlock",
+        io::ErrorKind::CrossesDevices => "crosses_devices",
+        io::ErrorKind::TooManyLinks => "too_many_links",
+        io::ErrorKind::InvalidFilename => "invalid_filename",
+        io::ErrorKind::ArgumentListTooLong => "argument_list_too_long",
+        io::ErrorKind::Interrupted => "interrupted",
+        io::ErrorKind::Unsupported => "unsupported",
+        io::ErrorKind::UnexpectedEof => "unexpected_eof",
+        io::ErrorKind::OutOfMemory => "out_of_memory",
+        _ => "other",
+    }
+}
+
 /// Semantic editor event produced by `urvim_core` and drained by the app loop.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum EditorEvent {
@@ -62,6 +145,31 @@ pub enum EditorEvent {
     /// A buffer was saved successfully.
     BufferSaved {
         /// Buffer metadata at enqueue time.
+        snapshot: BufferEventSnapshot,
+    },
+    /// A buffer save failed.
+    BufferSaveFailed {
+        /// Filesystem failure details captured at enqueue time.
+        error: BufferErrorSnapshot,
+    },
+    /// Opening a buffer failed.
+    BufferOpenFailed {
+        /// Filesystem failure details captured at enqueue time.
+        error: BufferErrorSnapshot,
+    },
+    /// A buffer's resolved path changed.
+    BufferPathChanged {
+        /// Path transition captured after the successful operation.
+        snapshot: BufferPathChangeSnapshot,
+    },
+    /// A clean buffer was reloaded after its file changed externally.
+    BufferReloaded {
+        /// Buffer metadata after reloading.
+        snapshot: BufferEventSnapshot,
+    },
+    /// A modified buffer's backing file changed externally.
+    ExternalFileConflict {
+        /// Buffer metadata when the distinct disk state was observed.
         snapshot: BufferEventSnapshot,
     },
     /// A buffer tab/view was closed from the UI.
@@ -148,10 +256,14 @@ pub enum EditorEvent {
         /// Active tab showing the newly active buffer.
         tab_id: TabId,
     },
-    /// A non-plugin command was executed successfully.
+    /// A user-facing command completed or was accepted for asynchronous work.
     CommandExecuted {
-        /// `Debug` representation of the executed command.
+        /// Stable command name.
         command: String,
+        /// Whether the command completed successfully or was accepted.
+        success: bool,
+        /// Failure detail, or `None` on success.
+        error: Option<String>,
     },
     /// Diagnostics changed for a buffer.
     DiagnosticsChanged {

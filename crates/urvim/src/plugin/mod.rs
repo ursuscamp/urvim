@@ -1892,11 +1892,6 @@ fn save_buffer_for_plugin(buffer_id: BufferId) -> Result<(), String> {
     match save_result {
         Ok(()) => {
             globals::with_lsp_runtime_mut(|runtime| runtime.did_save_buffer(buffer_id));
-            let snapshot = globals::with_buffer(buffer_id, |buffer| {
-                urvim_core::event::BufferEventSnapshot::from_buffer(buffer_id, buffer)
-            })
-            .expect("saved buffer should remain loaded");
-            globals::enqueue_editor_event(EditorEvent::BufferSaved { snapshot });
             Ok(())
         }
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
@@ -4135,7 +4130,11 @@ entry = "plugin.bear"
         let events = drain_editor_events();
         assert!(events.iter().any(|event| matches!(
             event,
-            EditorEvent::CommandExecuted { command } if command.contains("ToggleWrap")
+            EditorEvent::CommandExecuted {
+                command,
+                success: true,
+                error: None,
+            } if command == "window.toggle-wrap"
         )));
     }
 

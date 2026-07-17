@@ -11,14 +11,8 @@ use urvim_core::ui::{Command, Intent};
 
 pub(super) struct SaveBufferOutcome {
     pub(super) handled: bool,
-}
-
-pub(super) fn handle_save_buffer_action(
-    layout: &mut Layout,
-    target: Option<urvim_core::buffer::BufferId>,
-    force: bool,
-) -> bool {
-    handle_save_buffer_action_with_outcome(layout, target, force).handled
+    success: bool,
+    error: Option<String>,
 }
 
 pub(super) fn handle_save_buffer_action_with_outcome(
@@ -27,14 +21,22 @@ pub(super) fn handle_save_buffer_action_with_outcome(
     force: bool,
 ) -> SaveBufferOutcome {
     let Some(buffer_id) = resolve_buffer_target(layout, target) else {
-        return SaveBufferOutcome { handled: true };
+        return SaveBufferOutcome {
+            handled: true,
+            success: false,
+            error: Some("unknown buffer".to_string()),
+        };
     };
 
     if !force
         && globals::with_buffer_pool(|pool| pool.buffer_needs_overwrite_confirmation(buffer_id))
     {
         layout.prompt_overwrite_buffer(buffer_id);
-        return SaveBufferOutcome { handled: true };
+        return SaveBufferOutcome {
+            handled: true,
+            success: true,
+            error: None,
+        };
     }
 
     let save_result = globals::with_buffer_pool(|pool| pool.save_buffer(buffer_id));
@@ -50,19 +52,29 @@ pub(super) fn handle_save_buffer_action_with_outcome(
             .unwrap_or_else(|| "Untitled".to_string());
             globals::with_lsp_runtime_mut(|runtime| runtime.did_save_buffer(buffer_id));
             urvim_core::notify_info!("Saved {}", label);
-            globals::enqueue_editor_event(EditorEvent::BufferSaved {
-                snapshot: buffer_event_snapshot(buffer_id),
-            });
+            return SaveBufferOutcome {
+                handled: true,
+                success: true,
+                error: None,
+            };
         }
         Err(error) if error.kind() == io::ErrorKind::InvalidInput => {
             tracing::info!("Skipping save for unnamed buffer {:?}", buffer_id);
+            return SaveBufferOutcome {
+                handled: true,
+                success: false,
+                error: Some(error.to_string()),
+            };
         }
         Err(error) => {
             urvim_core::notify_error!("Failed to save buffer {:?}: {}", buffer_id, error);
+            return SaveBufferOutcome {
+                handled: true,
+                success: false,
+                error: Some(error.to_string()),
+            };
         }
     }
-
-    SaveBufferOutcome { handled: true }
 }
 
 pub(super) fn execute_action_intent_with_plugin_runtime(
@@ -109,8 +121,68 @@ pub(super) fn execute_command_intent(
     plugin_runtime: Option<&mut BearscriptPluginRuntime>,
     command: Command,
 ) -> bool {
+    let name = command.event_name().into_owned();
+    let emit_event = !command.is_internal_response();
+    let outcome = execute_command_intent_inner(layout, plugin_runtime, command);
+    if emit_event {
+        enqueue_command_executed(&name, outcome.success, outcome.error.clone());
+    }
+    outcome.handled
+}
+
+struct CommandOutcome {
+    handled: bool,
+    success: bool,
+    error: Option<String>,
+}
+
+impl CommandOutcome {
+    fn success() -> Self {
+        Self {
+            handled: true,
+            success: true,
+            error: None,
+        }
+    }
+
+    fn failure(error: impl Into<String>) -> Self {
+        Self {
+            handled: true,
+            success: false,
+            error: Some(error.into()),
+        }
+    }
+}
+
+pub(super) fn enqueue_command_executed(name: &str, success: bool, error: Option<String>) {
+    globals::enqueue_editor_event(EditorEvent::CommandExecuted {
+        command: name.to_string(),
+        success,
+        error,
+    });
+}
+
+fn execute_command_intent_inner(
+    layout: &mut Layout,
+    plugin_runtime: Option<&mut BearscriptPluginRuntime>,
+    command: Command,
+) -> CommandOutcome {
     if let Command::SaveBuffer(target) = &command {
-        return handle_save_buffer_action(layout, *target, false);
+        let outcome = handle_save_buffer_action_with_outcome(layout, *target, false);
+        return CommandOutcome {
+            handled: outcome.handled,
+            success: outcome.success,
+            error: outcome.error,
+        };
+    }
+
+    if let Command::OverwriteBuffer(target) = &command {
+        let outcome = handle_save_buffer_action_with_outcome(layout, *target, true);
+        return CommandOutcome {
+            handled: outcome.handled,
+            success: outcome.success,
+            error: outcome.error,
+        };
     }
 
     if let Command::PluginRequest {
@@ -122,16 +194,19 @@ pub(super) fn execute_command_intent(
         let Some(plugin_runtime) = plugin_runtime else {
             tracing::warn!(plugin, command, "plugin command has no runtime");
             urvim_core::notify_warn!("Plugin command {plugin} {command} could not run: no runtime");
-            return true;
+            return CommandOutcome::failure("plugin runtime is not active");
         };
         match plugin_runtime.run_command(&plugin, &command, &args) {
-            Ok(()) => tracing::debug!(plugin, command, "ran BearScript plugin command"),
+            Ok(()) => {
+                tracing::debug!(plugin, command, "ran BearScript plugin command");
+                return CommandOutcome::success();
+            }
             Err(error) => {
                 tracing::warn!(plugin, command, error = %error, "BearScript plugin command failed");
                 urvim_core::notify_warn!("Plugin command {plugin} {command} failed: {error}");
+                return CommandOutcome::failure(error);
             }
         }
-        return true;
     }
 
     if let Command::PluginPickerSelect {
@@ -141,13 +216,13 @@ pub(super) fn execute_command_intent(
     } = command
     {
         let Some(plugin_runtime) = plugin_runtime else {
-            return true;
+            return CommandOutcome::success();
         };
         if let Err(error) = plugin_runtime.run_picker_selection(&plugin, picker_id, item_id) {
             tracing::warn!(plugin, picker_id, error = %error, "plugin picker selection failed");
             urvim_core::notify_warn!("Plugin {plugin} picker {picker_id} failed: {error}");
         }
-        return true;
+        return CommandOutcome::success();
     }
 
     if let Command::PluginConfirmationSelect {
@@ -157,7 +232,7 @@ pub(super) fn execute_command_intent(
     } = command
     {
         let Some(plugin_runtime) = plugin_runtime else {
-            return true;
+            return CommandOutcome::success();
         };
         if let Err(error) =
             plugin_runtime.run_confirmation_response(&plugin, confirmation_id, selection)
@@ -167,7 +242,7 @@ pub(super) fn execute_command_intent(
                 "Plugin {plugin} confirmation {confirmation_id} failed: {error}"
             );
         }
-        return true;
+        return CommandOutcome::success();
     }
 
     if let Command::PluginInputSubmit {
@@ -177,13 +252,13 @@ pub(super) fn execute_command_intent(
     } = command
     {
         let Some(plugin_runtime) = plugin_runtime else {
-            return true;
+            return CommandOutcome::success();
         };
         if let Err(error) = plugin_runtime.run_input_submission(&plugin, input_id, text.clone()) {
             tracing::warn!(plugin, input_id, error = %error, "plugin input submission failed");
             urvim_core::notify_warn!("Plugin {plugin} input {input_id} failed: {error}");
         }
-        return true;
+        return CommandOutcome::success();
     }
 
     if matches!(command, Command::PluginStatus) {
@@ -192,34 +267,29 @@ pub(super) fn execute_command_intent(
             .map(|runtime| runtime.status_summary())
             .unwrap_or_else(|| "BearScript plugin runtime inactive".to_string());
         urvim_core::notify_info!("{status}");
-        return true;
+        return CommandOutcome::success();
     }
 
     if let Command::SaveBufferAs { buffer_id, path } = command {
         let Some(buffer_id) = resolve_buffer_target(layout, buffer_id) else {
-            return true;
+            return CommandOutcome::failure("unknown buffer");
         };
-        let handled =
-            match globals::with_buffer_pool(|pool| pool.save_buffer_to_path(buffer_id, &path)) {
-                Ok(()) => {
-                    globals::with_lsp_runtime_mut(|runtime| runtime.did_save_buffer(buffer_id));
-                    urvim_core::notify_info!("Saved {}", path.display());
-                    globals::enqueue_editor_event(EditorEvent::BufferSaved {
-                        snapshot: buffer_event_snapshot(buffer_id),
-                    });
-                    true
-                }
-                Err(error) => {
-                    urvim_core::notify_error!("Failed to write buffer to {:?}: {}", path, error);
-                    true
-                }
-            };
-        return handled;
+        return match globals::with_buffer_pool(|pool| pool.save_buffer_to_path(buffer_id, &path)) {
+            Ok(()) => {
+                globals::with_lsp_runtime_mut(|runtime| runtime.did_save_buffer(buffer_id));
+                urvim_core::notify_info!("Saved {}", path.display());
+                CommandOutcome::success()
+            }
+            Err(error) => {
+                urvim_core::notify_error!("Failed to write buffer to {:?}: {}", path, error);
+                CommandOutcome::failure(error.to_string())
+            }
+        };
     }
 
     if let Command::CloseBuffer(buffer_id) = command {
         let Some(buffer_id) = resolve_buffer_target(layout, buffer_id) else {
-            return true;
+            return CommandOutcome::failure("unknown buffer");
         };
         let closed = if buffer_id == layout.active_buffer_view().buffer_id() {
             layout.close_active_buffer_tab()
@@ -229,12 +299,16 @@ pub(super) fn execute_command_intent(
         if closed {
             cleanup_orphaned_buffers(layout);
         }
-        return true;
+        return if closed {
+            CommandOutcome::success()
+        } else {
+            CommandOutcome::failure("buffer is not open in the active window")
+        };
     }
 
     if let Command::UnloadBuffer { buffer_id, force } = command {
         let Some(buffer_id) = resolve_buffer_target(layout, buffer_id) else {
-            return true;
+            return CommandOutcome::failure("unknown buffer");
         };
         let modified =
             globals::with_buffer(buffer_id, |buffer| buffer.is_modified()).unwrap_or(false);
@@ -243,20 +317,21 @@ pub(super) fn execute_command_intent(
                 "Buffer {:?} has unsaved changes; use force=true to unload",
                 buffer_id
             );
-            return true;
+            return CommandOutcome::failure("buffer has unsaved changes");
         }
         let _closed = layout.close_buffer_tabs_and_prune(buffer_id);
-        globals::with_buffer_pool(|pool| {
-            pool.remove_buffer(buffer_id);
-        });
-        return true;
+        let removed = globals::with_buffer_pool(|pool| pool.remove_buffer(buffer_id).is_some());
+        return if removed {
+            CommandOutcome::success()
+        } else {
+            CommandOutcome::failure("buffer is no longer loaded")
+        };
     }
 
-    let command_for_event = format!("{:?}", command);
     let filetype_target = match &command {
         Command::SetBufferFiletype(buffer_id, _) => {
             let Some(buffer_id) = resolve_buffer_target(layout, *buffer_id) else {
-                return true;
+                return CommandOutcome::failure("unknown buffer");
             };
             let syntax_name =
                 globals::with_buffer(buffer_id, |buffer| buffer.syntax_name().to_string())
@@ -276,11 +351,16 @@ pub(super) fn execute_command_intent(
             });
         }
         cleanup_orphaned_buffers(layout);
-        globals::enqueue_editor_event(EditorEvent::CommandExecuted {
-            command: command_for_event,
-        });
     }
-    handled
+    if handled {
+        CommandOutcome::success()
+    } else {
+        CommandOutcome {
+            handled: false,
+            success: false,
+            error: Some("command was not handled".to_string()),
+        }
+    }
 }
 
 fn buffer_event_snapshot(buffer_id: urvim_core::buffer::BufferId) -> BufferEventSnapshot {
@@ -591,27 +671,46 @@ pub(super) fn process_intents_with_shared_layout(
                 plugin,
                 command,
                 args,
-            }) => match plugin_runtime.as_deref_mut() {
-                Some(runtime) => {
-                    match runtime.run_command(&plugin, &command, &args) {
-                        Ok(()) => tracing::debug!(plugin, command, "ran BearScript plugin command"),
-                        Err(error) => {
-                            tracing::warn!(plugin, command, error = %error, "BearScript plugin command failed");
-                            urvim_core::notify_warn!(
-                                "Plugin command {plugin} {command} failed: {error}"
-                            );
-                        }
+            }) => {
+                let event_name = Command::PluginRequest {
+                    plugin: plugin.clone(),
+                    command: command.clone(),
+                    args: Vec::new(),
+                }
+                .event_name()
+                .into_owned();
+                match plugin_runtime.as_deref_mut() {
+                    Some(runtime) => {
+                        let (success, error) = match runtime.run_command(&plugin, &command, &args) {
+                            Ok(()) => {
+                                tracing::debug!(plugin, command, "ran BearScript plugin command");
+                                (true, None)
+                            }
+                            Err(error) => {
+                                tracing::warn!(plugin, command, error = %error, "BearScript plugin command failed");
+                                urvim_core::notify_warn!(
+                                    "Plugin command {plugin} {command} failed: {error}"
+                                );
+                                (false, Some(error))
+                            }
+                        };
+                        enqueue_command_executed(&event_name, success, error);
+                        true
                     }
-                    true
+                    None => {
+                        tracing::warn!(plugin, command, "plugin command has no runtime");
+                        urvim_core::notify_warn!(
+                            "Plugin command {plugin} {command} could not run: no runtime"
+                        );
+                        enqueue_command_executed(
+                            &event_name,
+                            false,
+                            Some("plugin runtime is not active".to_string()),
+                        );
+                        true
+                    }
                 }
-                None => {
-                    tracing::warn!(plugin, command, "plugin command has no runtime");
-                    urvim_core::notify_warn!(
-                        "Plugin command {plugin} {command} could not run: no runtime"
-                    );
-                    true
-                }
-            },
+            }
             Intent::Command(Command::PluginPickerSelect {
                 plugin,
                 picker_id,
@@ -677,8 +776,18 @@ mod tests {
     use urvim_core::ui::Command;
     use urvim_core::window_group::WindowGroup;
 
+    fn drain_editor_events() -> Vec<EditorEvent> {
+        std::iter::from_fn(globals::take_editor_event).collect()
+    }
+
+    fn action_test_lock() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        LOCK.lock().unwrap()
+    }
+
     #[test]
     fn save_as_targets_non_active_buffer() {
+        let _pool_guard = action_test_lock();
         let mut layout = Layout::new(WindowGroup::from_buffers(vec![
             Buffer::from_str("first"),
             Buffer::from_str("second"),
@@ -713,5 +822,130 @@ mod tests {
         );
         assert!(globals::with_buffer(active, |buffer| buffer.path().is_none()).unwrap_or(false));
         std::fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn save_as_emits_domain_events_before_command_completion() {
+        let _pool_guard = action_test_lock();
+        globals::clear_editor_events_for_tests();
+        let mut layout = Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("text")]));
+        let path = std::env::temp_dir().join(format!(
+            "urvim-action-save-as-events-{}.txt",
+            std::process::id()
+        ));
+        std::fs::remove_file(&path).ok();
+        drain_editor_events();
+
+        assert!(execute_command_intent(
+            &mut layout,
+            None,
+            Command::SaveBufferAs {
+                buffer_id: None,
+                path: path.clone(),
+            },
+        ));
+
+        let events = drain_editor_events();
+        assert!(
+            matches!(
+                events.as_slice(),
+                [
+                    EditorEvent::BufferPathChanged { .. },
+                    EditorEvent::BufferSaved { .. },
+                    EditorEvent::CommandExecuted {
+                        command,
+                        success: true,
+                        error: None,
+                    }
+                ] if command == "buffer.save-as"
+            ),
+            "unexpected events: {events:?}"
+        );
+        std::fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn failed_save_emits_domain_failure_before_command_failure() {
+        let _pool_guard = action_test_lock();
+        globals::clear_editor_events_for_tests();
+        let mut layout = Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("text")]));
+        drain_editor_events();
+
+        assert!(execute_command_intent(
+            &mut layout,
+            None,
+            Command::SaveBuffer(None),
+        ));
+
+        let events = drain_editor_events();
+        assert!(
+            matches!(
+                events.as_slice(),
+                [
+                    EditorEvent::BufferSaveFailed { .. },
+                    EditorEvent::CommandExecuted {
+                        command,
+                        success: false,
+                        error: Some(error),
+                    }
+                ] if command == "buffer.save" && error == "buffer has no path"
+            ),
+            "unexpected events: {events:?}"
+        );
+    }
+
+    #[test]
+    fn internal_plugin_responses_do_not_emit_command_events() {
+        let _pool_guard = action_test_lock();
+        globals::clear_editor_events_for_tests();
+        let mut layout = Layout::new(WindowGroup::from_buffers(vec![Buffer::new()]));
+        drain_editor_events();
+
+        assert!(execute_command_intent(
+            &mut layout,
+            None,
+            Command::PluginInputSubmit {
+                plugin: "demo".to_string(),
+                input_id: 1,
+                text: "answer".to_string(),
+            },
+        ));
+        assert!(execute_command_intent(
+            &mut layout,
+            None,
+            Command::EnqueueNotification {
+                level: urvim_core::notification::NotificationLevel::Info,
+                message: "internal".to_string(),
+            },
+        ));
+
+        assert!(drain_editor_events().is_empty());
+    }
+
+    #[test]
+    fn plugin_command_event_preserves_plugin_identity() {
+        let _pool_guard = action_test_lock();
+        globals::clear_editor_events_for_tests();
+        let mut layout = Layout::new(WindowGroup::from_buffers(vec![Buffer::new()]));
+        drain_editor_events();
+
+        assert!(execute_command_intent(
+            &mut layout,
+            None,
+            Command::PluginRequest {
+                plugin: "acme-tools".to_string(),
+                command: "sync.now".to_string(),
+                args: Vec::new(),
+            },
+        ));
+
+        assert!(matches!(
+            drain_editor_events().as_slice(),
+            [EditorEvent::CommandExecuted {
+                command,
+                success: false,
+                error: Some(_),
+            }] if command == "plugin.acme-tools.sync.now"
+        ));
     }
 }

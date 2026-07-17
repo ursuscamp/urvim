@@ -1302,7 +1302,9 @@ mod tests {
             ),
         });
         enqueue_editor_event(EditorEvent::CommandExecuted {
-            command: "Write".to_string(),
+            command: "buffer.save-all".to_string(),
+            success: true,
+            error: None,
         });
 
         let first = take_editor_event();
@@ -1324,7 +1326,11 @@ mod tests {
         ));
         assert!(matches!(
             fourth,
-            Some(EditorEvent::CommandExecuted { ref command }) if command == "Write"
+            Some(EditorEvent::CommandExecuted {
+                ref command,
+                success: true,
+                error: None,
+            }) if command == "buffer.save-all"
         ));
         assert!(fifth.is_none());
 

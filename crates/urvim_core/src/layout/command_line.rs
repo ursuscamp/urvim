@@ -4,8 +4,6 @@ use super::Layout;
 use crate::background::{JobKind, JobToken};
 use crate::buffer::BufferId;
 use crate::command;
-use crate::event::EditorEvent;
-use crate::globals;
 use crate::lsp::rename_job::LspRenameJob;
 use crate::notification::NotificationLevel;
 use crate::ui::inputs::InputWidget;
@@ -284,17 +282,8 @@ impl Layout {
         }
 
         let buffer_id = buffer_id.unwrap_or_else(|| self.active_buffer_view().buffer_id());
-        let result =
-            crate::globals::with_buffer_pool(|pool| pool.save_buffer_to_path(buffer_id, path))
-                .map_err(|error| format!("Failed to write buffer to {}: {error}", path.display()));
-        if result.is_ok() {
-            let snapshot = globals::with_buffer(buffer_id, |buffer| {
-                crate::event::BufferEventSnapshot::from_buffer(buffer_id, buffer)
-            })
-            .expect("saved buffer should remain loaded");
-            globals::enqueue_editor_event(EditorEvent::BufferSaved { snapshot });
-        }
-        result
+        crate::globals::with_buffer_pool(|pool| pool.save_buffer_to_path(buffer_id, path))
+            .map_err(|error| format!("Failed to write buffer to {}: {error}", path.display()))
     }
 
     pub(super) fn execute_write_all(&mut self) -> Result<(), String> {
@@ -321,11 +310,6 @@ impl Layout {
 
             crate::globals::with_buffer_pool(|pool| pool.save_buffer(buffer_id))
                 .map_err(|error| format!("Failed to write buffer {:?}: {error}", buffer_id))?;
-            let snapshot = globals::with_buffer(buffer_id, |buffer| {
-                crate::event::BufferEventSnapshot::from_buffer(buffer_id, buffer)
-            })
-            .expect("saved buffer should remain loaded");
-            globals::enqueue_editor_event(EditorEvent::BufferSaved { snapshot });
             saved_buffer_ids.push(buffer_id);
         }
 

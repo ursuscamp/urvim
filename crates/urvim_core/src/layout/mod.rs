@@ -1149,13 +1149,6 @@ impl Layout {
                             runtime.did_save_buffer(buffer_id)
                         });
                         crate::notify_info!("Saved {}", label);
-                        let snapshot = crate::globals::with_buffer(buffer_id, |buffer| {
-                            crate::event::BufferEventSnapshot::from_buffer(buffer_id, buffer)
-                        })
-                        .expect("saved buffer should remain loaded");
-                        crate::globals::enqueue_editor_event(
-                            crate::event::EditorEvent::BufferSaved { snapshot },
-                        );
                     }
                     Err(error) if error.kind() == std::io::ErrorKind::InvalidInput => {
                         tracing::info!("Skipping save for unnamed buffer {:?}", buffer_id);

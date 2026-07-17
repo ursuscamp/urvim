@@ -11,7 +11,9 @@ use super::diff::DiffRefreshJob;
 use super::syntax::{IndentScopeRefreshJob, SyntaxRefreshJob};
 use crate::background::JobPayload;
 use crate::background::{BackgroundJob, JobEvent, JobKind, JobManager, JobSubmitError, JobToken};
-use crate::event::{BufferEventSnapshot, EditorEvent};
+use crate::event::{
+    BufferErrorSnapshot, BufferEventSnapshot, BufferPathChangeSnapshot, EditorEvent,
+};
 use crate::globals;
 use crate::path::AbsolutePath;
 use std::collections::HashMap;
@@ -29,6 +31,7 @@ pub struct BufferPool {
     paths: HashMap<AbsolutePath, BufferId>,
     jobs: JobManager,
     last_disk_check: Option<Instant>,
+    reported_external_conflicts: HashMap<BufferId, Option<super::DiskState>>,
 }
 
 impl BufferPool {
@@ -40,6 +43,7 @@ impl BufferPool {
             paths: HashMap::new(),
             jobs: JobManager::new(),
             last_disk_check: None,
+            reported_external_conflicts: HashMap::new(),
         }
     }
 
@@ -77,12 +81,19 @@ impl BufferPool {
     /// If the path does not exist yet, this creates an empty buffer that still
     /// remembers the resolved path so a later save will create the file.
     pub fn open_buffer(&mut self, path: impl AsRef<Path>) -> io::Result<BufferId> {
-        let abs_path = AbsolutePath::from_path(path.as_ref()).ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "failed to resolve absolute path",
-            )
-        })?;
+        let abs_path = match AbsolutePath::from_path(path.as_ref()) {
+            Some(path) => path,
+            None => {
+                let error = io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "failed to resolve absolute path",
+                );
+                globals::enqueue_editor_event(EditorEvent::BufferOpenFailed {
+                    error: BufferErrorSnapshot::from_io_error(None, None, &error),
+                });
+                return Err(error);
+            }
+        };
 
         if let Some(id) = self.paths.get(&abs_path).copied() {
             return Ok(id);
@@ -96,7 +107,16 @@ impl BufferPool {
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
                 Ok(self.insert_buffer(Buffer::with_path(abs_path)))
             }
-            Err(error) => Err(error),
+            Err(error) => {
+                globals::enqueue_editor_event(EditorEvent::BufferOpenFailed {
+                    error: BufferErrorSnapshot::from_io_error(
+                        None,
+                        Some(abs_path.as_path().to_path_buf()),
+                        &error,
+                    ),
+                });
+                Err(error)
+            }
         }
     }
 
@@ -140,12 +160,21 @@ impl BufferPool {
             ));
         }
 
-        if let Some(old_path) = buffer.path().cloned() {
+        let old_path = buffer.path().cloned();
+        if let Some(old_path) = &old_path {
             self.paths.remove(&old_path);
         }
 
         buffer.set_path(abs_path.clone());
         self.paths.insert(abs_path, id);
+        self.reported_external_conflicts.remove(&id);
+        let snapshot = BufferEventSnapshot::from_buffer(id, buffer);
+        globals::enqueue_editor_event(EditorEvent::BufferPathChanged {
+            snapshot: BufferPathChangeSnapshot {
+                buffer: snapshot,
+                previous_path: old_path.map(|path| path.as_path().to_path_buf()),
+            },
+        });
         Ok(())
     }
 
@@ -159,6 +188,7 @@ impl BufferPool {
         if let Some(path) = buffer.path().cloned() {
             self.paths.remove(&path);
         }
+        self.reported_external_conflicts.remove(&id);
         let snapshot = BufferEventSnapshot::from_buffer(id, &buffer);
         globals::enqueue_editor_event(EditorEvent::BufferUnloaded { snapshot });
         Some(buffer)
@@ -320,11 +350,8 @@ impl BufferPool {
                     continue;
                 };
 
-                if buffer.is_modified() {
-                    continue;
-                }
-
                 if buffer.saved_disk_state.is_none() {
+                    self.reported_external_conflicts.remove(&buffer_id);
                     continue;
                 }
 
@@ -333,12 +360,32 @@ impl BufferPool {
                 };
 
                 let current_state = Buffer::disk_state_for_path(path.as_path());
-                if current_state.is_none() || current_state == buffer.saved_disk_state {
+                if current_state == buffer.saved_disk_state {
+                    self.reported_external_conflicts.remove(&buffer_id);
+                    continue;
+                }
+
+                if buffer.is_modified() {
+                    if self.reported_external_conflicts.get(&buffer_id) != Some(&current_state) {
+                        self.reported_external_conflicts
+                            .insert(buffer_id, current_state);
+                        globals::enqueue_editor_event(EditorEvent::ExternalFileConflict {
+                            snapshot: BufferEventSnapshot::from_buffer(buffer_id, buffer),
+                        });
+                    }
+                    continue;
+                }
+
+                if current_state.is_none() {
                     continue;
                 }
 
                 match buffer.reload_from_disk() {
                     Ok(()) => {
+                        self.reported_external_conflicts.remove(&buffer_id);
+                        globals::enqueue_editor_event(EditorEvent::BufferReloaded {
+                            snapshot: BufferEventSnapshot::from_buffer(buffer_id, buffer),
+                        });
                         should_refresh_cache = true;
                     }
                     Err(error) => {
@@ -409,17 +456,48 @@ impl BufferPool {
     ///
     /// Missing files are created on write if the buffer already has a resolved path.
     pub fn save_buffer(&mut self, id: BufferId) -> io::Result<()> {
-        let buffer = self
+        let path = self
             .buffers
-            .get_mut(&id)
-            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "buffer id not found"))?;
-        let path = buffer
-            .path()
-            .cloned()
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "buffer has no path"))?;
-        buffer.save_to_file(path.as_path())?;
-        buffer.mark_saved();
-        Ok(())
+            .get(&id)
+            .and_then(|buffer| buffer.path().cloned());
+        let result = match self.buffers.get_mut(&id) {
+            None => Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                "buffer id not found",
+            )),
+            Some(_) if path.is_none() => Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "buffer has no path",
+            )),
+            Some(buffer) => {
+                let path = path.as_ref().expect("validated path should exist");
+                buffer
+                    .save_to_file(path.as_path())
+                    .map(|()| buffer.mark_saved())
+            }
+        };
+
+        match result {
+            Ok(()) => {
+                self.reported_external_conflicts.remove(&id);
+                let snapshot = BufferEventSnapshot::from_buffer(
+                    id,
+                    self.buffers.get(&id).expect("saved buffer should exist"),
+                );
+                globals::enqueue_editor_event(EditorEvent::BufferSaved { snapshot });
+                Ok(())
+            }
+            Err(error) => {
+                globals::enqueue_editor_event(EditorEvent::BufferSaveFailed {
+                    error: BufferErrorSnapshot::from_io_error(
+                        Some(id),
+                        path.map(|path| path.as_path().to_path_buf()),
+                        &error,
+                    ),
+                });
+                Err(error)
+            }
+        }
     }
 
     /// Saves the buffer to an explicit path after resolving it to an absolute
@@ -427,26 +505,62 @@ impl BufferPool {
     ///
     /// The destination file is created if it does not already exist.
     pub fn save_buffer_to_path(&mut self, id: BufferId, path: impl AsRef<Path>) -> io::Result<()> {
-        let abs_path = AbsolutePath::from_path(path.as_ref()).ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "failed to resolve absolute path",
-            )
-        })?;
-        let buffer = self
-            .buffers
-            .get_mut(&id)
-            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "buffer id not found"))?;
-        let result = buffer.save_to_file(abs_path.as_path());
-        if result.is_ok() {
-            if let Some(old_path) = buffer.path().cloned() {
-                self.paths.remove(&old_path);
+        let abs_path = match AbsolutePath::from_path(path.as_ref()) {
+            Some(path) => path,
+            None => {
+                let error = io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "failed to resolve absolute path",
+                );
+                globals::enqueue_editor_event(EditorEvent::BufferSaveFailed {
+                    error: BufferErrorSnapshot::from_io_error(Some(id), None, &error),
+                });
+                return Err(error);
             }
-            buffer.set_path(abs_path.clone());
-            buffer.mark_saved();
-            self.paths.insert(abs_path, id);
+        };
+        let Some(buffer) = self.buffers.get_mut(&id) else {
+            let error = io::Error::new(io::ErrorKind::NotFound, "buffer id not found");
+            globals::enqueue_editor_event(EditorEvent::BufferSaveFailed {
+                error: BufferErrorSnapshot::from_io_error(
+                    Some(id),
+                    Some(abs_path.as_path().to_path_buf()),
+                    &error,
+                ),
+            });
+            return Err(error);
+        };
+        if let Err(error) = buffer.save_to_file(abs_path.as_path()) {
+            globals::enqueue_editor_event(EditorEvent::BufferSaveFailed {
+                error: BufferErrorSnapshot::from_io_error(
+                    Some(id),
+                    Some(abs_path.as_path().to_path_buf()),
+                    &error,
+                ),
+            });
+            return Err(error);
         }
-        result
+
+        let old_path = buffer.path().cloned();
+        if let Some(old_path) = &old_path {
+            self.paths.remove(old_path);
+        }
+        buffer.set_path(abs_path.clone());
+        buffer.mark_saved();
+        self.paths.insert(abs_path, id);
+        self.reported_external_conflicts.remove(&id);
+
+        if old_path.as_ref() != buffer.path() {
+            globals::enqueue_editor_event(EditorEvent::BufferPathChanged {
+                snapshot: BufferPathChangeSnapshot {
+                    buffer: BufferEventSnapshot::from_buffer(id, buffer),
+                    previous_path: old_path.map(|path| path.as_path().to_path_buf()),
+                },
+            });
+        }
+        globals::enqueue_editor_event(EditorEvent::BufferSaved {
+            snapshot: BufferEventSnapshot::from_buffer(id, buffer),
+        });
+        Ok(())
     }
 
     /// Saves every modified buffer that has a resolved path.
@@ -973,6 +1087,156 @@ mod tests {
             globals::enqueue_editor_event(event);
         }
         ids
+    }
+
+    fn drain_editor_events() -> Vec<crate::event::EditorEvent> {
+        std::iter::from_fn(globals::take_editor_event).collect()
+    }
+
+    #[test]
+    fn test_save_as_emits_path_changed_before_saved_once() {
+        globals::clear_editor_events_for_tests();
+        let path = temp_file("save-as-events.txt");
+        fs::remove_file(&path).ok();
+        let mut pool = BufferPool::new();
+        let id = pool.create_buffer();
+        drain_editor_events();
+
+        pool.save_buffer_to_path(id, &path).unwrap();
+
+        let events = drain_editor_events();
+        assert!(matches!(
+            events.as_slice(),
+            [
+                crate::event::EditorEvent::BufferPathChanged { snapshot },
+                crate::event::EditorEvent::BufferSaved { snapshot: saved }
+            ] if snapshot.buffer.buffer_id == id
+                && snapshot.previous_path.is_none()
+                && saved.buffer_id == id
+        ));
+        fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn test_failed_save_as_keeps_path_and_emits_one_failure() {
+        globals::clear_editor_events_for_tests();
+        let original = temp_file("save-as-original.txt");
+        fs::write(&original, "alpha").unwrap();
+        let destination = temp_file("missing-parent").join("save-as.txt");
+        fs::remove_dir_all(destination.parent().unwrap()).ok();
+        fs::remove_file(destination.parent().unwrap()).ok();
+        let mut pool = BufferPool::new();
+        let id = pool.open_buffer(&original).unwrap();
+        drain_editor_events();
+
+        assert!(pool.save_buffer_to_path(id, &destination).is_err());
+
+        assert_eq!(pool.get(id).unwrap().path().unwrap().as_path(), original);
+        let events = drain_editor_events();
+        assert!(matches!(
+            events.as_slice(),
+            [crate::event::EditorEvent::BufferSaveFailed { error }]
+                if error.buffer_id == Some(id)
+                    && error.path.as_deref() == Some(destination.as_path())
+                    && error.error_kind == "not_found"
+        ));
+        fs::remove_file(original).ok();
+    }
+
+    #[test]
+    fn test_external_conflict_is_emitted_once_per_disk_state() {
+        globals::clear_editor_events_for_tests();
+        let path = temp_file("external-conflict-events.txt");
+        fs::write(&path, "alpha").unwrap();
+        let mut pool = BufferPool::new();
+        let id = pool.open_buffer(&path).unwrap();
+        pool.with_buffer_mut(id, |buffer| {
+            buffer.insert_text(crate::buffer::Cursor::new(0, 5), "!");
+        });
+        drain_editor_events();
+
+        fs::write(&path, "longer beta").unwrap();
+        assert!(!pool.process_external_file_changes());
+        pool.last_disk_check = None;
+        assert!(!pool.process_external_file_changes());
+        assert_eq!(
+            drain_editor_events()
+                .iter()
+                .filter(|event| matches!(
+                    event,
+                    crate::event::EditorEvent::ExternalFileConflict { .. }
+                ))
+                .count(),
+            1
+        );
+
+        pool.last_disk_check = None;
+        fs::write(&path, "a distinct, longer disk state").unwrap();
+        assert!(!pool.process_external_file_changes());
+        assert!(matches!(
+            drain_editor_events().as_slice(),
+            [crate::event::EditorEvent::ExternalFileConflict { snapshot }] if snapshot.buffer_id == id
+        ));
+        fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn test_clean_external_change_emits_reloaded_after_success() {
+        globals::clear_editor_events_for_tests();
+        let path = temp_file("reload-event.txt");
+        fs::write(&path, "alpha").unwrap();
+        let mut pool = BufferPool::new();
+        let id = pool.open_buffer(&path).unwrap();
+        drain_editor_events();
+
+        fs::write(&path, "alphabet").unwrap();
+        assert!(pool.process_external_file_changes());
+
+        assert!(matches!(
+            drain_editor_events().as_slice(),
+            [crate::event::EditorEvent::BufferReloaded { snapshot }] if snapshot.buffer_id == id && !snapshot.modified
+        ));
+        fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn test_open_directory_emits_open_failed_with_absolute_path() {
+        globals::clear_editor_events_for_tests();
+        let path = temp_file("open-directory-error");
+        fs::remove_dir_all(&path).ok();
+        fs::create_dir(&path).unwrap();
+        let mut pool = BufferPool::new();
+
+        let error = pool.open_buffer(&path).unwrap_err();
+
+        let events = drain_editor_events();
+        assert!(matches!(
+            events.as_slice(),
+            [crate::event::EditorEvent::BufferOpenFailed { error: snapshot }]
+                if snapshot.path.as_deref() == Some(path.as_path())
+                    && snapshot.message == error.to_string()
+        ));
+        fs::remove_dir(path).ok();
+    }
+
+    #[test]
+    fn test_rename_buffer_path_emits_path_changed_after_success() {
+        globals::clear_editor_events_for_tests();
+        let old_path = temp_file("rename-old.txt");
+        let new_path = temp_file("rename-new.txt");
+        let mut pool = BufferPool::new();
+        let id = pool.create_buffer_with_path(&old_path).unwrap();
+        drain_editor_events();
+
+        pool.rename_buffer_path(id, &new_path).unwrap();
+
+        assert!(matches!(
+            drain_editor_events().as_slice(),
+            [crate::event::EditorEvent::BufferPathChanged { snapshot }]
+                if snapshot.buffer.buffer_id == id
+                    && snapshot.buffer.path.as_deref() == Some(new_path.as_path())
+                    && snapshot.previous_path.as_deref() == Some(old_path.as_path())
+        ));
     }
 
     #[test]

@@ -276,7 +276,7 @@ Buffer rows and columns are 0-based. `urvim.buffers.lines(buffer_id, start_row, 
 }
 ```
 
-Invalid buffer ids, rows, columns, and argument shapes raise errors. `urvim.buffers.save(buffer_id)` saves through the normal buffer save path and emits the same `BufferSaved` editor event on success.
+Invalid buffer ids, rows, columns, and argument shapes raise errors. `urvim.buffers.save(buffer_id)` saves through the normal buffer save path and emits the same `BufferSaved` or `BufferSaveFailed` editor event.
 
 Window rows and columns are 0-based. Window ids are stable pane ids for currently visible editor windows; an id stays valid for the life of that pane and becomes invalid after the pane is closed. Invalid window ids raise errors. `urvim.windows.open_buffer(buffer_id)` mirrors normal editor behavior by activating an existing visible buffer tab or opening a tab for a loaded hidden buffer in the active window.
 
@@ -646,8 +646,13 @@ Currently emitted event names:
 - `BufferOpened`
 - `BufferLoaded`
 - `BufferSaved`
+- `BufferSaveFailed`
+- `BufferOpenFailed`
 - `BufferClosed`
 - `BufferUnloaded`
+- `BufferPathChanged`
+- `BufferReloaded`
+- `ExternalFileConflict`
 - `BufferFiletypeChanged`
 - `WindowCreated`
 - `WindowClosed`
@@ -663,7 +668,7 @@ Currently emitted event names:
 
 All event payloads are maps with an `event` field containing the event name.
 
-The buffer lifecycle events `BufferOpened`, `BufferLoaded`, `BufferSaved`, `BufferClosed`, `BufferUnloaded`, and `BufferFiletypeChanged` also contain these fields, captured when the event is enqueued:
+The buffer lifecycle events `BufferOpened`, `BufferLoaded`, `BufferSaved`, `BufferPathChanged`, `BufferReloaded`, `ExternalFileConflict`, `BufferClosed`, `BufferUnloaded`, and `BufferFiletypeChanged` also contain these fields, captured when the event is enqueued:
 
 - `buffer_id`: numeric buffer id
 - `path`: absolute path string, or `null` for an unnamed buffer
@@ -672,6 +677,10 @@ The buffer lifecycle events `BufferOpened`, `BufferLoaded`, `BufferSaved`, `Buff
 - `modified`: whether the buffer was modified
 
 `BufferOpened` means a buffer changed from having zero visible tabs across the entire layout to having at least one. `BufferClosed` means its final visible tab was closed. Opening or closing another tab for a buffer that remains visible does not emit either event.
+
+`BufferSaveFailed` and `BufferOpenFailed` contain `buffer_id` (or `null` when no buffer was identified), `path` (the attempted absolute path when resolution succeeded, otherwise `null`), `error_kind`, and `error`. `error_kind` is a stable lowercase category such as `not_found`, `permission_denied`, or `invalid_input`; `error` is the human-readable error message.
+
+`BufferPathChanged` additionally contains `previous_path`, which is `null` when the buffer was previously unnamed. Save-as emits `BufferPathChanged` before `BufferSaved`; failed save-as operations do not change the path. `BufferReloaded` is emitted after a clean buffer is successfully reloaded from disk. `ExternalFileConflict` is emitted once for each distinct changed disk state observed while the buffer has unsaved edits, rather than on every filesystem poll.
 
 Window and tab ids are stable for the current editor process. Tab ids are newly allocated when session state is restored rather than persisted. Window lifecycle payloads are:
 
@@ -691,7 +700,9 @@ Events produced by one layout transition are enqueued in this order: closed tabs
 
 Fresh and session-restored layouts emit their initial state as one transition from an empty layout. Initial `WindowCreated`, `TabOpened`, `BufferOpened`, `WindowFocused`, `TabActivated`, and `ActiveBufferChanged` events are queued in the order above before `EditorStarted`.
 
-`DiagnosticsChanged` contains `buffer_id`. `CommandExecuted` contains `command`, the executed command's debug representation. `EditorStarted` has no additional fields.
+`DiagnosticsChanged` contains `buffer_id`. `CommandExecuted` contains `command`, a stable dotted and kebab-case semantic identifier, `success`, and `error` (`null` on success). Examples include `buffer.save`, `buffer.save-as`, `buffer.close`, `window.next-tab`, and `lsp.hover`. Plugin commands include their identifiers as `plugin.<plugin>.<command>`, preserving the plugin and command text. Accepted asynchronous commands report success immediately. Buffer domain events are queued before the command completion event.
+
+Internal notification enqueueing, completion application, overwrite and git-discard confirmation results, and plugin picker, input, or confirmation responses do not emit `CommandExecuted`. `EditorStarted` has no additional fields.
 
 `urvim.events` may expose reserved event-name constants for later plugin phases. Reserved events are not emitted and are not supported for hooks until listed above.
 
