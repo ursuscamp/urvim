@@ -1,7 +1,10 @@
 use std::collections::HashMap;
 
 use bearscript::Value;
-use urvim_core::event::{BufferErrorSnapshot, BufferEventSnapshot, EditorEvent};
+use urvim_core::event::{
+    BufferErrorSnapshot, BufferEventSnapshot, ChangedRange, EditorEvent, EventPosition,
+    EventSelection, EventSource, EventSourceKind,
+};
 
 pub(in crate::plugin) fn bear_args(args: &[String]) -> Value {
     Value::List(
@@ -77,6 +80,42 @@ pub(in crate::plugin) fn event_payload(
             urvim_plugin::PluginEventKind::ExternalFileConflict,
             snapshot,
         )),
+        EditorEvent::BufferChanged {
+            buffer_id,
+            changed_range,
+            source,
+        } => {
+            let kind = urvim_plugin::PluginEventKind::BufferChanged;
+            payload.insert(
+                "buffer_id".to_string(),
+                Value::Number(buffer_id.get() as f64),
+            );
+            payload.insert(
+                "changed_range".to_string(),
+                changed_range_value(changed_range),
+            );
+            payload.insert("source".to_string(), source_value(source));
+            Some(kind_payload(&mut payload, kind))
+        }
+        EditorEvent::BufferModifiedChanged {
+            buffer_id,
+            previous_modified,
+            modified,
+            source,
+        } => {
+            let kind = urvim_plugin::PluginEventKind::BufferModifiedChanged;
+            payload.insert(
+                "buffer_id".to_string(),
+                Value::Number(buffer_id.get() as f64),
+            );
+            payload.insert(
+                "previous_modified".to_string(),
+                Value::Bool(previous_modified),
+            );
+            payload.insert("modified".to_string(), Value::Bool(modified));
+            payload.insert("source".to_string(), source_value(source));
+            Some(kind_payload(&mut payload, kind))
+        }
         EditorEvent::BufferClosed { snapshot } => Some(buffer_event_payload(
             &mut payload,
             urvim_plugin::PluginEventKind::BufferClosed,
@@ -240,7 +279,126 @@ pub(in crate::plugin) fn event_payload(
                 buffer_id,
             ))
         }
+        EditorEvent::ModeChanged {
+            window_id,
+            buffer_id,
+            previous_mode,
+            mode,
+            source,
+        } => {
+            let kind = urvim_plugin::PluginEventKind::ModeChanged;
+            pane_event_fields(&mut payload, window_id, buffer_id, source);
+            payload.insert(
+                "previous_mode".to_string(),
+                Value::String(previous_mode.into()),
+            );
+            payload.insert("mode".to_string(), Value::String(mode.into()));
+            Some(kind_payload(&mut payload, kind))
+        }
+        EditorEvent::CursorMoved {
+            window_id,
+            buffer_id,
+            previous_position,
+            position,
+            source,
+        } => {
+            let kind = urvim_plugin::PluginEventKind::CursorMoved;
+            pane_event_fields(&mut payload, window_id, buffer_id, source);
+            payload.insert(
+                "previous_position".to_string(),
+                position_value(previous_position),
+            );
+            payload.insert("position".to_string(), position_value(position));
+            Some(kind_payload(&mut payload, kind))
+        }
+        EditorEvent::SelectionChanged {
+            window_id,
+            buffer_id,
+            previous_selection,
+            selection,
+            source,
+        } => {
+            let kind = urvim_plugin::PluginEventKind::SelectionChanged;
+            pane_event_fields(&mut payload, window_id, buffer_id, source);
+            payload.insert(
+                "previous_selection".to_string(),
+                optional_selection_value(previous_selection),
+            );
+            payload.insert("selection".to_string(), optional_selection_value(selection));
+            Some(kind_payload(&mut payload, kind))
+        }
     }
+}
+
+fn kind_payload(
+    payload: &mut HashMap<String, Value>,
+    kind: urvim_plugin::PluginEventKind,
+) -> (urvim_plugin::PluginEventKind, Value) {
+    payload.insert("event".to_string(), Value::String(kind.as_str().into()));
+    (kind, Value::Map(std::mem::take(payload).into()))
+}
+
+fn pane_event_fields(
+    payload: &mut HashMap<String, Value>,
+    window_id: urvim_core::layout::PaneId,
+    buffer_id: urvim_core::buffer::BufferId,
+    source: EventSource,
+) {
+    payload.insert("window_id".to_string(), Value::Number(window_id.0 as f64));
+    payload.insert(
+        "buffer_id".to_string(),
+        Value::Number(buffer_id.get() as f64),
+    );
+    payload.insert("source".to_string(), source_value(source));
+}
+
+fn source_value(source: EventSource) -> Value {
+    let mut value = HashMap::new();
+    let kind = match source.kind {
+        EventSourceKind::User => "user",
+        EventSourceKind::Paste => "paste",
+        EventSourceKind::Undo => "undo",
+        EventSourceKind::Redo => "redo",
+        EventSourceKind::Plugin => "plugin",
+        EventSourceKind::Lsp => "lsp",
+        EventSourceKind::Reload => "reload",
+        EventSourceKind::Internal => "internal",
+    };
+    value.insert("kind".to_string(), Value::String(kind.into()));
+    value.insert(
+        "name".to_string(),
+        source
+            .name
+            .map(|name| Value::String(name.into()))
+            .unwrap_or(Value::Null),
+    );
+    Value::Map(value.into())
+}
+
+fn position_value(position: EventPosition) -> Value {
+    let mut value = HashMap::new();
+    value.insert("row".to_string(), Value::Number(position.row as f64));
+    value.insert("col".to_string(), Value::Number(position.col as f64));
+    Value::Map(value.into())
+}
+
+fn changed_range_value(range: ChangedRange) -> Value {
+    let mut value = HashMap::new();
+    value.insert("start".to_string(), position_value(range.start));
+    value.insert("old_end".to_string(), position_value(range.old_end));
+    value.insert("new_end".to_string(), position_value(range.new_end));
+    Value::Map(value.into())
+}
+
+fn optional_selection_value(selection: Option<EventSelection>) -> Value {
+    let Some(selection) = selection else {
+        return Value::Null;
+    };
+    let mut value = HashMap::new();
+    value.insert("anchor".to_string(), position_value(selection.anchor));
+    value.insert("cursor".to_string(), position_value(selection.cursor));
+    value.insert("linewise".to_string(), Value::Bool(selection.linewise));
+    Value::Map(value.into())
 }
 
 fn buffer_error_payload(
@@ -367,6 +525,38 @@ mod tests {
                 Some(&Value::String(event.as_str().into()))
             );
         }
+    }
+
+    #[test]
+    fn buffer_changed_payload_uses_byte_range_and_named_source() {
+        let (kind, Value::Map(payload)) = event_payload(EditorEvent::BufferChanged {
+            buffer_id: BufferId::new(9),
+            changed_range: ChangedRange {
+                start: EventPosition { row: 1, col: 2 },
+                old_end: EventPosition { row: 1, col: 4 },
+                new_end: EventPosition { row: 2, col: 3 },
+            },
+            source: EventSource::plugin("demo"),
+        })
+        .expect("buffer change should have a payload") else {
+            panic!("buffer change payload should be a map");
+        };
+
+        assert_eq!(kind, urvim_plugin::PluginEventKind::BufferChanged);
+        assert_eq!(payload.get("buffer_id"), Some(&Value::Number(9.0)));
+        let Some(Value::Map(source)) = payload.get("source") else {
+            panic!("source should be a map");
+        };
+        assert_eq!(source.get("kind"), Some(&Value::String("plugin".into())));
+        assert_eq!(source.get("name"), Some(&Value::String("demo".into())));
+        let Some(Value::Map(range)) = payload.get("changed_range") else {
+            panic!("changed range should be a map");
+        };
+        let Some(Value::Map(start)) = range.get("start") else {
+            panic!("range start should be a map");
+        };
+        assert_eq!(start.get("row"), Some(&Value::Number(1.0)));
+        assert_eq!(start.get("col"), Some(&Value::Number(2.0)));
     }
 
     #[test]

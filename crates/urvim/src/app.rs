@@ -8,7 +8,7 @@ use crate::render::{handle_resize, render_frame_if_needed};
 use crate::startup::{StartupPluginsAndThemes, load_startup_plugins_and_themes, startup_layout};
 use urvim_core::config::Config;
 use urvim_core::editor::HandleKeyResult;
-use urvim_core::event::EditorEvent;
+use urvim_core::event::{EditorEvent, EventSource, EventTransaction, capture_pane_state};
 use urvim_core::globals;
 use urvim_core::screen::Screen;
 use urvim_core::ui::{Command, Intent, UiEvent};
@@ -18,12 +18,45 @@ use super::Cli;
 
 /// Drains queued editor events and dispatches them to plugin event hooks in
 /// FIFO order. Returns `true` when at least one event was dispatched.
+/// Maximum consecutive hook-generated event waves before the causal chain is dropped.
+const MAX_EDITOR_EVENT_WAVES: usize = 32;
+
+thread_local! {
+    static EDITOR_EVENT_WAVE_DEPTH: RefCell<usize> = const { RefCell::new(0) };
+}
+
 fn drain_editor_events(plugin_runtime: &mut BearscriptPluginRuntime) -> bool {
+    let events = globals::take_editor_event_batch();
+    if events.is_empty() {
+        EDITOR_EVENT_WAVE_DEPTH.with(|depth| *depth.borrow_mut() = 0);
+        return false;
+    }
+    let over_limit = EDITOR_EVENT_WAVE_DEPTH.with(|depth| {
+        let mut depth = depth.borrow_mut();
+        *depth += 1;
+        *depth > MAX_EDITOR_EVENT_WAVES
+    });
+    if over_limit {
+        tracing::warn!(
+            limit = MAX_EDITOR_EVENT_WAVES,
+            dropped = events.len(),
+            "dropping over-limit plugin event causal chain"
+        );
+        urvim_core::notify_warn!(
+            "Plugin event chain exceeded {MAX_EDITOR_EVENT_WAVES} waves; generated events were dropped"
+        );
+        while !globals::take_editor_event_batch().is_empty() {}
+        EDITOR_EVENT_WAVE_DEPTH.with(|depth| *depth.borrow_mut() = 0);
+        return false;
+    }
     let mut dispatched = false;
-    while let Some(event) = globals::take_editor_event() {
+    for event in events {
         if plugin_runtime.dispatch_editor_event(event) {
             dispatched = true;
         }
+    }
+    if !globals::has_pending_editor_events() {
+        EDITOR_EVENT_WAVE_DEPTH.with(|depth| *depth.borrow_mut() = 0);
     }
     dispatched
 }
@@ -89,14 +122,19 @@ pub(super) fn run(cli: Cli) -> io::Result<()> {
 
     let mut needs_redraw = true;
     loop {
-        let background_requested_redraw = globals::with_buffer_pool(|pool| {
-            let jobs = pool.process_background_jobs();
-            let disk = pool.process_external_file_changes();
-            jobs || disk
-        }) || layout.borrow_mut().process_background_jobs()
-            || layout.borrow_mut().process_workspace_file_operations()
-            || globals::take_notification_redraw_requested();
+        let maintenance_transaction = EventTransaction::new(EventSource::internal());
+        capture_pane_state(layout.borrow().event_pane_snapshots());
+        let background_requested_redraw =
+            globals::with_buffer_pool(|pool| pool.process_background_jobs())
+                || layout.borrow_mut().process_background_jobs()
+                || layout.borrow_mut().process_workspace_file_operations()
+                || globals::take_notification_redraw_requested();
 
+        capture_pane_state(layout.borrow().event_pane_snapshots());
+        drop(maintenance_transaction);
+
+        let external_file_requested_redraw =
+            globals::with_buffer_pool(|pool| pool.process_external_file_changes());
         globals::try_with_lsp_runtime_mut(|runtime| runtime.sync());
 
         if drain_editor_events(&mut plugin_runtime) {
@@ -125,7 +163,7 @@ pub(super) fn run(cli: Cli) -> io::Result<()> {
             needs_redraw = true;
         }
 
-        if background_requested_redraw {
+        if background_requested_redraw || external_file_requested_redraw {
             needs_redraw = true;
         }
 
@@ -318,6 +356,8 @@ pub(super) fn run(cli: Cli) -> io::Result<()> {
                             }
                         }
                         Intent::Command(command) => {
+                            let _source =
+                                urvim_core::event::EventSourceScope::new(EventSource::user());
                             if matches!(command, Command::Quit | Command::TryQuit) {
                                 urvim_core::session::save_now(&layout.borrow());
                             }

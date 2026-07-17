@@ -15,6 +15,44 @@ use crate::buffer::{Buffer, BufferId};
 use crate::layout::PaneId;
 use crate::window::TabId;
 
+mod transaction;
+
+pub use transaction::{
+    EventSource, EventSourceKind, EventSourceScope, EventTransaction, PaneEventSnapshot,
+    capture_pane_state, current_event_source, flush_buffer_changes_before, record_buffer_change,
+};
+
+/// Zero-based text position whose column is a UTF-8 byte offset in the line.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EventPosition {
+    /// Zero-based row number.
+    pub row: usize,
+    /// Zero-based UTF-8 byte column.
+    pub col: usize,
+}
+
+/// Minimal replacement range between a buffer's pre- and post-transaction text.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ChangedRange {
+    /// Start of the replacement in both versions.
+    pub start: EventPosition,
+    /// End of the replaced text in the previous version.
+    pub old_end: EventPosition,
+    /// End of the inserted text in the final version.
+    pub new_end: EventPosition,
+}
+
+/// Selection state visible to event consumers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EventSelection {
+    /// Selection anchor.
+    pub anchor: EventPosition,
+    /// Selection cursor.
+    pub cursor: EventPosition,
+    /// Whether the selection is linewise rather than characterwise.
+    pub linewise: bool,
+}
+
 /// Snapshot of buffer metadata captured when a buffer event is enqueued.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BufferEventSnapshot {
@@ -172,6 +210,26 @@ pub enum EditorEvent {
         /// Buffer metadata when the distinct disk state was observed.
         snapshot: BufferEventSnapshot,
     },
+    /// A buffer's text changed during one completed event transaction.
+    BufferChanged {
+        /// Changed buffer.
+        buffer_id: BufferId,
+        /// Minimal UTF-8-safe replacement range.
+        changed_range: ChangedRange,
+        /// Direct origin of the transaction.
+        source: EventSource,
+    },
+    /// A buffer's modified flag changed during one completed event transaction.
+    BufferModifiedChanged {
+        /// Changed buffer.
+        buffer_id: BufferId,
+        /// Modified flag before the transaction.
+        previous_modified: bool,
+        /// Modified flag after the transaction.
+        modified: bool,
+        /// Direct origin of the transaction.
+        source: EventSource,
+    },
     /// A buffer tab/view was closed from the UI.
     BufferClosed {
         /// Buffer metadata at enqueue time.
@@ -256,6 +314,45 @@ pub enum EditorEvent {
         /// Active tab showing the newly active buffer.
         tab_id: TabId,
     },
+    /// An editor window's mode changed during one completed event transaction.
+    ModeChanged {
+        /// Changed window.
+        window_id: PaneId,
+        /// Buffer shown by the window.
+        buffer_id: BufferId,
+        /// Previous stable lowercase mode name.
+        previous_mode: String,
+        /// Final stable lowercase mode name.
+        mode: String,
+        /// Direct origin of the transaction.
+        source: EventSource,
+    },
+    /// An editor window's cursor moved during one completed event transaction.
+    CursorMoved {
+        /// Changed window.
+        window_id: PaneId,
+        /// Buffer shown by the window.
+        buffer_id: BufferId,
+        /// Previous cursor position.
+        previous_position: EventPosition,
+        /// Final cursor position.
+        position: EventPosition,
+        /// Direct origin of the transaction.
+        source: EventSource,
+    },
+    /// An editor window's visual selection changed during one completed transaction.
+    SelectionChanged {
+        /// Changed window.
+        window_id: PaneId,
+        /// Buffer shown by the window.
+        buffer_id: BufferId,
+        /// Previous selection, or `None`.
+        previous_selection: Option<EventSelection>,
+        /// Final selection, or `None`.
+        selection: Option<EventSelection>,
+        /// Direct origin of the transaction.
+        source: EventSource,
+    },
     /// A user-facing command completed or was accepted for asynchronous work.
     CommandExecuted {
         /// Stable command name.
@@ -270,6 +367,35 @@ pub enum EditorEvent {
         /// Identifier of the buffer whose diagnostics changed.
         buffer_id: BufferId,
     },
+}
+
+impl EditorEvent {
+    /// Returns whether this event is a coalesced high-frequency transaction event.
+    pub fn is_high_frequency(&self) -> bool {
+        matches!(
+            self,
+            Self::BufferChanged { .. }
+                | Self::BufferModifiedChanged { .. }
+                | Self::ModeChanged { .. }
+                | Self::CursorMoved { .. }
+                | Self::SelectionChanged { .. }
+        )
+    }
+
+    /// Returns the directly originating plugin for suppressible high-frequency events.
+    pub fn direct_plugin_source(&self) -> Option<&str> {
+        let source = match self {
+            Self::BufferChanged { source, .. }
+            | Self::BufferModifiedChanged { source, .. }
+            | Self::ModeChanged { source, .. }
+            | Self::CursorMoved { source, .. }
+            | Self::SelectionChanged { source, .. } => source,
+            _ => return None,
+        };
+        (source.kind == EventSourceKind::Plugin)
+            .then(|| source.name.as_deref())
+            .flatten()
+    }
 }
 
 #[cfg(test)]

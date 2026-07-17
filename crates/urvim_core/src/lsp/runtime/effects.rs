@@ -25,6 +25,8 @@ impl LspRuntime {
     }
 
     pub(super) fn apply_effects(&mut self, effects: Vec<LspRuntimeEffect>) {
+        let _transaction =
+            crate::event::EventTransaction::new(crate::event::EventSource::lsp(None::<String>));
         for effect in effects {
             self.apply_lsp_effect(effect);
         }

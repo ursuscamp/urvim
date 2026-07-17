@@ -631,6 +631,7 @@ fn editor_event_queue_slot() -> &'static Mutex<VecDeque<EditorEvent>> {
 ///
 /// Events are consumed in FIFO order by [`take_editor_event`].
 pub fn enqueue_editor_event(event: EditorEvent) {
+    crate::event::flush_buffer_changes_before(&event);
     #[cfg(test)]
     {
         TEST_EDITOR_EVENT_QUEUE.with(|queue| {
@@ -662,6 +663,40 @@ pub fn take_editor_event() -> Option<EditorEvent> {
             return None;
         };
         queue.pop_front()
+    }
+}
+
+/// Removes and returns the complete event wave present at call time.
+///
+/// Events generated while this returned batch is dispatched remain queued for
+/// the next wave, preserving FIFO order without recursively draining hooks.
+pub fn take_editor_event_batch() -> Vec<EditorEvent> {
+    #[cfg(test)]
+    {
+        return TEST_EDITOR_EVENT_QUEUE.with(|queue| queue.borrow_mut().drain(..).collect());
+    }
+
+    #[cfg(not(test))]
+    {
+        let Ok(mut queue) = editor_event_queue_slot().lock() else {
+            return Vec::new();
+        };
+        queue.drain(..).collect()
+    }
+}
+
+/// Returns whether an editor event is waiting without removing it.
+pub fn has_pending_editor_events() -> bool {
+    #[cfg(test)]
+    {
+        return TEST_EDITOR_EVENT_QUEUE.with(|queue| !queue.borrow().is_empty());
+    }
+
+    #[cfg(not(test))]
+    {
+        editor_event_queue_slot()
+            .lock()
+            .is_ok_and(|queue| !queue.is_empty())
     }
 }
 

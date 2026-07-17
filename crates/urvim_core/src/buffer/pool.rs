@@ -331,6 +331,7 @@ impl BufferPool {
 
     /// Reloads clean file-backed buffers whose on-disk contents changed.
     pub fn process_external_file_changes(&mut self) -> bool {
+        let _source = crate::event::EventSourceScope::new(crate::event::EventSource::reload());
         let now = Instant::now();
         if self
             .last_disk_check
@@ -346,7 +347,7 @@ impl BufferPool {
             let mut should_refresh_cache = false;
 
             {
-                let Some(buffer) = self.buffers.get_mut(&buffer_id) else {
+                let Some(buffer) = self.buffers.get(&buffer_id) else {
                     continue;
                 };
 
@@ -380,9 +381,16 @@ impl BufferPool {
                     continue;
                 }
 
-                match buffer.reload_from_disk() {
+                let reload = self
+                    .with_buffer_mut(buffer_id, |buffer| buffer.reload_from_disk())
+                    .expect("checked buffer should remain loaded");
+                match reload {
                     Ok(()) => {
                         self.reported_external_conflicts.remove(&buffer_id);
+                        let buffer = self
+                            .buffers
+                            .get(&buffer_id)
+                            .expect("reloaded buffer should remain loaded");
                         globals::enqueue_editor_event(EditorEvent::BufferReloaded {
                             snapshot: BufferEventSnapshot::from_buffer(buffer_id, buffer),
                         });
@@ -460,7 +468,7 @@ impl BufferPool {
             .buffers
             .get(&id)
             .and_then(|buffer| buffer.path().cloned());
-        let result = match self.buffers.get_mut(&id) {
+        let result = match self.buffers.get(&id) {
             None => Err(io::Error::new(
                 io::ErrorKind::NotFound,
                 "buffer id not found",
@@ -469,11 +477,14 @@ impl BufferPool {
                 io::ErrorKind::InvalidInput,
                 "buffer has no path",
             )),
-            Some(buffer) => {
+            Some(_) => {
                 let path = path.as_ref().expect("validated path should exist");
-                buffer
-                    .save_to_file(path.as_path())
-                    .map(|()| buffer.mark_saved())
+                self.with_buffer_mut(id, |buffer| {
+                    buffer
+                        .save_to_file(path.as_path())
+                        .map(|()| buffer.mark_saved())
+                })
+                .expect("checked buffer should remain loaded")
             }
         };
 
@@ -518,7 +529,7 @@ impl BufferPool {
                 return Err(error);
             }
         };
-        let Some(buffer) = self.buffers.get_mut(&id) else {
+        if !self.buffers.contains_key(&id) {
             let error = io::Error::new(io::ErrorKind::NotFound, "buffer id not found");
             globals::enqueue_editor_event(EditorEvent::BufferSaveFailed {
                 error: BufferErrorSnapshot::from_io_error(
@@ -528,8 +539,11 @@ impl BufferPool {
                 ),
             });
             return Err(error);
-        };
-        if let Err(error) = buffer.save_to_file(abs_path.as_path()) {
+        }
+        if let Err(error) = self
+            .with_buffer_mut(id, |buffer| buffer.save_to_file(abs_path.as_path()))
+            .expect("checked buffer should remain loaded")
+        {
             globals::enqueue_editor_event(EditorEvent::BufferSaveFailed {
                 error: BufferErrorSnapshot::from_io_error(
                     Some(id),
@@ -540,14 +554,24 @@ impl BufferPool {
             return Err(error);
         }
 
-        let old_path = buffer.path().cloned();
+        let old_path = self
+            .buffers
+            .get(&id)
+            .and_then(|buffer| buffer.path().cloned());
         if let Some(old_path) = &old_path {
             self.paths.remove(old_path);
         }
-        buffer.set_path(abs_path.clone());
-        buffer.mark_saved();
+        self.with_buffer_mut(id, |buffer| {
+            buffer.set_path(abs_path.clone());
+            buffer.mark_saved();
+        });
         self.paths.insert(abs_path, id);
         self.reported_external_conflicts.remove(&id);
+
+        let buffer = self
+            .buffers
+            .get(&id)
+            .expect("saved buffer should remain loaded");
 
         if old_path.as_ref() != buffer.path() {
             globals::enqueue_editor_event(EditorEvent::BufferPathChanged {
@@ -679,8 +703,15 @@ impl BufferPool {
         id: BufferId,
         f: impl FnOnce(&mut Buffer) -> R,
     ) -> Option<R> {
+        let _transaction = crate::event::EventTransaction::ensure();
         let buffer = self.buffers.get_mut(&id)?;
-        Some(f(buffer))
+        let before = buffer.text_snapshot();
+        let before_modified = buffer.is_modified();
+        let result = f(buffer);
+        let after = buffer.text_snapshot();
+        let after_modified = buffer.is_modified();
+        crate::event::record_buffer_change(id, before, after, before_modified, after_modified);
+        Some(result)
     }
 
     fn insert_buffer(&mut self, buffer: Buffer) -> BufferId {
@@ -1194,7 +1225,79 @@ mod tests {
 
         assert!(matches!(
             drain_editor_events().as_slice(),
-            [crate::event::EditorEvent::BufferReloaded { snapshot }] if snapshot.buffer_id == id && !snapshot.modified
+            [
+                crate::event::EditorEvent::BufferChanged {
+                    buffer_id,
+                    source,
+                    ..
+                },
+                crate::event::EditorEvent::BufferReloaded { snapshot },
+            ] if *buffer_id == id
+                && *source == crate::event::EventSource::reload()
+                && snapshot.buffer_id == id
+                && !snapshot.modified
+        ));
+        fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn test_edit_then_save_flushes_buffer_change_before_saved() {
+        globals::clear_editor_events_for_tests();
+        let path = temp_file("transaction-edit-save-order.txt");
+        fs::remove_file(&path).ok();
+        let mut pool = BufferPool::new();
+        let id = pool.create_buffer_with_path(&path).unwrap();
+        drain_editor_events();
+
+        let transaction =
+            crate::event::EventTransaction::new(crate::event::EventSource::plugin("ordering-test"));
+        pool.with_buffer_mut(id, |buffer| {
+            buffer.insert_text(crate::buffer::Cursor::new(0, 0), "first");
+        });
+        pool.save_buffer(id).unwrap();
+        drop(transaction);
+
+        assert!(matches!(
+            drain_editor_events().as_slice(),
+            [
+                crate::event::EditorEvent::BufferChanged { buffer_id, .. },
+                crate::event::EditorEvent::BufferSaved { snapshot },
+            ] if *buffer_id == id && snapshot.buffer_id == id
+        ));
+        fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn test_edits_on_both_sides_of_save_form_separate_segments() {
+        globals::clear_editor_events_for_tests();
+        let path = temp_file("transaction-save-segments.txt");
+        fs::remove_file(&path).ok();
+        let mut pool = BufferPool::new();
+        let id = pool.create_buffer_with_path(&path).unwrap();
+        drain_editor_events();
+
+        let transaction = crate::event::EventTransaction::new(crate::event::EventSource::user());
+        pool.with_buffer_mut(id, |buffer| {
+            buffer.insert_text(crate::buffer::Cursor::new(0, 0), "first");
+        });
+        pool.save_buffer(id).unwrap();
+        pool.with_buffer_mut(id, |buffer| {
+            buffer.insert_text(crate::buffer::Cursor::new(0, 5), " second");
+        });
+        drop(transaction);
+
+        assert!(matches!(
+            drain_editor_events().as_slice(),
+            [
+                crate::event::EditorEvent::BufferChanged { buffer_id: first, .. },
+                crate::event::EditorEvent::BufferSaved { snapshot },
+                crate::event::EditorEvent::BufferChanged { buffer_id: second, .. },
+                crate::event::EditorEvent::BufferModifiedChanged {
+                    previous_modified: false,
+                    modified: true,
+                    ..
+                },
+            ] if *first == id && snapshot.buffer_id == id && *second == id
         ));
         fs::remove_file(path).ok();
     }

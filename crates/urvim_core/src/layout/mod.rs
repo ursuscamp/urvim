@@ -26,7 +26,7 @@ use crate::action::ActionResult;
 use crate::background::{JobEvent, JobKind, JobManager};
 use crate::buffer::BufferId;
 use crate::editor::{EditorAction, InheritedKeymap, ModeKind, NormalMode};
-use crate::event::{BufferEventSnapshot, EditorEvent};
+use crate::event::{BufferEventSnapshot, EditorEvent, PaneEventSnapshot};
 use crate::globals;
 use crate::screen::Screen;
 use crate::status_bar::StatusBar;
@@ -245,6 +245,31 @@ impl Layout {
         };
         layout.emit_initial_lifecycle_events();
         layout
+    }
+
+    /// Captures mode, cursor, and selection state for every visible editor pane.
+    pub fn event_pane_snapshots(&self) -> Vec<PaneEventSnapshot> {
+        let Some(root) = self.root.as_ref() else {
+            return Vec::new();
+        };
+        self.window_ids()
+            .into_iter()
+            .filter_map(|window_id| {
+                let group = Self::find_pane(root, window_id)?.editor_window_group()?;
+                if group.is_empty() {
+                    return None;
+                }
+                let window = group.active_window();
+                let view = window.buffer_view();
+                Some(PaneEventSnapshot {
+                    window_id,
+                    buffer_id: view.buffer_id(),
+                    mode: window.mode_kind(),
+                    cursor: view.cursor(),
+                    selection: view.visual_selection(),
+                })
+            })
+            .collect()
     }
 
     fn emit_initial_lifecycle_events(&self) {

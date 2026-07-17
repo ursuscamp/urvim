@@ -20,7 +20,7 @@ use crate::actions::{execute_action_intent, execute_command_intent};
 use bearscript::{Engine, Value};
 use lsp_types::{Diagnostic, DiagnosticSeverity, Position, Range};
 use urvim_core::buffer::{BufferId, Cursor, SyntaxSpan, TextRef};
-use urvim_core::event::EditorEvent;
+use urvim_core::event::{EditorEvent, EventSource, EventTransaction, capture_pane_state};
 use urvim_core::globals;
 use urvim_core::layout::Layout;
 use urvim_core::ui::confirmation_box::{PluginConfirmationCancelled, PluginConfirmationSelection};
@@ -41,6 +41,21 @@ use pickers::PluginPickerEvents;
 use timers::{PluginTimerEvent, PluginTimerKind, PluginTimerRegistry};
 
 pub(super) type SharedLayout = Rc<RefCell<Layout>>;
+
+fn begin_plugin_callback(layout: &SharedLayout, plugin: &str) -> EventTransaction {
+    let transaction = EventTransaction::new(EventSource::plugin(plugin));
+    if let Ok(layout) = layout.try_borrow() {
+        capture_pane_state(layout.event_pane_snapshots());
+    }
+    transaction
+}
+
+fn finish_plugin_callback(layout: &SharedLayout, transaction: EventTransaction) {
+    if let Ok(layout) = layout.try_borrow() {
+        capture_pane_state(layout.event_pane_snapshots());
+    }
+    drop(transaction);
+}
 
 /// In-process BearScript plugin runtime.
 pub(super) struct BearscriptPluginRuntime {
@@ -174,6 +189,7 @@ impl BearscriptPluginRuntime {
         command: &str,
         args: &[String],
     ) -> Result<(), String> {
+        let layout = Rc::clone(&self.layout);
         self.contributions
             .borrow()
             .command(plugin, command)
@@ -191,11 +207,13 @@ impl BearscriptPluginRuntime {
             .cloned()
             .ok_or_else(|| format!("plugin {plugin:?} command {command:?} has no callback"))?;
         let started = Instant::now();
+        let transaction = begin_plugin_callback(&layout, plugin);
         let result = plugin_runtime
             .engine
             .call_value(callback, vec![bear_args(args)])
             .map(|_| ())
             .map_err(|error| error.to_string());
+        finish_plugin_callback(&layout, transaction);
         self.record_callback(plugin, format!("command {command}"), started.elapsed());
         if let Err(error) = &result {
             self.record_error(plugin, error.clone());
@@ -205,6 +223,7 @@ impl BearscriptPluginRuntime {
 
     /// Dispatches an editor event to registered BearScript event hooks.
     pub(super) fn dispatch_editor_event(&mut self, event: EditorEvent) -> bool {
+        let direct_plugin = event.direct_plugin_source().map(str::to_string);
         let Some((kind, payload)) = event_payload(event) else {
             return false;
         };
@@ -217,6 +236,9 @@ impl BearscriptPluginRuntime {
 
         let mut dispatched = false;
         for (plugin, hook_id) in targets {
+            if direct_plugin.as_deref() == Some(plugin.as_str()) {
+                continue;
+            }
             let Some(plugin_runtime) = self.plugins.get_mut(&plugin) else {
                 continue;
             };
@@ -230,11 +252,13 @@ impl BearscriptPluginRuntime {
                 continue;
             };
             let started = Instant::now();
+            let transaction = begin_plugin_callback(&self.layout, &plugin);
             let result = plugin_runtime
                 .engine
                 .call_value(callback, vec![payload.clone()])
                 .map(|_| ())
                 .map_err(|error| error.to_string());
+            finish_plugin_callback(&self.layout, transaction);
             self.record_callback(
                 &plugin,
                 format!("event {kind} hook {hook_id}"),
@@ -356,6 +380,7 @@ impl BearscriptPluginRuntime {
         plugin: &str,
         provider_id: u64,
     ) -> bool {
+        let layout = Rc::clone(&self.layout);
         let Some(plugin_runtime) = self.plugins.get_mut(plugin) else {
             return false;
         };
@@ -371,11 +396,13 @@ impl BearscriptPluginRuntime {
         let snapshot =
             syntax_snapshot_to_value(buffer_id, generation, &filetype, path, &text, visible_range);
         let started = Instant::now();
+        let transaction = begin_plugin_callback(&layout, plugin);
         let result = plugin_runtime
             .engine
             .call_value(callback, vec![snapshot])
             .map_err(|error| error.to_string())
             .and_then(|value| syntax_line_spans_from_value(&value, &text));
+        finish_plugin_callback(&layout, transaction);
         self.record_callback(
             plugin,
             format!("syntax provider {provider_id}"),
@@ -455,6 +482,7 @@ impl BearscriptPluginRuntime {
         input_id: u64,
         text: String,
     ) -> Result<(), String> {
+        let layout = Rc::clone(&self.layout);
         let plugin_runtime = self
             .plugins
             .get_mut(plugin)
@@ -466,11 +494,13 @@ impl BearscriptPluginRuntime {
             .remove(&input_id)
             .ok_or_else(|| format!("plugin input {input_id} is not open"))?;
         let started = Instant::now();
+        let transaction = begin_plugin_callback(&layout, plugin);
         let result = plugin_runtime
             .engine
             .call_value(input.on_submit, vec![Value::String(text.into())])
             .map(|_| ())
             .map_err(|error| error.to_string());
+        finish_plugin_callback(&layout, transaction);
         self.record_callback(
             plugin,
             format!("input {input_id} submit"),
@@ -489,6 +519,7 @@ impl BearscriptPluginRuntime {
         confirmation_id: u64,
         selection: PluginConfirmationSelection,
     ) -> Result<(), String> {
+        let layout = Rc::clone(&self.layout);
         let plugin_runtime = self
             .plugins
             .get_mut(plugin)
@@ -504,11 +535,13 @@ impl BearscriptPluginRuntime {
             PluginConfirmationSelection::Secondary => confirmation.secondary_value,
         };
         let started = Instant::now();
+        let transaction = begin_plugin_callback(&layout, plugin);
         let result = plugin_runtime
             .engine
             .call_value(confirmation.on_response, vec![value])
             .map(|_| ())
             .map_err(|error| error.to_string());
+        finish_plugin_callback(&layout, transaction);
         self.record_callback(
             plugin,
             format!("confirmation {confirmation_id} response"),
@@ -527,6 +560,7 @@ impl BearscriptPluginRuntime {
         picker_id: u64,
         item_id: u64,
     ) -> Result<(), String> {
+        let layout = Rc::clone(&self.layout);
         let plugin_runtime = self
             .plugins
             .get_mut(plugin)
@@ -543,11 +577,13 @@ impl BearscriptPluginRuntime {
             .cloned()
             .ok_or_else(|| format!("plugin picker item {item_id} is stale"))?;
         let started = Instant::now();
+        let transaction = begin_plugin_callback(&layout, plugin);
         let result = plugin_runtime
             .engine
             .call_value(picker.on_select, vec![value])
             .map(|_| ())
             .map_err(|error| error.to_string());
+        finish_plugin_callback(&layout, transaction);
         self.record_callback(
             plugin,
             format!("picker {picker_id} select"),
@@ -560,6 +596,7 @@ impl BearscriptPluginRuntime {
     }
 
     fn dispatch_picker_cancellation(&mut self, event: PluginPickerCancelled) -> bool {
+        let layout = Rc::clone(&self.layout);
         let Some(plugin_runtime) = self.plugins.get_mut(&event.plugin) else {
             return false;
         };
@@ -575,11 +612,13 @@ impl BearscriptPluginRuntime {
             return true;
         };
         let started = Instant::now();
+        let transaction = begin_plugin_callback(&layout, &event.plugin);
         let result = plugin_runtime
             .engine
             .call_value(callback, vec![])
             .map(|_| ())
             .map_err(|error| error.to_string());
+        finish_plugin_callback(&layout, transaction);
         self.record_callback(
             &event.plugin,
             format!("picker {} cancel", event.picker_id),
@@ -598,6 +637,7 @@ impl BearscriptPluginRuntime {
     }
 
     fn dispatch_confirmation_cancellation(&mut self, event: PluginConfirmationCancelled) -> bool {
+        let layout = Rc::clone(&self.layout);
         let Some(plugin_runtime) = self.plugins.get_mut(&event.plugin) else {
             return false;
         };
@@ -613,11 +653,13 @@ impl BearscriptPluginRuntime {
             return true;
         };
         let started = Instant::now();
+        let transaction = begin_plugin_callback(&layout, &event.plugin);
         let result = plugin_runtime
             .engine
             .call_value(callback, vec![])
             .map(|_| ())
             .map_err(|error| error.to_string());
+        finish_plugin_callback(&layout, transaction);
         self.record_callback(
             &event.plugin,
             format!("confirmation {} cancel", event.confirmation_id),
@@ -636,6 +678,7 @@ impl BearscriptPluginRuntime {
     }
 
     fn dispatch_input_cancellation(&mut self, event: PluginInputCancelled) -> bool {
+        let layout = Rc::clone(&self.layout);
         let Some(plugin_runtime) = self.plugins.get_mut(&event.plugin) else {
             return false;
         };
@@ -651,11 +694,13 @@ impl BearscriptPluginRuntime {
             return true;
         };
         let started = Instant::now();
+        let transaction = begin_plugin_callback(&layout, &event.plugin);
         let result = plugin_runtime
             .engine
             .call_value(callback, vec![])
             .map(|_| ())
             .map_err(|error| error.to_string());
+        finish_plugin_callback(&layout, transaction);
         self.record_callback(
             &event.plugin,
             format!("input {} cancel", event.input_id),
@@ -674,6 +719,7 @@ impl BearscriptPluginRuntime {
     }
 
     fn dispatch_fs_event(&mut self, event: PluginFsEvent) -> bool {
+        let layout = Rc::clone(&self.layout);
         let request_id = fs_event_id(&event);
         let Some(plugin) = self.fs.mark_finished(request_id) else {
             return false;
@@ -687,11 +733,13 @@ impl BearscriptPluginRuntime {
         };
         let payload = fs_event_to_value(&event);
         let started = Instant::now();
+        let transaction = begin_plugin_callback(&layout, &plugin);
         let result = plugin_runtime
             .engine
             .call_value(callback, vec![payload])
             .map(|_| ())
             .map_err(|error| error.to_string());
+        finish_plugin_callback(&layout, transaction);
         self.record_callback(
             &plugin,
             format!("fs request {request_id}"),
@@ -708,6 +756,7 @@ impl BearscriptPluginRuntime {
     }
 
     fn dispatch_timer_event(&mut self, event: PluginTimerEvent) -> bool {
+        let layout = Rc::clone(&self.layout);
         let Some(plugin) = self.timers.mark_dispatched(event.timer_id) else {
             return false;
         };
@@ -730,11 +779,13 @@ impl BearscriptPluginRuntime {
         };
         let label = format!("timer {} {}", event.timer_id, event.kind.as_str());
         let started = Instant::now();
+        let transaction = begin_plugin_callback(&layout, &plugin);
         let result = plugin_runtime
             .engine
             .call_value(callback, vec![])
             .map(|_| ())
             .map_err(|error| error.to_string());
+        finish_plugin_callback(&layout, transaction);
         self.record_callback(&plugin, label, started.elapsed());
         if let Err(error) = result {
             self.record_error(&plugin, error.clone());
@@ -748,6 +799,7 @@ impl BearscriptPluginRuntime {
     }
 
     fn dispatch_job_event(&mut self, event: PluginJobEvent) -> bool {
+        let layout = Rc::clone(&self.layout);
         let job_id = match &event {
             PluginJobEvent::Stdout { job_id, .. }
             | PluginJobEvent::Stderr { job_id, .. }
@@ -787,11 +839,13 @@ impl BearscriptPluginRuntime {
         };
         let payload = job_event_to_value(&event);
         let started = Instant::now();
+        let transaction = begin_plugin_callback(&layout, &plugin);
         let result = plugin_runtime
             .engine
             .call_value(callback, vec![payload])
             .map(|_| ())
             .map_err(|error| error.to_string());
+        finish_plugin_callback(&layout, transaction);
         self.record_callback(&plugin, label, started.elapsed());
         if let Err(error) = result {
             self.record_error(&plugin, error.clone());

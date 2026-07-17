@@ -4,7 +4,9 @@ use std::io;
 use crate::plugin::{BearscriptPluginRuntime, SharedLayout, loaded_buffer_ids};
 use urvim_core::buffer::Cursor;
 use urvim_core::editor::{EditorAction, EditorOperation, ModeKind, RepeatReplay};
-use urvim_core::event::{BufferEventSnapshot, EditorEvent};
+use urvim_core::event::{
+    BufferEventSnapshot, EditorEvent, EventSource, EventTransaction, capture_pane_state,
+};
 use urvim_core::globals;
 use urvim_core::layout::Layout;
 use urvim_core::ui::{Command, Intent};
@@ -82,9 +84,25 @@ pub(super) fn execute_action_intent_with_plugin_runtime(
     _plugin_runtime: &mut BearscriptPluginRuntime,
     action: EditorAction,
 ) -> bool {
-    // Plugin events are dispatched centrally from the editor event queue, so
-    // action intent execution simply forwards to the non-plugin-aware helper.
-    execute_action_intent(layout, action)
+    execute_action_transaction(layout, action)
+}
+
+fn execute_action_transaction(layout: &mut Layout, action: EditorAction) -> bool {
+    let source = match action.kind.as_ref() {
+        Some(EditorOperation::Undo) => EventSource::undo(),
+        Some(EditorOperation::Redo) => EventSource::redo(),
+        Some(EditorOperation::PasteAfter | EditorOperation::PasteBefore)
+        | Some(EditorOperation::InsertRawPaste(_) | EditorOperation::ReplaceSelectionRawPaste(_)) => {
+            EventSource::paste()
+        }
+        _ => EventSource::user(),
+    };
+    let transaction = EventTransaction::new(source);
+    capture_pane_state(layout.event_pane_snapshots());
+    let handled = execute_action_intent(layout, action);
+    capture_pane_state(layout.event_pane_snapshots());
+    drop(transaction);
+    handled
 }
 
 pub(super) fn process_intent_queue(layout: &mut Layout, intents: Vec<Intent>) -> bool {
@@ -105,7 +123,7 @@ pub(super) fn process_intent_queue_with_plugin_runtime(
         handled_all &= match intent {
             Intent::Editor(action) => match plugin_runtime.as_deref_mut() {
                 Some(runtime) => execute_action_intent_with_plugin_runtime(layout, runtime, action),
-                None => execute_action_intent(layout, action),
+                None => execute_action_transaction(layout, action),
             },
             Intent::Command(command) => {
                 execute_command_intent(layout, plugin_runtime.as_deref_mut(), command)
@@ -782,7 +800,7 @@ mod tests {
 
     fn action_test_lock() -> std::sync::MutexGuard<'static, ()> {
         static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-        LOCK.lock().unwrap()
+        LOCK.lock().unwrap_or_else(|error| error.into_inner())
     }
 
     #[test]
@@ -919,7 +937,11 @@ mod tests {
             },
         ));
 
-        assert!(drain_editor_events().is_empty());
+        assert!(
+            drain_editor_events()
+                .iter()
+                .all(|event| !matches!(event, EditorEvent::CommandExecuted { .. }))
+        );
     }
 
     #[test]
