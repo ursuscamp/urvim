@@ -104,7 +104,6 @@ pub(super) fn startup_layout_for_cwd(
 mod tests {
     use std::cell::RefCell;
     use std::rc::Rc;
-    use std::sync::{Mutex, OnceLock};
 
     use urvim_core::buffer::Buffer;
     use urvim_core::config::{Config, PluginConfig};
@@ -119,10 +118,7 @@ mod tests {
     }
 
     fn theme_registry_test_lock() -> std::sync::MutexGuard<'static, ()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(()))
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
+        crate::theme_test_lock()
     }
 
     fn unique_temp_dir(name: &str) -> std::path::PathBuf {

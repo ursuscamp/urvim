@@ -152,7 +152,11 @@ impl PickerSource for ColorschemePickerSource {
     }
 
     fn select(&self, item: &Self::Item) -> Intent {
-        crate::globals::update_theme_in_config(item);
+        if let Err(error) =
+            crate::globals::activate_theme(item, crate::event::ThemeChangeSource::Picker)
+        {
+            tracing::warn!(theme = item, %error, "failed to activate selected colorscheme");
+        }
         Intent::Command(Command::EnqueueNotification {
             level: crate::notification::NotificationLevel::Info,
             message: format!("colorscheme: {item}"),
@@ -184,12 +188,42 @@ mod tests {
 
     #[test]
     fn colorscheme_picker_selects_enqueue_notification_intent() {
+        let registry = urvim_theme::ThemeRegistry::load_builtin().expect("builtins should load");
+        let _registry_guard = globals::set_test_theme_registry(registry.clone());
+        let _theme_guard = globals::set_test_active_theme(
+            registry
+                .get("Friday Night")
+                .expect("default theme should exist")
+                .clone(),
+        );
+        let _config_guard = globals::set_test_config(crate::config::Config {
+            theme: "Friday Night".to_string(),
+            ..Default::default()
+        });
+        globals::clear_editor_events_for_tests();
         let source = ColorschemePickerSource::new(sorted_theme_names());
         let intent = source.select(&"Nord".to_string());
         assert!(matches!(
             intent,
             Intent::Command(Command::EnqueueNotification { .. })
         ));
+        assert!(matches!(
+            globals::take_editor_event(),
+            Some(crate::event::EditorEvent::ThemeChanged {
+                previous_theme,
+                theme,
+                source: crate::event::ThemeChangeSource::Picker,
+            }) if previous_theme == "Friday Night" && theme == "Nord"
+        ));
+        assert!(globals::take_editor_event().is_none());
+        assert_eq!(
+            globals::with_config(|config| config.theme.clone()).as_deref(),
+            Some("Nord")
+        );
+        assert_eq!(
+            globals::with_active_theme(|theme| theme.map(|theme| theme.name().to_string())),
+            Some("Nord".to_string())
+        );
     }
 
     #[test]
@@ -301,16 +335,39 @@ mod tests {
 
     #[test]
     fn colorscheme_select_updates_config() {
+        let registry = urvim_theme::ThemeRegistry::load_builtin().expect("builtins should load");
+        let _registry_guard = globals::set_test_theme_registry(registry.clone());
+        let _theme_guard = globals::set_test_active_theme(
+            registry
+                .get("Friday Night")
+                .expect("default theme should exist")
+                .clone(),
+        );
         let _cfg_guard = globals::set_test_config(crate::config::Config {
             theme: "Friday Night".to_string(),
             ..crate::config::Config::default()
         });
+        globals::clear_editor_events_for_tests();
 
         let source = ColorschemePickerSource::new(sorted_theme_names());
         source.select(&"Nord".to_string());
 
-        globals::with_config(|config| {
-            assert_eq!(config.theme, "Nord");
-        });
+        assert_eq!(
+            globals::with_config(|config| config.theme.clone()).as_deref(),
+            Some("Nord")
+        );
+        assert_eq!(
+            globals::with_active_theme(|theme| theme.map(|theme| theme.name().to_string())),
+            Some("Nord".to_string())
+        );
+        assert!(matches!(
+            globals::take_editor_event(),
+            Some(crate::event::EditorEvent::ThemeChanged {
+                previous_theme,
+                theme,
+                source: crate::event::ThemeChangeSource::Picker,
+            }) if previous_theme == "Friday Night" && theme == "Nord"
+        ));
+        assert!(globals::take_editor_event().is_none());
     }
 }

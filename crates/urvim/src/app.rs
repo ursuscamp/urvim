@@ -8,7 +8,9 @@ use crate::render::{handle_resize, render_frame_if_needed};
 use crate::startup::{StartupPluginsAndThemes, load_startup_plugins_and_themes, startup_layout};
 use urvim_core::config::Config;
 use urvim_core::editor::HandleKeyResult;
-use urvim_core::event::{EditorEvent, EventSource, EventTransaction, capture_pane_state};
+use urvim_core::event::{
+    EditorEvent, EventSource, EventTransaction, ShutdownReason, capture_pane_state,
+};
 use urvim_core::globals;
 use urvim_core::screen::Screen;
 use urvim_core::ui::{Command, Intent, UiEvent};
@@ -61,6 +63,72 @@ fn drain_editor_events(plugin_runtime: &mut BearscriptPluginRuntime) -> bool {
     dispatched
 }
 
+fn drain_all_editor_events(plugin_runtime: &mut BearscriptPluginRuntime) {
+    while globals::has_pending_editor_events() {
+        drain_editor_events(plugin_runtime);
+    }
+}
+
+#[derive(Default)]
+struct ShutdownFinalizer {
+    started: bool,
+}
+
+fn run_shutdown_finalization(
+    finalizer: &mut ShutdownFinalizer,
+    event: EditorEvent,
+    mut dispatch_event_waves: impl FnMut(EditorEvent),
+    mut shutdown_lsp: impl FnMut(),
+    mut save_session: impl FnMut(),
+    mut reset_terminal: impl FnMut() -> io::Result<()>,
+) -> io::Result<()> {
+    if finalizer.started {
+        return Ok(());
+    }
+    finalizer.started = true;
+
+    dispatch_event_waves(event);
+    shutdown_lsp();
+    save_session();
+    reset_terminal()
+}
+
+fn ui_result_requests_quit(result: &urvim_core::ui::UiEventResult) -> bool {
+    matches!(
+        result,
+        urvim_core::ui::UiEventResult::Handled(intents)
+            if intents.iter().any(|intent| matches!(
+                intent,
+                Intent::Command(Command::Quit | Command::TryQuit)
+            ))
+    )
+}
+
+fn shutdown_reason_after_command(command: &Command, should_exit: bool) -> Option<ShutdownReason> {
+    should_exit.then(|| {
+        if matches!(command, Command::Quit | Command::TryQuit) {
+            ShutdownReason::Quit
+        } else {
+            ShutdownReason::LastWindowClosed
+        }
+    })
+}
+
+fn combine_run_and_finalization(
+    loop_result: io::Result<ShutdownReason>,
+    finalization_result: io::Result<()>,
+) -> io::Result<()> {
+    match loop_result {
+        Err(error) => {
+            if let Err(finalization_error) = finalization_result {
+                tracing::warn!(%finalization_error, "shutdown finalization also failed");
+            }
+            Err(error)
+        }
+        Ok(_) => finalization_result,
+    }
+}
+
 pub(super) fn run(cli: Cli) -> io::Result<()> {
     let _guard = urvim_core::logger::init("debug.log");
 
@@ -84,7 +152,7 @@ pub(super) fn run(cli: Cli) -> io::Result<()> {
 
     let mut terminal = Terminal::new(stdin, stdout)?;
 
-    let (mut rows, mut cols) = get_terminal_size().unwrap_or((24, 80));
+    let (rows, cols) = get_terminal_size().unwrap_or((24, 80));
     let mut screen = Screen::new(rows, cols);
 
     let layout = Rc::new(RefCell::new(startup_layout(&cli.files)));
@@ -118,6 +186,47 @@ pub(super) fn run(cli: Cli) -> io::Result<()> {
     globals::with_lsp_runtime_mut(|runtime| runtime.sync());
     globals::enqueue_editor_event(EditorEvent::EditorStarted);
 
+    let loop_result = run_editor_loop(
+        &layout,
+        &mut plugin_runtime,
+        &mut terminal,
+        &mut screen,
+        rows,
+        cols,
+    );
+    let reason = match &loop_result {
+        Ok(reason) => *reason,
+        Err(_) => ShutdownReason::Error,
+    };
+    let shutdown_event = EditorEvent::EditorWillShutdown {
+        reason,
+        modified_buffer_ids: globals::with_buffer_pool(|pool| pool.modified_buffer_ids()),
+        session_enabled: urvim_core::session::is_enabled(),
+    };
+    let mut finalizer = ShutdownFinalizer::default();
+    let finalization_result = run_shutdown_finalization(
+        &mut finalizer,
+        shutdown_event,
+        |event| {
+            globals::enqueue_editor_event(event);
+            drain_all_editor_events(&mut plugin_runtime);
+        },
+        globals::shutdown_lsp_runtime,
+        || urvim_core::session::save_now(&layout.borrow()),
+        || terminal.reset_style(),
+    );
+
+    combine_run_and_finalization(loop_result, finalization_result)
+}
+
+fn run_editor_loop<I: io::Read + rustix::fd::AsFd, O: io::Write + rustix::fd::AsFd>(
+    layout: &Rc<RefCell<urvim_core::Layout>>,
+    mut plugin_runtime: &mut BearscriptPluginRuntime,
+    mut terminal: &mut Terminal<I, O>,
+    mut screen: &mut Screen,
+    mut rows: u16,
+    mut cols: u16,
+) -> io::Result<ShutdownReason> {
     terminal.set_cursor_style(layout.borrow().active_window_cursor_style())?;
 
     let mut needs_redraw = true;
@@ -193,6 +302,7 @@ pub(super) fn run(cli: Cli) -> io::Result<()> {
         match ui_event {
             UiEvent::Tick => {
                 let ui_result = layout.borrow_mut().route_ui_event(&UiEvent::Tick);
+                let quit_requested = ui_result_requests_quit(&ui_result);
                 if crate::actions::handle_ui_result_with_shared_layout(
                     &layout,
                     &mut plugin_runtime,
@@ -200,7 +310,11 @@ pub(super) fn run(cli: Cli) -> io::Result<()> {
                 ) {
                     needs_redraw = true;
                     if layout.borrow().should_exit() {
-                        break;
+                        return Ok(if quit_requested {
+                            ShutdownReason::Quit
+                        } else {
+                            ShutdownReason::LastWindowClosed
+                        });
                     }
                 }
                 urvim_core::session::maybe_autosave(&layout.borrow());
@@ -234,6 +348,7 @@ pub(super) fn run(cli: Cli) -> io::Result<()> {
                 let overlay_result = layout
                     .borrow_mut()
                     .route_ui_event(&UiEvent::Paste(text.clone()));
+                let quit_requested = ui_result_requests_quit(&overlay_result);
                 if crate::actions::handle_ui_result_with_shared_layout(
                     &layout,
                     &mut plugin_runtime,
@@ -241,7 +356,11 @@ pub(super) fn run(cli: Cli) -> io::Result<()> {
                 ) {
                     needs_redraw = true;
                     if layout.borrow().should_exit() {
-                        break;
+                        return Ok(if quit_requested {
+                            ShutdownReason::Quit
+                        } else {
+                            ShutdownReason::LastWindowClosed
+                        });
                     }
                     if drain_editor_events(&mut plugin_runtime) {
                         needs_redraw = true;
@@ -302,7 +421,7 @@ pub(super) fn run(cli: Cli) -> io::Result<()> {
                 }
 
                 if layout.borrow().should_exit() {
-                    break;
+                    return Ok(ShutdownReason::LastWindowClosed);
                 }
 
                 if drain_editor_events(&mut plugin_runtime) {
@@ -319,6 +438,7 @@ pub(super) fn run(cli: Cli) -> io::Result<()> {
             }
             UiEvent::Key(key) => {
                 let overlay_result = layout.borrow_mut().route_ui_event(&UiEvent::Key(key));
+                let quit_requested = ui_result_requests_quit(&overlay_result);
                 if crate::actions::handle_ui_result_with_shared_layout(
                     &layout,
                     &mut plugin_runtime,
@@ -326,7 +446,11 @@ pub(super) fn run(cli: Cli) -> io::Result<()> {
                 ) {
                     needs_redraw = true;
                     if layout.borrow().should_exit() {
-                        break;
+                        return Ok(if quit_requested {
+                            ShutdownReason::Quit
+                        } else {
+                            ShutdownReason::LastWindowClosed
+                        });
                     }
                     terminal.set_cursor_style(layout.borrow().active_window_cursor_style())?;
                     if drain_editor_events(&mut plugin_runtime) {
@@ -358,12 +482,8 @@ pub(super) fn run(cli: Cli) -> io::Result<()> {
                         Intent::Command(command) => {
                             let _source =
                                 urvim_core::event::EventSourceScope::new(EventSource::user());
-                            if matches!(command, Command::Quit | Command::TryQuit) {
-                                urvim_core::session::save_now(&layout.borrow());
-                            }
-
                             if matches!(command, Command::Quit) {
-                                break;
+                                return Ok(ShutdownReason::Quit);
                             }
 
                             if let Command::OverwriteBuffer(target) = &command {
@@ -377,7 +497,7 @@ pub(super) fn run(cli: Cli) -> io::Result<()> {
                                 }
 
                                 if layout.borrow().should_exit() {
-                                    break;
+                                    return Ok(ShutdownReason::LastWindowClosed);
                                 }
 
                                 terminal.set_cursor_style(
@@ -398,8 +518,11 @@ pub(super) fn run(cli: Cli) -> io::Result<()> {
                                 needs_redraw = true;
                             }
 
-                            if layout.borrow().should_exit() {
-                                break;
+                            if let Some(reason) = shutdown_reason_after_command(
+                                &command,
+                                layout.borrow().should_exit(),
+                            ) {
+                                return Ok(reason);
                             }
 
                             terminal
@@ -415,10 +538,87 @@ pub(super) fn run(cli: Cli) -> io::Result<()> {
             }
         }
     }
+}
 
-    globals::shutdown_lsp_runtime();
-    urvim_core::session::save_now(&layout.borrow());
-    terminal.reset_style()?;
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::{Cell, RefCell};
 
-    Ok(())
+    fn shutdown_event() -> EditorEvent {
+        EditorEvent::EditorWillShutdown {
+            reason: ShutdownReason::Quit,
+            modified_buffer_ids: Vec::new(),
+            session_enabled: false,
+        }
+    }
+
+    #[test]
+    fn shutdown_finalization_is_exactly_once_and_preserves_api_order() {
+        let plugin_available = Cell::new(true);
+        let lsp_available = Cell::new(true);
+        let order = RefCell::new(Vec::new());
+        let dispatched = Cell::new(0);
+        let mut finalizer = ShutdownFinalizer::default();
+
+        let mut run = || {
+            run_shutdown_finalization(
+                &mut finalizer,
+                shutdown_event(),
+                |_| {
+                    assert!(plugin_available.get());
+                    assert!(lsp_available.get());
+                    dispatched.set(dispatched.get() + 1);
+                    order.borrow_mut().push("event_waves");
+                },
+                || {
+                    lsp_available.set(false);
+                    order.borrow_mut().push("lsp");
+                },
+                || order.borrow_mut().push("session"),
+                || {
+                    plugin_available.set(false);
+                    order.borrow_mut().push("terminal");
+                    Ok(())
+                },
+            )
+        };
+
+        run().unwrap();
+        run().unwrap();
+
+        assert_eq!(dispatched.get(), 1);
+        assert_eq!(
+            order.into_inner(),
+            vec!["event_waves", "lsp", "session", "terminal"]
+        );
+    }
+
+    #[test]
+    fn rejected_try_quit_has_no_shutdown_reason() {
+        assert_eq!(
+            shutdown_reason_after_command(&Command::TryQuit, false),
+            None
+        );
+        assert_eq!(
+            shutdown_reason_after_command(&Command::TryQuit, true),
+            Some(ShutdownReason::Quit)
+        );
+        assert_eq!(
+            shutdown_reason_after_command(&Command::ClosePane, true),
+            Some(ShutdownReason::LastWindowClosed)
+        );
+    }
+
+    #[test]
+    fn original_loop_error_wins_over_terminal_reset_error() {
+        let error = combine_run_and_finalization(
+            Err(io::Error::new(io::ErrorKind::BrokenPipe, "render failed")),
+            Err(io::Error::new(io::ErrorKind::Other, "reset failed")),
+        )
+        .expect_err("the loop error should be preserved");
+
+        assert_eq!(error.kind(), io::ErrorKind::BrokenPipe);
+        assert_eq!(error.to_string(), "render failed");
+    }
 }

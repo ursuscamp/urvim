@@ -31,7 +31,7 @@ pub(in crate::plugin) fn themes_module(
             (
                 "set".to_string(),
                 native_fn("themes.set", move |name: String| {
-                    set_active_theme(&name)?;
+                    globals::activate_theme(&name, urvim_core::event::ThemeChangeSource::Plugin)?;
                     tracing::debug!(plugin = set_plugin, theme = name, "plugin set active theme");
                     Ok(())
                 }),
@@ -98,18 +98,6 @@ fn theme_to_value(name: &str, active: Option<&str>) -> Value {
         ])
         .into(),
     )
-}
-
-fn set_active_theme(name: &str) -> Result<(), String> {
-    let theme = globals::with_theme_registry(|registry| {
-        registry
-            .and_then(|registry| registry.get(name).cloned())
-            .ok_or_else(|| format!("unknown theme {name:?}"))
-    })?;
-
-    globals::set_active_theme(theme);
-    globals::update_theme_in_config(name);
-    Ok(())
 }
 
 fn register_theme(
@@ -197,14 +185,15 @@ fn unregister_theme(
     let removed_active =
         globals::with_active_theme(|theme| theme.is_some_and(|theme| theme.name() == name));
     if removed_active {
-        let fallback = globals::with_theme_registry(|registry| {
+        let fallback_name = globals::with_theme_registry(|registry| {
             registry
-                .map(|registry| registry.default_theme().clone())
+                .map(|registry| registry.default_theme().name().to_string())
                 .ok_or_else(|| "theme registry is unavailable".to_string())
         })?;
-        let fallback_name = fallback.name().to_string();
-        globals::set_active_theme(fallback);
-        globals::update_theme_in_config(&fallback_name);
+        globals::activate_theme(
+            &fallback_name,
+            urvim_core::event::ThemeChangeSource::Fallback,
+        )?;
     }
 
     Ok(())

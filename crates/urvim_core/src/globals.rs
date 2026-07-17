@@ -8,7 +8,7 @@ use crate::buffer::{Buffer, BufferId, BufferPool};
 use crate::config::Config;
 use crate::diagnostics::DiagnosticsStore;
 use crate::editor::EditorAction;
-use crate::event::EditorEvent;
+use crate::event::{EditorEvent, ThemeChangeSource};
 use crate::lsp::runtime::LspRuntime;
 use crate::notification::{NotificationLevel, NotificationMessage, NotificationState};
 use crate::register::RegisterStore;
@@ -388,13 +388,49 @@ fn register_store_slot() -> &'static RwLock<RegisterStore> {
     REGISTER_STORE.get_or_init(|| RwLock::new(RegisterStore::new()))
 }
 
-/// Sets the active theme used by renderers.
+/// Sets the active theme used by renderers without changing the committed theme.
 ///
-/// The editor treats the active theme as startup configuration, so this should
-/// be called once after CLI theme selection succeeds.
+/// This is used for the startup baseline and transient theme previews. It does
+/// not update config or emit an editor event.
 pub fn set_active_theme(theme: Theme) {
-    let mut active_theme = active_theme_slot().write().unwrap();
-    *active_theme = Some(theme);
+    #[cfg(test)]
+    {
+        TEST_ACTIVE_THEME.with(|slot| *slot.borrow_mut() = Some(theme));
+    }
+
+    #[cfg(not(test))]
+    {
+        let mut active_theme = active_theme_slot().write().unwrap();
+        *active_theme = Some(theme);
+    }
+}
+
+/// Commits a registered theme and emits [`EditorEvent::ThemeChanged`] on change.
+///
+/// Returns whether the committed theme name changed. A transient preview is
+/// replaced even when `name` already matches the committed config value.
+pub fn activate_theme(name: &str, source: ThemeChangeSource) -> Result<bool, String> {
+    let theme = with_theme_registry(|registry| {
+        registry
+            .and_then(|registry| registry.get(name).cloned())
+            .ok_or_else(|| format!("unknown theme {name:?}"))
+    })?;
+    let previous_theme = with_config(|config| config.theme.clone())
+        .or_else(|| with_active_theme(|theme| theme.map(|theme| theme.name().to_string())))
+        .unwrap_or_else(|| name.to_string());
+
+    set_active_theme(theme);
+    update_theme_in_config(name);
+    if previous_theme == name {
+        return Ok(false);
+    }
+
+    enqueue_editor_event(EditorEvent::ThemeChanged {
+        previous_theme,
+        theme: name.to_string(),
+        source,
+    });
+    Ok(true)
 }
 
 /// Sets the theme registry used by the colorscheme picker.
@@ -1117,15 +1153,47 @@ mod tests {
         set_active_theme(theme);
 
         assert_eq!(
-            active_theme_slot()
-                .read()
-                .unwrap()
-                .as_ref()
-                .map(|theme| theme.name()),
-            Some(expected_name.as_str())
+            with_active_theme(|theme| theme.map(|theme| theme.name().to_string())),
+            Some(expected_name)
+        );
+        TEST_ACTIVE_THEME.with(|slot| slot.borrow_mut().take());
+    }
+
+    #[test]
+    fn committed_theme_activation_ignores_preview_and_emits_only_name_changes() {
+        let registry = ThemeRegistry::load_builtin().expect("builtins should load");
+        let _registry_guard = set_test_theme_registry(registry.clone());
+        let _config_guard = set_test_config(themed_config("Friday Night"));
+        let _theme_guard = set_test_active_theme(
+            registry
+                .get("Nord")
+                .expect("preview theme should exist")
+                .clone(),
+        );
+        clear_editor_events_for_tests();
+
+        assert!(!activate_theme("Friday Night", ThemeChangeSource::Picker).unwrap());
+        assert!(take_editor_event().is_none());
+        assert_eq!(
+            with_active_theme(|theme| theme.map(|theme| theme.name().to_string())),
+            Some("Friday Night".to_string())
         );
 
-        drop(active_theme_slot().write().unwrap().take());
+        assert!(activate_theme("Nord", ThemeChangeSource::Picker).unwrap());
+        assert!(!activate_theme("Nord", ThemeChangeSource::Plugin).unwrap());
+        assert!(matches!(
+            take_editor_event(),
+            Some(EditorEvent::ThemeChanged {
+                previous_theme,
+                theme,
+                source: ThemeChangeSource::Picker,
+            }) if previous_theme == "Friday Night" && theme == "Nord"
+        ));
+        assert!(take_editor_event().is_none());
+        assert_eq!(
+            with_config(|config| config.theme.clone()).as_deref(),
+            Some("Nord")
+        );
     }
 
     #[test]

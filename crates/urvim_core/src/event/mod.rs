@@ -22,6 +22,50 @@ pub use transaction::{
     capture_pane_state, current_event_source, flush_buffer_changes_before, record_buffer_change,
 };
 
+/// Stable origin of a committed theme change.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ThemeChangeSource {
+    /// Selected from the colorscheme picker.
+    Picker,
+    /// Selected through a plugin API.
+    Plugin,
+    /// Selected because the active plugin theme was removed.
+    Fallback,
+}
+
+impl ThemeChangeSource {
+    /// Returns the stable plugin payload value.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Picker => "picker",
+            Self::Plugin => "plugin",
+            Self::Fallback => "fallback",
+        }
+    }
+}
+
+/// Stable reason the editor entered final shutdown.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ShutdownReason {
+    /// An accepted quit command ended the editor.
+    Quit,
+    /// Closing the final pane ended the editor.
+    LastWindowClosed,
+    /// An I/O error ended the editor loop.
+    Error,
+}
+
+impl ShutdownReason {
+    /// Returns the stable plugin payload value.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Quit => "quit",
+            Self::LastWindowClosed => "last_window_closed",
+            Self::Error => "error",
+        }
+    }
+}
+
 /// Zero-based text position whose column is a UTF-8 byte offset in the line.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct EventPosition {
@@ -170,6 +214,24 @@ pub fn io_error_kind_name(kind: io::ErrorKind) -> &'static str {
 pub enum EditorEvent {
     /// Editor startup finished far enough for dynamic hooks to receive events.
     EditorStarted,
+    /// The editor has committed to shutting down.
+    EditorWillShutdown {
+        /// Why final shutdown began.
+        reason: ShutdownReason,
+        /// Modified buffers still loaded when shutdown began.
+        modified_buffer_ids: Vec<BufferId>,
+        /// Whether session persistence is enabled for this run.
+        session_enabled: bool,
+    },
+    /// The committed colorscheme changed.
+    ThemeChanged {
+        /// Previously committed theme name.
+        previous_theme: String,
+        /// Newly committed theme name.
+        theme: String,
+        /// Origin of the committed change.
+        source: ThemeChangeSource,
+    },
     /// A buffer was loaded into the buffer pool.
     BufferLoaded {
         /// Buffer metadata at enqueue time.

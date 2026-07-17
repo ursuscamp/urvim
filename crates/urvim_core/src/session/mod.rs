@@ -45,6 +45,11 @@ pub fn set_enabled(enabled: bool) {
     }
 }
 
+/// Returns whether session persistence is enabled for the current editor run.
+pub fn is_enabled() -> bool {
+    runtime().lock().is_ok_and(|runtime| runtime.enabled)
+}
+
 #[cfg(test)]
 pub fn set_runtime_state_for_test(
     enabled: bool,

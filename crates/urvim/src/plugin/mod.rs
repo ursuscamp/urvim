@@ -4721,6 +4721,10 @@ entry = "plugin.bear"
     #[test]
     fn themes_module_lists_and_sets_active_theme() {
         let _guard = theme_registry_test_lock();
+        globals::set_config(urvim_core::config::Config {
+            theme: "Friday Night".to_string(),
+            ..Default::default()
+        });
         globals::set_theme_registry(
             urvim_theme::ThemeRegistry::load_builtin().expect("builtins should load"),
         );
@@ -4745,11 +4749,13 @@ entry = "plugin.bear"
                 test_timers(),
             ),
         );
+        globals::clear_editor_events_for_tests();
 
         let value = engine
             .eval(
                 r#"
                 let before = urvim.themes.list()
+                urvim.themes.set("Nord")
                 urvim.themes.set("Nord")
                 [before, urvim.themes.list()]
                 "#,
@@ -4771,11 +4777,23 @@ entry = "plugin.bear"
             globals::with_active_theme(|theme| theme.map(|theme| theme.name().to_string())),
             Some("Nord".to_string())
         );
+        assert!(matches!(
+            drain_editor_events().as_slice(),
+            [EditorEvent::ThemeChanged {
+                previous_theme,
+                theme,
+                source: urvim_core::event::ThemeChangeSource::Plugin,
+            }] if previous_theme == "Friday Night" && theme == "Nord"
+        ));
     }
 
     #[test]
     fn themes_module_registers_and_unregisters_owned_theme() {
         let _guard = theme_registry_test_lock();
+        globals::set_config(urvim_core::config::Config {
+            theme: "Friday Night".to_string(),
+            ..Default::default()
+        });
         globals::set_theme_registry(
             urvim_theme::ThemeRegistry::load_builtin().expect("builtins should load"),
         );
@@ -4813,6 +4831,7 @@ entry = "plugin.bear"
                 test_timers(),
             ),
         );
+        globals::clear_editor_events_for_tests();
 
         let value = engine
             .eval(&format!(
@@ -4845,6 +4864,28 @@ entry = "plugin.bear"
             globals::with_active_theme(|theme| theme.map(|theme| theme.name().to_string())),
             Some("Friday Night".to_string())
         );
+        assert_eq!(
+            globals::with_config(|config| config.theme.clone()).as_deref(),
+            Some("Friday Night")
+        );
+        let theme_events = drain_editor_events()
+            .into_iter()
+            .filter(|event| matches!(event, EditorEvent::ThemeChanged { .. }))
+            .collect::<Vec<_>>();
+        assert!(matches!(
+            theme_events.as_slice(),
+            [
+                EditorEvent::ThemeChanged {
+                    source: urvim_core::event::ThemeChangeSource::Plugin,
+                    ..
+                },
+                EditorEvent::ThemeChanged {
+                    previous_theme,
+                    theme,
+                    source: urvim_core::event::ThemeChangeSource::Fallback,
+                }
+            ] if previous_theme == "BearScript Theme" && theme == "Friday Night"
+        ));
 
         let Value::List(values) = value else {
             panic!("theme result should be a list");
@@ -5281,10 +5322,7 @@ entry = "plugin.bear"
     }
 
     fn theme_registry_test_lock() -> std::sync::MutexGuard<'static, ()> {
-        static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
-        LOCK.get_or_init(|| std::sync::Mutex::new(()))
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
+        crate::theme_test_lock()
     }
 
     fn test_theme_source(name: &str) -> String {

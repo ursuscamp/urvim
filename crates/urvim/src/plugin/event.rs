@@ -41,6 +41,40 @@ pub(in crate::plugin) fn event_payload(
                 Value::Map(payload.into()),
             ))
         }
+        EditorEvent::EditorWillShutdown {
+            reason,
+            modified_buffer_ids,
+            session_enabled,
+        } => {
+            let kind = urvim_plugin::PluginEventKind::EditorWillShutdown;
+            payload.insert("reason".to_string(), Value::String(reason.as_str().into()));
+            payload.insert(
+                "modified_buffer_ids".to_string(),
+                Value::List(
+                    modified_buffer_ids
+                        .into_iter()
+                        .map(|id| Value::Number(id.get() as f64))
+                        .collect::<Vec<_>>()
+                        .into(),
+                ),
+            );
+            payload.insert("session_enabled".to_string(), Value::Bool(session_enabled));
+            Some(kind_payload(&mut payload, kind))
+        }
+        EditorEvent::ThemeChanged {
+            previous_theme,
+            theme,
+            source,
+        } => {
+            let kind = urvim_plugin::PluginEventKind::ThemeChanged;
+            payload.insert(
+                "previous_theme".to_string(),
+                Value::String(previous_theme.into()),
+            );
+            payload.insert("theme".to_string(), Value::String(theme.into()));
+            payload.insert("source".to_string(), Value::String(source.as_str().into()));
+            Some(kind_payload(&mut payload, kind))
+        }
         EditorEvent::BufferSaved { snapshot } => Some(buffer_event_payload(
             &mut payload,
             urvim_plugin::PluginEventKind::BufferSaved,
@@ -510,7 +544,9 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
     use urvim_core::buffer::BufferId;
-    use urvim_core::event::{BufferErrorSnapshot, BufferPathChangeSnapshot};
+    use urvim_core::event::{
+        BufferErrorSnapshot, BufferPathChangeSnapshot, ShutdownReason, ThemeChangeSource,
+    };
 
     #[test]
     fn event_constants_include_the_complete_catalog() {
@@ -525,6 +561,51 @@ mod tests {
                 Some(&Value::String(event.as_str().into()))
             );
         }
+    }
+
+    #[test]
+    fn theme_changed_payload_has_stable_fields() {
+        let (kind, Value::Map(payload)) = event_payload(EditorEvent::ThemeChanged {
+            previous_theme: "Friday Night".to_string(),
+            theme: "Nord".to_string(),
+            source: ThemeChangeSource::Plugin,
+        })
+        .expect("theme event should have a payload") else {
+            panic!("theme payload should be a map");
+        };
+
+        assert_eq!(kind, urvim_plugin::PluginEventKind::ThemeChanged);
+        assert_eq!(
+            payload.get("previous_theme"),
+            Some(&Value::String("Friday Night".into()))
+        );
+        assert_eq!(payload.get("theme"), Some(&Value::String("Nord".into())));
+        assert_eq!(payload.get("source"), Some(&Value::String("plugin".into())));
+    }
+
+    #[test]
+    fn shutdown_payload_has_reason_buffers_and_session_state() {
+        let (kind, Value::Map(payload)) = event_payload(EditorEvent::EditorWillShutdown {
+            reason: ShutdownReason::LastWindowClosed,
+            modified_buffer_ids: vec![BufferId::new(3), BufferId::new(8)],
+            session_enabled: true,
+        })
+        .expect("shutdown event should have a payload") else {
+            panic!("shutdown payload should be a map");
+        };
+
+        assert_eq!(kind, urvim_plugin::PluginEventKind::EditorWillShutdown);
+        assert_eq!(
+            payload.get("reason"),
+            Some(&Value::String("last_window_closed".into()))
+        );
+        assert_eq!(
+            payload.get("modified_buffer_ids"),
+            Some(&Value::List(
+                vec![Value::Number(3.0), Value::Number(8.0)].into()
+            ))
+        );
+        assert_eq!(payload.get("session_enabled"), Some(&Value::Bool(true)));
     }
 
     #[test]
