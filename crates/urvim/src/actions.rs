@@ -799,8 +799,7 @@ mod tests {
     }
 
     fn action_test_lock() -> std::sync::MutexGuard<'static, ()> {
-        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-        LOCK.lock().unwrap_or_else(|error| error.into_inner())
+        crate::buffer_pool_test_lock()
     }
 
     #[test]

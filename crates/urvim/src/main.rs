@@ -15,6 +15,15 @@ fn theme_test_lock() -> std::sync::MutexGuard<'static, ()> {
         .unwrap_or_else(|error| error.into_inner())
 }
 
+#[cfg(test)]
+// The core dependency uses a process-global buffer pool in application tests.
+fn buffer_pool_test_lock() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+    LOCK.get_or_init(|| std::sync::Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+}
+
 #[derive(Parser)]
 #[command(name = "urvim")]
 #[command(version = "0.1.0")]

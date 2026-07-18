@@ -121,6 +121,10 @@ mod tests {
         crate::theme_test_lock()
     }
 
+    fn buffer_pool_test_lock() -> std::sync::MutexGuard<'static, ()> {
+        crate::buffer_pool_test_lock()
+    }
+
     fn unique_temp_dir(name: &str) -> std::path::PathBuf {
         let stamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -177,6 +181,7 @@ bg = "bg"
     #[test]
     fn load_startup_plugins_and_themes_loads_plugin_theme() {
         let _guard = theme_registry_test_lock();
+        let _pool_guard = buffer_pool_test_lock();
         let root = unique_temp_dir("startup-plugin-test");
         std::fs::create_dir_all(root.join("themes")).expect("plugin dirs should be created");
         std::fs::write(
@@ -221,6 +226,7 @@ entry = "plugin.bear"
     #[test]
     fn load_startup_plugins_and_themes_can_select_theme_registered_from_init() {
         let _guard = theme_registry_test_lock();
+        let _pool_guard = buffer_pool_test_lock();
         let root = unique_temp_dir("startup-dynamic-theme-test");
         std::fs::create_dir_all(&root).expect("plugin dir should be created");
         let theme_path = root.join("dynamic.toml");
@@ -272,6 +278,7 @@ fn init() {{
     #[test]
     fn load_startup_plugins_and_themes_can_select_theme_created_from_init() {
         let _guard = theme_registry_test_lock();
+        let _pool_guard = buffer_pool_test_lock();
         let root = unique_temp_dir("startup-created-theme-test");
         std::fs::create_dir_all(&root).expect("plugin dir should be created");
         std::fs::write(
@@ -320,6 +327,7 @@ fn init() {{
     #[test]
     fn load_startup_plugins_and_themes_skips_disabled_missing_plugins() {
         let _guard = theme_registry_test_lock();
+        let _pool_guard = buffer_pool_test_lock();
         let config = Config {
             plugins: std::collections::BTreeMap::from([(
                 "missing-demo".to_string(),
