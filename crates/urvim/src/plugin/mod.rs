@@ -6173,6 +6173,34 @@ bg = "bg"
     }
 
     #[test]
+    fn event_log_example_registers_the_complete_event_catalog() {
+        let plugin_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../examples/plugins/event-log");
+        let plugin_config = std::collections::BTreeMap::from([(
+            "event-log".to_string(),
+            urvim_plugin::PluginConfigEntry {
+                enabled: true,
+                path: plugin_root,
+            },
+        )]);
+        let registry = urvim_plugin::PluginRegistry::load_from_config(&plugin_config)
+            .expect("event log registry should load");
+        let plugin = registry
+            .get("event-log")
+            .expect("event log plugin should be present");
+        let mut runtime = BearscriptPluginRuntime::empty(shared_test_layout());
+
+        runtime
+            .load_plugin("event-log", plugin)
+            .expect("event log plugin should load");
+
+        let contributions = runtime.contributions.borrow();
+        for &event in urvim_plugin::PluginEventKind::ALL {
+            assert_eq!(contributions.event_hooks("event-log", event).count(), 1);
+        }
+    }
+
+    #[test]
     fn window_demo_example_loads_and_creates_a_focused_window() {
         let _guard = buffer_pool_lock();
         let plugin_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))

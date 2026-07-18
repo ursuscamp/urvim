@@ -1,0 +1,77 @@
+let log_path = "events.log"
+let log_text = ""
+let pending_text = ""
+let written_text = null
+let write_pending = false
+let logging_enabled = true
+
+fn init() {
+    urvim.register_event_hook(urvim.events.EditorStarted, log_event)
+    urvim.register_event_hook(urvim.events.EditorWillShutdown, log_event)
+    urvim.register_event_hook(urvim.events.ThemeChanged, log_event)
+
+    urvim.register_event_hook(urvim.events.BufferOpened, log_event)
+    urvim.register_event_hook(urvim.events.BufferLoaded, log_event)
+    urvim.register_event_hook(urvim.events.BufferSaved, log_event)
+    urvim.register_event_hook(urvim.events.BufferSaveFailed, log_event)
+    urvim.register_event_hook(urvim.events.BufferOpenFailed, log_event)
+    urvim.register_event_hook(urvim.events.BufferClosed, log_event)
+    urvim.register_event_hook(urvim.events.BufferUnloaded, log_event)
+    urvim.register_event_hook(urvim.events.BufferPathChanged, log_event)
+    urvim.register_event_hook(urvim.events.BufferReloaded, log_event)
+    urvim.register_event_hook(urvim.events.ExternalFileConflict, log_event)
+    urvim.register_event_hook(urvim.events.BufferChanged, log_event)
+    urvim.register_event_hook(urvim.events.BufferModifiedChanged, log_event)
+    urvim.register_event_hook(urvim.events.BufferFiletypeChanged, log_event)
+
+    urvim.register_event_hook(urvim.events.WindowCreated, log_event)
+    urvim.register_event_hook(urvim.events.WindowClosed, log_event)
+    urvim.register_event_hook(urvim.events.WindowFocused, log_event)
+    urvim.register_event_hook(urvim.events.TabOpened, log_event)
+    urvim.register_event_hook(urvim.events.TabClosed, log_event)
+    urvim.register_event_hook(urvim.events.TabActivated, log_event)
+    urvim.register_event_hook(urvim.events.ActiveBufferChanged, log_event)
+    urvim.register_event_hook(urvim.events.ModeChanged, log_event)
+    urvim.register_event_hook(urvim.events.CursorMoved, log_event)
+    urvim.register_event_hook(urvim.events.SelectionChanged, log_event)
+
+    urvim.register_event_hook(urvim.events.LspServerStarted, log_event)
+    urvim.register_event_hook(urvim.events.LspServerStartFailed, log_event)
+    urvim.register_event_hook(urvim.events.LspServerStopped, log_event)
+    urvim.register_event_hook(urvim.events.LspBufferAttached, log_event)
+    urvim.register_event_hook(urvim.events.LspBufferDetached, log_event)
+    urvim.register_event_hook(urvim.events.DiagnosticsChanged, log_event)
+
+    urvim.register_event_hook(urvim.events.CommandExecuted, log_event)
+}
+
+fn log_event(event) {
+    if !logging_enabled {
+        return
+    }
+
+    log_text = log_text + urvim.json.stringify(event) + "\n"
+    flush_log()
+}
+
+fn flush_log() {
+    if !logging_enabled or write_pending or log_text == written_text {
+        return
+    }
+
+    pending_text = log_text
+    write_pending = true
+    urvim.fs.write_file(log_path, pending_text, on_log_written)
+}
+
+fn on_log_written(result) {
+    write_pending = false
+    if !result["ok"] {
+        logging_enabled = false
+        urvim.ui.show_message("event-log could not write {log_path}: " + result["error"], { "level": "warn" })
+        return
+    }
+
+    written_text = pending_text
+    flush_log()
+}
