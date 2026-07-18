@@ -112,9 +112,17 @@ struct BufferChange {
 #[derive(Debug)]
 struct TransactionState {
     source: EventSource,
+    buffer_change_kind: BufferChangeEventKind,
     buffers: BTreeMap<BufferId, BufferChange>,
     panes_before: Option<BTreeMap<PaneId, PaneEventSnapshot>>,
     panes_after: Option<BTreeMap<PaneId, PaneEventSnapshot>>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum BufferChangeEventKind {
+    #[default]
+    Regular,
+    Insert,
 }
 
 thread_local! {
@@ -157,6 +165,18 @@ pub struct EventTransaction {
 impl EventTransaction {
     /// Begins a transaction with an explicit direct source.
     pub fn new(source: EventSource) -> Self {
+        Self::new_with_buffer_change_kind(source, BufferChangeEventKind::Regular)
+    }
+
+    /// Begins a transaction whose text changes belong to an Insert or Replace session.
+    pub fn new_insert(source: EventSource) -> Self {
+        Self::new_with_buffer_change_kind(source, BufferChangeEventKind::Insert)
+    }
+
+    fn new_with_buffer_change_kind(
+        source: EventSource,
+        buffer_change_kind: BufferChangeEventKind,
+    ) -> Self {
         let source_scope = EventSourceScope::new(source.clone());
         let owner = TRANSACTION.with(|slot| {
             let mut slot = slot.borrow_mut();
@@ -165,6 +185,7 @@ impl EventTransaction {
             } else {
                 *slot = Some(TransactionState {
                     source,
+                    buffer_change_kind,
                     buffers: BTreeMap::new(),
                     panes_before: None,
                     panes_after: None,
@@ -193,11 +214,12 @@ impl Drop for EventTransaction {
         if let Some(state) = state {
             let TransactionState {
                 source,
+                buffer_change_kind,
                 buffers,
                 panes_before,
                 panes_after,
             } = state;
-            emit_buffer_changes(source.clone(), buffers);
+            emit_buffer_changes(source.clone(), buffer_change_kind, buffers);
             emit_pane_changes(source, panes_before, panes_after);
         }
     }
@@ -245,11 +267,16 @@ pub fn flush_buffer_changes_before(event: &EditorEvent) {
     let pending = TRANSACTION.with(|slot| {
         let mut slot = slot.borrow_mut();
         let state = slot.as_mut()?;
-        (!state.buffers.is_empty())
-            .then(|| (state.source.clone(), std::mem::take(&mut state.buffers)))
+        (!state.buffers.is_empty()).then(|| {
+            (
+                state.source.clone(),
+                state.buffer_change_kind,
+                std::mem::take(&mut state.buffers),
+            )
+        })
     });
-    if let Some((source, buffers)) = pending {
-        emit_buffer_changes(source, buffers);
+    if let Some((source, buffer_change_kind, buffers)) = pending {
+        emit_buffer_changes(source, buffer_change_kind, buffers);
     }
 }
 
@@ -271,16 +298,26 @@ pub fn capture_pane_state(panes: Vec<PaneEventSnapshot>) {
     });
 }
 
-fn emit_buffer_changes(source: EventSource, buffers: BTreeMap<BufferId, BufferChange>) {
+fn emit_buffer_changes(
+    source: EventSource,
+    buffer_change_kind: BufferChangeEventKind,
+    buffers: BTreeMap<BufferId, BufferChange>,
+) {
     for (buffer_id, change) in buffers {
-        if !text_snapshots_equal(&change.before, &change.after) {
-            let before = change.before.text().to_text();
-            let after = change.after.text().to_text();
-            globals::enqueue_editor_event(EditorEvent::BufferChanged {
-                buffer_id,
-                changed_range: minimal_changed_range(&before, &after),
-                source: source.clone(),
-            });
+        if let Some(changed_range) = buffer_changed_range(&change.before, &change.after) {
+            let event = match buffer_change_kind {
+                BufferChangeEventKind::Regular => EditorEvent::BufferChanged {
+                    buffer_id,
+                    changed_range,
+                    source: source.clone(),
+                },
+                BufferChangeEventKind::Insert => EditorEvent::InsertBufferChanged {
+                    buffer_id,
+                    changed_range,
+                    source: source.clone(),
+                },
+            };
+            globals::enqueue_editor_event(event);
         }
         if change.before_modified != change.after_modified {
             globals::enqueue_editor_event(EditorEvent::BufferModifiedChanged {
@@ -291,6 +328,17 @@ fn emit_buffer_changes(source: EventSource, buffers: BTreeMap<BufferId, BufferCh
             });
         }
     }
+}
+
+/// Returns the minimal changed range between two snapshots, or `None` when their text matches.
+pub fn buffer_changed_range(before: &PieceTable, after: &PieceTable) -> Option<ChangedRange> {
+    if text_snapshots_equal(before, after) {
+        return None;
+    }
+
+    let before = before.text().to_text();
+    let after = after.text().to_text();
+    Some(minimal_changed_range(&before, &after))
 }
 
 fn emit_pane_changes(
@@ -495,6 +543,40 @@ mod tests {
                 modified: true,
                 ..
             }
+        ));
+    }
+
+    #[test]
+    fn insert_transaction_emits_granular_insert_change() {
+        globals::clear_editor_events_for_tests();
+        let transaction = EventTransaction::new_insert(EventSource::user());
+        record_buffer_change(BufferId::new(9), text("a"), text("ab"), true, true);
+        drop(transaction);
+
+        assert!(matches!(
+            take_events().as_slice(),
+            [EditorEvent::InsertBufferChanged {
+                buffer_id,
+                source,
+                ..
+            }] if *buffer_id == BufferId::new(9) && *source == EventSource::user()
+        ));
+    }
+
+    #[test]
+    fn outer_transaction_keeps_its_buffer_change_classification() {
+        globals::clear_editor_events_for_tests();
+        let transaction = EventTransaction::new(EventSource::plugin("demo"));
+        {
+            let _nested = EventTransaction::new_insert(EventSource::user());
+            record_buffer_change(BufferId::new(5), text("a"), text("ab"), true, true);
+        }
+        drop(transaction);
+
+        assert!(matches!(
+            take_events().as_slice(),
+            [EditorEvent::BufferChanged { source, .. }]
+                if *source == EventSource::plugin("demo")
         ));
     }
 

@@ -199,6 +199,7 @@ pub(super) fn run(cli: Cli) -> io::Result<()> {
         Ok(reason) => *reason,
         Err(_) => ShutdownReason::Error,
     };
+    layout.borrow_mut().finish_insert_session();
     let shutdown_event = EditorEvent::EditorWillShutdown {
         reason,
         modified_buffer_ids: globals::with_buffer_pool(|pool| pool.modified_buffer_ids()),

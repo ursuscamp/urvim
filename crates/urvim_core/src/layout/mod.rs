@@ -11,6 +11,7 @@ mod dialogs;
 mod geometry;
 mod hover;
 mod input_box;
+mod insert_session;
 mod keymap;
 mod lsp;
 mod lsp_rename;
@@ -21,6 +22,7 @@ mod session;
 mod tree;
 
 use self::dialogs::Dialogs;
+use self::insert_session::InsertSession;
 use self::keymap::ModalKeySequence;
 use crate::action::ActionResult;
 use crate::background::{JobEvent, JobKind, JobManager};
@@ -134,6 +136,7 @@ pub struct Layout {
     plugin_pane_key_sequence: PluginPaneKeySequence,
     modal_inherited_keymap: InheritedKeymap,
     modal_key_sequence: ModalKeySequence,
+    insert_session: Option<InsertSession>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -242,6 +245,7 @@ impl Layout {
             plugin_pane_key_sequence: PluginPaneKeySequence::None,
             modal_inherited_keymap: InheritedKeymap::new(NormalMode::keymap()),
             modal_key_sequence: ModalKeySequence::None,
+            insert_session: None,
         };
         layout.emit_initial_lifecycle_events();
         layout
@@ -281,6 +285,7 @@ impl Layout {
         let result = transition(self);
         let after = self.event_snapshot();
         self.emit_event_transition(before, after);
+        self.reconcile_insert_session_focus();
         result
     }
 
@@ -764,6 +769,7 @@ impl Layout {
         self.plugin_pane(owner, id)?;
         self.plugin_windows.blur_focused();
         self.focus_pane(id);
+        self.reconcile_insert_session_focus();
         Ok(())
     }
 
@@ -808,12 +814,16 @@ impl Layout {
 
     /// Focuses the next visible editor pane or plugin window in visual order.
     pub fn focus_next_window(&mut self) -> bool {
-        self.cycle_persistent_focus(true)
+        let focused = self.cycle_persistent_focus(true);
+        self.reconcile_insert_session_focus();
+        focused
     }
 
     /// Focuses the previous visible editor pane or plugin window in visual order.
     pub fn focus_previous_window(&mut self) -> bool {
-        self.cycle_persistent_focus(false)
+        let focused = self.cycle_persistent_focus(false);
+        self.reconcile_insert_session_focus();
+        focused
     }
 
     fn cycle_persistent_focus(&mut self, forward: bool) -> bool {
@@ -899,6 +909,13 @@ impl Layout {
         self.plugin_windows.set_content(owner, id, content)
     }
 
+    /// Focuses an owned floating plugin window.
+    pub fn focus_plugin_window(&mut self, owner: &str, id: PluginWindowId) -> Result<(), String> {
+        self.plugin_windows.focus(owner, id)?;
+        self.reconcile_insert_session_focus();
+        Ok(())
+    }
+
     /// Creates a plugin pane beside an existing pane and focuses it.
     pub fn create_plugin_pane(
         &mut self,
@@ -923,6 +940,7 @@ impl Layout {
         self.root = Some(root);
         self.plugin_windows.blur_focused();
         self.focus_pane(new_id);
+        self.reconcile_insert_session_focus();
         crate::session::mark_dirty();
         Ok(new_id)
     }

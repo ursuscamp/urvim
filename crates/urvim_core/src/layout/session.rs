@@ -42,6 +42,7 @@ impl Layout {
                 crate::editor::NormalMode::keymap(),
             ),
             modal_key_sequence: super::ModalKeySequence::None,
+            insert_session: None,
         };
         layout.next_pane_id = layout.max_pane_id().map(|id| id.0 + 1).unwrap_or(0);
         if layout.root.is_some() {

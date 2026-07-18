@@ -97,12 +97,49 @@ fn execute_action_transaction(layout: &mut Layout, action: EditorAction) -> bool
         }
         _ => EventSource::user(),
     };
-    let transaction = EventTransaction::new(source);
+    let insert_session_mode = insert_session_mode_for_action(layout, &action);
+    if let Some(mode) = insert_session_mode {
+        layout.begin_insert_session(mode);
+    }
+    let insert_transaction_before = layout.insert_session_text_snapshot();
+    let transaction = if insert_session_mode.is_some() {
+        EventTransaction::new_insert(source)
+    } else {
+        EventTransaction::new(source)
+    };
     capture_pane_state(layout.event_pane_snapshots());
     let handled = execute_action_intent(layout, action);
+    if handled && let Some(before) = insert_transaction_before.as_ref() {
+        layout.record_insert_session_change(before);
+    }
     capture_pane_state(layout.event_pane_snapshots());
     drop(transaction);
+    if layout.should_exit()
+        || !matches!(
+            layout.active_window_mode_kind(),
+            ModeKind::Insert | ModeKind::Replace
+        )
+    {
+        layout.finish_insert_session();
+    } else {
+        layout.reconcile_insert_session_focus();
+    }
     handled
+}
+
+fn insert_session_mode_for_action(layout: &Layout, action: &EditorAction) -> Option<ModeKind> {
+    let active_mode = layout.active_window_mode_kind();
+    if matches!(active_mode, ModeKind::Insert | ModeKind::Replace) {
+        return Some(active_mode);
+    }
+
+    action
+        .resolve_dot_repeat()
+        .as_ref()
+        .map(|replay| &replay.action)
+        .unwrap_or(action)
+        .to_mode
+        .filter(|mode| matches!(mode, ModeKind::Insert | ModeKind::Replace))
 }
 
 pub(super) fn process_intent_queue(layout: &mut Layout, intents: Vec<Intent>) -> bool {
@@ -126,12 +163,41 @@ pub(super) fn process_intent_queue_with_plugin_runtime(
                 None => execute_action_transaction(layout, action),
             },
             Intent::Command(command) => {
-                execute_command_intent(layout, plugin_runtime.as_deref_mut(), command)
+                execute_command_intent_transaction(layout, plugin_runtime.as_deref_mut(), command)
             }
         };
     }
 
     saw_intent && handled_all
+}
+
+fn execute_command_intent_transaction(
+    layout: &mut Layout,
+    plugin_runtime: Option<&mut BearscriptPluginRuntime>,
+    command: Command,
+) -> bool {
+    if !matches!(command, Command::ApplyCompletion(_))
+        || !matches!(
+            layout.active_window_mode_kind(),
+            ModeKind::Insert | ModeKind::Replace
+        )
+    {
+        return execute_command_intent(layout, plugin_runtime, command);
+    }
+
+    let mode = layout.active_window_mode_kind();
+    layout.begin_insert_session(mode);
+    let transaction_before = layout.insert_session_text_snapshot();
+    let transaction = EventTransaction::new_insert(EventSource::user());
+    capture_pane_state(layout.event_pane_snapshots());
+    let handled = execute_command_intent(layout, plugin_runtime, command);
+    if handled && let Some(before) = transaction_before.as_ref() {
+        layout.record_insert_session_change(before);
+    }
+    capture_pane_state(layout.event_pane_snapshots());
+    drop(transaction);
+    layout.reconcile_insert_session_focus();
+    handled
 }
 
 pub(super) fn execute_command_intent(
@@ -790,7 +856,8 @@ pub(super) fn raw_paste_action_for_mode(mode: ModeKind, text: String) -> Option<
 #[cfg(test)]
 mod tests {
     use super::*;
-    use urvim_core::buffer::Buffer;
+    use urvim_core::buffer::{Buffer, Cursor};
+    use urvim_core::editor::EditorOperation;
     use urvim_core::ui::Command;
     use urvim_core::window_group::WindowGroup;
 
@@ -800,6 +867,227 @@ mod tests {
 
     fn action_test_lock() -> std::sync::MutexGuard<'static, ()> {
         crate::buffer_pool_test_lock()
+    }
+
+    fn execute(layout: &mut Layout, action: EditorAction) {
+        assert!(execute_action_transaction(layout, action));
+    }
+
+    #[test]
+    fn insert_session_separates_granular_and_aggregate_changes() {
+        let _pool_guard = action_test_lock();
+        globals::clear_editor_events_for_tests();
+        let mut layout = Layout::new(WindowGroup::from_buffers(vec![Buffer::new()]));
+        drain_editor_events();
+
+        execute(&mut layout, EditorAction::mode_transition(ModeKind::Insert));
+        execute(
+            &mut layout,
+            EditorAction::insert_text("a".to_string()).with_from_mode(ModeKind::Insert),
+        );
+        execute(
+            &mut layout,
+            EditorAction::insert_text("é".to_string()).with_from_mode(ModeKind::Insert),
+        );
+        execute(
+            &mut layout,
+            EditorAction::mode_transition(ModeKind::Normal).with_from_mode(ModeKind::Insert),
+        );
+
+        let events = drain_editor_events();
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(event, EditorEvent::InsertBufferChanged { .. }))
+                .count(),
+            2
+        );
+        assert!(
+            events
+                .iter()
+                .all(|event| !matches!(event, EditorEvent::BufferChanged { .. }))
+        );
+        assert!(matches!(
+            events.last(),
+            Some(EditorEvent::InsertSessionChanged {
+                mode,
+                changed_range: urvim_core::event::ChangedRange {
+                    start: urvim_core::event::EventPosition { row: 0, col: 0 },
+                    old_end: urvim_core::event::EventPosition { row: 0, col: 0 },
+                    new_end: urvim_core::event::EventPosition { row: 0, col: 3 },
+                },
+                ..
+            }) if mode == "insert"
+        ));
+    }
+
+    #[test]
+    fn structural_change_belongs_to_insert_session() {
+        let _pool_guard = action_test_lock();
+        let registers_before = globals::with_register_store(Clone::clone);
+        globals::clear_editor_events_for_tests();
+        let mut layout = Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("abc")]));
+        drain_editor_events();
+
+        execute(
+            &mut layout,
+            EditorAction::new(EditorOperation::ChangeLine).with_to_mode(ModeKind::Insert),
+        );
+        execute(
+            &mut layout,
+            EditorAction::insert_text("x".to_string()).with_from_mode(ModeKind::Insert),
+        );
+        execute(
+            &mut layout,
+            EditorAction::mode_transition(ModeKind::Normal).with_from_mode(ModeKind::Insert),
+        );
+
+        let events = drain_editor_events();
+        globals::with_register_store_mut(|registers| *registers = registers_before);
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(event, EditorEvent::InsertBufferChanged { .. }))
+                .count(),
+            2
+        );
+        assert!(
+            events
+                .iter()
+                .all(|event| !matches!(event, EditorEvent::BufferChanged { .. }))
+        );
+        assert!(events.iter().any(|event| matches!(
+            event,
+            EditorEvent::InsertSessionChanged { mode, .. } if mode == "insert"
+        )));
+    }
+
+    #[test]
+    fn switching_tabs_finishes_insert_session() {
+        let _pool_guard = action_test_lock();
+        globals::clear_editor_events_for_tests();
+        let mut layout = Layout::new(WindowGroup::from_buffers(vec![
+            Buffer::new(),
+            Buffer::new(),
+        ]));
+        drain_editor_events();
+
+        execute(&mut layout, EditorAction::mode_transition(ModeKind::Insert));
+        execute(
+            &mut layout,
+            EditorAction::insert_text("x".to_string()).with_from_mode(ModeKind::Insert),
+        );
+        assert!(process_intent_queue(
+            &mut layout,
+            vec![Intent::Command(Command::NextTab(1))],
+        ));
+
+        assert!(
+            drain_editor_events()
+                .iter()
+                .any(|event| matches!(event, EditorEvent::InsertSessionChanged { .. }))
+        );
+    }
+
+    #[test]
+    fn replace_mode_uses_insert_session_events() {
+        let _pool_guard = action_test_lock();
+        globals::clear_editor_events_for_tests();
+        let mut layout = Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("abc")]));
+        drain_editor_events();
+
+        execute(
+            &mut layout,
+            EditorAction::mode_transition(ModeKind::Replace),
+        );
+        execute(
+            &mut layout,
+            EditorAction::new(EditorOperation::ReplaceChar('x')).with_from_mode(ModeKind::Replace),
+        );
+        execute(
+            &mut layout,
+            EditorAction::mode_transition(ModeKind::Normal).with_from_mode(ModeKind::Replace),
+        );
+
+        let events = drain_editor_events();
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, EditorEvent::InsertBufferChanged { .. }))
+        );
+        assert!(events.iter().any(|event| matches!(
+            event,
+            EditorEvent::InsertSessionChanged { mode, .. } if mode == "replace"
+        )));
+        assert!(
+            events
+                .iter()
+                .all(|event| !matches!(event, EditorEvent::BufferChanged { .. }))
+        );
+    }
+
+    #[test]
+    fn net_no_op_insert_session_has_no_summary() {
+        let _pool_guard = action_test_lock();
+        globals::clear_editor_events_for_tests();
+        let mut layout = Layout::new(WindowGroup::from_buffers(vec![Buffer::new()]));
+        drain_editor_events();
+
+        execute(&mut layout, EditorAction::mode_transition(ModeKind::Insert));
+        execute(
+            &mut layout,
+            EditorAction::insert_text("x".to_string()).with_from_mode(ModeKind::Insert),
+        );
+        execute(
+            &mut layout,
+            EditorAction::new(EditorOperation::DeleteBackward).with_from_mode(ModeKind::Insert),
+        );
+        execute(
+            &mut layout,
+            EditorAction::mode_transition(ModeKind::Normal).with_from_mode(ModeKind::Insert),
+        );
+
+        assert!(
+            drain_editor_events()
+                .iter()
+                .all(|event| !matches!(event, EditorEvent::InsertSessionChanged { .. }))
+        );
+    }
+
+    #[test]
+    fn external_edit_during_insert_remains_a_regular_buffer_change() {
+        let _pool_guard = action_test_lock();
+        globals::clear_editor_events_for_tests();
+        let mut layout = Layout::new(WindowGroup::from_buffers(vec![Buffer::new()]));
+        drain_editor_events();
+
+        execute(&mut layout, EditorAction::mode_transition(ModeKind::Insert));
+        execute(
+            &mut layout,
+            EditorAction::insert_text("x".to_string()).with_from_mode(ModeKind::Insert),
+        );
+        let transaction = EventTransaction::new(EventSource::plugin("demo"));
+        layout
+            .active_buffer_view()
+            .with_buffer_mut(|buffer| buffer.insert_text(Cursor::new(0, 1), "p"))
+            .expect("active buffer should exist");
+        drop(transaction);
+        execute(
+            &mut layout,
+            EditorAction::mode_transition(ModeKind::Normal).with_from_mode(ModeKind::Insert),
+        );
+
+        let events = drain_editor_events();
+        assert!(events.iter().any(|event| matches!(
+            event,
+            EditorEvent::BufferChanged { source, .. }
+                if *source == EventSource::plugin("demo")
+        )));
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, EditorEvent::InsertSessionChanged { .. }))
+        );
     }
 
     #[test]

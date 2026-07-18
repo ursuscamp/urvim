@@ -115,8 +115,7 @@ pub(in crate::plugin::host::ui) fn windows_module(
                 native_fn("ui.windows.focus", move |window_id: f64| {
                     focus_layout
                         .borrow_mut()
-                        .plugin_windows_mut()
-                        .focus(&focus_plugin, id_from_number(window_id)?)
+                        .focus_plugin_window(&focus_plugin, id_from_number(window_id)?)
                 }),
             ),
             (

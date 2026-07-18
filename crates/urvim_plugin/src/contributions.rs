@@ -76,6 +76,10 @@ pub enum PluginEventKind {
     ExternalFileConflict,
     /// A buffer's contents changed.
     BufferChanged,
+    /// A buffer's contents changed during an insert session.
+    InsertBufferChanged,
+    /// An insert session completed or changed focus.
+    InsertSessionChanged,
     /// A buffer's modified state changed.
     BufferModifiedChanged,
     /// A buffer filetype changed.
@@ -135,6 +139,8 @@ impl PluginEventKind {
         Self::BufferReloaded,
         Self::ExternalFileConflict,
         Self::BufferChanged,
+        Self::InsertBufferChanged,
+        Self::InsertSessionChanged,
         Self::BufferModifiedChanged,
         Self::BufferFiletypeChanged,
         Self::WindowCreated,
@@ -173,6 +179,8 @@ impl PluginEventKind {
             Self::BufferReloaded => "BufferReloaded",
             Self::ExternalFileConflict => "ExternalFileConflict",
             Self::BufferChanged => "BufferChanged",
+            Self::InsertBufferChanged => "InsertBufferChanged",
+            Self::InsertSessionChanged => "InsertSessionChanged",
             Self::BufferModifiedChanged => "BufferModifiedChanged",
             Self::BufferFiletypeChanged => "BufferFiletypeChanged",
             Self::WindowCreated => "WindowCreated",
@@ -221,6 +229,8 @@ impl FromStr for PluginEventKind {
             "BufferReloaded" => Ok(Self::BufferReloaded),
             "ExternalFileConflict" => Ok(Self::ExternalFileConflict),
             "BufferChanged" => Ok(Self::BufferChanged),
+            "InsertBufferChanged" => Ok(Self::InsertBufferChanged),
+            "InsertSessionChanged" => Ok(Self::InsertSessionChanged),
             "BufferModifiedChanged" => Ok(Self::BufferModifiedChanged),
             "BufferFiletypeChanged" => Ok(Self::BufferFiletypeChanged),
             "WindowCreated" => Ok(Self::WindowCreated),

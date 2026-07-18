@@ -18,8 +18,6 @@ This is a list, in no particular order, of things that need to be addressed whic
 # Plugins
 
 - can plugins expose APIs to each other?
-- we need to look for more opportunities for events for plugins to react to
 - ghost text access from plugins
 
 - can we clarify/unify nomenclature of panes, windowgroups, windows across code and plugin
-- can all text entered in insert mode be a single transaction?

@@ -19,7 +19,8 @@ mod transaction;
 
 pub use transaction::{
     EventSource, EventSourceKind, EventSourceScope, EventTransaction, PaneEventSnapshot,
-    capture_pane_state, current_event_source, flush_buffer_changes_before, record_buffer_change,
+    buffer_changed_range, capture_pane_state, current_event_source, flush_buffer_changes_before,
+    record_buffer_change,
 };
 
 /// Stable origin of a committed theme change.
@@ -304,6 +305,28 @@ pub enum EditorEvent {
         /// Direct origin of the transaction.
         source: EventSource,
     },
+    /// A buffer's text changed during one granular Insert or Replace transaction.
+    InsertBufferChanged {
+        /// Changed buffer.
+        buffer_id: BufferId,
+        /// Minimal UTF-8-safe replacement range.
+        changed_range: ChangedRange,
+        /// Direct origin of the transaction.
+        source: EventSource,
+    },
+    /// A buffer changed over one completed Insert or Replace session.
+    InsertSessionChanged {
+        /// Window that owned the session.
+        window_id: PaneId,
+        /// Tab that owned the session.
+        tab_id: TabId,
+        /// Changed buffer.
+        buffer_id: BufferId,
+        /// Mode in which the session began.
+        mode: String,
+        /// Minimal UTF-8-safe replacement range across the session.
+        changed_range: ChangedRange,
+    },
     /// A buffer's modified flag changed during one completed event transaction.
     BufferModifiedChanged {
         /// Changed buffer.
@@ -513,6 +536,7 @@ impl EditorEvent {
         matches!(
             self,
             Self::BufferChanged { .. }
+                | Self::InsertBufferChanged { .. }
                 | Self::BufferModifiedChanged { .. }
                 | Self::ModeChanged { .. }
                 | Self::CursorMoved { .. }
@@ -524,6 +548,7 @@ impl EditorEvent {
     pub fn direct_plugin_source(&self) -> Option<&str> {
         let source = match self {
             Self::BufferChanged { source, .. }
+            | Self::InsertBufferChanged { source, .. }
             | Self::BufferModifiedChanged { source, .. }
             | Self::ModeChanged { source, .. }
             | Self::CursorMoved { source, .. }

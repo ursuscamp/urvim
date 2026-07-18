@@ -131,6 +131,44 @@ pub(in crate::plugin) fn event_payload(
             payload.insert("source".to_string(), source_value(source));
             Some(kind_payload(&mut payload, kind))
         }
+        EditorEvent::InsertBufferChanged {
+            buffer_id,
+            changed_range,
+            source,
+        } => {
+            let kind = urvim_plugin::PluginEventKind::InsertBufferChanged;
+            payload.insert(
+                "buffer_id".to_string(),
+                Value::Number(buffer_id.get() as f64),
+            );
+            payload.insert(
+                "changed_range".to_string(),
+                changed_range_value(changed_range),
+            );
+            payload.insert("source".to_string(), source_value(source));
+            Some(kind_payload(&mut payload, kind))
+        }
+        EditorEvent::InsertSessionChanged {
+            window_id,
+            tab_id,
+            buffer_id,
+            mode,
+            changed_range,
+        } => {
+            let kind = urvim_plugin::PluginEventKind::InsertSessionChanged;
+            payload.insert("mode".to_string(), Value::String(mode.into()));
+            payload.insert(
+                "changed_range".to_string(),
+                changed_range_value(changed_range),
+            );
+            Some(window_tab_event_payload(
+                &mut payload,
+                kind,
+                window_id,
+                tab_id,
+                buffer_id,
+            ))
+        }
         EditorEvent::BufferModifiedChanged {
             buffer_id,
             previous_modified,
@@ -832,6 +870,74 @@ mod tests {
         };
         assert_eq!(start.get("row"), Some(&Value::Number(1.0)));
         assert_eq!(start.get("col"), Some(&Value::Number(2.0)));
+    }
+
+    #[test]
+    fn insert_buffer_changed_payload_uses_byte_range_and_named_source() {
+        let (kind, Value::Map(payload)) = event_payload(EditorEvent::InsertBufferChanged {
+            buffer_id: BufferId::new(10),
+            changed_range: ChangedRange {
+                start: EventPosition { row: 2, col: 1 },
+                old_end: EventPosition { row: 2, col: 1 },
+                new_end: EventPosition { row: 2, col: 4 },
+            },
+            source: EventSource::user(),
+        })
+        .expect("insert buffer change should have a payload") else {
+            panic!("insert buffer change payload should be a map");
+        };
+
+        assert_eq!(kind, urvim_plugin::PluginEventKind::InsertBufferChanged);
+        assert_eq!(payload.get("buffer_id"), Some(&Value::Number(10.0)));
+        let Some(Value::Map(source)) = payload.get("source") else {
+            panic!("source should be a map");
+        };
+        assert_eq!(source.get("kind"), Some(&Value::String("user".into())));
+        let Some(Value::Map(range)) = payload.get("changed_range") else {
+            panic!("changed range should be a map");
+        };
+        let Some(Value::Map(new_end)) = range.get("new_end") else {
+            panic!("range end should be a map");
+        };
+        assert_eq!(new_end.get("row"), Some(&Value::Number(2.0)));
+        assert_eq!(new_end.get("col"), Some(&Value::Number(4.0)));
+    }
+
+    #[test]
+    fn insert_session_changed_payload_has_session_identity_mode_and_range() {
+        let window = urvim_core::window::Window::from_buffer_id(BufferId::new(11));
+        let tab_id = window.tab_id();
+        let (kind, Value::Map(payload)) = event_payload(EditorEvent::InsertSessionChanged {
+            window_id: urvim_core::layout::PaneId(6),
+            tab_id,
+            buffer_id: BufferId::new(11),
+            mode: "replace".to_string(),
+            changed_range: ChangedRange {
+                start: EventPosition { row: 3, col: 2 },
+                old_end: EventPosition { row: 3, col: 5 },
+                new_end: EventPosition { row: 4, col: 1 },
+            },
+        })
+        .expect("insert session change should have a payload") else {
+            panic!("insert session change payload should be a map");
+        };
+
+        assert_eq!(kind, urvim_plugin::PluginEventKind::InsertSessionChanged);
+        assert_eq!(payload.get("window_id"), Some(&Value::Number(6.0)));
+        assert_eq!(
+            payload.get("tab_id"),
+            Some(&Value::Number(tab_id.get() as f64))
+        );
+        assert_eq!(payload.get("buffer_id"), Some(&Value::Number(11.0)));
+        assert_eq!(payload.get("mode"), Some(&Value::String("replace".into())));
+        let Some(Value::Map(range)) = payload.get("changed_range") else {
+            panic!("changed range should be a map");
+        };
+        let Some(Value::Map(old_end)) = range.get("old_end") else {
+            panic!("old range end should be a map");
+        };
+        assert_eq!(old_end.get("row"), Some(&Value::Number(3.0)));
+        assert_eq!(old_end.get("col"), Some(&Value::Number(5.0)));
     }
 
     #[test]

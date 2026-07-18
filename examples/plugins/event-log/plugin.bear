@@ -21,6 +21,8 @@ fn init() {
     urvim.register_event_hook(urvim.events.BufferReloaded, log_event)
     urvim.register_event_hook(urvim.events.ExternalFileConflict, log_event)
     urvim.register_event_hook(urvim.events.BufferChanged, log_event)
+    urvim.register_event_hook(urvim.events.InsertBufferChanged, log_event)
+    urvim.register_event_hook(urvim.events.InsertSessionChanged, log_event)
     urvim.register_event_hook(urvim.events.BufferModifiedChanged, log_event)
     urvim.register_event_hook(urvim.events.BufferFiletypeChanged, log_event)
 
