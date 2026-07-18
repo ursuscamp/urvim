@@ -23,7 +23,7 @@ pub enum SessionNode {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SessionPane {
     pub pane_id: usize,
-    pub window_group: SessionWindowGroup,
+    pub editor_pane: SessionEditorPane,
 }
 
 /// Serialized split node.
@@ -43,16 +43,16 @@ pub struct SessionSplitSize {
     pub second_weight: u16,
 }
 
-/// Serialized window-group state.
+/// Serialized editor-pane state.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct SessionWindowGroup {
+pub struct SessionEditorPane {
     pub active_tab: usize,
-    pub tabs: Vec<SessionWindow>,
+    pub tabs: Vec<SessionEditorTab>,
 }
 
-/// Serialized per-window state.
+/// Serialized per-tab state.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct SessionWindow {
+pub struct SessionEditorTab {
     pub path: String,
     pub cursor: SessionCursor,
     pub scroll_offset: SessionPosition,

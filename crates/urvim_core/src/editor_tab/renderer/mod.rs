@@ -22,15 +22,15 @@ pub struct BufferRenderState {
     pub scroll_to_cursor: bool,
     /// Whether the active editor line should be highlighted.
     pub active_line_enabled: bool,
-    /// Whether the window is in normal mode.
+    /// Whether the tab is in normal mode.
     pub is_normal_mode: bool,
     /// Whether syntax warmup should synchronously fill missing spans before rendering.
     pub syntax_warmup: bool,
 }
 
-/// Theme and style values used while rendering a window frame.
+/// Theme and style values used while rendering a tab frame.
 #[derive(Debug, Clone, Copy)]
-pub struct WindowRenderTheme {
+pub struct EditorTabRenderTheme {
     /// Style used for the gutter background and text.
     pub gutter_style: Style,
     /// Default background style for the content area.
@@ -49,14 +49,14 @@ pub struct WindowRenderTheme {
 
 /// Renders a buffer view into the supplied screen region.
 ///
-/// This contains the shared window rendering pipeline so higher-level callers
+/// This contains the shared tab rendering pipeline so higher-level callers
 /// can reuse the same gutter, wrapping, cursor, and active-line behavior.
 pub fn render_buffer_view(
     screen: &mut Screen,
     origin: Position,
     buffer_view: &mut BufferView,
     render_data: &mut RenderData,
-    theme: WindowRenderTheme,
+    theme: EditorTabRenderTheme,
     state: &mut BufferRenderState,
 ) {
     buffer_view.prune_yank_flash(std::time::Instant::now());

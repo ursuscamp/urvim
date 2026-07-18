@@ -1,7 +1,7 @@
 //! Session-local jumplist state.
 //!
 //! This module provides the shared jumplist history used by the active tab
-//! group and the windows it manages.
+//! editor pane and the tabs it manages.
 
 use crate::buffer::{BufferId, Cursor};
 

@@ -14,10 +14,7 @@ impl FoldRange {
 }
 
 impl BufferView {
-    pub(in crate::window) fn folded_range_starting_at(
-        &self,
-        start_line: usize,
-    ) -> Option<FoldRange> {
+    pub fn folded_range_starting_at(&self, start_line: usize) -> Option<FoldRange> {
         if !self.folded_lines.contains(&start_line) {
             return None;
         }
@@ -26,7 +23,7 @@ impl BufferView {
             .filter(|range| range.start_line == start_line)
     }
 
-    pub(in crate::window) fn folded_render_ranges(&self) -> Vec<FoldRange> {
+    pub fn folded_render_ranges(&self) -> Vec<FoldRange> {
         self.folded_lines
             .iter()
             .copied()
@@ -34,11 +31,11 @@ impl BufferView {
             .collect()
     }
 
-    pub(in crate::window) fn is_line_hidden_by_fold(&self, line: usize) -> bool {
+    pub fn is_line_hidden_by_fold(&self, line: usize) -> bool {
         self.folded_range_containing_hidden_line(line).is_some()
     }
 
-    pub(in crate::window) fn next_visible_line_from_hidden(&self, line: usize) -> usize {
+    pub fn next_visible_line_from_hidden(&self, line: usize) -> usize {
         self.folded_range_containing_hidden_line(line)
             .map(|range| range.end_line.saturating_add(1))
             .unwrap_or(line)
@@ -52,7 +49,7 @@ impl BufferView {
             .find(|range| range.contains_hidden_line(line))
     }
 
-    pub(in crate::window) fn open_folds_containing_hidden_line(&mut self, line: usize) -> bool {
+    pub fn open_folds_containing_hidden_line(&mut self, line: usize) -> bool {
         let mut changed = false;
         loop {
             let start_line = self.folded_lines.iter().copied().find(|start_line| {
@@ -73,14 +70,11 @@ impl BufferView {
         changed
     }
 
-    pub(in crate::window) fn folded_range_at_visible_start(
-        &self,
-        line: usize,
-    ) -> Option<FoldRange> {
+    pub fn folded_range_at_visible_start(&self, line: usize) -> Option<FoldRange> {
         self.folded_range_starting_at(line)
     }
 
-    pub(in crate::window) fn open_fold_starting_at(&mut self, line: usize) -> bool {
+    pub fn open_fold_starting_at(&mut self, line: usize) -> bool {
         let changed = self.folded_lines.remove(&line);
         if changed {
             crate::session::mark_dirty();
@@ -88,10 +82,7 @@ impl BufferView {
         changed
     }
 
-    pub(in crate::window) fn folded_range_before_visible_line(
-        &self,
-        line: usize,
-    ) -> Option<FoldRange> {
+    pub fn folded_range_before_visible_line(&self, line: usize) -> Option<FoldRange> {
         self.folded_lines
             .iter()
             .copied()
@@ -99,7 +90,7 @@ impl BufferView {
             .find(|range| range.end_line.saturating_add(1) == line)
     }
 
-    pub(in crate::window) fn next_visible_line_after(&self, line: usize) -> usize {
+    pub fn next_visible_line_after(&self, line: usize) -> usize {
         if let Some(range) = self.folded_range_starting_at(line) {
             range.end_line.saturating_add(1)
         } else {
@@ -107,7 +98,7 @@ impl BufferView {
         }
     }
 
-    pub(in crate::window) fn previous_visible_line_before(&self, line: usize) -> usize {
+    pub fn previous_visible_line_before(&self, line: usize) -> usize {
         if line == 0 {
             return 0;
         }
@@ -118,7 +109,7 @@ impl BufferView {
             .unwrap_or(candidate)
     }
 
-    pub(in crate::window) fn visible_row_for_line(&self, line: usize) -> usize {
+    pub fn visible_row_for_line(&self, line: usize) -> usize {
         let mut row = 0usize;
         let mut current = 0usize;
         while current < line {
@@ -128,7 +119,7 @@ impl BufferView {
         row
     }
 
-    pub(in crate::window) fn line_for_visible_row(&self, row: usize) -> usize {
+    pub fn line_for_visible_row(&self, row: usize) -> usize {
         let line_count = self.line_count();
         if line_count == 0 {
             return 0;
@@ -143,7 +134,7 @@ impl BufferView {
         line
     }
 
-    pub(in crate::window) fn visible_line_count(&self) -> usize {
+    pub fn visible_line_count(&self) -> usize {
         let line_count = self.line_count();
         let mut visible = 0usize;
         let mut line = 0usize;
@@ -154,7 +145,7 @@ impl BufferView {
         visible.max(1)
     }
 
-    pub(in crate::window) fn toggle_fold_at_cursor(&mut self) -> bool {
+    pub fn toggle_fold_at_cursor(&mut self) -> bool {
         let Some(range) = self.fold_range_for_cursor() else {
             return false;
         };
@@ -166,7 +157,7 @@ impl BufferView {
         true
     }
 
-    pub(in crate::window) fn open_fold_at_cursor(&mut self) -> bool {
+    pub fn open_fold_at_cursor(&mut self) -> bool {
         let Some(range) = self.fold_range_for_cursor() else {
             return false;
         };
@@ -178,7 +169,7 @@ impl BufferView {
         removed
     }
 
-    pub(in crate::window) fn close_fold_at_cursor(&mut self) -> bool {
+    pub fn close_fold_at_cursor(&mut self) -> bool {
         let Some(range) = self.fold_range_for_cursor() else {
             return false;
         };

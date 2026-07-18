@@ -1,4 +1,4 @@
-//! Generic bordered floating window helpers.
+//! Generic bordered overlay frame helpers.
 //!
 //! This module centralizes bordered floating frame geometry and rendering so
 //! multiple overlays (notification banner, command line, etc.) can share one
@@ -6,27 +6,27 @@
 
 use crate::icon;
 use crate::screen::Screen;
+use crate::ui::geometry::{Position, Size};
 use crate::ui::text_width::{ClipSide, clip_first_line};
-use crate::window::{Position, Size};
 use unicode_width::UnicodeWidthStr;
 use urvim_terminal::Style;
 
-/// Placement anchor for floating windows.
+/// Placement anchor for overlays.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FloatingAnchor {
-    /// Place the floating window centered inside the bounds.
+pub enum OverlayAnchor {
+    /// Place the overlay centered inside the bounds.
     Center,
-    /// Place the floating window near the top, centered horizontally.
+    /// Place the overlay near the top, centered horizontally.
     TopCenter,
-    /// Place the floating window at the top-right corner inside the bounds.
+    /// Place the overlay at the top-right corner inside the bounds.
     TopRight,
-    /// Place the floating window at the bottom-right corner inside the bounds.
+    /// Place the overlay at the bottom-right corner inside the bounds.
     BottomRight,
 }
 
 /// Spacing applied between a floating frame and the bounds used to place it.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct FloatingMargins {
+pub struct OverlayMargins {
     /// Spacing from the top edge.
     pub top: u16,
     /// Spacing from the right edge.
@@ -39,13 +39,13 @@ pub struct FloatingMargins {
 
 /// Placement mode for a floating frame.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FloatingPlacement {
+pub enum OverlayPlacement {
     /// Resolve the frame from an anchor after applying edge margins.
     Anchored {
         /// Anchor used to resolve the frame.
-        anchor: FloatingAnchor,
+        anchor: OverlayAnchor,
         /// Margins applied before resolving the anchor.
-        margins: FloatingMargins,
+        margins: OverlayMargins,
     },
     /// Place the frame at fixed coordinates relative to the bounds.
     Fixed {
@@ -61,9 +61,9 @@ pub enum FloatingPlacement {
     },
 }
 
-/// Resolved geometry for a bordered floating window.
+/// Resolved geometry for a bordered overlay.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct FloatingWindowFrame {
+pub struct OverlayFrame {
     /// Outer frame origin including border.
     pub origin: Position,
     /// Outer frame size including border.
@@ -74,24 +74,20 @@ pub struct FloatingWindowFrame {
     pub content_size: Size,
 }
 
-/// Label rendered into a floating window frame border.
+/// Label rendered into an overlay frame border.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct FloatingWindowFrameLabel<'a> {
+pub struct OverlayFrameLabel<'a> {
     /// Text to render inside the border.
     pub text: &'a str,
     /// Frame side where the label should be rendered.
-    pub side: FloatingWindowFrameLabelSide,
+    pub side: OverlayFrameLabelSide,
     /// Label alignment within the non-corner border span.
-    pub align: FloatingWindowFrameLabelAlign,
+    pub align: OverlayFrameLabelAlign,
 }
 
-impl<'a> FloatingWindowFrameLabel<'a> {
+impl<'a> OverlayFrameLabel<'a> {
     /// Creates a frame label.
-    pub fn new(
-        text: &'a str,
-        side: FloatingWindowFrameLabelSide,
-        align: FloatingWindowFrameLabelAlign,
-    ) -> Self {
+    pub fn new(text: &'a str, side: OverlayFrameLabelSide, align: OverlayFrameLabelAlign) -> Self {
         Self { text, side, align }
     }
 
@@ -99,15 +95,15 @@ impl<'a> FloatingWindowFrameLabel<'a> {
     pub fn top_center(text: &'a str) -> Self {
         Self::new(
             text,
-            FloatingWindowFrameLabelSide::Top,
-            FloatingWindowFrameLabelAlign::Center,
+            OverlayFrameLabelSide::Top,
+            OverlayFrameLabelAlign::Center,
         )
     }
 }
 
-/// Side of a floating window frame where a label is rendered.
+/// Side of an overlay frame where a label is rendered.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FloatingWindowFrameLabelSide {
+pub enum OverlayFrameLabelSide {
     /// Render the label on the top border.
     Top,
     /// Render the label on the bottom border.
@@ -116,7 +112,7 @@ pub enum FloatingWindowFrameLabelSide {
 
 /// Alignment for a frame label within the non-corner border span.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FloatingWindowFrameLabelAlign {
+pub enum OverlayFrameLabelAlign {
     /// Align the label to the left edge of the border span.
     Left,
     /// Center the label in the border span.
@@ -125,14 +121,14 @@ pub enum FloatingWindowFrameLabelAlign {
     Right,
 }
 
-impl FloatingWindowFrame {
+impl OverlayFrame {
     /// Resolves a bordered floating frame from content dimensions and bounds.
     pub fn resolve(
         bounds_origin: Position,
         bounds_size: Size,
         content_rows: u16,
         content_cols: u16,
-        anchor: FloatingAnchor,
+        anchor: OverlayAnchor,
     ) -> Option<Self> {
         if bounds_size.rows < 3 || bounds_size.cols < 3 || content_rows == 0 || content_cols == 0 {
             return None;
@@ -145,7 +141,7 @@ impl FloatingWindowFrame {
         }
 
         let origin = match anchor {
-            FloatingAnchor::Center => Position::new(
+            OverlayAnchor::Center => Position::new(
                 bounds_origin
                     .row
                     .saturating_add(bounds_size.rows.saturating_sub(frame_rows) / 2),
@@ -153,19 +149,19 @@ impl FloatingWindowFrame {
                     .col
                     .saturating_add(bounds_size.cols.saturating_sub(frame_cols) / 2),
             ),
-            FloatingAnchor::TopCenter => Position::new(
+            OverlayAnchor::TopCenter => Position::new(
                 bounds_origin.row,
                 bounds_origin
                     .col
                     .saturating_add(bounds_size.cols.saturating_sub(frame_cols) / 2),
             ),
-            FloatingAnchor::TopRight => Position::new(
+            OverlayAnchor::TopRight => Position::new(
                 bounds_origin.row,
                 bounds_origin
                     .col
                     .saturating_add(bounds_size.cols.saturating_sub(frame_cols)),
             ),
-            FloatingAnchor::BottomRight => Position::new(
+            OverlayAnchor::BottomRight => Position::new(
                 bounds_origin
                     .row
                     .saturating_add(bounds_size.rows.saturating_sub(frame_rows)),
@@ -189,11 +185,11 @@ impl FloatingWindowFrame {
         bounds_size: Size,
         content_rows: u16,
         content_cols: u16,
-        placement: FloatingPlacement,
+        placement: OverlayPlacement,
     ) -> Option<Self> {
         match placement {
-            FloatingPlacement::Anchored { anchor, margins } => {
-                let top = if matches!(anchor, FloatingAnchor::TopCenter) {
+            OverlayPlacement::Anchored { anchor, margins } => {
+                let top = if matches!(anchor, OverlayAnchor::TopCenter) {
                     let frame_rows = content_rows.saturating_add(2).min(bounds_size.rows);
                     margins.top.min(
                         bounds_size
@@ -218,7 +214,7 @@ impl FloatingWindowFrame {
                 );
                 Self::resolve(inset_origin, inset_size, content_rows, content_cols, anchor)
             }
-            FloatingPlacement::Fixed { row, col } => {
+            OverlayPlacement::Fixed { row, col } => {
                 let frame_origin = Position::new(
                     bounds_origin.row.checked_add(row)?,
                     bounds_origin.col.checked_add(col)?,
@@ -231,7 +227,7 @@ impl FloatingWindowFrame {
                     content_cols,
                 )
             }
-            FloatingPlacement::NearCursor { cursor } => Self::resolve_near_cursor(
+            OverlayPlacement::NearCursor { cursor } => Self::resolve_near_cursor(
                 bounds_origin,
                 bounds_size,
                 cursor,
@@ -290,7 +286,7 @@ impl FloatingWindowFrame {
             bounds_size,
             content_rows,
             content_cols,
-            FloatingAnchor::Center,
+            OverlayAnchor::Center,
         )?;
         let max_row = bounds_origin
             .row
@@ -329,7 +325,7 @@ impl FloatingWindowFrame {
         screen: &mut Screen,
         border_style: Style,
         body_style: Style,
-        label: Option<FloatingWindowFrameLabel<'_>>,
+        label: Option<OverlayFrameLabel<'_>>,
     ) {
         if self.size.rows < 3 || self.size.cols < 3 {
             return;
@@ -372,12 +368,7 @@ impl FloatingWindowFrame {
         }
     }
 
-    fn render_label(
-        self,
-        screen: &mut Screen,
-        border_style: Style,
-        label: FloatingWindowFrameLabel<'_>,
-    ) {
+    fn render_label(self, screen: &mut Screen, border_style: Style, label: OverlayFrameLabel<'_>) {
         let Some((row, col, text)) = self.resolve_label(label) else {
             return;
         };
@@ -385,7 +376,7 @@ impl FloatingWindowFrame {
         screen.write_str(row, col, border_style, text.as_str());
     }
 
-    fn resolve_label(self, label: FloatingWindowFrameLabel<'_>) -> Option<(u16, u16, String)> {
+    fn resolve_label(self, label: OverlayFrameLabel<'_>) -> Option<(u16, u16, String)> {
         let available_cols = self.size.cols.checked_sub(2)? as usize;
         if available_cols == 0 {
             return None;
@@ -398,13 +389,13 @@ impl FloatingWindowFrame {
         }
 
         let offset = match label.align {
-            FloatingWindowFrameLabelAlign::Left => 0,
-            FloatingWindowFrameLabelAlign::Center => available_cols.saturating_sub(label_cols) / 2,
-            FloatingWindowFrameLabelAlign::Right => available_cols.saturating_sub(label_cols),
+            OverlayFrameLabelAlign::Left => 0,
+            OverlayFrameLabelAlign::Center => available_cols.saturating_sub(label_cols) / 2,
+            OverlayFrameLabelAlign::Right => available_cols.saturating_sub(label_cols),
         } as u16;
         let row = match label.side {
-            FloatingWindowFrameLabelSide::Top => self.origin.row,
-            FloatingWindowFrameLabelSide::Bottom => self.origin.row + self.size.rows - 1,
+            OverlayFrameLabelSide::Top => self.origin.row,
+            OverlayFrameLabelSide::Bottom => self.origin.row + self.size.rows - 1,
         };
         let col = self.origin.col + 1 + offset;
 
@@ -434,12 +425,12 @@ mod tests {
 
     #[test]
     fn resolve_centered_frame() {
-        let frame = FloatingWindowFrame::resolve(
+        let frame = OverlayFrame::resolve(
             Position::new(0, 0),
             Size::new(10, 20),
             1,
             6,
-            FloatingAnchor::Center,
+            OverlayAnchor::Center,
         )
         .expect("frame should resolve");
 
@@ -451,12 +442,12 @@ mod tests {
 
     #[test]
     fn resolve_top_right_frame() {
-        let frame = FloatingWindowFrame::resolve(
+        let frame = OverlayFrame::resolve(
             Position::new(2, 3),
             Size::new(8, 12),
             1,
             4,
-            FloatingAnchor::TopRight,
+            OverlayAnchor::TopRight,
         )
         .expect("frame should resolve");
 
@@ -466,12 +457,12 @@ mod tests {
 
     #[test]
     fn resolve_bottom_right_frame() {
-        let frame = FloatingWindowFrame::resolve(
+        let frame = OverlayFrame::resolve(
             Position::new(2, 3),
             Size::new(8, 12),
             1,
             4,
-            FloatingAnchor::BottomRight,
+            OverlayAnchor::BottomRight,
         )
         .expect("frame should resolve");
 
@@ -481,16 +472,16 @@ mod tests {
 
     #[test]
     fn resolve_top_center_frame() {
-        let frame = FloatingWindowFrame::resolve_placement(
+        let frame = OverlayFrame::resolve_placement(
             Position::new(2, 3),
             Size::new(20, 40),
             6,
             10,
-            FloatingPlacement::Anchored {
-                anchor: FloatingAnchor::TopCenter,
-                margins: FloatingMargins {
+            OverlayPlacement::Anchored {
+                anchor: OverlayAnchor::TopCenter,
+                margins: OverlayMargins {
                     top: 5,
-                    ..FloatingMargins::default()
+                    ..OverlayMargins::default()
                 },
             },
         )
@@ -502,16 +493,16 @@ mod tests {
 
     #[test]
     fn resolve_top_center_clamps_margin_to_bounds() {
-        let frame = FloatingWindowFrame::resolve_placement(
+        let frame = OverlayFrame::resolve_placement(
             Position::new(2, 3),
             Size::new(10, 40),
             6,
             10,
-            FloatingPlacement::Anchored {
-                anchor: FloatingAnchor::TopCenter,
-                margins: FloatingMargins {
+            OverlayPlacement::Anchored {
+                anchor: OverlayAnchor::TopCenter,
+                margins: OverlayMargins {
                     top: 20,
-                    ..FloatingMargins::default()
+                    ..OverlayMargins::default()
                 },
             },
         )
@@ -523,12 +514,12 @@ mod tests {
 
     #[test]
     fn resolve_near_cursor_prefers_below_when_space_allows() {
-        let frame = FloatingWindowFrame::resolve_placement(
+        let frame = OverlayFrame::resolve_placement(
             Position::new(0, 0),
             Size::new(20, 40),
             4,
             10,
-            FloatingPlacement::NearCursor {
+            OverlayPlacement::NearCursor {
                 cursor: Position::new(4, 10),
             },
         )
@@ -539,12 +530,12 @@ mod tests {
 
     #[test]
     fn resolve_near_cursor_falls_back_above_when_needed() {
-        let frame = FloatingWindowFrame::resolve_placement(
+        let frame = OverlayFrame::resolve_placement(
             Position::new(0, 0),
             Size::new(8, 40),
             4,
             10,
-            FloatingPlacement::NearCursor {
+            OverlayPlacement::NearCursor {
                 cursor: Position::new(6, 10),
             },
         )
@@ -574,7 +565,7 @@ mod tests {
     #[test]
     fn label_resolves_top_center_inside_corners() {
         let frame = frame_at_origin(Size::new(3, 12));
-        let label = FloatingWindowFrameLabel::top_center("Name");
+        let label = OverlayFrameLabel::top_center("Name");
 
         assert_eq!(frame.resolve_label(label), Some((0, 4, "Name".to_string())));
     }
@@ -582,10 +573,10 @@ mod tests {
     #[test]
     fn label_resolves_bottom_left_inside_corners() {
         let frame = frame_at_origin(Size::new(5, 12));
-        let label = FloatingWindowFrameLabel::new(
+        let label = OverlayFrameLabel::new(
             "Name",
-            FloatingWindowFrameLabelSide::Bottom,
-            FloatingWindowFrameLabelAlign::Left,
+            OverlayFrameLabelSide::Bottom,
+            OverlayFrameLabelAlign::Left,
         );
 
         assert_eq!(frame.resolve_label(label), Some((4, 1, "Name".to_string())));
@@ -594,10 +585,10 @@ mod tests {
     #[test]
     fn label_resolves_top_right_inside_corners() {
         let frame = frame_at_origin(Size::new(3, 12));
-        let label = FloatingWindowFrameLabel::new(
+        let label = OverlayFrameLabel::new(
             "Name",
-            FloatingWindowFrameLabelSide::Top,
-            FloatingWindowFrameLabelAlign::Right,
+            OverlayFrameLabelSide::Top,
+            OverlayFrameLabelAlign::Right,
         );
 
         assert_eq!(frame.resolve_label(label), Some((0, 7, "Name".to_string())));
@@ -606,7 +597,7 @@ mod tests {
     #[test]
     fn label_clips_to_non_corner_span() {
         let frame = frame_at_origin(Size::new(3, 6));
-        let label = FloatingWindowFrameLabel::top_center("abcdef");
+        let label = OverlayFrameLabel::top_center("abcdef");
 
         assert_eq!(frame.resolve_label(label), Some((0, 1, "abcd".to_string())));
     }
@@ -614,7 +605,7 @@ mod tests {
     #[test]
     fn label_clips_wide_graphemes_without_exceeding_span() {
         let frame = frame_at_origin(Size::new(3, 5));
-        let label = FloatingWindowFrameLabel::top_center("ab🙂");
+        let label = OverlayFrameLabel::top_center("ab🙂");
 
         assert_eq!(frame.resolve_label(label), Some((0, 1, "ab".to_string())));
     }
@@ -622,13 +613,13 @@ mod tests {
     #[test]
     fn empty_label_does_not_resolve() {
         let frame = frame_at_origin(Size::new(3, 6));
-        let label = FloatingWindowFrameLabel::top_center("");
+        let label = OverlayFrameLabel::top_center("");
 
         assert_eq!(frame.resolve_label(label), None);
     }
 
-    fn frame_at_origin(size: Size) -> FloatingWindowFrame {
-        FloatingWindowFrame {
+    fn frame_at_origin(size: Size) -> OverlayFrame {
+        OverlayFrame {
             origin: Position::new(0, 0),
             size,
             content_origin: Position::new(1, 1),

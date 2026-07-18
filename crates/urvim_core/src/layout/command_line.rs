@@ -19,7 +19,7 @@ pub struct CommandLineState {
     history: Vec<String>,
     history_index: Option<usize>,
     history_draft: String,
-    cursor: Option<crate::window::Position>,
+    cursor: Option<crate::ui::geometry::Position>,
 }
 
 impl CommandLineState {
@@ -94,11 +94,11 @@ impl CommandLineState {
         self.history_draft.clear();
     }
 
-    pub fn cursor(&self) -> Option<crate::window::Position> {
+    pub fn cursor(&self) -> Option<crate::ui::geometry::Position> {
         self.cursor
     }
 
-    pub fn set_cursor(&mut self, cursor: Option<crate::window::Position>) {
+    pub fn set_cursor(&mut self, cursor: Option<crate::ui::geometry::Position>) {
         self.cursor = cursor;
     }
 }
@@ -338,7 +338,7 @@ impl Layout {
     fn execute_edit_path(&mut self, path: &str) -> Result<(), String> {
         let buffer_id = crate::globals::with_buffer_pool(|pool| pool.open_buffer(path))
             .map_err(|error| format!("Failed to open {path}: {error}"))?;
-        self.active_window_group_mut()
+        self.active_editor_pane_mut()
             .activate_or_open_buffer(buffer_id);
         Ok(())
     }
@@ -371,8 +371,8 @@ impl Layout {
             return Ok(());
         };
 
-        self.active_window_group_mut().record_cursor_position();
-        self.active_window_group_mut()
+        self.active_editor_pane_mut().record_cursor_position();
+        self.active_editor_pane_mut()
             .activate_or_open_buffer(target_buffer_id);
         self.active_buffer_view_mut()
             .set_cursor_synced(target_cursor);
@@ -443,8 +443,8 @@ impl Layout {
         };
 
         {
-            let active_window = self.active_window_group_mut().active_window_mut();
-            active_window.reveal_cursor(target_cursor);
+            let active_tab = self.active_editor_pane_mut().active_tab_mut();
+            active_tab.reveal_cursor(target_cursor);
         }
 
         let diagnostics = crate::globals::with_diagnostics_store(|store| {
@@ -606,8 +606,8 @@ fn tokenize_command_line(input: &str) -> Result<Vec<String>, ParseCommandError> 
 mod tests {
     use super::*;
     use crate::buffer::Buffer;
+    use crate::editor_pane::EditorPane;
     use crate::layout::Layout;
-    use crate::window_group::WindowGroup;
     use urvim_terminal::{KeyCode, Modifiers};
 
     #[test]
@@ -750,7 +750,7 @@ mod tests {
 
     #[test]
     fn enter_on_unknown_command_emits_error_and_closes_overlay() {
-        let mut layout = Layout::new(WindowGroup::from_buffers(vec![Buffer::new()]));
+        let mut layout = Layout::new(EditorPane::from_buffers(vec![Buffer::new()]));
         layout.open_command_line();
         layout
             .dialogs
@@ -772,7 +772,7 @@ mod tests {
 
     #[test]
     fn ctrl_p_and_ctrl_n_navigate_history() {
-        let mut layout = Layout::new(WindowGroup::from_buffers(vec![Buffer::new()]));
+        let mut layout = Layout::new(EditorPane::from_buffers(vec![Buffer::new()]));
         layout.open_command_line();
         layout
             .dialogs

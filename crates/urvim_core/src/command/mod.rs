@@ -628,14 +628,14 @@ mod tests {
     }
 
     #[test]
-    fn resolve_window_focus_cycle_commands() {
+    fn resolve_pane_focus_cycle_commands() {
         assert!(matches!(
-            parse("window focus-next").expect("next window should resolve"),
-            Intent::Command(Command::FocusNextWindow)
+            parse("focus next").expect("next target should resolve"),
+            Intent::Command(Command::FocusNextTarget)
         ));
         assert!(matches!(
-            parse("window focus-previous").expect("previous window should resolve"),
-            Intent::Command(Command::FocusPreviousWindow)
+            parse("focus previous").expect("previous target should resolve"),
+            Intent::Command(Command::FocusPreviousTarget)
         ));
     }
 

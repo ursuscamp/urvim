@@ -2,13 +2,14 @@
 
 use crate::buffer::{Buffer, TextRef};
 use crate::config::WrapMode;
+use crate::editor_tab::renderer::{self, BufferRenderState, EditorTabRenderTheme};
+use crate::editor_tab::{BufferView, Gutter, RenderData};
 use crate::path::AbsolutePath;
 use crate::screen::Screen;
-use crate::ui::floating_window::{FloatingPlacement, FloatingWindowFrame};
+use crate::ui::geometry::{Position, Size};
+use crate::ui::overlay::frame::{OverlayFrame, OverlayPlacement};
 use crate::ui::{FocusPolicy, UiContext, UiEvent, UiEventResult, UiRect};
 use crate::widget::Widget;
-use crate::window::renderer::{self, BufferRenderState, WindowRenderTheme};
-use crate::window::{BufferView, Gutter, Position, RenderData, Size};
 use std::path::PathBuf;
 use unicode_width::UnicodeWidthStr;
 use urvim_terminal::{KeyCode, Style};
@@ -92,14 +93,14 @@ impl HoverWidget {
         }
     }
 
-    fn resolve_frame(&self, rect: UiRect) -> Option<FloatingWindowFrame> {
+    fn resolve_frame(&self, rect: UiRect) -> Option<OverlayFrame> {
         let content_size = self.content_size(rect.size)?;
-        FloatingWindowFrame::resolve_placement(
+        OverlayFrame::resolve_placement(
             rect.origin,
             rect.size,
             content_size.rows,
             content_size.cols,
-            FloatingPlacement::NearCursor {
+            OverlayPlacement::NearCursor {
                 cursor: self.anchor,
             },
         )
@@ -180,7 +181,7 @@ impl Widget for HoverWidget {
             frame.content_origin,
             &mut self.buffer_view,
             &mut self.render_data,
-            WindowRenderTheme {
+            EditorTabRenderTheme {
                 gutter_style: gutter_style,
                 default_style: body_style,
                 active_gutter_style: Some(active_gutter_style),
@@ -246,7 +247,7 @@ mod tests {
     use crate::globals;
     use crate::screen::Screen;
     use crate::ui::UiRect;
-    use crate::window::Position;
+    use crate::ui::geometry::Position;
     use urvim_theme::{HighlightStyles, Tag, Theme, ThemeKind};
 
     fn theme() -> Theme {

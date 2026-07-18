@@ -1,7 +1,7 @@
 //! Layout tree node types and split metadata.
 
+use crate::editor_pane::EditorPane;
 use crate::ui::plugin_pane::{PluginPane, PluginPaneOptions};
-use crate::window_group::WindowGroup;
 
 /// Stable identifier for a pane in the layout split tree.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -48,18 +48,37 @@ impl SplitSize {
     }
 }
 
+/// Kind of content hosted by a split-tree pane.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PaneKind {
+    /// A pane containing editor tabs.
+    Editor,
+    /// A pane containing retained plugin UI.
+    Plugin,
+}
+
+impl PaneKind {
+    /// Returns the stable plugin API value.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Editor => "editor",
+            Self::Plugin => "plugin",
+        }
+    }
+}
+
 /// Leaf node that owns one pane-hosted editor or plugin UI.
 #[derive(Debug)]
-pub struct PaneNode {
+pub struct Pane {
     pub(super) id: PaneId,
     pub(super) content: PaneContent,
 }
 
-impl PaneNode {
-    pub(super) fn new_editor(id: PaneId, window_group: WindowGroup) -> Self {
+impl Pane {
+    pub(super) fn new_editor(id: PaneId, editor_pane: EditorPane) -> Self {
         Self {
             id,
-            content: PaneContent::Editor(window_group),
+            content: PaneContent::Editor(editor_pane),
         }
     }
 
@@ -74,16 +93,24 @@ impl PaneNode {
         matches!(self.content, PaneContent::Plugin(_))
     }
 
-    pub(super) fn editor_window_group(&self) -> Option<&WindowGroup> {
+    /// Returns the kind of content hosted by this pane.
+    pub fn kind(&self) -> PaneKind {
+        match self.content {
+            PaneContent::Editor(_) => PaneKind::Editor,
+            PaneContent::Plugin(_) => PaneKind::Plugin,
+        }
+    }
+
+    pub(super) fn editor_pane(&self) -> Option<&EditorPane> {
         match &self.content {
-            PaneContent::Editor(window_group) => Some(window_group),
+            PaneContent::Editor(editor_pane) => Some(editor_pane),
             PaneContent::Plugin(_) => None,
         }
     }
 
-    pub(super) fn editor_window_group_mut(&mut self) -> Option<&mut WindowGroup> {
+    pub(super) fn editor_pane_mut(&mut self) -> Option<&mut EditorPane> {
         match &mut self.content {
-            PaneContent::Editor(window_group) => Some(window_group),
+            PaneContent::Editor(editor_pane) => Some(editor_pane),
             PaneContent::Plugin(_) => None,
         }
     }
@@ -106,9 +133,9 @@ impl PaneNode {
 /// Content hosted by a layout pane.
 #[derive(Debug)]
 pub enum PaneContent {
-    /// A traditional editor window group.
-    Editor(WindowGroup),
-    /// A retained plugin-owned UI window.
+    /// An editor pane containing tabs.
+    Editor(EditorPane),
+    /// Retained plugin-owned UI.
     Plugin(PluginPane),
 }
 
@@ -143,7 +170,7 @@ impl SplitNode {
 #[derive(Debug)]
 pub enum LayoutNode {
     /// A visible pane that owns editor or plugin content.
-    Pane(PaneNode),
+    Pane(Pane),
     /// A binary split node that owns two child layout nodes.
     Split(SplitNode),
 }

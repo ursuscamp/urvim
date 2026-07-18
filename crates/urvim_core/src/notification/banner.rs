@@ -3,10 +3,8 @@
 use crate::globals;
 use crate::screen::Screen;
 use urvim_terminal::{Color, Style};
-use crate::ui::floating_window::{
-    FloatingAnchor, FloatingMargins, FloatingPlacement, FloatingWindowFrame,
-};
-use crate::window::{Position, Size};
+use crate::ui::overlay::frame::{OverlayAnchor, OverlayFrame, OverlayMargins, OverlayPlacement};
+use crate::ui::geometry::{Position, Size};
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
@@ -81,14 +79,14 @@ fn render_notification_popup(
         return;
     }
 
-    let frame = FloatingWindowFrame::resolve_placement(
+    let frame = OverlayFrame::resolve_placement(
         origin,
         size,
         popup_height.saturating_sub(2),
         popup_width.saturating_sub(2),
-        FloatingPlacement::Anchored {
-            anchor: FloatingAnchor::TopRight,
-            margins: FloatingMargins::default(),
+        OverlayPlacement::Anchored {
+            anchor: OverlayAnchor::TopRight,
+            margins: OverlayMargins::default(),
         },
     );
     let Some(frame) = frame else {

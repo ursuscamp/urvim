@@ -12,8 +12,8 @@ use std::io;
 use std::path::PathBuf;
 
 use crate::buffer::{Buffer, BufferId};
-use crate::layout::PaneId;
-use crate::window::TabId;
+use crate::editor_tab::TabId;
+use crate::layout::{PaneId, PaneKind};
 
 mod transaction;
 
@@ -51,7 +51,7 @@ pub enum ShutdownReason {
     /// An accepted quit command ended the editor.
     Quit,
     /// Closing the final pane ended the editor.
-    LastWindowClosed,
+    LastPaneClosed,
     /// An I/O error ended the editor loop.
     Error,
 }
@@ -61,7 +61,7 @@ impl ShutdownReason {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Quit => "quit",
-            Self::LastWindowClosed => "last_window_closed",
+            Self::LastPaneClosed => "last_pane_closed",
             Self::Error => "error",
         }
     }
@@ -316,8 +316,8 @@ pub enum EditorEvent {
     },
     /// A buffer changed over one completed Insert or Replace session.
     InsertSessionChanged {
-        /// Window that owned the session.
-        window_id: PaneId,
+        /// Pane that owned the session.
+        pane_id: PaneId,
         /// Tab that owned the session.
         tab_id: TabId,
         /// Changed buffer.
@@ -353,59 +353,65 @@ pub enum EditorEvent {
         /// Buffer metadata at enqueue time.
         snapshot: BufferEventSnapshot,
     },
-    /// An editor window was created.
-    WindowCreated {
-        /// Stable window identifier.
-        window_id: PaneId,
-        /// Buffer shown by the window's active tab.
-        buffer_id: BufferId,
-        /// Active tab's stable runtime identifier.
-        tab_id: TabId,
+    /// An editor or plugin pane was created.
+    PaneCreated {
+        /// Stable pane identifier.
+        pane_id: PaneId,
+        /// Kind of content hosted by the pane.
+        kind: PaneKind,
+        /// Buffer shown by an editor pane's active tab.
+        buffer_id: Option<BufferId>,
+        /// Editor pane's active tab identifier.
+        tab_id: Option<TabId>,
     },
-    /// An editor window was closed.
-    WindowClosed {
-        /// Stable window identifier.
-        window_id: PaneId,
-        /// Buffer shown by the window's final active tab.
-        buffer_id: BufferId,
-        /// Final active tab's stable runtime identifier.
-        tab_id: TabId,
+    /// An editor or plugin pane was closed.
+    PaneClosed {
+        /// Stable pane identifier.
+        pane_id: PaneId,
+        /// Kind of content hosted by the pane.
+        kind: PaneKind,
+        /// Buffer shown by an editor pane's final active tab.
+        buffer_id: Option<BufferId>,
+        /// Editor pane's final active tab identifier.
+        tab_id: Option<TabId>,
     },
-    /// An editor window received focus.
-    WindowFocused {
-        /// Previously focused window, or `None` when there was none.
-        previous_window_id: Option<PaneId>,
-        /// Stable window identifier.
-        window_id: PaneId,
-        /// Buffer shown by the focused window's active tab.
-        buffer_id: BufferId,
-        /// Focused window's active tab identifier.
-        tab_id: TabId,
+    /// An editor or plugin pane received focus.
+    PaneFocused {
+        /// Previously focused pane, or `None` when there was none.
+        previous_pane_id: Option<PaneId>,
+        /// Stable pane identifier.
+        pane_id: PaneId,
+        /// Kind of content hosted by the pane.
+        kind: PaneKind,
+        /// Buffer shown by a focused editor pane's active tab.
+        buffer_id: Option<BufferId>,
+        /// Focused editor pane's active tab identifier.
+        tab_id: Option<TabId>,
     },
-    /// A tab was opened in an editor window.
+    /// A tab was opened in an editor pane.
     TabOpened {
-        /// Stable window identifier.
-        window_id: PaneId,
+        /// Stable pane identifier.
+        pane_id: PaneId,
         /// Stable runtime tab identifier.
         tab_id: TabId,
         /// Buffer metadata at enqueue time.
         snapshot: BufferEventSnapshot,
     },
-    /// A tab was closed in an editor window.
+    /// A tab was closed in an editor pane.
     TabClosed {
-        /// Stable window identifier.
-        window_id: PaneId,
+        /// Stable pane identifier.
+        pane_id: PaneId,
         /// Stable runtime tab identifier.
         tab_id: TabId,
         /// Buffer metadata captured before the tab was removed.
         snapshot: BufferEventSnapshot,
     },
-    /// A different tab became active in an editor window.
+    /// A different tab became active in an editor pane.
     TabActivated {
-        /// Previously active tab, or `None` for a newly created window.
+        /// Previously active tab, or `None` for a newly created pane.
         previous_tab_id: Option<TabId>,
-        /// Stable window identifier.
-        window_id: PaneId,
+        /// Stable pane identifier.
+        pane_id: PaneId,
         /// Stable runtime tab identifier.
         tab_id: TabId,
         /// Buffer shown by the tab.
@@ -417,16 +423,16 @@ pub enum EditorEvent {
         previous_buffer_id: Option<BufferId>,
         /// Newly active buffer.
         buffer_id: BufferId,
-        /// Window containing the newly active buffer.
-        window_id: PaneId,
+        /// Pane containing the newly active buffer.
+        pane_id: PaneId,
         /// Active tab showing the newly active buffer.
         tab_id: TabId,
     },
-    /// An editor window's mode changed during one completed event transaction.
+    /// An editor tab's mode changed during one completed event transaction.
     ModeChanged {
-        /// Changed window.
-        window_id: PaneId,
-        /// Buffer shown by the window.
+        /// Changed pane.
+        pane_id: PaneId,
+        /// Buffer shown by the tab.
         buffer_id: BufferId,
         /// Previous stable lowercase mode name.
         previous_mode: String,
@@ -435,11 +441,11 @@ pub enum EditorEvent {
         /// Direct origin of the transaction.
         source: EventSource,
     },
-    /// An editor window's cursor moved during one completed event transaction.
+    /// An editor tab's cursor moved during one completed event transaction.
     CursorMoved {
-        /// Changed window.
-        window_id: PaneId,
-        /// Buffer shown by the window.
+        /// Changed pane.
+        pane_id: PaneId,
+        /// Buffer shown by the tab.
         buffer_id: BufferId,
         /// Previous cursor position.
         previous_position: EventPosition,
@@ -448,11 +454,11 @@ pub enum EditorEvent {
         /// Direct origin of the transaction.
         source: EventSource,
     },
-    /// An editor window's visual selection changed during one completed transaction.
+    /// An editor tab's visual selection changed during one completed transaction.
     SelectionChanged {
-        /// Changed window.
-        window_id: PaneId,
-        /// Buffer shown by the window.
+        /// Changed pane.
+        pane_id: PaneId,
+        /// Buffer shown by the tab.
         buffer_id: BufferId,
         /// Previous selection, or `None`.
         previous_selection: Option<EventSelection>,

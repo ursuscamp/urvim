@@ -107,12 +107,12 @@ mod tests {
 
     use urvim_core::buffer::Buffer;
     use urvim_core::config::{Config, PluginConfig};
-    use urvim_core::window_group::WindowGroup;
+    use urvim_core::editor_pane::EditorPane;
 
     use super::*;
 
     fn shared_test_layout() -> SharedLayout {
-        Rc::new(RefCell::new(Layout::new(WindowGroup::from_buffers(vec![
+        Rc::new(RefCell::new(Layout::new(EditorPane::from_buffers(vec![
             Buffer::new(),
         ]))))
     }

@@ -2,14 +2,14 @@
 
 use crate::buffer::{BufferId, PieceTable};
 use crate::editor::ModeKind;
+use crate::editor_tab::TabId;
 use crate::event::{EditorEvent, buffer_changed_range};
 use crate::globals;
 use crate::layout::{Layout, PaneId};
-use crate::window::TabId;
 
 #[derive(Debug)]
 pub(super) struct InsertSession {
-    window_id: PaneId,
+    pane_id: PaneId,
     tab_id: TabId,
     buffer_id: BufferId,
     mode: ModeKind,
@@ -21,14 +21,12 @@ impl Layout {
     /// Starts an Insert or Replace event session for the focused editor tab.
     pub fn begin_insert_session(&mut self, mode: ModeKind) {
         debug_assert!(matches!(mode, ModeKind::Insert | ModeKind::Replace));
-        let Some((window_id, tab_id, buffer_id)) = self.focused_editor_identity() else {
+        let Some((pane_id, tab_id, buffer_id)) = self.focused_editor_identity() else {
             return;
         };
 
         if self.insert_session.as_ref().is_some_and(|session| {
-            session.window_id == window_id
-                && session.tab_id == tab_id
-                && session.buffer_id == buffer_id
+            session.pane_id == pane_id && session.tab_id == tab_id && session.buffer_id == buffer_id
         }) {
             return;
         }
@@ -38,7 +36,7 @@ impl Layout {
             return;
         };
         self.insert_session = Some(InsertSession {
-            window_id,
+            pane_id,
             tab_id,
             buffer_id,
             mode,
@@ -77,7 +75,7 @@ impl Layout {
         };
 
         globals::enqueue_editor_event(EditorEvent::InsertSessionChanged {
-            window_id: session.window_id,
+            pane_id: session.pane_id,
             tab_id: session.tab_id,
             buffer_id: session.buffer_id,
             mode: insert_mode_name(session.mode).to_string(),
@@ -90,20 +88,20 @@ impl Layout {
         let Some(session) = self.insert_session.as_ref() else {
             return;
         };
-        let identity = (session.window_id, session.tab_id, session.buffer_id);
+        let identity = (session.pane_id, session.tab_id, session.buffer_id);
         if self.focused_editor_identity() != Some(identity) {
             self.finish_insert_session();
         }
     }
 
     fn focused_editor_identity(&self) -> Option<(PaneId, TabId, BufferId)> {
-        if self.plugin_windows.focused().is_some() || self.focused_plugin_pane().is_some() {
+        if self.overlays.focused().is_some() || self.focused_plugin_pane().is_some() {
             return None;
         }
-        let window_id = self.active_window_id()?;
-        let group = self.active_window_group();
-        let window = group.active_window();
-        Some((window_id, window.tab_id(), window.buffer_view().buffer_id()))
+        let pane_id = self.active_editor_pane_id()?;
+        let editor_pane = self.active_editor_pane();
+        let tab = editor_pane.active_tab();
+        Some((pane_id, tab.tab_id(), tab.buffer_view().buffer_id()))
     }
 }
 

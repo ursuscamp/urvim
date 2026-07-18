@@ -113,7 +113,7 @@ pub fn fuzzy_match_score(query: &str, candidate: &str) -> Option<FuzzyMatchScore
                     let last_match = *match_positions.last().unwrap_or(&0);
                     let gaps = match_positions
                         .windows(2)
-                        .map(|window| window[1].saturating_sub(window[0]).saturating_sub(1))
+                        .map(|pair| pair[1].saturating_sub(pair[0]).saturating_sub(1))
                         .sum();
                     return Some(FuzzyMatchScore {
                         first_match,

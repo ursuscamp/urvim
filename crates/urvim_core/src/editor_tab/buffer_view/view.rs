@@ -9,9 +9,10 @@ use crate::buffer::{
 };
 use crate::config::ScrollMargin;
 use crate::config::WrapMode;
+use crate::editor_tab::{FoldGutterGlyph, LineData, RenderChunk, RenderData};
 use crate::globals;
 use crate::lsp::diagnostics::{diagnostic_severity, diagnostic_severity_rank};
-use crate::window::{FoldGutterGlyph, LineData, Position, RenderChunk, RenderData, Size};
+use crate::ui::geometry::{Position, Size};
 use smol_str::SmolStr;
 use std::cell::RefCell;
 use std::collections::BTreeSet;
@@ -162,7 +163,7 @@ impl BufferView {
     ///
     /// The returned line bounds are exclusive boundary lines, so callers render
     /// on `start_exclusive + 1..end_exclusive`.
-    pub(in crate::window) fn active_indent_guide(&self) -> Option<(usize, usize, usize)> {
+    pub fn active_indent_guide(&self) -> Option<(usize, usize, usize)> {
         self.with_buffer(|buffer| {
             if buffer.line_count() == 0 {
                 return None;

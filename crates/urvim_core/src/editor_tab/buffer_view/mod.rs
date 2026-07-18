@@ -1,4 +1,4 @@
-//! Window-local buffer view state and rendering helpers.
+//! EditorTab-local buffer view state and rendering helpers.
 
 mod fold;
 mod session;
@@ -6,11 +6,11 @@ mod view;
 mod wrap;
 
 use crate::buffer::Cursor;
-use crate::window::Position;
+use crate::ui::geometry::Position;
 use std::collections::BTreeSet;
 use std::time::Instant;
 
-/// A window-local view of a shared buffer plus scroll and cursor state.
+/// A tab-local view of a shared buffer plus scroll and cursor state.
 #[derive(Debug, Clone)]
 pub struct BufferView {
     buffer: view::BufferBacking,
@@ -33,7 +33,7 @@ pub enum VisualSelectionKind {
     Line,
 }
 
-/// Active visual selection metadata stored by a window-local buffer view.
+/// Active visual selection metadata stored by a tab-local buffer view.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct VisualSelection {
     /// Selection anchor cursor.

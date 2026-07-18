@@ -3,8 +3,8 @@ use crate::editor::pairs;
 use crate::editor::{EditorOperation, ModeKind};
 use crate::register::{DefaultRegisterRole, RegisterContentKind};
 
-impl Window {
-    /// Dispatches an editor action to this window.
+impl EditorTab {
+    /// Dispatches an editor action to this tab.
     pub fn dispatch_action(&mut self, action: &EditorAction) -> ActionResult {
         self.pending_repeat_suffix = None;
         let insert_mode = action.from_mode == Some(ModeKind::Insert);

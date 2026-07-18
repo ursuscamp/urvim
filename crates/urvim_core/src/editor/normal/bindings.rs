@@ -17,7 +17,7 @@ pub(super) fn register(trie_keymap: &mut TrieKeymap) {
     register_motion_bindings(trie_keymap);
     register_character_scan_bindings(trie_keymap);
     register_mode_bindings(trie_keymap);
-    register_window_bindings(trie_keymap);
+    register_pane_bindings(trie_keymap);
     register_edit_bindings(trie_keymap);
     register_operator_bindings(trie_keymap);
     register_misc_bindings(trie_keymap);
@@ -162,7 +162,7 @@ fn register_mode_bindings(trie_keymap: &mut TrieKeymap) {
     );
 }
 
-fn register_window_bindings(trie_keymap: &mut TrieKeymap) {
+fn register_pane_bindings(trie_keymap: &mut TrieKeymap) {
     trie_keymap.insert_str("<C-o>", EditorAction::jump_backward());
     trie_keymap.insert_str("<C-i>", EditorAction::jump_forward());
     trie_keymap.insert_str("<C-w>v", Command::SplitVertical);
@@ -171,8 +171,8 @@ fn register_window_bindings(trie_keymap: &mut TrieKeymap) {
     trie_keymap.insert_str("<C-w>j", Command::FocusPaneDown);
     trie_keymap.insert_str("<C-w>k", Command::FocusPaneUp);
     trie_keymap.insert_str("<C-w>l", Command::FocusPaneRight);
-    trie_keymap.insert_str("<C-w>n", Command::FocusNextWindow);
-    trie_keymap.insert_str("<C-w>p", Command::FocusPreviousWindow);
+    trie_keymap.insert_str("<C-w>n", Command::FocusNextTarget);
+    trie_keymap.insert_str("<C-w>p", Command::FocusPreviousTarget);
     trie_keymap.insert_str("<C-w>q", Command::ClosePane);
     trie_keymap.insert_str("<C-w>=", Command::EqualizeSplits);
     trie_keymap.insert_str("<C-w>w", Command::ToggleWrap);

@@ -9,7 +9,7 @@ use crate::register::{
 };
 use std::sync::Arc;
 
-impl Window {
+impl EditorTab {
     fn resolved_register_name(
         explicit: Option<RegisterName>,
         role: DefaultRegisterRole,

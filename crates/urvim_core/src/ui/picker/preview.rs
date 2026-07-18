@@ -1,9 +1,10 @@
 use crate::background::{JobContext, JobManager, JobToken};
 use crate::buffer::{Buffer, BufferCache, BufferCacheRefreshResult, BufferId, Cursor, PieceTable};
+use crate::editor_tab::renderer::{self, BufferRenderState, EditorTabRenderTheme};
+use crate::editor_tab::{BufferView, RenderData};
 use crate::globals;
 use crate::screen::Screen;
-use crate::window::renderer::{self, BufferRenderState, WindowRenderTheme};
-use crate::window::{BufferView, Position, RenderData, Size};
+use crate::ui::geometry::{Position, Size};
 use smol_str::SmolStr;
 use std::collections::HashMap;
 use std::fs;
@@ -213,7 +214,7 @@ impl PreviewPane {
         self.page_by_pages(false);
     }
 
-    /// Renders the shared buffer body using the same renderer as editor windows.
+    /// Renders the shared buffer body using the same renderer as editor tabs.
     pub fn render(
         &mut self,
         screen: &mut Screen,
@@ -230,7 +231,7 @@ impl PreviewPane {
             diff_added_gutter_style,
             diff_deleted_gutter_style,
             diff_modified_gutter_style,
-        ) = resolve_window_styles();
+        ) = resolve_tab_styles();
         let wrap_mode = globals::with_config(|config| config.wrap_mode).unwrap_or_default();
 
         self.last_viewport_rows = size.rows;
@@ -263,7 +264,7 @@ impl PreviewPane {
             origin,
             &mut self.buffer_view,
             &mut self.render_data,
-            WindowRenderTheme {
+            EditorTabRenderTheme {
                 gutter_style,
                 default_style,
                 active_gutter_style: if active_line {
@@ -528,7 +529,7 @@ impl PreviewSyntaxRefreshJob {
     }
 }
 
-fn resolve_window_styles() -> (Style, Style, Style, Style, Style, Style, Style) {
+fn resolve_tab_styles() -> (Style, Style, Style, Style, Style, Style, Style) {
     globals::with_active_theme(|theme| {
         theme
             .map(|theme| {
@@ -562,9 +563,9 @@ mod tests {
     use crate::background::{JobEvent, JobHandle, JobToken};
     use crate::buffer::Buffer;
     use crate::config::{Config, WrapMode};
+    use crate::editor_tab::EditorTab;
     use crate::globals;
     use crate::path::AbsolutePath;
-    use crate::window::Window;
     use smol_str::SmolStr;
     use std::time::{SystemTime, UNIX_EPOCH};
     use urvim_terminal::{Color, Style};
@@ -618,6 +619,7 @@ mod tests {
 
     #[test]
     fn preview_adapter_reuses_buffer_for_path() {
+        let _pool_guard = globals::buffer_pool_test_lock();
         let temp_root = unique_temp_dir();
         fs::create_dir_all(&temp_root).unwrap();
         let file_path = temp_root.join("preview.rs");
@@ -682,7 +684,7 @@ mod tests {
             syntax: true,
             ..Config::default()
         });
-        let theme = themed_window();
+        let theme = themed_tab();
         let _theme_guard = globals::set_test_active_theme(theme);
         let file_path = unique_temp_dir().join("preview.rs");
         fs::create_dir_all(file_path.parent().unwrap()).unwrap();
@@ -708,13 +710,13 @@ mod tests {
             false,
         );
 
-        let mut plain_window = Window::new(Buffer::from_str_with_path(
+        let mut plain_tab = EditorTab::new(Buffer::from_str_with_path(
             "fn main() { let value = 1; }\n",
             AbsolutePath::from_path(file_path.as_path()).unwrap(),
         ));
-        plain_window.set_cursor(crate::buffer::Cursor::new(0, 0));
+        plain_tab.set_cursor(crate::buffer::Cursor::new(0, 0));
         let mut plain_screen = crate::screen::Screen::new(2, 32);
-        plain_window.render(&mut plain_screen, Position::new(0, 0), Size::new(2, 32));
+        plain_tab.render(&mut plain_screen, Position::new(0, 0), Size::new(2, 32));
 
         assert_screen_body_eq(&mut preview_screen, &mut plain_screen);
 
@@ -887,13 +889,13 @@ mod tests {
     }
 
     #[test]
-    fn preview_pane_renders_body_like_window() {
+    fn preview_pane_renders_body_like_tab() {
         let _config_guard = globals::set_test_config(Config {
             wrap_mode: WrapMode::Hard,
             syntax: false,
             ..Config::default()
         });
-        let theme = themed_window();
+        let theme = themed_tab();
         let _theme_guard = globals::set_test_active_theme(theme);
 
         let mut pane = PreviewPane::new(Buffer::from_str("alpha\nbeta\n"));
@@ -906,30 +908,30 @@ mod tests {
             false,
         );
 
-        let mut window = Window::new(Buffer::from_str("alpha\nbeta\n"));
-        window.set_cursor(crate::buffer::Cursor::new(0, 0));
-        let mut window_screen = crate::screen::Screen::new(2, 20);
-        window.render(&mut window_screen, Position::new(0, 0), Size::new(2, 20));
+        let mut tab = EditorTab::new(Buffer::from_str("alpha\nbeta\n"));
+        tab.set_cursor(crate::buffer::Cursor::new(0, 0));
+        let mut tab_screen = crate::screen::Screen::new(2, 20);
+        tab.render(&mut tab_screen, Position::new(0, 0), Size::new(2, 20));
 
         assert_eq!(
             row_text(&mut preview_screen, 0, 0),
-            row_text(&mut window_screen, 0, 0)
+            row_text(&mut tab_screen, 0, 0)
         );
         assert_eq!(
             row_text(&mut preview_screen, 1, 0),
-            row_text(&mut window_screen, 1, 0)
+            row_text(&mut tab_screen, 1, 0)
         );
     }
 
     #[test]
-    fn preview_pane_matches_window_for_syntax_and_active_line() {
+    fn preview_pane_matches_tab_for_syntax_and_active_line() {
         let _config_guard = globals::set_test_config(Config {
             wrap_mode: WrapMode::Hard,
             syntax: false,
             active_line: true,
             ..Config::default()
         });
-        let theme = themed_window();
+        let theme = themed_tab();
         let _theme_guard = globals::set_test_active_theme(theme);
         let file_path = unique_temp_dir().join("preview.rs");
         fs::create_dir_all(file_path.parent().unwrap()).unwrap();
@@ -948,27 +950,27 @@ mod tests {
             true,
         );
 
-        let mut window = Window::new(Buffer::from_str_with_path(
+        let mut tab = EditorTab::new(Buffer::from_str_with_path(
             "fn main() { let value = 1; }\n",
             AbsolutePath::from_path(file_path.as_path()).unwrap(),
         ));
-        window.set_cursor(crate::buffer::Cursor::new(0, 0));
-        let mut window_screen = crate::screen::Screen::new(2, 32);
-        window.render(&mut window_screen, Position::new(0, 0), Size::new(2, 32));
+        tab.set_cursor(crate::buffer::Cursor::new(0, 0));
+        let mut tab_screen = crate::screen::Screen::new(2, 32);
+        tab.render(&mut tab_screen, Position::new(0, 0), Size::new(2, 32));
 
-        assert_screen_body_eq(&mut preview_screen, &mut window_screen);
+        assert_screen_body_eq(&mut preview_screen, &mut tab_screen);
 
         fs::remove_file(file_path).ok();
     }
 
     #[test]
-    fn preview_pane_matches_window_when_wrapping() {
+    fn preview_pane_matches_tab_when_wrapping() {
         let _config_guard = globals::set_test_config(Config {
             wrap_mode: WrapMode::Hard,
             syntax: false,
             ..Config::default()
         });
-        let theme = themed_window();
+        let theme = themed_tab();
         let _theme_guard = globals::set_test_active_theme(theme);
         let mut pane = PreviewPane::new(Buffer::from_str("abcdefghij\nklmnop\n"));
         pane.set_wrap_enabled(true);
@@ -981,15 +983,15 @@ mod tests {
             false,
         );
 
-        let mut window = Window::new(Buffer::from_str("abcdefghij\nklmnop\n"));
-        window.set_wrap_enabled(true);
-        window.set_cursor(crate::buffer::Cursor::new(0, 0));
-        let mut window_screen = crate::screen::Screen::new(2, 8);
-        window.render(&mut window_screen, Position::new(0, 0), Size::new(2, 8));
+        let mut tab = EditorTab::new(Buffer::from_str("abcdefghij\nklmnop\n"));
+        tab.set_wrap_enabled(true);
+        tab.set_cursor(crate::buffer::Cursor::new(0, 0));
+        let mut tab_screen = crate::screen::Screen::new(2, 8);
+        tab.render(&mut tab_screen, Position::new(0, 0), Size::new(2, 8));
 
         assert_eq!(
             row_text(&mut preview_screen, 0, 0),
-            row_text(&mut window_screen, 0, 0)
+            row_text(&mut tab_screen, 0, 0)
         );
     }
 
@@ -1081,7 +1083,7 @@ mod tests {
         }
     }
 
-    fn themed_window() -> Theme {
+    fn themed_tab() -> Theme {
         let default_style = Style::new().fg(Color::ansi(15)).bg(Color::ansi(30));
         let mut highlights = HighlightStyles::default();
         highlights.insert(
@@ -1152,14 +1154,14 @@ mod tests {
     }
 
     #[test]
-    fn preview_pane_matches_window_with_syntax_and_active_line() {
+    fn preview_pane_matches_tab_with_syntax_and_active_line() {
         let _config_guard = globals::set_test_config(Config {
             wrap_mode: WrapMode::Hard,
             syntax: true,
             active_line: true,
             ..Config::default()
         });
-        let theme = themed_window();
+        let theme = themed_tab();
         let _theme_guard = globals::set_test_active_theme(theme);
         let file_path = unique_temp_dir().join("preview.rs");
         fs::create_dir_all(file_path.parent().unwrap()).unwrap();
@@ -1182,15 +1184,15 @@ mod tests {
             true,
         );
 
-        let mut window = Window::new(Buffer::from_str_with_path(
+        let mut tab = EditorTab::new(Buffer::from_str_with_path(
             "fn main() { let value: Option<String> = Some(\"hi\"); } // note\n",
             AbsolutePath::from_path(file_path.as_path()).unwrap(),
         ));
-        window.set_cursor(crate::buffer::Cursor::new(0, 0));
-        let mut window_screen = crate::screen::Screen::new(1, 80);
-        window.render(&mut window_screen, Position::new(0, 0), Size::new(1, 80));
+        tab.set_cursor(crate::buffer::Cursor::new(0, 0));
+        let mut tab_screen = crate::screen::Screen::new(1, 80);
+        tab.render(&mut tab_screen, Position::new(0, 0), Size::new(1, 80));
 
-        assert_screen_body_eq(&mut preview_screen, &mut window_screen);
+        assert_screen_body_eq(&mut preview_screen, &mut tab_screen);
 
         fs::remove_file(file_path).ok();
     }
@@ -1201,7 +1203,7 @@ mod tests {
             syntax: true,
             ..Config::default()
         });
-        let theme = themed_window();
+        let theme = themed_tab();
         let _theme_guard = globals::set_test_active_theme(theme);
 
         let mut pane = PreviewPane::new(Buffer::from_str(

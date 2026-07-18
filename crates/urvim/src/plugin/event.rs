@@ -149,7 +149,7 @@ pub(in crate::plugin) fn event_payload(
             Some(kind_payload(&mut payload, kind))
         }
         EditorEvent::InsertSessionChanged {
-            window_id,
+            pane_id,
             tab_id,
             buffer_id,
             mode,
@@ -161,10 +161,10 @@ pub(in crate::plugin) fn event_payload(
                 "changed_range".to_string(),
                 changed_range_value(changed_range),
             );
-            Some(window_tab_event_payload(
+            Some(pane_tab_event_payload(
                 &mut payload,
                 kind,
-                window_id,
+                pane_id,
                 tab_id,
                 buffer_id,
             ))
@@ -336,71 +336,77 @@ pub(in crate::plugin) fn event_payload(
             urvim_plugin::PluginEventKind::BufferOpened,
             snapshot,
         )),
-        EditorEvent::WindowCreated {
-            window_id,
+        EditorEvent::PaneCreated {
+            pane_id,
+            kind: pane_kind,
             buffer_id,
             tab_id,
-        } => Some(window_tab_event_payload(
+        } => Some(pane_lifecycle_event_payload(
             &mut payload,
-            urvim_plugin::PluginEventKind::WindowCreated,
-            window_id,
+            urvim_plugin::PluginEventKind::PaneCreated,
+            pane_id,
+            pane_kind,
             tab_id,
             buffer_id,
         )),
-        EditorEvent::WindowClosed {
-            window_id,
+        EditorEvent::PaneClosed {
+            pane_id,
+            kind: pane_kind,
             buffer_id,
             tab_id,
-        } => Some(window_tab_event_payload(
+        } => Some(pane_lifecycle_event_payload(
             &mut payload,
-            urvim_plugin::PluginEventKind::WindowClosed,
-            window_id,
+            urvim_plugin::PluginEventKind::PaneClosed,
+            pane_id,
+            pane_kind,
             tab_id,
             buffer_id,
         )),
-        EditorEvent::WindowFocused {
-            previous_window_id,
-            window_id,
+        EditorEvent::PaneFocused {
+            previous_pane_id,
+            pane_id,
+            kind: pane_kind,
             buffer_id,
             tab_id,
         } => {
             payload.insert(
-                "previous_window_id".to_string(),
-                optional_window_id_value(previous_window_id),
+                "previous_pane_id".to_string(),
+                optional_pane_id_value(previous_pane_id),
             );
-            Some(window_tab_event_payload(
+            Some(pane_lifecycle_event_payload(
                 &mut payload,
-                urvim_plugin::PluginEventKind::WindowFocused,
-                window_id,
+                urvim_plugin::PluginEventKind::PaneFocused,
+                pane_id,
+                pane_kind,
                 tab_id,
                 buffer_id,
             ))
         }
         EditorEvent::TabOpened {
-            window_id,
+            pane_id,
             tab_id,
             snapshot,
         } => Some(tab_snapshot_event_payload(
             &mut payload,
             urvim_plugin::PluginEventKind::TabOpened,
-            window_id,
+            pane_id,
             tab_id,
             snapshot,
         )),
         EditorEvent::TabClosed {
-            window_id,
+            pane_id,
             tab_id,
             snapshot,
         } => Some(tab_snapshot_event_payload(
             &mut payload,
             urvim_plugin::PluginEventKind::TabClosed,
-            window_id,
+            pane_id,
             tab_id,
             snapshot,
         )),
         EditorEvent::TabActivated {
             previous_tab_id,
-            window_id,
+            pane_id,
             tab_id,
             buffer_id,
         } => {
@@ -408,10 +414,10 @@ pub(in crate::plugin) fn event_payload(
                 "previous_tab_id".to_string(),
                 optional_tab_id_value(previous_tab_id),
             );
-            Some(window_tab_event_payload(
+            Some(pane_tab_event_payload(
                 &mut payload,
                 urvim_plugin::PluginEventKind::TabActivated,
-                window_id,
+                pane_id,
                 tab_id,
                 buffer_id,
             ))
@@ -419,7 +425,7 @@ pub(in crate::plugin) fn event_payload(
         EditorEvent::ActiveBufferChanged {
             previous_buffer_id,
             buffer_id,
-            window_id,
+            pane_id,
             tab_id,
         } => {
             payload.insert(
@@ -428,23 +434,23 @@ pub(in crate::plugin) fn event_payload(
                     .map(|id| Value::Number(id.get() as f64))
                     .unwrap_or(Value::Null),
             );
-            Some(window_tab_event_payload(
+            Some(pane_tab_event_payload(
                 &mut payload,
                 urvim_plugin::PluginEventKind::ActiveBufferChanged,
-                window_id,
+                pane_id,
                 tab_id,
                 buffer_id,
             ))
         }
         EditorEvent::ModeChanged {
-            window_id,
+            pane_id,
             buffer_id,
             previous_mode,
             mode,
             source,
         } => {
             let kind = urvim_plugin::PluginEventKind::ModeChanged;
-            pane_event_fields(&mut payload, window_id, buffer_id, source);
+            pane_event_fields(&mut payload, pane_id, buffer_id, source);
             payload.insert(
                 "previous_mode".to_string(),
                 Value::String(previous_mode.into()),
@@ -453,14 +459,14 @@ pub(in crate::plugin) fn event_payload(
             Some(kind_payload(&mut payload, kind))
         }
         EditorEvent::CursorMoved {
-            window_id,
+            pane_id,
             buffer_id,
             previous_position,
             position,
             source,
         } => {
             let kind = urvim_plugin::PluginEventKind::CursorMoved;
-            pane_event_fields(&mut payload, window_id, buffer_id, source);
+            pane_event_fields(&mut payload, pane_id, buffer_id, source);
             payload.insert(
                 "previous_position".to_string(),
                 position_value(previous_position),
@@ -469,14 +475,14 @@ pub(in crate::plugin) fn event_payload(
             Some(kind_payload(&mut payload, kind))
         }
         EditorEvent::SelectionChanged {
-            window_id,
+            pane_id,
             buffer_id,
             previous_selection,
             selection,
             source,
         } => {
             let kind = urvim_plugin::PluginEventKind::SelectionChanged;
-            pane_event_fields(&mut payload, window_id, buffer_id, source);
+            pane_event_fields(&mut payload, pane_id, buffer_id, source);
             payload.insert(
                 "previous_selection".to_string(),
                 optional_selection_value(previous_selection),
@@ -526,11 +532,11 @@ fn lsp_buffer_fields(
 
 fn pane_event_fields(
     payload: &mut HashMap<String, Value>,
-    window_id: urvim_core::layout::PaneId,
+    pane_id: urvim_core::layout::PaneId,
     buffer_id: urvim_core::buffer::BufferId,
     source: EventSource,
 ) {
-    payload.insert("window_id".to_string(), Value::Number(window_id.0 as f64));
+    payload.insert("pane_id".to_string(), Value::Number(pane_id.0 as f64));
     payload.insert(
         "buffer_id".to_string(),
         Value::Number(buffer_id.get() as f64),
@@ -618,15 +624,15 @@ fn buffer_error_payload(
     (kind, Value::Map(std::mem::take(payload).into()))
 }
 
-fn window_tab_event_payload(
+fn pane_tab_event_payload(
     payload: &mut HashMap<String, Value>,
     kind: urvim_plugin::PluginEventKind,
-    window_id: urvim_core::layout::PaneId,
-    tab_id: urvim_core::window::TabId,
+    pane_id: urvim_core::layout::PaneId,
+    tab_id: urvim_core::editor_tab::TabId,
     buffer_id: urvim_core::buffer::BufferId,
 ) -> (urvim_plugin::PluginEventKind, Value) {
     payload.insert("event".to_string(), Value::String(kind.as_str().into()));
-    payload.insert("window_id".to_string(), Value::Number(window_id.0 as f64));
+    payload.insert("pane_id".to_string(), Value::Number(pane_id.0 as f64));
     payload.insert("tab_id".to_string(), Value::Number(tab_id.get() as f64));
     payload.insert(
         "buffer_id".to_string(),
@@ -638,22 +644,42 @@ fn window_tab_event_payload(
 fn tab_snapshot_event_payload(
     payload: &mut HashMap<String, Value>,
     kind: urvim_plugin::PluginEventKind,
-    window_id: urvim_core::layout::PaneId,
-    tab_id: urvim_core::window::TabId,
+    pane_id: urvim_core::layout::PaneId,
+    tab_id: urvim_core::editor_tab::TabId,
     snapshot: BufferEventSnapshot,
 ) -> (urvim_plugin::PluginEventKind, Value) {
-    payload.insert("window_id".to_string(), Value::Number(window_id.0 as f64));
+    payload.insert("pane_id".to_string(), Value::Number(pane_id.0 as f64));
     payload.insert("tab_id".to_string(), Value::Number(tab_id.get() as f64));
     buffer_event_payload(payload, kind, snapshot)
 }
 
-fn optional_window_id_value(window_id: Option<urvim_core::layout::PaneId>) -> Value {
-    window_id
+fn optional_pane_id_value(pane_id: Option<urvim_core::layout::PaneId>) -> Value {
+    pane_id
         .map(|id| Value::Number(id.0 as f64))
         .unwrap_or(Value::Null)
 }
 
-fn optional_tab_id_value(tab_id: Option<urvim_core::window::TabId>) -> Value {
+fn pane_lifecycle_event_payload(
+    payload: &mut HashMap<String, Value>,
+    kind: urvim_plugin::PluginEventKind,
+    pane_id: urvim_core::layout::PaneId,
+    pane_kind: urvim_core::layout::PaneKind,
+    tab_id: Option<urvim_core::editor_tab::TabId>,
+    buffer_id: Option<urvim_core::buffer::BufferId>,
+) -> (urvim_plugin::PluginEventKind, Value) {
+    payload.insert("pane_id".to_string(), Value::Number(pane_id.0 as f64));
+    payload.insert("kind".to_string(), Value::String(pane_kind.as_str().into()));
+    payload.insert("tab_id".to_string(), optional_tab_id_value(tab_id));
+    payload.insert(
+        "buffer_id".to_string(),
+        buffer_id
+            .map(|id| Value::Number(id.get() as f64))
+            .unwrap_or(Value::Null),
+    );
+    kind_payload(payload, kind)
+}
+
+fn optional_tab_id_value(tab_id: Option<urvim_core::editor_tab::TabId>) -> Value {
     tab_id
         .map(|id| Value::Number(id.get() as f64))
         .unwrap_or(Value::Null)
@@ -739,7 +765,7 @@ mod tests {
     #[test]
     fn shutdown_payload_has_reason_buffers_and_session_state() {
         let (kind, Value::Map(payload)) = event_payload(EditorEvent::EditorWillShutdown {
-            reason: ShutdownReason::LastWindowClosed,
+            reason: ShutdownReason::LastPaneClosed,
             modified_buffer_ids: vec![BufferId::new(3), BufferId::new(8)],
             session_enabled: true,
         })
@@ -750,7 +776,7 @@ mod tests {
         assert_eq!(kind, urvim_plugin::PluginEventKind::EditorWillShutdown);
         assert_eq!(
             payload.get("reason"),
-            Some(&Value::String("last_window_closed".into()))
+            Some(&Value::String("last_pane_closed".into()))
         );
         assert_eq!(
             payload.get("modified_buffer_ids"),
@@ -905,10 +931,10 @@ mod tests {
 
     #[test]
     fn insert_session_changed_payload_has_session_identity_mode_and_range() {
-        let window = urvim_core::window::Window::from_buffer_id(BufferId::new(11));
-        let tab_id = window.tab_id();
+        let tab = urvim_core::editor_tab::EditorTab::from_buffer_id(BufferId::new(11));
+        let tab_id = tab.tab_id();
         let (kind, Value::Map(payload)) = event_payload(EditorEvent::InsertSessionChanged {
-            window_id: urvim_core::layout::PaneId(6),
+            pane_id: urvim_core::layout::PaneId(6),
             tab_id,
             buffer_id: BufferId::new(11),
             mode: "replace".to_string(),
@@ -923,7 +949,7 @@ mod tests {
         };
 
         assert_eq!(kind, urvim_plugin::PluginEventKind::InsertSessionChanged);
-        assert_eq!(payload.get("window_id"), Some(&Value::Number(6.0)));
+        assert_eq!(payload.get("pane_id"), Some(&Value::Number(6.0)));
         assert_eq!(
             payload.get("tab_id"),
             Some(&Value::Number(tab_id.get() as f64))
@@ -1078,9 +1104,9 @@ mod tests {
     }
 
     #[test]
-    fn tab_payload_contains_window_tab_and_buffer_ids() {
-        let window = urvim_core::window::Window::from_buffer_id(BufferId::new(11));
-        let tab_id = window.tab_id();
+    fn tab_payload_contains_tab_tab_and_buffer_ids() {
+        let tab = urvim_core::editor_tab::EditorTab::from_buffer_id(BufferId::new(11));
+        let tab_id = tab.tab_id();
         let snapshot = BufferEventSnapshot {
             buffer_id: BufferId::new(11),
             path: Some(PathBuf::from("/tmp/tab.rs")),
@@ -1089,7 +1115,7 @@ mod tests {
             modified: true,
         };
         let (kind, Value::Map(payload)) = event_payload(EditorEvent::TabOpened {
-            window_id: urvim_core::layout::PaneId(4),
+            pane_id: urvim_core::layout::PaneId(4),
             tab_id,
             snapshot,
         })
@@ -1098,7 +1124,7 @@ mod tests {
         };
 
         assert_eq!(kind, urvim_plugin::PluginEventKind::TabOpened);
-        assert_eq!(payload.get("window_id"), Some(&Value::Number(4.0)));
+        assert_eq!(payload.get("pane_id"), Some(&Value::Number(4.0)));
         assert_eq!(
             payload.get("tab_id"),
             Some(&Value::Number(tab_id.get() as f64))
@@ -1113,7 +1139,7 @@ mod tests {
 
     #[test]
     fn closed_tab_payload_uses_pre_removal_snapshot() {
-        let window = urvim_core::window::Window::from_buffer_id(BufferId::new(12));
+        let tab = urvim_core::editor_tab::EditorTab::from_buffer_id(BufferId::new(12));
         let snapshot = BufferEventSnapshot {
             buffer_id: BufferId::new(12),
             path: Some(PathBuf::from("/tmp/closed.rs")),
@@ -1122,8 +1148,8 @@ mod tests {
             modified: true,
         };
         let (kind, Value::Map(payload)) = event_payload(EditorEvent::TabClosed {
-            window_id: urvim_core::layout::PaneId(4),
-            tab_id: window.tab_id(),
+            pane_id: urvim_core::layout::PaneId(4),
+            tab_id: tab.tab_id(),
             snapshot,
         })
         .expect("closed tab event should have a payload") else {
@@ -1144,12 +1170,12 @@ mod tests {
 
     #[test]
     fn active_buffer_payload_contains_previous_and_current_ids() {
-        let window = urvim_core::window::Window::from_buffer_id(BufferId::new(3));
-        let tab_id = window.tab_id();
+        let tab = urvim_core::editor_tab::EditorTab::from_buffer_id(BufferId::new(3));
+        let tab_id = tab.tab_id();
         let (kind, Value::Map(payload)) = event_payload(EditorEvent::ActiveBufferChanged {
             previous_buffer_id: Some(BufferId::new(2)),
             buffer_id: BufferId::new(3),
-            window_id: urvim_core::layout::PaneId(5),
+            pane_id: urvim_core::layout::PaneId(5),
             tab_id,
         })
         .expect("active buffer event should have a payload") else {
@@ -1159,7 +1185,7 @@ mod tests {
         assert_eq!(kind, urvim_plugin::PluginEventKind::ActiveBufferChanged);
         assert_eq!(payload.get("previous_buffer_id"), Some(&Value::Number(2.0)));
         assert_eq!(payload.get("buffer_id"), Some(&Value::Number(3.0)));
-        assert_eq!(payload.get("window_id"), Some(&Value::Number(5.0)));
+        assert_eq!(payload.get("pane_id"), Some(&Value::Number(5.0)));
         assert_eq!(
             payload.get("tab_id"),
             Some(&Value::Number(tab_id.get() as f64))
@@ -1168,11 +1194,11 @@ mod tests {
 
     #[test]
     fn tab_activation_payload_contains_previous_tab_id() {
-        let previous = urvim_core::window::Window::from_buffer_id(BufferId::new(1));
-        let active = urvim_core::window::Window::from_buffer_id(BufferId::new(2));
+        let previous = urvim_core::editor_tab::EditorTab::from_buffer_id(BufferId::new(1));
+        let active = urvim_core::editor_tab::EditorTab::from_buffer_id(BufferId::new(2));
         let (kind, Value::Map(payload)) = event_payload(EditorEvent::TabActivated {
             previous_tab_id: Some(previous.tab_id()),
-            window_id: urvim_core::layout::PaneId(7),
+            pane_id: urvim_core::layout::PaneId(7),
             tab_id: active.tab_id(),
             buffer_id: BufferId::new(2),
         })
@@ -1189,27 +1215,28 @@ mod tests {
             payload.get("tab_id"),
             Some(&Value::Number(active.tab_id().get() as f64))
         );
-        assert_eq!(payload.get("window_id"), Some(&Value::Number(7.0)));
+        assert_eq!(payload.get("pane_id"), Some(&Value::Number(7.0)));
         assert_eq!(payload.get("buffer_id"), Some(&Value::Number(2.0)));
     }
 
     #[test]
-    fn window_payload_contains_window_id() {
-        let window = urvim_core::window::Window::from_buffer_id(BufferId::new(6));
-        let tab_id = window.tab_id();
-        let (kind, Value::Map(payload)) = event_payload(EditorEvent::WindowFocused {
-            previous_window_id: None,
-            window_id: urvim_core::layout::PaneId(9),
-            buffer_id: BufferId::new(6),
-            tab_id,
+    fn pane_payload_contains_pane_id() {
+        let tab = urvim_core::editor_tab::EditorTab::from_buffer_id(BufferId::new(6));
+        let tab_id = tab.tab_id();
+        let (kind, Value::Map(payload)) = event_payload(EditorEvent::PaneFocused {
+            previous_pane_id: None,
+            pane_id: urvim_core::layout::PaneId(9),
+            kind: urvim_core::layout::PaneKind::Editor,
+            buffer_id: Some(BufferId::new(6)),
+            tab_id: Some(tab_id),
         })
-        .expect("window event should have a payload") else {
-            panic!("window payload should be a map");
+        .expect("tab event should have a payload") else {
+            panic!("tab payload should be a map");
         };
 
-        assert_eq!(kind, urvim_plugin::PluginEventKind::WindowFocused);
-        assert_eq!(payload.get("previous_window_id"), Some(&Value::Null));
-        assert_eq!(payload.get("window_id"), Some(&Value::Number(9.0)));
+        assert_eq!(kind, urvim_plugin::PluginEventKind::PaneFocused);
+        assert_eq!(payload.get("previous_pane_id"), Some(&Value::Null));
+        assert_eq!(payload.get("pane_id"), Some(&Value::Number(9.0)));
         assert_eq!(payload.get("buffer_id"), Some(&Value::Number(6.0)));
         assert_eq!(
             payload.get("tab_id"),

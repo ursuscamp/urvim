@@ -487,7 +487,7 @@ mod tests {
     fn filtered_prefix_keeps_mixed_eligible_descendants() {
         let mut keymap = TrieKeymap::<Intent>::new();
         keymap.insert_str("gd", Command::LspDefinition);
-        keymap.insert_str("gp", Command::FocusPreviousWindow);
+        keymap.insert_str("gp", Command::FocusPreviousTarget);
 
         assert!(keymap.is_prefix_filtered(&["g".to_string()], |intent| {
             intent.keymap_inheritance() == KeymapInheritance::Focus

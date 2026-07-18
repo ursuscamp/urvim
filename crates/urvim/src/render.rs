@@ -3,7 +3,7 @@ use std::io;
 use rustix::fd::AsFd;
 
 use urvim_core::screen::Screen;
-use urvim_core::window::{Position, Size};
+use urvim_core::ui::geometry::{Position, Size};
 use urvim_terminal::Terminal;
 
 pub(super) fn handle_resize<I: io::Read + AsFd, O: io::Write + AsFd>(

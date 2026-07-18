@@ -2,11 +2,11 @@
 
 use crate::lsp::diagnostics::{diagnostic_marker, diagnostic_severity};
 use crate::screen::Screen;
-use crate::ui::floating_window::{FloatingPlacement, FloatingWindowFrame};
+use crate::ui::geometry::{Position, Size};
+use crate::ui::overlay::frame::{OverlayFrame, OverlayPlacement};
 use crate::ui::text_width::{ClipSide, clip_text};
 use crate::ui::{FocusPolicy, UiContext, UiEvent, UiEventResult, UiRect};
 use crate::widget::Widget;
-use crate::window::Position;
 use lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString};
 use unicode_width::UnicodeWidthStr;
 use urvim_terminal::{Color, Style};
@@ -73,20 +73,20 @@ impl DiagnosticHoverWidget {
         }
     }
 
-    fn resolve_frame(&self, rect: UiRect) -> Option<FloatingWindowFrame> {
+    fn resolve_frame(&self, rect: UiRect) -> Option<OverlayFrame> {
         let content_size = self.content_size(rect.size)?;
-        FloatingWindowFrame::resolve_placement(
+        OverlayFrame::resolve_placement(
             rect.origin,
             rect.size,
             content_size.rows,
             content_size.cols,
-            FloatingPlacement::NearCursor {
+            OverlayPlacement::NearCursor {
                 cursor: self.anchor,
             },
         )
     }
 
-    fn content_size(&self, bounds: crate::window::Size) -> Option<crate::window::Size> {
+    fn content_size(&self, bounds: Size) -> Option<Size> {
         let available_cols = bounds.cols.saturating_sub(2);
         let available_rows = bounds.rows.saturating_sub(2);
         if available_cols == 0 || available_rows == 0 {
@@ -106,7 +106,7 @@ impl DiagnosticHoverWidget {
             .len()
             .min(usize::from(available_rows.min(MAX_CONTENT_ROWS)))
             .max(1) as u16;
-        Some(crate::window::Size::new(rows, max_width))
+        Some(Size::new(rows, max_width))
     }
 
     fn format_line(diagnostic: &Diagnostic) -> Option<DiagnosticLine> {
@@ -277,7 +277,7 @@ mod tests {
 
         widget.render_widget(
             &mut screen,
-            UiRect::new(Position::new(0, 0), crate::window::Size::new(6, 24)),
+            UiRect::new(Position::new(0, 0), Size::new(6, 24)),
             &UiContext,
         );
 

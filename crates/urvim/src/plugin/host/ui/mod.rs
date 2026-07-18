@@ -11,9 +11,8 @@ use super::super::{SharedLayout, native_fn};
 mod confirmations;
 mod inputs;
 mod line_format;
-mod panes;
+pub(super) mod overlays;
 mod pickers;
-mod windows;
 
 pub(in crate::plugin) fn ui_module(
     plugin: String,
@@ -21,9 +20,6 @@ pub(in crate::plugin) fn ui_module(
     layout: SharedLayout,
     callbacks: Rc<RefCell<BearscriptPluginCallbacks>>,
 ) -> Value {
-    let panes_plugin = plugin.clone();
-    let panes_contributions = Rc::clone(&contributions);
-    let panes_layout = Rc::clone(&layout);
     let confirm_plugin = plugin.clone();
     let confirm_callbacks = Rc::clone(&callbacks);
     let confirm_layout = Rc::clone(&layout);
@@ -34,9 +30,9 @@ pub(in crate::plugin) fn ui_module(
     let input_layout = Rc::clone(&layout);
     let close_input_plugin = plugin.clone();
     let close_input_layout = Rc::clone(&layout);
-    let windows_plugin = plugin.clone();
-    let windows_contributions = Rc::clone(&contributions);
-    let windows_layout = Rc::clone(&layout);
+    let overlays_plugin = plugin.clone();
+    let overlays_contributions = Rc::clone(&contributions);
+    let overlays_layout = Rc::clone(&layout);
     Value::Module(
         HashMap::from([
             (
@@ -69,12 +65,8 @@ pub(in crate::plugin) fn ui_module(
             ),
             ("line_format".to_string(), line_format::line_format_module()),
             (
-                "windows".to_string(),
-                windows::windows_module(windows_plugin, windows_contributions, windows_layout),
-            ),
-            (
-                "panes".to_string(),
-                panes::panes_module(panes_plugin, panes_contributions, panes_layout),
+                "overlays".to_string(),
+                overlays::overlays_module(overlays_plugin, overlays_contributions, overlays_layout),
             ),
             (
                 "pickers".to_string(),

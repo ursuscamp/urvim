@@ -262,7 +262,7 @@ pub struct Config {
     pub syntax: bool,
     /// Whether insert mode should auto-close supported bracket and quote pairs.
     pub auto_close_pairs: bool,
-    /// Whether the active line should be highlighted in the focused window.
+    /// Whether the active line should be highlighted in the focused editor tab.
     pub active_line: bool,
     /// Whether to render relative gutter line numbers.
     pub relative_number: bool,
@@ -292,7 +292,7 @@ pub struct Config {
     pub tab_width: usize,
     /// Visual scroll margins that trigger viewport movement before edge crossing.
     pub scroll_margin: ScrollMargin,
-    /// How visual line wrapping should break lines when enabled per window.
+    /// How visual line wrapping should break lines when enabled per editor tab.
     pub wrap_mode: WrapMode,
     /// The resolved LSP server configuration.
     pub lsp: LspConfig,
@@ -314,7 +314,7 @@ pub struct PartialConfig {
     pub syntax: Option<bool>,
     /// Whether insert mode should auto-close supported bracket and quote pairs.
     pub auto_close_pairs: Option<bool>,
-    /// Whether the active line should be highlighted in the focused window.
+    /// Whether the active line should be highlighted in the focused editor tab.
     pub active_line: Option<bool>,
     /// Whether to render relative gutter line numbers.
     pub relative_number: Option<bool>,

@@ -5,9 +5,9 @@ use std::collections::BTreeMap;
 
 use crate::buffer::{BufferId, Cursor, PieceTable, TextRef, TextSnapshot};
 use crate::editor::ModeKind;
+use crate::editor_tab::{VisualSelection, VisualSelectionKind};
 use crate::globals;
 use crate::layout::PaneId;
-use crate::window::{VisualSelection, VisualSelectionKind};
 
 use super::{ChangedRange, EditorEvent, EventPosition, EventSelection};
 
@@ -89,8 +89,8 @@ impl Default for EventSource {
 /// Complete high-frequency state for one visible editor pane.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PaneEventSnapshot {
-    /// Window identifier.
-    pub window_id: PaneId,
+    /// Pane identifier.
+    pub pane_id: PaneId,
     /// Active buffer identifier.
     pub buffer_id: BufferId,
     /// Current mode.
@@ -287,10 +287,7 @@ pub fn capture_pane_state(panes: Vec<PaneEventSnapshot>) {
         let Some(state) = slot.as_mut() else {
             return;
         };
-        let panes: BTreeMap<_, _> = panes
-            .into_iter()
-            .map(|pane| (pane.window_id, pane))
-            .collect();
+        let panes: BTreeMap<_, _> = panes.into_iter().map(|pane| (pane.pane_id, pane)).collect();
         if state.panes_before.is_none() {
             state.panes_before = Some(panes.clone());
         }
@@ -349,8 +346,8 @@ fn emit_pane_changes(
     let (Some(before), Some(after)) = (before, after) else {
         return;
     };
-    for (window_id, final_state) in after {
-        let Some(previous) = before.get(&window_id) else {
+    for (pane_id, final_state) in after {
+        let Some(previous) = before.get(&pane_id) else {
             continue;
         };
         if previous.buffer_id != final_state.buffer_id {
@@ -358,7 +355,7 @@ fn emit_pane_changes(
         }
         if previous.mode != final_state.mode {
             globals::enqueue_editor_event(EditorEvent::ModeChanged {
-                window_id,
+                pane_id,
                 buffer_id: final_state.buffer_id,
                 previous_mode: mode_name(previous.mode).to_string(),
                 mode: mode_name(final_state.mode).to_string(),
@@ -367,7 +364,7 @@ fn emit_pane_changes(
         }
         if previous.cursor != final_state.cursor {
             globals::enqueue_editor_event(EditorEvent::CursorMoved {
-                window_id,
+                pane_id,
                 buffer_id: final_state.buffer_id,
                 previous_position: cursor_position(previous.cursor),
                 position: cursor_position(final_state.cursor),
@@ -378,7 +375,7 @@ fn emit_pane_changes(
         let new_selection = event_selection(&final_state);
         if old_selection != new_selection {
             globals::enqueue_editor_event(EditorEvent::SelectionChanged {
-                window_id,
+                pane_id,
                 buffer_id: final_state.buffer_id,
                 previous_selection: old_selection,
                 selection: new_selection,
@@ -611,7 +608,7 @@ mod tests {
         globals::clear_editor_events_for_tests();
         let transaction = EventTransaction::new(EventSource::paste());
         capture_pane_state(vec![PaneEventSnapshot {
-            window_id: PaneId(2),
+            pane_id: PaneId(2),
             buffer_id: BufferId::new(4),
             mode: ModeKind::Visual,
             cursor: Cursor::new(0, 1),
@@ -621,7 +618,7 @@ mod tests {
             }),
         }]);
         capture_pane_state(vec![PaneEventSnapshot {
-            window_id: PaneId(2),
+            pane_id: PaneId(2),
             buffer_id: BufferId::new(4),
             mode: ModeKind::Normal,
             cursor: Cursor::new(1, 2),

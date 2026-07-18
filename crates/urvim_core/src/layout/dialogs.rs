@@ -3,6 +3,7 @@ use super::confirmation::ConfirmationDialog;
 use super::input_box::InputDialog;
 use crate::ui::completion::CompletionWidget;
 use crate::ui::diagnostic_hover::DiagnosticHoverWidget;
+use crate::ui::geometry::Position;
 use crate::ui::hover::HoverWidget;
 use crate::ui::lsp_rename::LspRenamePrompt;
 use crate::ui::picker::buffer::BufferPickerWidget;
@@ -15,7 +16,6 @@ use crate::ui::picker::git::GitPickerWidget;
 use crate::ui::picker::grep::GrepPickerWidget;
 use crate::ui::picker::plugin::PluginPickerWidget;
 use crate::ui::picker::references::ReferencesPickerWidget;
-use crate::window::Position;
 
 /// Transient overlays and dialogs owned by the layout.
 #[derive(Debug)]

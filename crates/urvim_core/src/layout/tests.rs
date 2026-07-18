@@ -7,11 +7,12 @@ use crate::buffer::Buffer;
 use crate::buffer::Cursor;
 use crate::config::{Config, KeymapsConfig};
 use crate::editor::{EditorAction, EditorOperation, ModeKind};
+use crate::editor_pane::EditorPane;
+use crate::editor_tab::{BufferView, EditorTab};
 use crate::globals;
 use crate::path::AbsolutePath;
+use crate::ui::geometry::{Position, Size};
 use crate::ui::{Command, Intent, UiEvent, UiEventResult};
-use crate::window::{Position, Size};
-use crate::window_group::WindowGroup;
 use lsp_types::{Diagnostic, DiagnosticSeverity, Range};
 use smol_str::SmolStr;
 use std::collections::BTreeSet;
@@ -22,7 +23,7 @@ use urvim_terminal::{Color, Key, KeyCode, Modifiers, Style};
 use urvim_theme::{HighlightStyles, Tag, Theme, ThemeKind};
 
 fn layout_with_buffers(buffers: Vec<Buffer>) -> Layout {
-    Layout::new(WindowGroup::from_buffers(buffers))
+    Layout::new(EditorPane::from_buffers(buffers))
 }
 
 fn abs_path(path: &std::path::Path) -> crate::AbsolutePath {
@@ -116,26 +117,26 @@ fn border_config(unicode_borders: bool) -> Config {
     }
 }
 
-fn buffer_line_count(view: &crate::window::BufferView) -> usize {
+fn buffer_line_count(view: &BufferView) -> usize {
     view.with_buffer(|buffer| buffer.line_count()).unwrap_or(0)
 }
 
-fn pane_buffer_view(node: &LayoutNode) -> &crate::window::BufferView {
+fn pane_buffer_view(node: &LayoutNode) -> &BufferView {
     match node {
         LayoutNode::Pane(pane) => pane
-            .editor_window_group()
+            .editor_pane()
             .expect("expected editor pane")
             .active_buffer_view(),
         LayoutNode::Split(_) => panic!("expected buffer pane"),
     }
 }
 
-fn pane_window(node: &LayoutNode) -> &crate::window::Window {
+fn pane_tab(node: &LayoutNode) -> &EditorTab {
     match node {
         LayoutNode::Pane(pane) => pane
-            .editor_window_group()
+            .editor_pane()
             .expect("expected editor pane")
-            .active_window(),
+            .active_tab(),
         LayoutNode::Split(_) => panic!("expected buffer pane"),
     }
 }
@@ -250,14 +251,14 @@ fn assert_all_splits_even(node: &LayoutNode) {
 }
 
 #[test]
-fn test_layout_new_wraps_window_group() {
-    let layout = Layout::new(WindowGroup::new(Vec::new()));
+fn test_layout_new_wraps_editor_pane() {
+    let layout = Layout::new(EditorPane::new(Vec::new()));
 
     assert_eq!(layout.origin(), Position::default());
     assert_eq!(layout.size(), Size::default());
-    assert_eq!(layout.window_group().active_tab_index(), 0);
+    assert_eq!(layout.active_editor_pane().active_tab_index(), 0);
     assert_eq!(
-        layout.window_group().active_window_mode_kind(),
+        layout.active_editor_pane().active_tab_mode_kind(),
         ModeKind::Normal
     );
     assert_eq!(layout.mode_label(), "NORMAL");
@@ -522,7 +523,7 @@ fn test_layout_buffer_picker_opens_and_focuses_first_visible_pane() {
         globals::with_buffer_pool(|pool| pool.register_buffer(Buffer::from_str("beta")));
     let mut layout = layout_with_buffers(vec![alpha]);
     layout
-        .active_window_group_mut()
+        .active_editor_pane_mut()
         .activate_or_open_buffer(second_buffer_id);
 
     assert!(layout.dispatch_intent(&Intent::Command(Command::OpenBufferPicker)));
@@ -624,16 +625,16 @@ fn test_layout_confirmation_box_takes_precedence_over_git_picker() {
 }
 
 #[test]
-fn test_layout_confirmation_takes_input_and_render_precedence_over_plugin_window() {
+fn test_layout_confirmation_takes_input_and_render_precedence_over_overlay() {
     let mut layout = layout_with_buffers(vec![Buffer::from_str("one")]);
-    let id = layout.create_plugin_window(
+    let id = layout.create_overlay(
         "demo".to_string(),
-        crate::ui::plugin_window::PluginWindowOptions::default(),
+        crate::ui::overlay::OverlayOptions::default(),
     );
     layout
-        .plugin_windows_mut()
+        .overlays_mut()
         .focus("demo", id)
-        .expect("plugin window should focus");
+        .expect("overlay should focus");
     layout.open_confirmation_box("Confirm?", Command::Quit);
 
     let mut screen = crate::screen::Screen::new(12, 60);
@@ -648,20 +649,20 @@ fn test_layout_confirmation_takes_input_and_render_precedence_over_plugin_window
         layout.route_ui_event(&UiEvent::Key(key(KeyCode::Enter))),
         UiEventResult::Handled(vec![Intent::Command(Command::Quit)])
     );
-    assert_eq!(layout.plugin_windows().focused(), Some(id));
+    assert_eq!(layout.overlays().focused(), Some(id));
 }
 
 #[test]
-fn test_picker_cursor_takes_precedence_over_focused_plugin_window() {
+fn test_picker_cursor_takes_precedence_over_focused_overlay() {
     let mut layout = layout_with_buffers(vec![Buffer::from_str("one")]);
-    let id = layout.create_plugin_window(
+    let id = layout.create_overlay(
         "demo".to_string(),
-        crate::ui::plugin_window::PluginWindowOptions::default(),
+        crate::ui::overlay::OverlayOptions::default(),
     );
     layout
-        .plugin_windows_mut()
+        .overlays_mut()
         .focus("demo", id)
-        .expect("plugin window should focus");
+        .expect("overlay should focus");
     assert_eq!(layout.visual_cursor(), None);
 
     assert!(layout.dispatch_intent(&Intent::Command(Command::OpenFiletypePicker)));
@@ -669,19 +670,19 @@ fn test_picker_cursor_takes_precedence_over_focused_plugin_window() {
     layout.render(&mut screen, Position::new(0, 0), Size::new(12, 60));
 
     assert!(layout.visual_cursor().is_some());
-    assert_eq!(layout.plugin_windows().focused(), Some(id));
+    assert_eq!(layout.overlays().focused(), Some(id));
 
     layout.close_filetype_picker();
     assert_eq!(layout.visual_cursor(), None);
-    assert_eq!(layout.plugin_windows().focused(), Some(id));
+    assert_eq!(layout.overlays().focused(), Some(id));
 }
 
 #[test]
 fn test_layout_completion_esc_closes_popup_and_exits_insert_mode() {
     let mut layout = layout_with_buffers(vec![Buffer::from_str("alpha")]);
     layout
-        .active_window_group_mut()
-        .active_window_mut()
+        .active_editor_pane_mut()
+        .active_tab_mut()
         .switch_mode(ModeKind::Insert);
 
     assert!(layout.dispatch_intent(&Intent::Command(Command::OpenCompletion)));
@@ -692,8 +693,8 @@ fn test_layout_completion_esc_closes_popup_and_exits_insert_mode() {
     assert!(layout.dialogs.completion.is_none());
 
     let result = layout
-        .active_window_group_mut()
-        .active_window_mut()
+        .active_editor_pane_mut()
+        .active_tab_mut()
         .handle_key(&key(KeyCode::Esc));
     let intent = match result {
         crate::editor::HandleKeyResult::Complete(intent) => intent,
@@ -1391,7 +1392,7 @@ fn test_layout_layered_render_preserves_focus_and_cursor_in_split_layout() {
 }
 
 #[test]
-fn test_layout_process_action_delegates_to_window_group() {
+fn test_layout_process_action_delegates_to_editor_pane() {
     let mut layout = layout_with_buffers(vec![
         Buffer::from_str("one"),
         Buffer::from_str("two"),
@@ -1399,7 +1400,7 @@ fn test_layout_process_action_delegates_to_window_group() {
     ]);
 
     assert!(layout.dispatch_intent(&Intent::Command(Command::NextTab(1))));
-    assert_eq!(layout.window_group().active_tab_index(), 1);
+    assert_eq!(layout.active_editor_pane().active_tab_index(), 1);
 }
 
 #[test]
@@ -1463,8 +1464,8 @@ fn test_layout_split_copies_active_buffer_view_state() {
         .active_buffer_view_mut()
         .set_wrapped_row_offset(source_wrapped_row);
     layout
-        .active_window_group_mut()
-        .active_window_mut()
+        .active_editor_pane_mut()
+        .active_tab_mut()
         .set_wrap_enabled(true);
 
     let source_buffer_id = layout.active_buffer_view().buffer_id();
@@ -1482,7 +1483,7 @@ fn test_layout_split_copies_active_buffer_view_state() {
         layout.active_buffer_view().wrapped_row_offset(),
         source_wrapped_row
     );
-    assert!(layout.active_window_group().active_window().wrap_enabled());
+    assert!(layout.active_editor_pane().active_tab().wrap_enabled());
 
     let root = layout.root.as_ref().expect("layout should keep a root");
     match root {
@@ -1498,8 +1499,8 @@ fn test_layout_split_copies_active_buffer_view_state() {
             assert_eq!(copied.cursor(), source_cursor);
             assert_eq!(copied.scroll_offset(), source_scroll);
             assert_eq!(copied.wrapped_row_offset(), source_wrapped_row);
-            assert!(pane_window(&split.first).wrap_enabled());
-            assert!(pane_window(&split.second).wrap_enabled());
+            assert!(pane_tab(&split.first).wrap_enabled());
+            assert!(pane_tab(&split.second).wrap_enabled());
         }
         LayoutNode::Pane(_) => {
             panic!("split action should replace the root pane")
@@ -1508,73 +1509,116 @@ fn test_layout_split_copies_active_buffer_view_state() {
 }
 
 #[test]
-fn test_layout_exposes_stable_window_ids_for_visible_panes() {
+fn test_layout_exposes_stable_ids_for_visible_editor_panes() {
     let mut layout = layout_with_buffers(vec![Buffer::from_str("one\ntwo")]);
 
-    assert_eq!(layout.active_window_id(), Some(PaneId(0)));
-    assert_eq!(layout.window_ids(), vec![PaneId(0)]);
+    assert_eq!(layout.active_editor_pane_id(), Some(PaneId(0)));
+    assert_eq!(layout.editor_pane_ids(), vec![PaneId(0)]);
 
     assert_eq!(
         dispatch_layout_action(&mut layout, Intent::Command(Command::SplitVertical)),
         ActionResult::Handled
     );
 
-    assert_eq!(layout.active_window_id(), Some(PaneId(1)));
-    assert_eq!(layout.window_ids(), vec![PaneId(0), PaneId(1)]);
-    assert!(layout.buffer_view_for_window(PaneId(0)).is_some());
-    assert!(layout.buffer_view_for_window(PaneId(1)).is_some());
+    assert_eq!(layout.active_editor_pane_id(), Some(PaneId(1)));
+    assert_eq!(layout.editor_pane_ids(), vec![PaneId(0), PaneId(1)]);
+    assert!(layout.buffer_view_for_pane(PaneId(0)).is_some());
+    assert!(layout.buffer_view_for_pane(PaneId(1)).is_some());
 
     assert!(layout.focus_pane(PaneId(0)));
-    assert_eq!(layout.active_window_id(), Some(PaneId(0)));
-    assert_eq!(layout.window_ids(), vec![PaneId(0), PaneId(1)]);
+    assert_eq!(layout.active_editor_pane_id(), Some(PaneId(0)));
+    assert_eq!(layout.editor_pane_ids(), vec![PaneId(0), PaneId(1)]);
 
     assert_eq!(
         dispatch_layout_action(&mut layout, Intent::Command(Command::ClosePane)),
         ActionResult::Handled
     );
 
-    assert_eq!(layout.window_ids(), vec![PaneId(1)]);
-    assert!(layout.buffer_view_for_window(PaneId(0)).is_none());
+    assert_eq!(layout.editor_pane_ids(), vec![PaneId(1)]);
+    assert!(layout.buffer_view_for_pane(PaneId(0)).is_none());
 }
 
 #[test]
-fn test_layout_cycles_focus_across_panes_and_plugin_windows() {
+fn pane_ids_include_editor_and_plugin_panes_in_tree_order() {
+    let _pool_guard = globals::buffer_pool_test_lock();
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("editor")]);
+    let plugin_id = layout
+        .create_plugin_pane(
+            "demo".to_string(),
+            Some(PaneId(0)),
+            SplitAxis::Vertical,
+            SplitSize::even(),
+            crate::ui::plugin_pane::PluginPaneOptions::default(),
+        )
+        .unwrap();
+
+    assert_eq!(layout.pane_ids(), vec![PaneId(0), plugin_id]);
+    assert_eq!(layout.editor_pane_ids(), vec![PaneId(0)]);
+}
+
+#[test]
+fn closing_remembered_editor_pane_repairs_active_editor_while_plugin_pane_is_focused() {
+    let _pool_guard = globals::buffer_pool_test_lock();
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("editor")]);
+    assert!(layout.dispatch_intent(&Intent::Command(Command::SplitVertical)));
+    let remembered_editor = layout.active_editor_pane_id().unwrap();
+    let plugin_id = layout
+        .create_plugin_pane(
+            "demo".to_string(),
+            Some(PaneId(0)),
+            SplitAxis::Vertical,
+            SplitSize::even(),
+            crate::ui::plugin_pane::PluginPaneOptions::default(),
+        )
+        .unwrap();
+    assert_eq!(layout.focused_plugin_pane(), Some(plugin_id));
+
+    layout.close_pane(remembered_editor).unwrap();
+
+    assert_eq!(layout.focused_plugin_pane(), Some(plugin_id));
+    assert_eq!(layout.last_editor_pane, PaneId(0));
+    assert!(layout.dispatch_action(&EditorAction::new(EditorOperation::MoveRight)));
+}
+
+#[test]
+fn test_layout_cycles_focus_across_panes_and_overlays() {
     let mut layout = layout_with_buffers(vec![Buffer::from_str("left")]);
     dispatch_layout_action(&mut layout, Intent::Command(Command::SplitVertical));
-    let first_plugin = layout.create_plugin_window(
+    let first_plugin = layout.create_overlay(
         "demo".to_string(),
-        crate::ui::plugin_window::PluginWindowOptions::default(),
+        crate::ui::overlay::OverlayOptions::default(),
     );
-    let second_plugin = layout.create_plugin_window(
+    let second_plugin = layout.create_overlay(
         "demo".to_string(),
-        crate::ui::plugin_window::PluginWindowOptions::default(),
+        crate::ui::overlay::OverlayOptions::default(),
     );
     layout.focus_pane(PaneId(0));
 
     let mut screen = crate::screen::Screen::new(8, 20);
     layout.render(&mut screen, Position::new(0, 0), Size::new(8, 20));
 
-    assert!(layout.focus_next_window());
-    assert_eq!(layout.active_window_id(), Some(PaneId(1)));
-    assert_eq!(layout.plugin_windows().focused(), None);
+    assert!(layout.focus_next_target());
+    assert_eq!(layout.active_editor_pane_id(), Some(PaneId(1)));
+    assert_eq!(layout.overlays().focused(), None);
 
-    assert!(layout.focus_next_window());
-    assert_eq!(layout.plugin_windows().focused(), Some(first_plugin));
-    assert_eq!(layout.active_window_id(), Some(PaneId(1)));
+    assert!(layout.focus_next_target());
+    assert_eq!(layout.overlays().focused(), Some(first_plugin));
+    assert_eq!(layout.active_editor_pane_id(), Some(PaneId(1)));
 
-    assert!(layout.focus_next_window());
-    assert_eq!(layout.plugin_windows().focused(), Some(second_plugin));
+    assert!(layout.focus_next_target());
+    assert_eq!(layout.overlays().focused(), Some(second_plugin));
 
-    assert!(layout.focus_next_window());
-    assert_eq!(layout.active_window_id(), Some(PaneId(0)));
-    assert_eq!(layout.plugin_windows().focused(), None);
+    assert!(layout.focus_next_target());
+    assert_eq!(layout.active_editor_pane_id(), Some(PaneId(0)));
+    assert_eq!(layout.overlays().focused(), None);
 
-    assert!(layout.focus_previous_window());
-    assert_eq!(layout.plugin_windows().focused(), Some(second_plugin));
+    assert!(layout.focus_previous_target());
+    assert_eq!(layout.overlays().focused(), Some(second_plugin));
 }
 
 #[test]
 fn test_layout_creates_and_closes_targeted_plugin_pane() {
+    let _pool_guard = globals::buffer_pool_test_lock();
     let mut layout = layout_with_buffers(vec![Buffer::from_str("editor")]);
     let id = layout
         .create_plugin_pane(
@@ -1602,11 +1646,257 @@ fn test_layout_creates_and_closes_targeted_plugin_pane() {
         _ => panic!("plugin pane creation should create a split"),
     }
 
+    drain_editor_events();
     layout
         .close_plugin_pane("demo", id)
         .expect("plugin pane should close through its owner");
     assert_eq!(layout.focused_plugin_pane(), None);
     assert_eq!(layout.pane_regions().len(), 1);
+    assert!(matches!(
+        drain_editor_events().as_slice(),
+        [
+            EditorEvent::PaneClosed {
+                pane_id,
+                kind: PaneKind::Plugin,
+                ..
+            },
+            EditorEvent::PaneFocused {
+                previous_pane_id: Some(previous),
+                pane_id: PaneId(0),
+                kind: PaneKind::Editor,
+                ..
+            }
+        ] if *pane_id == id && *previous == id
+    ));
+}
+
+#[test]
+fn close_plugin_panes_owned_emits_closed_panes_before_focus() {
+    let _pool_guard = globals::buffer_pool_test_lock();
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("editor")]);
+    let first = layout
+        .create_plugin_pane(
+            "demo".to_string(),
+            Some(PaneId(0)),
+            SplitAxis::Vertical,
+            SplitSize::even(),
+            crate::ui::plugin_pane::PluginPaneOptions::default(),
+        )
+        .unwrap();
+    let second = layout
+        .create_plugin_pane(
+            "demo".to_string(),
+            Some(PaneId(0)),
+            SplitAxis::Horizontal,
+            SplitSize::even(),
+            crate::ui::plugin_pane::PluginPaneOptions::default(),
+        )
+        .unwrap();
+    drain_editor_events();
+
+    layout.close_plugin_panes_owned("demo");
+
+    assert!(layout.plugin_pane_ids("demo").is_empty());
+    assert_eq!(layout.focused_pane_id(), PaneId(0));
+    let events = drain_editor_events();
+    let closed = events
+        .iter()
+        .filter_map(|event| match event {
+            EditorEvent::PaneClosed {
+                pane_id,
+                kind: PaneKind::Plugin,
+                ..
+            } => Some(*pane_id),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(closed.len(), 2);
+    assert!(closed.contains(&first));
+    assert!(closed.contains(&second));
+    assert!(matches!(
+        events.last(),
+        Some(EditorEvent::PaneFocused {
+            previous_pane_id: Some(previous),
+            pane_id: PaneId(0),
+            kind: PaneKind::Editor,
+            ..
+        }) if *previous == second
+    ));
+}
+
+#[test]
+fn focus_layout_pane_blurs_overlay_for_editor_and_plugin_destinations() {
+    let _pool_guard = globals::buffer_pool_test_lock();
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("editor")]);
+    let plugin_id = layout
+        .create_plugin_pane(
+            "demo".to_string(),
+            Some(PaneId(0)),
+            SplitAxis::Vertical,
+            SplitSize::even(),
+            crate::ui::plugin_pane::PluginPaneOptions::default(),
+        )
+        .unwrap();
+    let overlay_id = layout.create_overlay(
+        "demo".to_string(),
+        crate::ui::overlay::OverlayOptions::default(),
+    );
+
+    layout.focus_overlay("demo", overlay_id).unwrap();
+    assert!(layout.focus_layout_pane(PaneId(0)));
+    assert_eq!(layout.overlays().focused(), None);
+
+    layout.focus_overlay("demo", overlay_id).unwrap();
+    assert!(layout.focus_layout_pane(plugin_id));
+    assert_eq!(layout.overlays().focused(), None);
+    assert_eq!(layout.focused_plugin_pane(), Some(plugin_id));
+}
+
+#[test]
+fn focused_overlay_takes_key_and_focus_cycle_precedence_over_plugin_pane() {
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("editor")]);
+    let plugin_id = layout
+        .create_plugin_pane(
+            "demo".to_string(),
+            None,
+            SplitAxis::Vertical,
+            SplitSize::even(),
+            crate::ui::plugin_pane::PluginPaneOptions::default(),
+        )
+        .unwrap();
+    layout
+        .set_plugin_pane_keymap(
+            "demo",
+            plugin_id,
+            vec!["x".to_string()],
+            "pane wrap-toggle".to_string(),
+            Intent::Command(Command::ToggleWrap),
+        )
+        .unwrap();
+    layout
+        .set_plugin_pane_keymap(
+            "demo",
+            plugin_id,
+            vec!["g".to_string(), "g".to_string()],
+            "pane wrap-toggle".to_string(),
+            Intent::Command(Command::ToggleWrap),
+        )
+        .unwrap();
+    assert_eq!(
+        layout.route_ui_event(&UiEvent::Key(key(KeyCode::Char('g')))),
+        UiEventResult::Handled(Vec::new())
+    );
+
+    let overlay_id = layout.create_overlay(
+        "demo".to_string(),
+        crate::ui::overlay::OverlayOptions {
+            rows: 2,
+            cols: 10,
+            ..Default::default()
+        },
+    );
+    layout
+        .set_overlay_content(
+            "demo",
+            overlay_id,
+            vec![vec![crate::ui::overlay::RetainedSegment {
+                text: "OVERLAY".to_string(),
+                style: None,
+            }]],
+        )
+        .unwrap();
+    layout
+        .overlays_mut()
+        .set_keymap(
+            "demo",
+            overlay_id,
+            vec!["x".to_string()],
+            "file-picker".to_string(),
+            Intent::Command(Command::OpenFilePicker),
+        )
+        .unwrap();
+    layout.focus_overlay("demo", overlay_id).unwrap();
+
+    let mut screen = crate::screen::Screen::new(12, 60);
+    layout.render(&mut screen, Position::new(0, 0), Size::new(12, 60));
+    let rendered = (0..12)
+        .flat_map(|row| (0..60).map(move |col| (row, col)))
+        .map(|(row, col)| screen.get_cell_mut(row, col).unwrap().text.clone())
+        .collect::<String>();
+    assert!(rendered.contains("OVERLAY"));
+
+    assert_eq!(
+        layout.route_ui_event(&UiEvent::Key(key(KeyCode::Char('x')))),
+        UiEventResult::Handled(vec![Intent::Command(Command::OpenFilePicker)])
+    );
+    assert_eq!(layout.focused_plugin_pane(), Some(plugin_id));
+    assert_eq!(layout.visual_cursor(), None);
+
+    assert!(
+        layout
+            .route_ui_event(&UiEvent::Key(key(KeyCode::Esc)))
+            .handled()
+    );
+    assert_eq!(layout.overlays().focused(), None);
+    assert_eq!(
+        layout.route_ui_event(&UiEvent::Key(key(KeyCode::Char('g')))),
+        UiEventResult::Handled(Vec::new())
+    );
+
+    layout.focus_overlay("demo", overlay_id).unwrap();
+    assert!(layout.focus_next_target());
+    assert_eq!(layout.overlays().focused(), None);
+    assert_eq!(layout.active_editor_pane_id(), Some(PaneId(0)));
+}
+
+#[test]
+fn closing_final_buffer_keeps_last_editor_pane_valid_beside_plugin_pane() {
+    let _pool_guard = globals::buffer_pool_test_lock();
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("editor")]);
+    let old_buffer_id = layout.active_buffer_view().buffer_id();
+    let plugin_id = layout
+        .create_plugin_pane(
+            "demo".to_string(),
+            Some(PaneId(0)),
+            SplitAxis::Vertical,
+            SplitSize::even(),
+            crate::ui::plugin_pane::PluginPaneOptions::default(),
+        )
+        .unwrap();
+    assert!(layout.focus_layout_pane(PaneId(0)));
+
+    assert!(layout.close_active_buffer_tab());
+
+    assert_eq!(layout.editor_pane_ids(), vec![PaneId(0)]);
+    assert_eq!(layout.pane_ids(), vec![PaneId(0), plugin_id]);
+    assert_ne!(layout.active_buffer_view().buffer_id(), old_buffer_id);
+    assert!(!layout.active_editor_pane().is_empty());
+    assert!(!layout.should_exit());
+}
+
+#[test]
+fn closing_shared_final_buffer_keeps_one_editor_pane_beside_plugin_pane() {
+    let _pool_guard = globals::buffer_pool_test_lock();
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("shared")]);
+    let buffer_id = layout.active_buffer_view().buffer_id();
+    assert!(layout.dispatch_intent(&Intent::Command(Command::SplitVertical)));
+    let plugin_id = layout
+        .create_plugin_pane(
+            "demo".to_string(),
+            Some(PaneId(0)),
+            SplitAxis::Horizontal,
+            SplitSize::even(),
+            crate::ui::plugin_pane::PluginPaneOptions::default(),
+        )
+        .unwrap();
+
+    assert!(layout.close_buffer_tabs_and_prune(buffer_id));
+
+    assert_eq!(layout.editor_pane_ids().len(), 1);
+    assert_eq!(layout.pane_ids().len(), 2);
+    assert!(layout.pane_ids().contains(&plugin_id));
+    assert_ne!(layout.active_buffer_view().buffer_id(), buffer_id);
+    assert!(!layout.should_exit());
 }
 
 #[test]
@@ -1632,7 +1922,7 @@ fn test_plugin_pane_render_updates_header_style_with_focus() {
         .set_plugin_pane_content(
             "demo",
             id,
-            vec![vec![crate::ui::plugin_window::PluginWindowSegment {
+            vec![vec![crate::ui::overlay::RetainedSegment {
                 text: "content".to_string(),
                 style: None,
             }]],
@@ -1725,7 +2015,7 @@ fn test_plugin_pane_routes_standard_focus_sequences() {
     );
     assert!(layout.dispatch_intent(&Intent::Command(Command::FocusPaneLeft)));
     assert_eq!(layout.focused_plugin_pane(), None);
-    assert_eq!(layout.active_window_id(), Some(PaneId(0)));
+    assert_eq!(layout.active_editor_pane_id(), Some(PaneId(0)));
 
     layout.focus_plugin_pane("demo", plugin_id).unwrap();
     assert!(layout.route_ui_event(&UiEvent::Key(ctrl_w)).handled());
@@ -1862,24 +2152,24 @@ fn test_plugin_pane_inherits_application_mapping() {
 }
 
 #[test]
-fn test_layout_wrap_toggle_is_window_local() {
+fn test_layout_wrap_toggle_is_editor_pane_local() {
     let mut layout = layout_with_buffers(vec![Buffer::from_str("one\ntwo")]);
     assert_eq!(
         dispatch_layout_action(&mut layout, Intent::Command(Command::SplitVertical)),
         ActionResult::Handled
     );
-    assert!(!layout.active_window_group().active_window().wrap_enabled());
+    assert!(!layout.active_editor_pane().active_tab().wrap_enabled());
 
     assert_eq!(
         dispatch_layout_action(&mut layout, Intent::Command(Command::ToggleWrap)),
         ActionResult::Handled
     );
-    assert!(layout.active_window_group().active_window().wrap_enabled());
+    assert!(layout.active_editor_pane().active_tab().wrap_enabled());
     let root = layout.root.as_ref().expect("layout should keep a root");
     match root {
         LayoutNode::Split(split) => {
-            assert!(!pane_window(&split.first).wrap_enabled());
-            assert!(pane_window(&split.second).wrap_enabled());
+            assert!(!pane_tab(&split.first).wrap_enabled());
+            assert!(pane_tab(&split.second).wrap_enabled());
         }
         LayoutNode::Pane(_) => {
             panic!("split action should replace the root pane")
@@ -1888,14 +2178,14 @@ fn test_layout_wrap_toggle_is_window_local() {
 }
 
 #[test]
-fn test_layout_close_pane_exits_when_last_pane_is_removed() {
+fn test_layout_close_pane_rejects_last_editor_pane() {
     let mut layout = layout_with_buffers(vec![Buffer::from_str("one")]);
 
     assert_eq!(
         dispatch_layout_action(&mut layout, Intent::Command(Command::ClosePane)),
-        ActionResult::Handled
+        ActionResult::NotHandled
     );
-    assert!(layout.should_exit());
+    assert!(!layout.should_exit());
 }
 
 #[test]
@@ -1915,7 +2205,7 @@ fn test_layout_render_stores_geometry_and_forwards_size() {
     assert_eq!(layout.origin(), origin);
     assert_eq!(layout.size(), size);
     assert_eq!(
-        layout.window_group().active_window().size(),
+        layout.active_editor_pane().active_tab().size(),
         Size::new(1, 12)
     );
     assert_eq!(screen.get_cell_mut(5, 4).unwrap().text, "N");
@@ -2236,8 +2526,8 @@ fn test_layout_mode_kind_updates_footer() {
     let _config_guard = globals::set_test_config(Config::default());
     let mut layout = layout_with_buffers(vec![Buffer::from_str("alpha")]);
     layout
-        .window_group_mut()
-        .active_window_mut()
+        .active_editor_pane_mut()
+        .active_tab_mut()
         .switch_mode(ModeKind::Insert);
 
     let mut screen = crate::screen::Screen::new(3, 12);
@@ -2429,8 +2719,8 @@ fn test_layout_render_uses_resize_border_style_in_resize_mode() {
     let mut layout = layout_with_buffers(vec![Buffer::from_str("alpha")]);
     dispatch_layout_action(&mut layout, Intent::Command(Command::SplitVertical));
     layout
-        .window_group_mut()
-        .active_window_mut()
+        .active_editor_pane_mut()
+        .active_tab_mut()
         .switch_mode(ModeKind::Resizing);
 
     let mut screen = crate::screen::Screen::new(4, 20);
@@ -2563,11 +2853,11 @@ fn test_layout_close_pane_collapses_parent_split_to_surviving_child() {
 }
 
 #[test]
-fn test_layout_prunes_empty_window_group_during_render() {
+fn test_layout_prunes_empty_editor_pane_during_render() {
     let mut layout = layout_with_buffers(vec![Buffer::from_str("one")]);
     dispatch_layout_action(&mut layout, Intent::Command(Command::SplitVertical));
 
-    assert!(layout.active_window_group_mut().close_active_tab());
+    assert!(layout.active_editor_pane_mut().close_active_tab());
 
     let mut screen = crate::screen::Screen::new(4, 20);
     layout.render(&mut screen, Position::new(0, 0), Size::new(4, 20));
@@ -2597,8 +2887,8 @@ fn test_layout_prunes_expired_yank_flash_during_tick() {
     let mut layout = layout_with_buffers(vec![buffer]);
     assert_eq!(
         layout
-            .active_window_group_mut()
-            .active_window_mut()
+            .active_editor_pane_mut()
+            .active_tab_mut()
             .dispatch_action(&EditorAction::new(EditorOperation::YankLine)),
         ActionResult::Handled
     );
@@ -2611,8 +2901,8 @@ fn test_layout_prunes_expired_yank_flash_during_tick() {
     layout.render(&mut screen, Position::new(0, 0), Size::new(3, 20));
 
     let line = layout
-        .active_window_group()
-        .active_window()
+        .active_editor_pane()
+        .active_tab()
         .render_data()
         .get_line(0)
         .expect("rendered line should exist");
@@ -2626,8 +2916,8 @@ fn test_layout_preserves_unrelated_pane_cursor_and_mode_state() {
         .active_buffer_view_mut()
         .set_cursor(crate::buffer::Cursor::new(0, 2));
     layout
-        .active_window_group_mut()
-        .active_window_mut()
+        .active_editor_pane_mut()
+        .active_tab_mut()
         .switch_mode(ModeKind::Insert);
 
     dispatch_layout_action(&mut layout, Intent::Command(Command::SplitVertical));
@@ -2639,7 +2929,7 @@ fn test_layout_preserves_unrelated_pane_cursor_and_mode_state() {
         layout.active_buffer_view().cursor(),
         crate::buffer::Cursor::new(0, 2)
     );
-    assert_eq!(layout.active_window_mode_kind(), ModeKind::Insert);
+    assert_eq!(layout.active_tab_mode_kind(), ModeKind::Insert);
 }
 
 #[test]
@@ -2648,8 +2938,17 @@ fn test_layout_process_workspace_file_operations_closes_deleted_tabs() {
     globals::with_buffer_pool(|pool| *pool = crate::buffer::BufferPool::new());
     globals::clear_workspace_file_operation_notifications();
 
-    let layout = layout_with_buffers(vec![Buffer::from_str("alpha")]);
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("alpha")]);
     let buffer_id = layout.active_buffer_view().buffer_id();
+    let plugin_id = layout
+        .create_plugin_pane(
+            "demo".to_string(),
+            Some(PaneId(0)),
+            SplitAxis::Vertical,
+            SplitSize::even(),
+            crate::ui::plugin_pane::PluginPaneOptions::default(),
+        )
+        .unwrap();
 
     globals::enqueue_workspace_file_operation_notification(
         globals::WorkspaceFileOperationNotification::Delete {
@@ -2658,9 +2957,11 @@ fn test_layout_process_workspace_file_operations_closes_deleted_tabs() {
         },
     );
 
-    let mut layout = layout;
     assert!(layout.process_workspace_file_operations());
-    assert!(layout.should_exit());
+    assert_eq!(layout.editor_pane_ids(), vec![PaneId(0)]);
+    assert_eq!(layout.pane_ids(), vec![PaneId(0), plugin_id]);
+    assert_ne!(layout.active_buffer_view().buffer_id(), buffer_id);
+    assert!(!layout.should_exit());
 }
 
 fn drain_editor_events() -> Vec<EditorEvent> {
@@ -2671,10 +2972,10 @@ fn initial_lifecycle_event_names(events: &[EditorEvent]) -> Vec<&'static str> {
     events
         .iter()
         .filter_map(|event| match event {
-            EditorEvent::WindowCreated { .. } => Some("WindowCreated"),
+            EditorEvent::PaneCreated { .. } => Some("PaneCreated"),
             EditorEvent::TabOpened { .. } => Some("TabOpened"),
             EditorEvent::BufferOpened { .. } => Some("BufferOpened"),
-            EditorEvent::WindowFocused { .. } => Some("WindowFocused"),
+            EditorEvent::PaneFocused { .. } => Some("PaneFocused"),
             EditorEvent::TabActivated { .. } => Some("TabActivated"),
             EditorEvent::ActiveBufferChanged { .. } => Some("ActiveBufferChanged"),
             EditorEvent::EditorStarted => Some("EditorStarted"),
@@ -2687,64 +2988,61 @@ fn initial_lifecycle_event_names(events: &[EditorEvent]) -> Vec<&'static str> {
 fn fresh_layout_emits_initial_lifecycle_before_editor_started() {
     let _lock = globals::buffer_pool_test_lock();
     globals::with_buffer_pool(|pool| *pool = crate::buffer::BufferPool::new());
-    let window_group =
-        WindowGroup::from_buffers(vec![Buffer::from_str("first"), Buffer::from_str("second")]);
+    let editor_pane =
+        EditorPane::from_buffers(vec![Buffer::from_str("first"), Buffer::from_str("second")]);
     drain_editor_events();
 
-    let layout = Layout::new(window_group);
+    let _layout = Layout::new(editor_pane);
     globals::enqueue_editor_event(EditorEvent::EditorStarted);
 
     let events = drain_editor_events();
     assert_eq!(
         initial_lifecycle_event_names(&events),
         vec![
-            "WindowCreated",
+            "PaneCreated",
             "TabOpened",
             "TabOpened",
             "BufferOpened",
             "BufferOpened",
-            "WindowFocused",
+            "PaneFocused",
             "TabActivated",
             "ActiveBufferChanged",
             "EditorStarted",
         ]
     );
-    let active_buffer_id = layout.active_buffer_view().buffer_id();
-    assert_eq!(
-        globals::with_active_buffer_id(|id| id),
-        Some(active_buffer_id)
-    );
     assert!(matches!(
         events.as_slice(),
         [
-            EditorEvent::WindowCreated {
-                window_id: PaneId(0),
-                tab_id: created_tab_id,
-                buffer_id: created_buffer_id,
+            EditorEvent::PaneCreated {
+                pane_id: PaneId(0),
+                kind: PaneKind::Editor,
+                tab_id: Some(created_tab_id),
+                buffer_id: Some(created_buffer_id),
             },
             EditorEvent::TabOpened {
-                window_id: PaneId(0),
+                pane_id: PaneId(0),
                 tab_id: first_tab_id,
                 snapshot: first_snapshot,
             },
             EditorEvent::TabOpened { .. },
             EditorEvent::BufferOpened { .. },
             EditorEvent::BufferOpened { .. },
-            EditorEvent::WindowFocused {
-                previous_window_id: None,
-                window_id: PaneId(0),
-                tab_id: focused_tab_id,
-                buffer_id: focused_buffer_id,
+            EditorEvent::PaneFocused {
+                previous_pane_id: None,
+                pane_id: PaneId(0),
+                kind: PaneKind::Editor,
+                tab_id: Some(focused_tab_id),
+                buffer_id: Some(focused_buffer_id),
             },
             EditorEvent::TabActivated {
                 previous_tab_id: None,
-                window_id: PaneId(0),
+                pane_id: PaneId(0),
                 tab_id: activated_tab_id,
                 buffer_id: activated_buffer_id,
             },
             EditorEvent::ActiveBufferChanged {
                 previous_buffer_id: None,
-                window_id: PaneId(0),
+                pane_id: PaneId(0),
                 tab_id: active_tab_id,
                 buffer_id,
             },
@@ -2778,7 +3076,7 @@ fn restored_multi_pane_layout_emits_initial_lifecycle_once_in_order() {
     fs::write(&first_path, "first").unwrap();
     fs::write(&second_path, "second").unwrap();
 
-    let mut source = Layout::new(WindowGroup::from_paths(std::slice::from_ref(&first_path)));
+    let mut source = Layout::new(EditorPane::from_paths(std::slice::from_ref(&first_path)));
     assert!(source.dispatch_intent(&Intent::Command(Command::SplitVertical)));
     let second_buffer_id =
         globals::with_buffer_pool(|pool| pool.open_buffer(&second_path)).unwrap();
@@ -2793,29 +3091,25 @@ fn restored_multi_pane_layout_emits_initial_lifecycle_once_in_order() {
     assert_eq!(
         initial_lifecycle_event_names(&events),
         vec![
-            "WindowCreated",
-            "WindowCreated",
+            "PaneCreated",
+            "PaneCreated",
             "TabOpened",
             "TabOpened",
             "TabOpened",
             "BufferOpened",
             "BufferOpened",
-            "WindowFocused",
+            "PaneFocused",
             "TabActivated",
             "TabActivated",
             "ActiveBufferChanged",
             "EditorStarted",
         ]
     );
-    assert_eq!(restored.active_window_id(), Some(PaneId(1)));
-    assert_eq!(
-        globals::with_active_buffer_id(|id| id),
-        Some(restored.active_buffer_view().buffer_id())
-    );
+    assert_eq!(restored.active_editor_pane_id(), Some(PaneId(1)));
     assert_eq!(
         events
             .iter()
-            .filter(|event| matches!(event, EditorEvent::WindowFocused { .. }))
+            .filter(|event| matches!(event, EditorEvent::PaneFocused { .. }))
             .count(),
         1
     );
@@ -2824,12 +3118,31 @@ fn restored_multi_pane_layout_emits_initial_lifecycle_once_in_order() {
 }
 
 #[test]
+fn session_round_trip_restores_non_even_split_weights() {
+    let _pool_guard = globals::buffer_pool_test_lock();
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("editor")]);
+    assert!(layout.dispatch_intent(&Intent::Command(Command::SplitVertical)));
+    let LayoutNode::Split(split) = layout.root.as_mut().unwrap() else {
+        panic!("split command should create a split root");
+    };
+    split.split_size = SplitSize::new(3, 7);
+
+    let restored = Layout::from_session(layout.to_session());
+
+    let LayoutNode::Split(split) = restored.root.as_ref().unwrap() else {
+        panic!("restored layout should retain its split root");
+    };
+    assert_eq!(split.split_size.first_weight(), 3);
+    assert_eq!(split.split_size.second_weight(), 7);
+}
+
+#[test]
 fn layout_open_buffer_emits_ordered_tab_buffer_and_active_events() {
     let _lock = globals::buffer_pool_test_lock();
     globals::with_buffer_pool(|pool| *pool = crate::buffer::BufferPool::new());
     let mut layout = layout_with_buffers(vec![Buffer::from_str("visible")]);
     let previous_buffer_id = layout.active_buffer_view().buffer_id();
-    let previous_tab_id = layout.active_window_group().active_tab_id().unwrap();
+    let previous_tab_id = layout.active_editor_pane().active_tab_id().unwrap();
     let buffer_id = globals::with_buffer_pool(|pool| pool.create_buffer());
     drain_editor_events();
 
@@ -2840,13 +3153,13 @@ fn layout_open_buffer_emits_ordered_tab_buffer_and_active_events() {
         events.as_slice(),
         [
             EditorEvent::TabOpened {
-                window_id: PaneId(0),
+                pane_id: PaneId(0),
                 tab_id: opened_tab_id,
                 snapshot: opened_snapshot,
             },
             EditorEvent::BufferOpened { snapshot },
             EditorEvent::TabActivated {
-                window_id: PaneId(0),
+                pane_id: PaneId(0),
                 previous_tab_id: Some(previous_tab),
                 tab_id: activated_tab_id,
                 buffer_id: activated_buffer_id,
@@ -2854,7 +3167,7 @@ fn layout_open_buffer_emits_ordered_tab_buffer_and_active_events() {
             EditorEvent::ActiveBufferChanged {
                 previous_buffer_id: Some(previous),
                 buffer_id: active_buffer_id,
-                window_id: PaneId(0),
+                pane_id: PaneId(0),
                 tab_id: active_tab_id,
             }
         ] if opened_snapshot.buffer_id == buffer_id
@@ -2869,10 +3182,10 @@ fn layout_open_buffer_emits_ordered_tab_buffer_and_active_events() {
 }
 
 #[test]
-fn layout_split_emits_window_before_tab_then_focus_without_buffer_open() {
+fn layout_split_emits_pane_before_tab_then_focus_without_buffer_open() {
     let mut layout = layout_with_buffers(vec![Buffer::from_str("shared")]);
     let buffer_id = layout.active_buffer_view().buffer_id();
-    let previous_tab_id = layout.active_window_group().active_tab_id().unwrap();
+    let previous_tab_id = layout.active_editor_pane().active_tab_id().unwrap();
     drain_editor_events();
 
     assert!(layout.dispatch_intent(&Intent::Command(Command::SplitVertical)));
@@ -2881,25 +3194,27 @@ fn layout_split_emits_window_before_tab_then_focus_without_buffer_open() {
     assert!(matches!(
         events.as_slice(),
         [
-            EditorEvent::WindowCreated {
-                window_id: PaneId(1),
-                buffer_id: created_buffer_id,
-                tab_id: created_tab_id,
+            EditorEvent::PaneCreated {
+                pane_id: PaneId(1),
+                kind: PaneKind::Editor,
+                buffer_id: Some(created_buffer_id),
+                tab_id: Some(created_tab_id),
             },
             EditorEvent::TabOpened {
-                window_id: PaneId(1),
+                pane_id: PaneId(1),
                 tab_id: opened_tab_id,
                 snapshot: opened_snapshot,
             },
-            EditorEvent::WindowFocused {
-                previous_window_id: Some(PaneId(0)),
-                window_id: PaneId(1),
-                buffer_id: focused_buffer_id,
-                tab_id: focused_tab_id,
+            EditorEvent::PaneFocused {
+                previous_pane_id: Some(PaneId(0)),
+                pane_id: PaneId(1),
+                kind: PaneKind::Editor,
+                buffer_id: Some(focused_buffer_id),
+                tab_id: Some(focused_tab_id),
             },
             EditorEvent::TabActivated {
                 previous_tab_id: None,
-                window_id: PaneId(1),
+                pane_id: PaneId(1),
                 tab_id: activated_tab_id,
                 buffer_id: activated_buffer_id,
             }
@@ -2918,97 +3233,107 @@ fn layout_split_emits_window_before_tab_then_focus_without_buffer_open() {
 fn closing_duplicate_split_tab_does_not_close_globally_visible_buffer() {
     let mut layout = layout_with_buffers(vec![Buffer::from_str("shared")]);
     assert!(layout.dispatch_intent(&Intent::Command(Command::SplitVertical)));
-    let closed_tab_id = layout.active_window_group().active_tab_id().unwrap();
+    let closed_tab_id = layout.active_editor_pane().active_tab_id().unwrap();
     let buffer_id = layout.active_buffer_view().buffer_id();
     assert!(layout.focus_pane(PaneId(0)));
-    let focused_tab_id = layout.active_window_group().active_tab_id().unwrap();
+    let focused_tab_id = layout.active_editor_pane().active_tab_id().unwrap();
     assert!(layout.focus_pane(PaneId(1)));
     drain_editor_events();
 
     assert!(layout.dispatch_intent(&Intent::Command(Command::ClosePane)));
 
     let events = drain_editor_events();
-    assert!(matches!(
-        events.as_slice(),
-        [
-            EditorEvent::TabClosed {
-                window_id: PaneId(1),
-                tab_id,
-                snapshot,
-            },
-            EditorEvent::WindowClosed {
-                window_id: PaneId(1),
-                buffer_id: closed_buffer_id,
-                tab_id: final_tab_id,
-            },
-            EditorEvent::WindowFocused {
-                previous_window_id: Some(PaneId(1)),
-                window_id: PaneId(0),
-                buffer_id: focused_buffer_id,
-                tab_id: new_focused_tab_id,
-            }
-        ] if *tab_id == closed_tab_id
-            && snapshot.buffer_id == buffer_id
-            && *closed_buffer_id == buffer_id
-            && *final_tab_id == closed_tab_id
-            && *focused_buffer_id == buffer_id
-            && *new_focused_tab_id == focused_tab_id
-    ));
+    assert!(
+        matches!(
+            events.as_slice(),
+            [
+                EditorEvent::TabClosed {
+                    pane_id: PaneId(1),
+                    tab_id,
+                    snapshot,
+                },
+                EditorEvent::PaneClosed {
+                    pane_id: PaneId(1),
+                    kind: PaneKind::Editor,
+                    buffer_id: Some(closed_buffer_id),
+                    tab_id: Some(final_tab_id),
+                },
+                EditorEvent::PaneFocused {
+                    previous_pane_id: Some(PaneId(1)),
+                    pane_id: PaneId(0),
+                    kind: PaneKind::Editor,
+                    buffer_id: Some(focused_buffer_id),
+                    tab_id: Some(new_focused_tab_id),
+                }
+            ] if *tab_id == closed_tab_id
+                && snapshot.buffer_id == buffer_id
+                && *closed_buffer_id == buffer_id
+                && *final_tab_id == closed_tab_id
+                && *focused_buffer_id == buffer_id
+                && *new_focused_tab_id == focused_tab_id
+        ),
+        "{events:#?}"
+    );
 }
 
 #[test]
-fn closing_whole_pane_closes_buffers_before_window() {
+fn closing_whole_pane_closes_buffers_before_pane() {
     let mut layout = layout_with_buffers(vec![Buffer::from_str("shared")]);
     let shared_buffer_id = layout.active_buffer_view().buffer_id();
     assert!(layout.dispatch_intent(&Intent::Command(Command::SplitVertical)));
     let unique_buffer_id = globals::with_buffer_pool(|pool| pool.create_buffer());
     layout.activate_or_open_buffer(unique_buffer_id);
-    let final_tab_id = layout.active_window_group().active_tab_id().unwrap();
+    let final_tab_id = layout.active_editor_pane().active_tab_id().unwrap();
     drain_editor_events();
 
     assert!(layout.dispatch_intent(&Intent::Command(Command::ClosePane)));
 
     let events = drain_editor_events();
-    assert!(matches!(
-        events.as_slice(),
-        [
-            EditorEvent::TabClosed {
-                snapshot: shared_snapshot,
-                ..
-            },
-            EditorEvent::TabClosed {
-                tab_id: closed_final_tab_id,
-                snapshot: unique_snapshot,
-                ..
-            },
-            EditorEvent::BufferClosed { snapshot },
-            EditorEvent::WindowClosed {
-                window_id: PaneId(1),
-                buffer_id: closed_buffer_id,
-                tab_id: window_final_tab_id,
-            },
-            EditorEvent::WindowFocused {
-                previous_window_id: Some(PaneId(1)),
-                window_id: PaneId(0),
-                buffer_id: focused_buffer_id,
-                ..
-            },
-            EditorEvent::ActiveBufferChanged {
-                previous_buffer_id: Some(previous_buffer_id),
-                buffer_id: active_buffer_id,
-                window_id: PaneId(0),
-                ..
-            }
-        ] if shared_snapshot.buffer_id == shared_buffer_id
-            && unique_snapshot.buffer_id == unique_buffer_id
-            && snapshot.buffer_id == unique_buffer_id
-            && *closed_final_tab_id == final_tab_id
-            && *closed_buffer_id == unique_buffer_id
-            && *window_final_tab_id == final_tab_id
-            && *focused_buffer_id == shared_buffer_id
-            && *previous_buffer_id == unique_buffer_id
-            && *active_buffer_id == shared_buffer_id
-    ));
+    assert!(
+        matches!(
+            events.as_slice(),
+            [
+                EditorEvent::TabClosed {
+                    snapshot: shared_snapshot,
+                    ..
+                },
+                EditorEvent::TabClosed {
+                    tab_id: closed_final_tab_id,
+                    snapshot: unique_snapshot,
+                    ..
+                },
+                EditorEvent::BufferClosed { snapshot },
+                EditorEvent::PaneClosed {
+                    pane_id: PaneId(1),
+                    kind: PaneKind::Editor,
+                    buffer_id: Some(closed_buffer_id),
+                    tab_id: Some(window_final_tab_id),
+                },
+                EditorEvent::PaneFocused {
+                    previous_pane_id: Some(PaneId(1)),
+                    pane_id: PaneId(0),
+                    kind: PaneKind::Editor,
+                    buffer_id: Some(focused_buffer_id),
+                    ..
+                },
+                EditorEvent::ActiveBufferChanged {
+                    previous_buffer_id: Some(previous_buffer_id),
+                    buffer_id: active_buffer_id,
+                    pane_id: PaneId(0),
+                    ..
+                }
+            ] if shared_snapshot.buffer_id == shared_buffer_id
+                && unique_snapshot.buffer_id == unique_buffer_id
+                && snapshot.buffer_id == unique_buffer_id
+                && *closed_final_tab_id == final_tab_id
+                && *closed_buffer_id == unique_buffer_id
+                && *window_final_tab_id == final_tab_id
+                && *focused_buffer_id == shared_buffer_id
+                && *previous_buffer_id == unique_buffer_id
+                && *active_buffer_id == shared_buffer_id
+        ),
+        "{events:#?}"
+    );
 }
 
 #[test]
@@ -3016,8 +3341,8 @@ fn closing_active_tab_snapshots_buffer_before_activation_changes() {
     let mut layout =
         layout_with_buffers(vec![Buffer::from_str("first"), Buffer::from_str("second")]);
     let closed_buffer_id = layout.active_buffer_view().buffer_id();
-    let closed_tab_id = layout.active_window_group().active_tab_id().unwrap();
-    let next_buffer_id = layout.active_window_group().buffer_ids()[1];
+    let closed_tab_id = layout.active_editor_pane().active_tab_id().unwrap();
+    let next_buffer_id = layout.active_editor_pane().buffer_ids()[1];
     drain_editor_events();
 
     assert!(layout.close_active_buffer_tab());

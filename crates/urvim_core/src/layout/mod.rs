@@ -1,7 +1,7 @@
 //! Layout module.
 //!
 //! This module provides the `Layout` root container, which owns a binary split
-//! tree of pane-hosted window groups, routes split-management actions, and renders
+//! tree of editor and plugin panes, routes split-management actions, and renders
 //! a footer status bar below the active editor region.
 
 mod command_line;
@@ -28,16 +28,16 @@ use crate::action::ActionResult;
 use crate::background::{JobEvent, JobKind, JobManager};
 use crate::buffer::BufferId;
 use crate::editor::{EditorAction, InheritedKeymap, ModeKind, NormalMode};
+use crate::editor_pane::EditorPane;
+use crate::editor_tab::{BufferView, TabId};
 use crate::event::{BufferEventSnapshot, EditorEvent, PaneEventSnapshot};
 use crate::globals;
 use crate::screen::Screen;
 use crate::status_bar::StatusBar;
+use crate::ui::geometry::{Position, Size};
+use crate::ui::overlay::{OverlayId, OverlayManager, OverlayOptions, RetainedContent};
 use crate::ui::plugin_pane::{PluginPane, PluginPaneOptions};
-use crate::ui::plugin_window::{
-    PluginWindowContent, PluginWindowId, PluginWindowManager, PluginWindowOptions,
-};
 use crate::ui::{Command, Intent, KeymapInheritance, UiEvent, UiEventResult};
-use crate::window::{BufferView, Position, Size, TabId};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -46,7 +46,7 @@ use urvim_terminal::CursorStyle;
 
 use self::tree::ResizeDirection;
 pub use geometry::PaneRegion;
-pub use node::{LayoutNode, PaneContent, PaneId, PaneNode, SplitAxis, SplitNode, SplitSize};
+pub use node::{LayoutNode, Pane, PaneContent, PaneId, PaneKind, SplitAxis, SplitNode, SplitSize};
 
 /// Snapshot of a visible buffer range in a pane.
 #[derive(Debug, Clone)]
@@ -102,7 +102,7 @@ pub struct PaneStateSnapshot {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PersistentFocusTarget {
     Pane(PaneId),
-    Plugin(PluginWindowId),
+    Overlay(OverlayId),
     PluginPane(PaneId),
 }
 
@@ -131,7 +131,7 @@ pub struct Layout {
     jobs: Arc<JobManager>,
     inlay_hints: InlayHintState,
     autocomplete: AutocompleteState,
-    plugin_windows: PluginWindowManager,
+    overlays: OverlayManager,
     plugin_pane_inherited_keymap: InheritedKeymap,
     plugin_pane_key_sequence: PluginPaneKeySequence,
     modal_inherited_keymap: InheritedKeymap,
@@ -140,16 +140,17 @@ pub struct Layout {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct LayoutEventWindowSnapshot {
+struct LayoutEventPaneSnapshot {
     id: PaneId,
+    kind: PaneKind,
     tabs: Vec<(TabId, BufferId)>,
     active_tab_id: Option<TabId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct LayoutEventSnapshot {
-    windows: Vec<LayoutEventWindowSnapshot>,
-    focused_window_id: Option<PaneId>,
+    panes: Vec<LayoutEventPaneSnapshot>,
+    focused_pane_id: Option<PaneId>,
     active_buffer_id: Option<BufferId>,
     buffers: BTreeMap<BufferId, (usize, BufferEventSnapshot)>,
 }
@@ -157,8 +158,8 @@ struct LayoutEventSnapshot {
 impl LayoutEventSnapshot {
     fn empty() -> Self {
         Self {
-            windows: Vec::new(),
-            focused_window_id: None,
+            panes: Vec::new(),
+            focused_pane_id: None,
             active_buffer_id: None,
             buffers: BTreeMap::new(),
         }
@@ -222,13 +223,13 @@ impl InlayHintState {
 }
 
 impl Layout {
-    /// Creates a layout from an existing window group.
-    pub fn new(window_group: crate::window_group::WindowGroup) -> Self {
+    /// Creates a layout from an existing editor pane.
+    pub fn new(editor_pane: EditorPane) -> Self {
         let focused_pane = PaneId(0);
         let layout = Self {
-            root: Some(LayoutNode::Pane(PaneNode::new_editor(
+            root: Some(LayoutNode::Pane(Pane::new_editor(
                 focused_pane,
-                window_group,
+                editor_pane,
             ))),
             focused_pane,
             last_editor_pane: focused_pane,
@@ -240,7 +241,7 @@ impl Layout {
             jobs: Arc::new(JobManager::new()),
             inlay_hints: InlayHintState::Idle,
             autocomplete: AutocompleteState::default(),
-            plugin_windows: PluginWindowManager::new(),
+            overlays: OverlayManager::new(),
             plugin_pane_inherited_keymap: InheritedKeymap::new(NormalMode::keymap()),
             plugin_pane_key_sequence: PluginPaneKeySequence::None,
             modal_inherited_keymap: InheritedKeymap::new(NormalMode::keymap()),
@@ -256,19 +257,19 @@ impl Layout {
         let Some(root) = self.root.as_ref() else {
             return Vec::new();
         };
-        self.window_ids()
+        self.editor_pane_ids()
             .into_iter()
-            .filter_map(|window_id| {
-                let group = Self::find_pane(root, window_id)?.editor_window_group()?;
-                if group.is_empty() {
+            .filter_map(|pane_id| {
+                let editor_pane = Self::find_pane(root, pane_id)?.editor_pane()?;
+                if editor_pane.is_empty() {
                     return None;
                 }
-                let window = group.active_window();
-                let view = window.buffer_view();
+                let tab = editor_pane.active_tab();
+                let view = tab.buffer_view();
                 Some(PaneEventSnapshot {
-                    window_id,
+                    pane_id,
                     buffer_id: view.buffer_id(),
-                    mode: window.mode_kind(),
+                    mode: tab.mode_kind(),
                     cursor: view.cursor(),
                     selection: view.visual_selection(),
                 })
@@ -290,21 +291,21 @@ impl Layout {
     }
 
     fn event_snapshot(&self) -> LayoutEventSnapshot {
-        let mut windows = Vec::new();
+        let mut panes = Vec::new();
         if let Some(root) = self.root.as_ref() {
-            Self::collect_event_windows(root, &mut windows);
+            Self::collect_event_panes(root, &mut panes);
         }
 
         let active_buffer_id = self
             .root
             .as_ref()
             .and_then(|root| Self::find_pane(root, self.last_editor_pane))
-            .and_then(PaneNode::editor_window_group)
-            .filter(|group| !group.is_empty())
-            .map(|group| group.active_buffer_view().buffer_id());
+            .and_then(Pane::editor_pane)
+            .filter(|editor_pane| !editor_pane.is_empty())
+            .map(|editor_pane| editor_pane.active_buffer_view().buffer_id());
         let mut buffers = BTreeMap::new();
-        for window in &windows {
-            for &(_, buffer_id) in &window.tabs {
+        for pane in &panes {
+            for &(_, buffer_id) in &pane.tabs {
                 let entry = buffers.entry(buffer_id).or_insert_with(|| {
                     let snapshot = globals::with_buffer(buffer_id, |buffer| {
                         BufferEventSnapshot::from_buffer(buffer_id, buffer)
@@ -323,35 +324,42 @@ impl Layout {
         }
 
         LayoutEventSnapshot {
-            windows,
-            focused_window_id: self.active_window_id(),
+            panes,
+            focused_pane_id: self.root.as_ref().map(|_| self.focused_pane),
             active_buffer_id,
             buffers,
         }
     }
 
-    fn collect_event_windows(node: &LayoutNode, windows: &mut Vec<LayoutEventWindowSnapshot>) {
+    fn collect_event_panes(node: &LayoutNode, panes: &mut Vec<LayoutEventPaneSnapshot>) {
         match node {
             LayoutNode::Pane(pane) => {
-                if let Some(group) = pane.editor_window_group() {
-                    windows.push(LayoutEventWindowSnapshot {
+                if let Some(editor_pane) = pane.editor_pane() {
+                    panes.push(LayoutEventPaneSnapshot {
                         id: pane.id,
-                        tabs: group.tab_ids_and_buffer_ids(),
-                        active_tab_id: group.active_tab_id(),
+                        kind: PaneKind::Editor,
+                        tabs: editor_pane.tab_ids_and_buffer_ids(),
+                        active_tab_id: editor_pane.active_tab_id(),
+                    });
+                } else {
+                    panes.push(LayoutEventPaneSnapshot {
+                        id: pane.id,
+                        kind: PaneKind::Plugin,
+                        tabs: Vec::new(),
+                        active_tab_id: None,
                     });
                 }
             }
             LayoutNode::Split(split) => {
-                Self::collect_event_windows(&split.first, windows);
-                Self::collect_event_windows(&split.second, windows);
+                Self::collect_event_panes(&split.first, panes);
+                Self::collect_event_panes(&split.second, panes);
             }
         }
     }
 
-    fn active_event_tab(window: &LayoutEventWindowSnapshot) -> Option<(TabId, BufferId)> {
-        let tab_id = window.active_tab_id?;
-        window
-            .tabs
+    fn active_event_tab(pane: &LayoutEventPaneSnapshot) -> Option<(TabId, BufferId)> {
+        let tab_id = pane.active_tab_id?;
+        pane.tabs
             .iter()
             .find_map(|(id, buffer_id)| (*id == tab_id).then_some((tab_id, *buffer_id)))
     }
@@ -364,23 +372,16 @@ impl Layout {
             globals::set_active_buffer_id(buffer_id);
         }
 
-        let before_windows: BTreeMap<_, _> = before
-            .windows
-            .iter()
-            .map(|window| (window.id, window))
-            .collect();
-        let after_windows: BTreeMap<_, _> = after
-            .windows
-            .iter()
-            .map(|window| (window.id, window))
-            .collect();
+        let before_panes: BTreeMap<_, _> =
+            before.panes.iter().map(|pane| (pane.id, pane)).collect();
+        let after_panes: BTreeMap<_, _> = after.panes.iter().map(|pane| (pane.id, pane)).collect();
 
-        for window in &before.windows {
-            let after_tabs: BTreeSet<_> = after_windows
-                .get(&window.id)
-                .map(|window| window.tabs.iter().map(|(id, _)| *id).collect())
+        for pane in &before.panes {
+            let after_tabs: BTreeSet<_> = after_panes
+                .get(&pane.id)
+                .map(|pane| pane.tabs.iter().map(|(id, _)| *id).collect())
                 .unwrap_or_default();
-            for &(tab_id, buffer_id) in &window.tabs {
+            for &(tab_id, buffer_id) in &pane.tabs {
                 if !after_tabs.contains(&tab_id) {
                     let snapshot = before
                         .buffers
@@ -388,7 +389,7 @@ impl Layout {
                         .map(|(_, snapshot)| snapshot.clone())
                         .expect("closed tab buffer should have a pre-transition snapshot");
                     globals::enqueue_editor_event(EditorEvent::TabClosed {
-                        window_id: window.id,
+                        pane_id: pane.id,
                         tab_id,
                         snapshot,
                     });
@@ -402,34 +403,34 @@ impl Layout {
                 });
             }
         }
-        for window in &before.windows {
-            if !after_windows.contains_key(&window.id) {
-                let (tab_id, buffer_id) = Self::active_event_tab(window)
-                    .expect("closed editor window should have a final active tab");
-                globals::enqueue_editor_event(EditorEvent::WindowClosed {
-                    window_id: window.id,
-                    buffer_id,
-                    tab_id,
+        for pane in &before.panes {
+            if !after_panes.contains_key(&pane.id) {
+                let active = Self::active_event_tab(pane);
+                globals::enqueue_editor_event(EditorEvent::PaneClosed {
+                    pane_id: pane.id,
+                    kind: pane.kind,
+                    buffer_id: active.map(|(_, buffer_id)| buffer_id),
+                    tab_id: active.map(|(tab_id, _)| tab_id),
                 });
             }
         }
-        for window in &after.windows {
-            if !before_windows.contains_key(&window.id) {
-                let (tab_id, buffer_id) = Self::active_event_tab(window)
-                    .expect("created editor window should have an active tab");
-                globals::enqueue_editor_event(EditorEvent::WindowCreated {
-                    window_id: window.id,
-                    buffer_id,
-                    tab_id,
+        for pane in &after.panes {
+            if !before_panes.contains_key(&pane.id) {
+                let active = Self::active_event_tab(pane);
+                globals::enqueue_editor_event(EditorEvent::PaneCreated {
+                    pane_id: pane.id,
+                    kind: pane.kind,
+                    buffer_id: active.map(|(_, buffer_id)| buffer_id),
+                    tab_id: active.map(|(tab_id, _)| tab_id),
                 });
             }
         }
-        for window in &after.windows {
-            let before_tabs: BTreeSet<_> = before_windows
-                .get(&window.id)
-                .map(|window| window.tabs.iter().map(|(id, _)| *id).collect())
+        for pane in &after.panes {
+            let before_tabs: BTreeSet<_> = before_panes
+                .get(&pane.id)
+                .map(|pane| pane.tabs.iter().map(|(id, _)| *id).collect())
                 .unwrap_or_default();
-            for &(tab_id, buffer_id) in &window.tabs {
+            for &(tab_id, buffer_id) in &pane.tabs {
                 if !before_tabs.contains(&tab_id) {
                     let snapshot = after
                         .buffers
@@ -437,7 +438,7 @@ impl Layout {
                         .map(|(_, snapshot)| snapshot.clone())
                         .expect("opened tab buffer should have a post-transition snapshot");
                     globals::enqueue_editor_event(EditorEvent::TabOpened {
-                        window_id: window.id,
+                        pane_id: pane.id,
                         tab_id,
                         snapshot,
                     });
@@ -451,31 +452,31 @@ impl Layout {
                 });
             }
         }
-        if before.focused_window_id != after.focused_window_id
-            && let Some(window_id) = after.focused_window_id
+        if before.focused_pane_id != after.focused_pane_id
+            && let Some(pane_id) = after.focused_pane_id
         {
-            let window = after_windows
-                .get(&window_id)
-                .expect("focused window should be present after transition");
-            let (tab_id, buffer_id) = Self::active_event_tab(window)
-                .expect("focused editor window should have an active tab");
-            globals::enqueue_editor_event(EditorEvent::WindowFocused {
-                previous_window_id: before.focused_window_id,
-                window_id,
-                buffer_id,
-                tab_id,
+            let pane = after_panes
+                .get(&pane_id)
+                .expect("focused pane should be present after transition");
+            let active = Self::active_event_tab(pane);
+            globals::enqueue_editor_event(EditorEvent::PaneFocused {
+                previous_pane_id: before.focused_pane_id,
+                pane_id,
+                kind: pane.kind,
+                buffer_id: active.map(|(_, buffer_id)| buffer_id),
+                tab_id: active.map(|(tab_id, _)| tab_id),
             });
         }
-        for window in &after.windows {
-            let previous_tab_id = before_windows
-                .get(&window.id)
-                .and_then(|window| window.active_tab_id);
-            if previous_tab_id != window.active_tab_id
-                && let Some((tab_id, buffer_id)) = Self::active_event_tab(window)
+        for pane in &after.panes {
+            let previous_tab_id = before_panes
+                .get(&pane.id)
+                .and_then(|pane| pane.active_tab_id);
+            if previous_tab_id != pane.active_tab_id
+                && let Some((tab_id, buffer_id)) = Self::active_event_tab(pane)
             {
                 globals::enqueue_editor_event(EditorEvent::TabActivated {
                     previous_tab_id,
-                    window_id: window.id,
+                    pane_id: pane.id,
                     tab_id,
                     buffer_id,
                 });
@@ -484,19 +485,17 @@ impl Layout {
         if before.active_buffer_id != after.active_buffer_id
             && let Some(buffer_id) = after.active_buffer_id
         {
-            let window_id = after
-                .focused_window_id
-                .expect("an active buffer change should have a focused editor window");
-            let window = after_windows
-                .get(&window_id)
-                .expect("active buffer window should be present after transition");
-            let (tab_id, active_buffer_id) = Self::active_event_tab(window)
-                .expect("active buffer window should have an active tab");
+            let pane_id = self.last_editor_pane;
+            let pane = after_panes
+                .get(&pane_id)
+                .expect("active buffer pane should be present after transition");
+            let (tab_id, active_buffer_id) =
+                Self::active_event_tab(pane).expect("active buffer pane should have an active tab");
             debug_assert_eq!(active_buffer_id, buffer_id);
             globals::enqueue_editor_event(EditorEvent::ActiveBufferChanged {
                 previous_buffer_id: before.active_buffer_id,
                 buffer_id,
-                window_id,
+                pane_id,
                 tab_id,
             });
         }
@@ -504,12 +503,12 @@ impl Layout {
 
     /// Creates a layout from CLI file paths.
     pub fn from_paths(paths: &[PathBuf]) -> Self {
-        Self::new(crate::window_group::WindowGroup::from_paths(paths))
+        Self::new(EditorPane::from_paths(paths))
     }
 
     /// Creates a layout from CLI file arguments with optional initial cursor positions.
     pub fn from_cli_files(files: &[crate::cli::CliFileSpec]) -> Self {
-        Self::new(crate::window_group::WindowGroup::from_cli_files(files))
+        Self::new(EditorPane::from_cli_files(files))
     }
 
     /// Returns true when the layout has no panes left to render.
@@ -522,32 +521,27 @@ impl Layout {
         self.root.is_some()
     }
 
-    /// Returns the active window group for the focused pane.
-    pub fn active_window_group(&self) -> &crate::window_group::WindowGroup {
+    /// Returns the last-focused editor pane.
+    pub fn active_editor_pane(&self) -> &EditorPane {
         let root = self
             .root
             .as_ref()
             .expect("layout should contain a focused pane");
         Self::find_pane(root, self.last_editor_pane)
-            .and_then(PaneNode::editor_window_group)
+            .and_then(Pane::editor_pane)
             .expect("focused pane should exist")
     }
 
-    /// Returns the active window group mutably for the focused pane.
-    pub fn active_window_group_mut(&mut self) -> &mut crate::window_group::WindowGroup {
+    /// Returns the last-focused editor pane mutably.
+    pub fn active_editor_pane_mut(&mut self) -> &mut EditorPane {
         let focused_pane = self.last_editor_pane;
         let root = self
             .root
             .as_mut()
             .expect("layout should contain a focused pane");
         Self::find_pane_mut(root, focused_pane)
-            .and_then(PaneNode::editor_window_group_mut)
+            .and_then(Pane::editor_pane_mut)
             .expect("focused pane should exist")
-    }
-
-    /// Returns the active window group.
-    pub fn window_group(&self) -> &crate::window_group::WindowGroup {
-        self.active_window_group()
     }
 
     /// Returns every buffer identifier currently shown in any pane.
@@ -562,24 +556,19 @@ impl Layout {
         ids
     }
 
-    /// Returns the active window group mutably.
-    pub fn window_group_mut(&mut self) -> &mut crate::window_group::WindowGroup {
-        self.active_window_group_mut()
-    }
-
     /// Returns the current layout mode label.
     pub fn mode_label(&self) -> &'static str {
-        self.active_window_group().active_window_mode_label()
+        self.active_editor_pane().active_tab_mode_label()
     }
 
-    /// Returns the current mode kind of the focused pane's active window.
-    pub fn active_window_mode_kind(&self) -> ModeKind {
-        self.active_window_group().active_window_mode_kind()
+    /// Returns the current mode kind of the focused pane's active tab.
+    pub fn active_tab_mode_kind(&self) -> ModeKind {
+        self.active_editor_pane().active_tab_mode_kind()
     }
 
-    /// Returns the cursor style of the focused pane's active window.
-    pub fn active_window_cursor_style(&self) -> CursorStyle {
-        self.active_window_group().active_window_cursor_style()
+    /// Returns the cursor style of the focused pane's active tab.
+    pub fn active_tab_cursor_style(&self) -> CursorStyle {
+        self.active_editor_pane().active_tab_cursor_style()
     }
 
     /// Returns the last rendered layout origin.
@@ -594,12 +583,12 @@ impl Layout {
 
     /// Returns the active buffer view from the focused pane.
     pub fn active_buffer_view(&self) -> &BufferView {
-        self.active_window_group().active_buffer_view()
+        self.active_editor_pane().active_buffer_view()
     }
 
     /// Returns the active buffer view mutably from the focused pane.
     pub fn active_buffer_view_mut(&mut self) -> &mut BufferView {
-        self.active_window_group_mut().active_buffer_view_mut()
+        self.active_editor_pane_mut().active_buffer_view_mut()
     }
 
     /// Clears expired yank-flash highlights from all visible panes.
@@ -607,13 +596,13 @@ impl Layout {
         self.prune_expired_yank_flashes_at(std::time::Instant::now())
     }
 
-    /// Returns and clears any repeat-text suffix produced by the active child window.
+    /// Returns and clears any repeat-text suffix produced by the active tab.
     pub fn take_pending_repeat_suffix(&mut self) -> Option<String> {
         if self.should_exit() {
             return None;
         }
 
-        self.active_window_group_mut().take_pending_repeat_suffix()
+        self.active_editor_pane_mut().take_pending_repeat_suffix()
     }
 
     /// Returns the visual cursor for the focused pane, if any.
@@ -622,12 +611,12 @@ impl Layout {
             return Some(position);
         }
 
-        if self.plugin_windows.focused().is_some() || self.focused_plugin_pane().is_some() {
+        if self.overlays.focused().is_some() || self.focused_plugin_pane().is_some() {
             return None;
         }
 
         let pane_region = self.pane_region(self.focused_pane)?;
-        let mut pos = self.active_window_group().visual_cursor()?;
+        let mut pos = self.active_editor_pane().visual_cursor()?;
         pos.row = pos.row.saturating_add(pane_region.origin.row);
         pos.col = pos.col.saturating_add(pane_region.origin.col);
         Some(pos)
@@ -638,14 +627,14 @@ impl Layout {
         self.render_layout(screen, origin, size);
     }
 
-    /// Returns the registry of plugin-owned floating windows.
-    pub fn plugin_windows(&self) -> &PluginWindowManager {
-        &self.plugin_windows
+    /// Returns the plugin-overlay registry.
+    pub fn overlays(&self) -> &OverlayManager {
+        &self.overlays
     }
 
-    /// Returns the mutable registry of plugin-owned floating windows.
-    pub fn plugin_windows_mut(&mut self) -> &mut PluginWindowManager {
-        &mut self.plugin_windows
+    /// Returns the mutable plugin-overlay registry.
+    pub fn overlays_mut(&mut self) -> &mut OverlayManager {
+        &mut self.overlays
     }
 
     /// Returns the focused plugin pane, if any.
@@ -654,18 +643,23 @@ impl Layout {
             .then_some(self.focused_pane)
     }
 
+    /// Returns the focused underlying split-tree pane.
+    pub fn focused_pane_id(&self) -> PaneId {
+        self.focused_pane
+    }
+
     /// Returns an owned plugin pane.
     pub fn plugin_pane(&self, owner: &str, id: PaneId) -> Result<&PluginPane, String> {
         let pane = self
             .plugin_pane_node(id)
             .ok_or_else(|| format!("unknown plugin pane_id {}", id.0))?;
-        let window = pane
+        let plugin_pane = pane
             .plugin_pane()
             .ok_or_else(|| format!("pane_id {} is not a plugin pane", id.0))?;
-        if window.owner() != owner {
+        if plugin_pane.owner() != owner {
             return Err(format!("plugin {owner:?} does not own pane_id {}", id.0));
         }
-        Ok(window)
+        Ok(plugin_pane)
     }
 
     /// Returns all plugin pane IDs owned by a plugin.
@@ -690,11 +684,11 @@ impl Layout {
         &mut self,
         owner: &str,
         id: PaneId,
-        content: PluginWindowContent,
+        content: RetainedContent,
     ) -> Result<(), String> {
         self.plugin_pane(owner, id)?;
         self.plugin_pane_node_mut(id)
-            .and_then(PaneNode::plugin_pane_mut)
+            .and_then(Pane::plugin_pane_mut)
             .expect("owned plugin pane should exist")
             .set_content(content);
         Ok(())
@@ -709,7 +703,7 @@ impl Layout {
     ) -> Result<(), String> {
         self.plugin_pane(owner, id)?;
         self.plugin_pane_node_mut(id)
-            .and_then(PaneNode::plugin_pane_mut)
+            .and_then(Pane::plugin_pane_mut)
             .expect("owned plugin pane should exist")
             .set_options(options);
         Ok(())
@@ -726,7 +720,7 @@ impl Layout {
     ) -> Result<(), String> {
         self.plugin_pane(owner, id)?;
         self.plugin_pane_node_mut(id)
-            .and_then(PaneNode::plugin_pane_mut)
+            .and_then(Pane::plugin_pane_mut)
             .expect("owned plugin pane should exist")
             .set_keymap(keys, rhs, intent);
         if self.focused_plugin_pane() == Some(id) {
@@ -745,7 +739,7 @@ impl Layout {
     ) -> Result<(), String> {
         self.plugin_pane(owner, id)?;
         self.plugin_pane_node_mut(id)
-            .and_then(PaneNode::plugin_pane_mut)
+            .and_then(Pane::plugin_pane_mut)
             .expect("owned plugin pane should exist")
             .delete_keymap(keys);
         if self.focused_plugin_pane() == Some(id) {
@@ -767,7 +761,7 @@ impl Layout {
     /// Focuses an owned plugin pane.
     pub fn focus_plugin_pane(&mut self, owner: &str, id: PaneId) -> Result<(), String> {
         self.plugin_pane(owner, id)?;
-        self.plugin_windows.blur_focused();
+        self.overlays.blur_focused();
         self.focus_pane(id);
         self.reconcile_insert_session_focus();
         Ok(())
@@ -775,6 +769,10 @@ impl Layout {
 
     /// Closes an owned plugin pane and removes its layout leaf.
     pub fn close_plugin_pane(&mut self, owner: &str, id: PaneId) -> Result<(), String> {
+        self.with_event_transition(|layout| layout.close_plugin_pane_inner(owner, id))
+    }
+
+    fn close_plugin_pane_inner(&mut self, owner: &str, id: PaneId) -> Result<(), String> {
         self.plugin_pane(owner, id)?;
         let Some(root) = self.root.take() else {
             return Err("layout has no panes".to_string());
@@ -795,32 +793,25 @@ impl Layout {
 
     /// Closes every layout pane owned by a plugin.
     pub fn close_plugin_panes_owned(&mut self, owner: &str) {
-        let ids = self.plugin_pane_ids(owner);
-        let focused = self.focused_plugin_pane();
-        for id in ids {
-            if let Some(root) = self.root.take() {
-                let (root, removed) = Self::remove_pane(root, id);
-                self.root = root;
-                debug_assert!(removed, "owned plugin pane should be present in the tree");
+        self.with_event_transition(|layout| {
+            let ids = layout.plugin_pane_ids(owner);
+            for id in ids {
+                layout
+                    .close_plugin_pane_inner(owner, id)
+                    .expect("owned plugin pane should remain closable");
             }
-        }
-        if focused.is_some() {
-            if let Some(next) = self.first_editor_pane_id() {
-                self.focus_pane(next);
-            }
-        }
-        crate::session::mark_dirty();
+        });
     }
 
-    /// Focuses the next visible editor pane or plugin window in visual order.
-    pub fn focus_next_window(&mut self) -> bool {
+    /// Focuses the next visible pane or overlay in visual order.
+    pub fn focus_next_target(&mut self) -> bool {
         let focused = self.cycle_persistent_focus(true);
         self.reconcile_insert_session_focus();
         focused
     }
 
-    /// Focuses the previous visible editor pane or plugin window in visual order.
-    pub fn focus_previous_window(&mut self) -> bool {
+    /// Focuses the previous visible pane or overlay in visual order.
+    pub fn focus_previous_target(&mut self) -> bool {
         let focused = self.cycle_persistent_focus(false);
         self.reconcile_insert_session_focus();
         focused
@@ -841,18 +832,18 @@ impl Layout {
             })
             .collect::<Vec<_>>();
         targets.extend(
-            self.plugin_windows
+            self.overlays
                 .visible_ids()
-                .map(PersistentFocusTarget::Plugin),
+                .map(PersistentFocusTarget::Overlay),
         );
 
         let current = self
-            .focused_plugin_pane()
-            .map(PersistentFocusTarget::PluginPane)
+            .overlays
+            .focused()
+            .map(PersistentFocusTarget::Overlay)
             .or_else(|| {
-                self.plugin_windows
-                    .focused()
-                    .map(PersistentFocusTarget::Plugin)
+                self.focused_plugin_pane()
+                    .map(PersistentFocusTarget::PluginPane)
             })
             .unwrap_or(PersistentFocusTarget::Pane(self.focused_pane));
         if targets.is_empty() {
@@ -870,48 +861,85 @@ impl Layout {
 
         match targets[target_index] {
             PersistentFocusTarget::Pane(id) => {
-                self.plugin_windows.blur_focused();
+                self.overlays.blur_focused();
                 self.focus_pane(id)
             }
-            PersistentFocusTarget::Plugin(id) => self.plugin_windows.focus_id(id),
+            PersistentFocusTarget::Overlay(id) => {
+                let focused = self.overlays.focus_id(id);
+                if focused {
+                    self.clear_plugin_pane_pending_keys();
+                }
+                focused
+            }
             PersistentFocusTarget::PluginPane(id) => {
-                self.plugin_windows.blur_focused();
+                self.overlays.blur_focused();
                 self.focus_pane(id)
             }
         }
     }
 
-    pub(super) fn focus_layout_pane(&mut self, id: PaneId) -> bool {
+    /// Focuses any editor or plugin pane.
+    pub fn focus_layout_pane(&mut self, id: PaneId) -> bool {
         self.with_event_transition(|layout| {
-            if layout.is_plugin_pane(id) {
-                layout.plugin_windows.blur_focused();
+            if layout.pane_kind(id).is_none() {
+                return false;
             }
+            layout.overlays.blur_focused();
             layout.focus_pane(id)
         })
     }
 
-    /// Creates a plugin-owned floating window.
-    pub fn create_plugin_window(
-        &mut self,
-        owner: String,
-        options: PluginWindowOptions,
-    ) -> PluginWindowId {
-        self.plugin_windows.create(owner, options)
+    /// Closes any editor or plugin pane, preserving at least one editor pane.
+    pub fn close_pane(&mut self, id: PaneId) -> Result<(), String> {
+        self.with_event_transition(|layout| layout.close_pane_inner(id))
     }
 
-    /// Replaces a plugin window's retained content.
-    pub fn set_plugin_window_content(
+    fn close_pane_inner(&mut self, id: PaneId) -> Result<(), String> {
+        let kind = self
+            .pane_kind(id)
+            .ok_or_else(|| format!("unknown pane_id {}", id.0))?;
+        if kind == PaneKind::Editor && self.editor_pane_ids().len() == 1 {
+            return Err("cannot close the last editor pane".to_string());
+        }
+        let root = self.root.take().expect("known pane requires a layout root");
+        let (root, removed) = Self::remove_pane(root, id);
+        debug_assert!(removed, "known pane should be removable");
+        self.root = root;
+        if kind == PaneKind::Editor && self.last_editor_pane == id {
+            self.last_editor_pane = self
+                .first_editor_pane_id()
+                .expect("closing an editor pane must leave an editor pane");
+        }
+        if self.focused_pane == id {
+            let target = self
+                .first_editor_pane_id()
+                .or_else(|| self.first_pane_id())
+                .expect("closing a pane must leave an editor pane");
+            self.focus_pane(target);
+        }
+        crate::session::mark_dirty();
+        Ok(())
+    }
+
+    /// Creates a plugin-owned overlay.
+    pub fn create_overlay(&mut self, owner: String, options: OverlayOptions) -> OverlayId {
+        self.overlays.create(owner, options)
+    }
+
+    /// Replaces an overlay's retained content.
+    pub fn set_overlay_content(
         &mut self,
         owner: &str,
-        id: PluginWindowId,
-        content: PluginWindowContent,
+        id: OverlayId,
+        content: RetainedContent,
     ) -> Result<(), String> {
-        self.plugin_windows.set_content(owner, id, content)
+        self.overlays.set_content(owner, id, content)
     }
 
-    /// Focuses an owned floating plugin window.
-    pub fn focus_plugin_window(&mut self, owner: &str, id: PluginWindowId) -> Result<(), String> {
-        self.plugin_windows.focus(owner, id)?;
+    /// Focuses an owned overlay.
+    pub fn focus_overlay(&mut self, owner: &str, id: OverlayId) -> Result<(), String> {
+        self.overlays.focus(owner, id)?;
+        self.clear_plugin_pane_pending_keys();
         self.reconcile_insert_session_focus();
         Ok(())
     }
@@ -925,24 +953,25 @@ impl Layout {
         split_size: SplitSize,
         options: PluginPaneOptions,
     ) -> Result<PaneId, String> {
-        let target = target.unwrap_or(self.focused_pane);
-        let new_id = self.allocate_pane_id();
-        let Some(root) = self.root.take() else {
-            return Err("layout has no panes".to_string());
-        };
-        let mut plugin = Some(PaneNode::new_plugin(new_id, owner, options));
-        let (root, changed) =
-            Self::split_node_with_content(root, target, axis, split_size, &mut plugin);
-        if !changed {
-            self.root = Some(root);
-            return Err(format!("unknown pane_id {}", target.0));
-        }
-        self.root = Some(root);
-        self.plugin_windows.blur_focused();
-        self.focus_pane(new_id);
-        self.reconcile_insert_session_focus();
-        crate::session::mark_dirty();
-        Ok(new_id)
+        self.with_event_transition(|layout| {
+            let target = target.unwrap_or(layout.focused_pane);
+            let new_id = layout.allocate_pane_id();
+            let Some(root) = layout.root.take() else {
+                return Err("layout has no panes".to_string());
+            };
+            let mut plugin = Some(Pane::new_plugin(new_id, owner, options));
+            let (root, changed) =
+                Self::split_node_with_content(root, target, axis, split_size, &mut plugin);
+            if !changed {
+                layout.root = Some(root);
+                return Err(format!("unknown pane_id {}", target.0));
+            }
+            layout.root = Some(root);
+            layout.overlays.blur_focused();
+            layout.focus_pane(new_id);
+            crate::session::mark_dirty();
+            Ok(new_id)
+        })
     }
 
     /// Closes the focused plugin pane and collapses its parent split.
@@ -1069,7 +1098,7 @@ impl Layout {
     pub fn activate_or_open_buffer(&mut self, buffer_id: BufferId) {
         self.with_event_transition(|layout| {
             layout
-                .active_window_group_mut()
+                .active_editor_pane_mut()
                 .activate_or_open_buffer(buffer_id);
         });
     }
@@ -1089,7 +1118,7 @@ impl Layout {
                 true
             }
             Command::OpenUnnamedBuffer => {
-                self.active_window_group_mut().open_unnamed_buffer_tab();
+                self.active_editor_pane_mut().open_unnamed_buffer_tab();
                 true
             }
             Command::OpenCompletion => {
@@ -1289,7 +1318,7 @@ impl Layout {
             Command::OpenFile(path) => {
                 match crate::globals::with_buffer_pool(|pool| pool.open_buffer(path)) {
                     Ok(buffer_id) => {
-                        self.active_window_group_mut()
+                        self.active_editor_pane_mut()
                             .activate_or_open_buffer(buffer_id);
                         true
                     }
@@ -1302,9 +1331,9 @@ impl Layout {
             Command::OpenFileAtCursor(path, cursor) => {
                 match crate::globals::with_buffer_pool(|pool| pool.open_buffer(path)) {
                     Ok(buffer_id) => {
-                        let window_group = self.active_window_group_mut();
-                        window_group.activate_or_open_buffer(buffer_id);
-                        window_group.active_window_mut().set_cursor_synced(*cursor);
+                        let editor_pane = self.active_editor_pane_mut();
+                        editor_pane.activate_or_open_buffer(buffer_id);
+                        editor_pane.active_tab_mut().set_cursor_synced(*cursor);
                         true
                     }
                     Err(error) => {
@@ -1327,20 +1356,18 @@ impl Layout {
             }
             Command::EqualizeSplits => self.equalize_splits(),
             Command::PreviousTab(count) => {
-                self.active_window_group_mut().previous_tab(*count);
+                self.active_editor_pane_mut().previous_tab(*count);
                 true
             }
             Command::NextTab(count) => {
-                self.active_window_group_mut().next_tab(*count);
+                self.active_editor_pane_mut().next_tab(*count);
                 true
             }
             Command::ToggleWrap => {
                 if self.should_exit() {
                     false
                 } else {
-                    self.active_window_group_mut()
-                        .active_window_mut()
-                        .toggle_wrap();
+                    self.active_editor_pane_mut().active_tab_mut().toggle_wrap();
                     true
                 }
             }
@@ -1350,9 +1377,9 @@ impl Layout {
             Command::FocusPaneDown => self.move_focus(geometry::FocusDirection::Down),
             Command::FocusPaneUp => self.move_focus(geometry::FocusDirection::Up),
             Command::FocusPaneRight => self.move_focus(geometry::FocusDirection::Right),
-            Command::FocusNextWindow => self.focus_next_window(),
-            Command::FocusPreviousWindow => self.focus_previous_window(),
-            Command::ClosePane => self.close_focused_pane(),
+            Command::FocusNextTarget => self.focus_next_target(),
+            Command::FocusPreviousTarget => self.focus_previous_target(),
+            Command::ClosePane => self.close_pane_inner(self.focused_pane).is_ok(),
             Command::TryQuit => {
                 let modified_count =
                     crate::globals::with_buffer_pool(|pool| pool.modified_buffer_count());
@@ -1423,13 +1450,13 @@ impl Layout {
                 if self.should_exit() {
                     false
                 } else {
-                    let handled = self.active_window_group_mut().dispatch_action(action)
+                    let handled = self.active_editor_pane_mut().dispatch_action(action)
                         == ActionResult::Handled;
                     if handled {
                         self.request_inlay_hints_for_active_viewport();
                     }
-                    if handled && self.active_window_group().is_empty() {
-                        self.close_focused_pane();
+                    if handled && self.active_editor_pane().is_empty() {
+                        self.prune_empty_panes();
                     }
                     handled
                 }
@@ -1496,13 +1523,13 @@ impl Layout {
             return self.route_modal_inherited_key(key);
         }
 
+        let overlay = self.overlays.route_ui_event(event);
+        if overlay.handled() {
+            return overlay;
+        }
         let plugin_pane = self.route_plugin_pane_ui_event(event);
         if plugin_pane.handled() {
             return plugin_pane;
-        }
-        let plugin_window = self.plugin_windows.route_ui_event(event);
-        if plugin_window.handled() {
-            return plugin_window;
         }
 
         let hover = self.route_hover_ui_event(event);
@@ -1690,6 +1717,18 @@ impl Layout {
         }
     }
 
+    fn clear_plugin_pane_pending_keys(&mut self) {
+        if let Some(id) = self.focused_plugin_pane()
+            && let Some(pane) = self.plugin_pane_node_mut(id)
+        {
+            pane.plugin_pane_mut()
+                .expect("focused plugin pane should contain plugin content")
+                .clear_pending_keys();
+        }
+        self.plugin_pane_inherited_keymap.clear_pending();
+        self.plugin_pane_key_sequence = PluginPaneKeySequence::None;
+    }
+
     fn route_plugin_pane_inherited_key(&mut self, key: &urvim_terminal::Key) -> UiEventResult {
         let result = self
             .plugin_pane_inherited_keymap
@@ -1755,7 +1794,7 @@ impl Layout {
 
     fn editor_cursor_position(&self) -> Option<Position> {
         let pane_region = self.pane_region(self.focused_pane)?;
-        let mut pos = self.active_window_group().visual_cursor()?;
+        let mut pos = self.active_editor_pane().visual_cursor()?;
         pos.row = pos.row.saturating_add(pane_region.origin.row);
         pos.col = pos.col.saturating_add(pane_region.origin.col);
         Some(pos)
@@ -1815,9 +1854,9 @@ impl Layout {
             apply_completion.additional_text_edits.clone()
         };
 
-        let window = self.active_window_group_mut().active_window_mut();
+        let tab = self.active_editor_pane_mut().active_tab_mut();
 
-        let next_cursor = window.buffer_view_mut().with_buffer_mut(|buffer| {
+        let next_cursor = tab.buffer_view_mut().with_buffer_mut(|buffer| {
             buffer.apply_completion(
                 apply_completion.range,
                 replacement.as_str(),
@@ -1827,7 +1866,7 @@ impl Layout {
         });
 
         if let Some(next_cursor) = next_cursor.flatten() {
-            window.buffer_view_mut().set_cursor(next_cursor);
+            tab.buffer_view_mut().set_cursor(next_cursor);
         }
 
         true
@@ -1974,10 +2013,10 @@ impl Layout {
             let Some(pane) = Self::find_pane(root, region.id) else {
                 continue;
             };
-            let Some(window_group) = pane.editor_window_group() else {
+            let Some(editor_pane) = pane.editor_pane() else {
                 continue;
             };
-            let view = window_group.active_buffer_view();
+            let view = editor_pane.active_buffer_view();
             let buffer_id = view.buffer_id();
 
             if let Some(filter) = buffer_filter {
@@ -2020,13 +2059,13 @@ impl Layout {
             let Some(pane) = Self::find_pane(root, region.id) else {
                 continue;
             };
-            let Some(window_group) = pane.editor_window_group() else {
+            let Some(editor_pane) = pane.editor_pane() else {
                 continue;
             };
-            let active_tab_index = window_group.active_tab_index();
-            let buffer_ids = window_group.buffer_ids();
+            let active_tab_index = editor_pane.active_tab_index();
+            let buffer_ids = editor_pane.buffer_ids();
 
-            let tabs: Vec<PaneTabSnapshot> = window_group
+            let tabs: Vec<PaneTabSnapshot> = editor_pane
                 .tab_ids_and_buffer_ids()
                 .iter()
                 .enumerate()

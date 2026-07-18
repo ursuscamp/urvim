@@ -8,7 +8,7 @@ use super::{CompletionCandidate, CompletionSourceKind, configured_completion_sou
 use crate::background::{JobManager, JobToken};
 use crate::buffer::{BufferId, Cursor};
 use crate::screen::Screen;
-use crate::ui::floating_window::{FloatingPlacement, FloatingWindowFrame};
+use crate::ui::overlay::frame::{OverlayFrame, OverlayPlacement};
 use crate::ui::{Command, FocusPolicy, Intent, UiContext, UiEvent, UiEventResult, UiRect};
 use crate::widget::Widget;
 use std::collections::{BTreeMap, BTreeSet};
@@ -25,7 +25,7 @@ pub struct CompletionWidget {
     items: Vec<CompletionCandidate>,
     highlighted: usize,
     visible_start: usize,
-    cursor: Option<crate::window::Position>,
+    cursor: Option<crate::ui::geometry::Position>,
     open: bool,
     generation: u64,
     source_order: Vec<CompletionSourceKind>,
@@ -72,12 +72,12 @@ impl CompletionWidget {
     }
 
     /// Returns the rendered cursor position, if available.
-    pub fn cursor(&self) -> Option<crate::window::Position> {
+    pub fn cursor(&self) -> Option<crate::ui::geometry::Position> {
         self.cursor
     }
 
     /// Sets the popup anchor cursor.
-    pub fn set_cursor(&mut self, cursor: Option<crate::window::Position>) {
+    pub fn set_cursor(&mut self, cursor: Option<crate::ui::geometry::Position>) {
         self.cursor = cursor;
     }
 
@@ -164,12 +164,12 @@ impl CompletionWidget {
 
         let content_rows = self.visible_rows();
         let content_cols = self.content_cols(rect.size.cols);
-        let Some(frame) = FloatingWindowFrame::resolve_placement(
+        let Some(frame) = OverlayFrame::resolve_placement(
             rect.origin,
             rect.size,
             content_rows,
             content_cols,
-            FloatingPlacement::NearCursor {
+            OverlayPlacement::NearCursor {
                 cursor: self.cursor.unwrap_or_default(),
             },
         ) else {

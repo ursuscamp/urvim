@@ -1,12 +1,12 @@
 //! Layout tree mutation and traversal helpers.
 
 use super::geometry::PaneRegion;
-use super::node::{LayoutNode, PaneNode, SplitAxis, SplitNode, SplitSize};
+use super::node::{LayoutNode, Pane, SplitAxis, SplitNode, SplitSize};
 use super::{Layout, PaneId};
 use crate::buffer::BufferId;
-use crate::window::Window;
-use crate::window::{Position, Size};
-use crate::window_group::WindowGroup;
+use crate::editor_pane::EditorPane;
+use crate::editor_tab::{BufferView, EditorTab};
+use crate::ui::geometry::{Position, Size};
 use std::collections::HashSet;
 use std::time::Instant;
 
@@ -39,12 +39,21 @@ impl Layout {
     }
 
     pub(super) fn prune_empty_panes(&mut self) {
+        self.ensure_editor_pane_has_tab();
         let Some(root) = self.root.take() else {
             return;
         };
 
         let focused_pane = self.focused_pane;
         self.root = Self::prune_empty_nodes(root);
+        if self
+            .root
+            .as_ref()
+            .is_some_and(|root| Self::find_pane(root, self.last_editor_pane).is_none())
+            && let Some(editor_pane) = self.first_editor_pane_id()
+        {
+            self.last_editor_pane = editor_pane;
+        }
         let next_focused = if let Some(root) = self.root.as_ref() {
             if Self::find_pane(root, focused_pane).is_some() {
                 focused_pane
@@ -108,31 +117,31 @@ impl Layout {
     ) -> (LayoutNode, bool) {
         match node {
             LayoutNode::Pane(pane) if pane.id == target => {
-                let Some(window_group) = pane.editor_window_group() else {
+                let Some(editor_pane) = pane.editor_pane() else {
                     return (LayoutNode::Pane(pane), false);
                 };
-                let buffer_view = window_group.active_buffer_view();
+                let buffer_view = editor_pane.active_buffer_view();
                 let buffer_id = buffer_view.buffer_id();
                 let cursor = buffer_view.cursor();
                 let scroll_offset = buffer_view.scroll_offset();
                 let wrapped_row_offset = buffer_view.wrapped_row_offset();
-                let wrap_enabled = window_group.active_window().wrap_enabled();
+                let wrap_enabled = editor_pane.active_tab().wrap_enabled();
 
-                let mut window_group = WindowGroup::new(vec![Window::from_buffer_id(buffer_id)]);
+                let mut editor_pane = EditorPane::new(vec![EditorTab::from_buffer_id(buffer_id)]);
                 {
-                    let window = window_group.active_window_mut();
-                    let view = window.buffer_view_mut();
+                    let tab = editor_pane.active_tab_mut();
+                    let view = tab.buffer_view_mut();
                     view.set_scroll_offset(scroll_offset);
                     view.set_wrapped_row_offset(wrapped_row_offset);
                     view.set_cursor(cursor);
-                    window.set_wrap_enabled(wrap_enabled);
+                    tab.set_wrap_enabled(wrap_enabled);
                 }
 
                 (
                     LayoutNode::Split(SplitNode::new(
                         axis,
                         LayoutNode::Pane(pane),
-                        LayoutNode::Pane(PaneNode::new_editor(new_pane_id, window_group)),
+                        LayoutNode::Pane(Pane::new_editor(new_pane_id, editor_pane)),
                         new_pane_id,
                     )),
                     true,
@@ -176,7 +185,7 @@ impl Layout {
         target: PaneId,
         axis: SplitAxis,
         split_size: SplitSize,
-        new_pane: &mut Option<PaneNode>,
+        new_pane: &mut Option<Pane>,
     ) -> (LayoutNode, bool) {
         match node {
             LayoutNode::Pane(pane) if pane.id == target => {
@@ -226,23 +235,6 @@ impl Layout {
         }
     }
 
-    pub(super) fn close_focused_pane(&mut self) -> bool {
-        if self.focused_plugin_pane().is_some() {
-            return self.close_focused_plugin_pane();
-        }
-        let Some(root) = self.root.take() else {
-            return false;
-        };
-
-        let (root, removed) = Self::remove_pane(root, self.focused_pane);
-        self.root = root;
-        if removed {
-            let next_focused = self.first_pane_id().unwrap_or(self.focused_pane);
-            self.focus_pane(next_focused);
-        }
-        removed
-    }
-
     pub fn close_buffer_tabs(&mut self, buffer_id: BufferId) -> bool {
         self.with_event_transition(|layout| layout.close_buffer_tabs_raw(buffer_id))
     }
@@ -252,7 +244,11 @@ impl Layout {
             return false;
         };
 
-        Self::close_buffer_tabs_in_node(root, buffer_id)
+        let closed = Self::close_buffer_tabs_in_node(root, buffer_id);
+        if closed {
+            self.ensure_editor_pane_has_tab();
+        }
+        closed
     }
 
     pub fn close_buffer_tabs_and_prune(&mut self, buffer_id: BufferId) -> bool {
@@ -268,19 +264,21 @@ impl Layout {
     pub fn close_active_buffer_tab(&mut self) -> bool {
         self.with_event_transition(|layout| {
             let buffer_id = layout.active_buffer_view().buffer_id();
-            let closed = layout.active_window_group_mut().close_buffer_tab(buffer_id);
+            let closed = layout.active_editor_pane_mut().close_buffer_tab(buffer_id);
             if closed {
+                layout.ensure_editor_pane_has_tab();
                 layout.prune_empty_panes();
             }
             closed
         })
     }
 
-    /// Closes a buffer tab in the active editor window and prunes an empty pane.
-    pub fn close_buffer_tab_in_active_window(&mut self, buffer_id: BufferId) -> bool {
+    /// Closes a buffer tab in the active editor pane and prunes an empty pane.
+    pub fn close_buffer_tab_in_active_pane(&mut self, buffer_id: BufferId) -> bool {
         self.with_event_transition(|layout| {
-            let closed = layout.active_window_group_mut().close_buffer_tab(buffer_id);
+            let closed = layout.active_editor_pane_mut().close_buffer_tab(buffer_id);
             if closed {
+                layout.ensure_editor_pane_has_tab();
                 layout.prune_empty_panes();
             }
             closed
@@ -390,8 +388,8 @@ impl Layout {
     fn close_buffer_tabs_in_node(node: &mut LayoutNode, buffer_id: BufferId) -> bool {
         match node {
             LayoutNode::Pane(pane) => pane
-                .editor_window_group_mut()
-                .is_some_and(|window_group| window_group.close_buffer_tab(buffer_id)),
+                .editor_pane_mut()
+                .is_some_and(|editor_pane| editor_pane.close_buffer_tab(buffer_id)),
             LayoutNode::Split(split) => {
                 let removed_first = Self::close_buffer_tabs_in_node(&mut split.first, buffer_id);
                 let removed_second = Self::close_buffer_tabs_in_node(&mut split.second, buffer_id);
@@ -400,11 +398,37 @@ impl Layout {
         }
     }
 
+    fn ensure_editor_pane_has_tab(&mut self) {
+        let ids = self.editor_pane_ids();
+        if ids.is_empty() {
+            return;
+        }
+        let has_tab = self.root.as_ref().is_some_and(|root| {
+            ids.iter().any(|id| {
+                Self::find_pane(root, *id)
+                    .and_then(Pane::editor_pane)
+                    .is_some_and(|editor_pane| !editor_pane.is_empty())
+            })
+        });
+        if has_tab {
+            return;
+        }
+        let Some(root) = self.root.as_mut() else {
+            return;
+        };
+        let editor_pane = Self::find_pane_mut(root, ids[0])
+            .and_then(Pane::editor_pane_mut)
+            .expect("editor pane ID should identify an editor pane");
+        if editor_pane.is_empty() {
+            editor_pane.open_unnamed_buffer_tab();
+        }
+    }
+
     pub(super) fn collect_buffer_ids(node: &LayoutNode, ids: &mut Vec<BufferId>) {
         match node {
             LayoutNode::Pane(pane) => {
-                if let Some(window_group) = pane.editor_window_group() {
-                    ids.extend(window_group.buffer_ids());
+                if let Some(editor_pane) = pane.editor_pane() {
+                    ids.extend(editor_pane.buffer_ids());
                 }
             }
             LayoutNode::Split(split) => {
@@ -417,10 +441,7 @@ impl Layout {
     fn prune_empty_nodes(node: LayoutNode) -> Option<LayoutNode> {
         match node {
             LayoutNode::Pane(pane) => {
-                if pane
-                    .editor_window_group()
-                    .is_some_and(WindowGroup::is_empty)
-                {
+                if pane.editor_pane().is_some_and(EditorPane::is_empty) {
                     None
                 } else {
                     Some(LayoutNode::Pane(pane))
@@ -588,8 +609,8 @@ impl Layout {
         })
     }
 
-    /// Returns the stable identifier for the focused visible window.
-    pub fn active_window_id(&self) -> Option<PaneId> {
+    /// Returns the stable identifier for the focused visible editor pane.
+    pub fn active_editor_pane_id(&self) -> Option<PaneId> {
         if self.focused_plugin_pane().is_some() {
             return None;
         }
@@ -598,32 +619,44 @@ impl Layout {
             .and_then(|root| Self::find_pane(root, self.focused_pane).map(|pane| pane.id))
     }
 
-    /// Returns stable identifiers for all visible editor windows in layout order.
-    pub fn window_ids(&self) -> Vec<PaneId> {
+    /// Returns stable identifiers for all visible editor panes in layout order.
+    pub fn editor_pane_ids(&self) -> Vec<PaneId> {
         let mut ids = Vec::new();
         if let Some(root) = self.root.as_ref() {
-            Self::collect_pane_ids(root, &mut ids);
+            Self::collect_editor_pane_ids(root, &mut ids);
         }
         ids
     }
 
-    /// Returns the active buffer view for a visible window.
-    pub fn buffer_view_for_window(&self, id: PaneId) -> Option<&crate::window::BufferView> {
-        let root = self.root.as_ref()?;
-        Self::find_pane(root, id)
-            .and_then(PaneNode::editor_window_group)
-            .map(|window_group| window_group.active_buffer_view())
+    /// Returns every split-tree pane identifier in visual tree order.
+    pub fn pane_ids(&self) -> Vec<PaneId> {
+        let Some(root) = self.root.as_ref() else {
+            return Vec::new();
+        };
+        let mut ids = Vec::new();
+        Self::collect_pane_ids(root, &mut ids);
+        ids
     }
 
-    /// Returns the active buffer view mutably for a visible window.
-    pub fn buffer_view_for_window_mut(
-        &mut self,
-        id: PaneId,
-    ) -> Option<&mut crate::window::BufferView> {
+    /// Returns the kind of a split-tree pane.
+    pub fn pane_kind(&self, id: PaneId) -> Option<super::PaneKind> {
+        Self::find_pane(self.root.as_ref()?, id).map(Pane::kind)
+    }
+
+    /// Returns the active buffer view for a visible editor pane.
+    pub fn buffer_view_for_pane(&self, id: PaneId) -> Option<&BufferView> {
+        let root = self.root.as_ref()?;
+        Self::find_pane(root, id)
+            .and_then(Pane::editor_pane)
+            .map(|editor_pane| editor_pane.active_buffer_view())
+    }
+
+    /// Returns the active buffer view mutably for a visible editor pane.
+    pub fn buffer_view_for_pane_mut(&mut self, id: PaneId) -> Option<&mut BufferView> {
         let root = self.root.as_mut()?;
         Self::find_pane_mut(root, id)
-            .and_then(PaneNode::editor_window_group_mut)
-            .map(|window_group| window_group.active_buffer_view_mut())
+            .and_then(Pane::editor_pane_mut)
+            .map(|editor_pane| editor_pane.active_buffer_view_mut())
     }
 
     pub(super) fn first_pane_id(&self) -> Option<PaneId> {
@@ -653,11 +686,21 @@ impl Layout {
 
     fn collect_pane_ids(node: &LayoutNode, ids: &mut Vec<PaneId>) {
         match node {
-            LayoutNode::Pane(pane) if !pane.is_plugin() => ids.push(pane.id),
-            LayoutNode::Pane(_) => {}
+            LayoutNode::Pane(pane) => ids.push(pane.id),
             LayoutNode::Split(split) => {
                 Self::collect_pane_ids(&split.first, ids);
                 Self::collect_pane_ids(&split.second, ids);
+            }
+        }
+    }
+
+    fn collect_editor_pane_ids(node: &LayoutNode, ids: &mut Vec<PaneId>) {
+        match node {
+            LayoutNode::Pane(pane) if !pane.is_plugin() => ids.push(pane.id),
+            LayoutNode::Pane(_) => {}
+            LayoutNode::Split(split) => {
+                Self::collect_editor_pane_ids(&split.first, ids);
+                Self::collect_editor_pane_ids(&split.second, ids);
             }
         }
     }
@@ -685,17 +728,17 @@ impl Layout {
         self.root
             .as_ref()
             .and_then(|root| Self::find_pane(root, id))
-            .is_some_and(PaneNode::is_plugin)
+            .is_some_and(Pane::is_plugin)
     }
 
-    pub(super) fn plugin_pane_node(&self, id: PaneId) -> Option<&PaneNode> {
+    pub(super) fn plugin_pane_node(&self, id: PaneId) -> Option<&Pane> {
         self.root
             .as_ref()
             .and_then(|root| Self::find_pane(root, id))
             .filter(|pane| pane.is_plugin())
     }
 
-    pub(super) fn plugin_pane_node_mut(&mut self, id: PaneId) -> Option<&mut PaneNode> {
+    pub(super) fn plugin_pane_node_mut(&mut self, id: PaneId) -> Option<&mut Pane> {
         self.root
             .as_mut()
             .and_then(|root| Self::find_pane_mut(root, id))
@@ -716,7 +759,7 @@ impl Layout {
         }
     }
 
-    pub(super) fn find_pane(node: &LayoutNode, id: PaneId) -> Option<&PaneNode> {
+    pub(super) fn find_pane(node: &LayoutNode, id: PaneId) -> Option<&Pane> {
         match node {
             LayoutNode::Pane(pane) if pane.id == id => Some(pane),
             LayoutNode::Pane(_) => None,
@@ -735,7 +778,7 @@ impl Layout {
         }
     }
 
-    pub(super) fn find_pane_mut(node: &mut LayoutNode, id: PaneId) -> Option<&mut PaneNode> {
+    pub(super) fn find_pane_mut(node: &mut LayoutNode, id: PaneId) -> Option<&mut Pane> {
         match node {
             LayoutNode::Pane(pane) if pane.id == id => Some(pane),
             LayoutNode::Pane(_) => None,
@@ -751,10 +794,10 @@ impl Layout {
     ) {
         match node {
             LayoutNode::Pane(pane) => {
-                let Some(window_group) = pane.editor_window_group() else {
+                let Some(editor_pane) = pane.editor_pane() else {
                     return;
                 };
-                for buffer_id in window_group.buffer_ids() {
+                for buffer_id in editor_pane.buffer_ids() {
                     if !seen.insert(buffer_id) {
                         continue;
                     }
@@ -776,11 +819,11 @@ impl Layout {
     fn activate_buffer_in_first_pane(node: &mut LayoutNode, buffer_id: BufferId) -> Option<PaneId> {
         match node {
             LayoutNode::Pane(pane) => {
-                let Some(window_group) = pane.editor_window_group_mut() else {
+                let Some(editor_pane) = pane.editor_pane_mut() else {
                     return None;
                 };
-                if window_group.buffer_ids().contains(&buffer_id) {
-                    window_group.activate_or_open_buffer(buffer_id);
+                if editor_pane.buffer_ids().contains(&buffer_id) {
+                    editor_pane.activate_or_open_buffer(buffer_id);
                     Some(pane.id)
                 } else {
                     None
@@ -796,10 +839,10 @@ impl Layout {
     pub(super) fn node_has_stale_visible_visuals(node: &LayoutNode) -> bool {
         match node {
             LayoutNode::Pane(pane) => {
-                let Some(window_group) = pane.editor_window_group() else {
+                let Some(editor_pane) = pane.editor_pane() else {
                     return false;
                 };
-                let view = window_group.active_buffer_view();
+                let view = editor_pane.active_buffer_view();
                 view.with_buffer(|buffer| {
                     let buffer_generation = buffer.visual_generation();
                     let rendered_generation = view.rendered_visual_generation();
@@ -823,9 +866,9 @@ impl Layout {
 
         if previous_pane != pane_id {
             if let Some(pane) = Self::find_pane_mut(root, previous_pane)
-                && let Some(window) = pane.plugin_pane_mut()
+                && let Some(plugin_pane) = pane.plugin_pane_mut()
             {
-                window.clear_pending_keys();
+                plugin_pane.clear_pending_keys();
             }
             self.plugin_pane_inherited_keymap.clear_pending();
             self.plugin_pane_key_sequence = super::PluginPaneKeySequence::None;
@@ -993,8 +1036,8 @@ impl Layout {
 
         match node {
             LayoutNode::Pane(pane) => pane
-                .editor_window_group_mut()
-                .is_some_and(|window_group| window_group.prune_expired_yank_flash(now)),
+                .editor_pane_mut()
+                .is_some_and(|editor_pane| editor_pane.prune_expired_yank_flash(now)),
             LayoutNode::Split(split) => {
                 let first =
                     Self::prune_expired_yank_flashes_in_node(Some(split.first.as_mut()), now);

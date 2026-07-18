@@ -1,7 +1,7 @@
 use super::Layout;
 use crate::ui::diagnostic_hover::DiagnosticHoverWidget;
+use crate::ui::geometry::Position;
 use crate::ui::hover::HoverWidget;
-use crate::window::Position;
 
 impl Layout {
     /// Opens an LSP hover popup near the provided cursor position.

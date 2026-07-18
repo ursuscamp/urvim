@@ -1,7 +1,7 @@
 //! Global state for the editor.
 //!
 //! This module stores persistent state that needs to survive across mode switches
-//! and future multi-window support.
+//! and future multi-pane support.
 
 use crate::AbsolutePath;
 use crate::buffer::{Buffer, BufferId, BufferPool};

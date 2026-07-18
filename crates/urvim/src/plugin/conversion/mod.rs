@@ -418,11 +418,11 @@ mod tests {
     #[test]
     fn map_rejects_unknown_fields_with_their_path() {
         let value = Value::Map(HashMap::from([("widht".to_string(), Value::Number(4.0))]).into());
-        let map = BearValueRef::new(&value, "window").map().unwrap();
+        let map = BearValueRef::new(&value, "overlay").map().unwrap();
 
         assert_eq!(
             map.reject_unknown(&["width"]).unwrap_err().to_string(),
-            "window.widht is not a recognized field"
+            "overlay.widht is not a recognized field"
         );
     }
 }

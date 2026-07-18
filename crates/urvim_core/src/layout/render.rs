@@ -10,14 +10,13 @@ use crate::globals;
 use crate::notification;
 use crate::screen::Screen;
 use crate::status_bar::StatusBarContext;
-use crate::ui::floating_window::{
-    FloatingAnchor, FloatingMargins, FloatingPlacement, FloatingWindowFrame,
-    FloatingWindowFrameLabel,
-};
+use crate::ui::geometry::{Position, Size};
 use crate::ui::inputs::LineSegment;
+use crate::ui::overlay::frame::{
+    OverlayAnchor, OverlayFrame, OverlayFrameLabel, OverlayMargins, OverlayPlacement,
+};
 use crate::ui::{UiContext, UiRect};
 use crate::widget::Widget;
-use crate::window::{Position, Size};
 use urvim_terminal::Style;
 
 #[derive(Clone, Copy, Default)]
@@ -155,8 +154,7 @@ impl Layout {
         self.render_completion_overlay(screen, origin, size);
         self.render_diagnostic_hover_overlay(screen, origin, size);
         self.render_hover_overlay(screen, origin, size);
-        self.plugin_windows
-            .render(screen, UiRect::new(origin, size));
+        self.overlays.render(screen, UiRect::new(origin, size));
         self.render_buffer_picker_overlay(screen, origin, size);
         self.render_colorscheme_picker_overlay(screen, origin, size);
         self.render_code_actions_picker_overlay(screen, origin, size);
@@ -335,14 +333,14 @@ impl Layout {
 
         let frame_cols = size.cols.min(55);
         let content_cols = frame_cols.saturating_sub(2);
-        let frame = FloatingWindowFrame::resolve_placement(
+        let frame = OverlayFrame::resolve_placement(
             origin,
             size,
             1,
             content_cols,
-            FloatingPlacement::Anchored {
-                anchor: FloatingAnchor::Center,
-                margins: FloatingMargins::default(),
+            OverlayPlacement::Anchored {
+                anchor: OverlayAnchor::Center,
+                margins: OverlayMargins::default(),
             },
         );
         let Some(frame) = frame else {
@@ -353,7 +351,7 @@ impl Layout {
             screen,
             border_style,
             body_style,
-            Some(FloatingWindowFrameLabel::top_center("Command")),
+            Some(OverlayFrameLabel::top_center("Command")),
         );
         let cursor = {
             input.set_text_style(body_style);
@@ -480,7 +478,7 @@ impl Layout {
         }
 
         let unicode_borders = crate::icon::unicode_borders_enabled();
-        let mode = self.active_window_mode_kind();
+        let mode = self.active_tab_mode_kind();
         let border_style: Style = globals::with_active_theme(|theme| {
             theme
                 .map(|theme| {
@@ -660,8 +658,8 @@ impl Layout {
             LayoutNode::Pane(pane) => {
                 let pane_id = pane.id;
                 match &mut pane.content {
-                    super::PaneContent::Editor(window_group) => {
-                        window_group.render(screen, origin, size)
+                    super::PaneContent::Editor(editor_pane) => {
+                        editor_pane.render(screen, origin, size)
                     }
                     super::PaneContent::Plugin(plugin_pane) => plugin_pane.render(
                         screen,

@@ -1,11 +1,10 @@
 //! Generic single-line input dialog widget.
 
 use crate::screen::Screen;
-use crate::ui::floating_window::{
-    FloatingAnchor, FloatingMargins, FloatingPlacement, FloatingWindowFrame,
-    FloatingWindowFrameLabel,
-};
 use crate::ui::inputs::InputWidget;
+use crate::ui::overlay::frame::{
+    OverlayAnchor, OverlayFrame, OverlayFrameLabel, OverlayMargins, OverlayPlacement,
+};
 use crate::ui::{FocusPolicy, UiContext, UiEvent, UiEventResult, UiRect};
 use crate::widget::Widget;
 use urvim_terminal::{KeyCode, Style};
@@ -70,7 +69,7 @@ impl InputBox {
     }
 
     /// Returns the rendered cursor position, if available.
-    pub fn cursor(&self) -> Option<crate::window::Position> {
+    pub fn cursor(&self) -> Option<crate::ui::geometry::Position> {
         self.input.render_cursor()
     }
 
@@ -113,14 +112,14 @@ impl InputBox {
         let border_style = theme_style("ui.window.lines.border");
         let body_style = theme_style("ui.window");
         let content_width = rect.size.cols.min(MAX_INPUT_CONTENT_WIDTH as u16);
-        let frame = FloatingWindowFrame::resolve_placement(
+        let frame = OverlayFrame::resolve_placement(
             rect.origin,
             rect.size,
             1,
             content_width.saturating_sub(2),
-            FloatingPlacement::Anchored {
-                anchor: FloatingAnchor::Center,
-                margins: FloatingMargins::default(),
+            OverlayPlacement::Anchored {
+                anchor: OverlayAnchor::Center,
+                margins: OverlayMargins::default(),
             },
         );
         let Some(frame) = frame else {
@@ -131,7 +130,7 @@ impl InputBox {
             screen,
             border_style,
             body_style,
-            Some(FloatingWindowFrameLabel::top_center(self.title.as_str())),
+            Some(OverlayFrameLabel::top_center(self.title.as_str())),
         );
         self.input.render_widget(
             screen,

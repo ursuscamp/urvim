@@ -1,10 +1,11 @@
-//! Retained floating windows owned by plugins.
+//! Retained overlays owned by plugins.
+
+pub mod frame;
 
 use crate::editor::{InheritedKeymap, NormalMode, TrieKeymap};
 use crate::screen::Screen;
-use crate::ui::floating_window::{
-    FloatingAnchor, FloatingMargins, FloatingPlacement, FloatingWindowFrame,
-    FloatingWindowFrameLabel,
+use crate::ui::overlay::frame::{
+    OverlayAnchor, OverlayFrame, OverlayFrameLabel, OverlayMargins, OverlayPlacement,
 };
 use crate::ui::{
     FocusPolicy, Intent, KeymapInheritance, UiContext, UiEvent, UiEventResult, UiRect,
@@ -15,40 +16,40 @@ use std::collections::BTreeMap;
 use urvim_terminal::Key;
 use urvim_theme::Tag;
 
-/// Stable identifier for a plugin-owned floating window.
+/// Stable identifier for a plugin-owned overlay.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct PluginWindowId(pub usize);
+pub struct OverlayId(pub usize);
 
-/// Configuration for a plugin floating window.
+/// Configuration for a plugin overlay.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PluginWindowOptions {
+pub struct OverlayOptions {
     /// Placement mode.
-    pub placement: FloatingPlacement,
+    pub placement: OverlayPlacement,
     /// Content height in terminal rows.
     pub rows: u16,
     /// Content width in terminal columns.
     pub cols: u16,
     /// Optional border title.
     pub title: Option<String>,
-    /// Theme tag for the window body.
+    /// Theme tag for the overlay body.
     pub body_style: Tag,
-    /// Theme tag for the unfocused window border.
+    /// Theme tag for the unfocused overlay border.
     pub border_style: Tag,
-    /// Theme tag for the focused window border.
+    /// Theme tag for the focused overlay border.
     pub focused_border_style: Tag,
 }
 
-impl Default for PluginWindowOptions {
+impl Default for OverlayOptions {
     fn default() -> Self {
         Self {
-            placement: FloatingPlacement::Anchored {
-                anchor: FloatingAnchor::Center,
-                margins: FloatingMargins::default(),
+            placement: OverlayPlacement::Anchored {
+                anchor: OverlayAnchor::Center,
+                margins: OverlayMargins::default(),
             },
             rows: 8,
             cols: 40,
             title: None,
-            body_style: Tag::parse("ui.window").expect("built-in window tag should parse"),
+            body_style: Tag::parse("ui.window").expect("built-in theme tag should parse"),
             border_style: Tag::parse("ui.window.lines.border")
                 .expect("built-in border tag should parse"),
             focused_border_style: Tag::parse("ui.window.lines.resize")
@@ -57,17 +58,17 @@ impl Default for PluginWindowOptions {
     }
 }
 
-/// A styled text segment in a plugin window line.
+/// A styled text segment in retained plugin UI.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PluginWindowSegment {
+pub struct RetainedSegment {
     /// Segment text without a newline.
     pub text: String,
-    /// Optional theme tag overlaid on the window body style.
+    /// Optional theme tag overlaid on the surface body style.
     pub style: Option<Tag>,
 }
 
-/// Retained content for a plugin floating window.
-pub type PluginWindowContent = Vec<Vec<PluginWindowSegment>>;
+/// Retained styled content shared by plugin panes and overlays.
+pub type RetainedContent = Vec<Vec<RetainedSegment>>;
 
 #[derive(Debug, Clone)]
 struct KeyBinding {
@@ -75,62 +76,39 @@ struct KeyBinding {
     intent: Intent,
 }
 
-/// A plugin-owned floating window and its retained UI state.
+/// Shared retained content and local keymap state for plugin UI surfaces.
 #[derive(Debug)]
-pub struct PluginWindow {
+pub struct RetainedSurface {
     owner: String,
-    options: PluginWindowOptions,
-    content: PluginWindowContent,
-    visible: bool,
+    content: RetainedContent,
     keymaps: TrieKeymap<KeyBinding>,
     pending_keys: Vec<String>,
 }
 
-impl PluginWindow {
-    /// Creates a retained plugin-owned window.
-    pub fn new(owner: String, options: PluginWindowOptions) -> Self {
+impl RetainedSurface {
+    /// Creates an empty retained surface owned by a plugin.
+    pub fn new(owner: String) -> Self {
         Self {
             owner,
-            options,
             content: Vec::new(),
-            visible: true,
-            keymaps: TrieKeymap::<KeyBinding>::new(),
+            keymaps: TrieKeymap::new(),
             pending_keys: Vec::new(),
         }
     }
 
-    /// Returns the plugin that owns this window.
+    /// Returns the owning plugin name.
     pub fn owner(&self) -> &str {
         &self.owner
     }
 
-    /// Returns the current window configuration.
-    pub fn options(&self) -> &PluginWindowOptions {
-        &self.options
-    }
-
-    /// Returns the current retained content.
-    pub fn content(&self) -> &PluginWindowContent {
+    /// Returns the retained content.
+    pub fn content(&self) -> &RetainedContent {
         &self.content
     }
 
-    /// Returns whether this window is visible.
-    pub fn is_visible(&self) -> bool {
-        self.visible
-    }
-
-    /// Updates the window's presentation options.
-    pub fn set_options(&mut self, options: PluginWindowOptions) {
-        self.options = options;
-    }
-
-    /// Replaces the retained window content.
-    pub fn set_content(&mut self, content: PluginWindowContent) {
+    /// Replaces the retained content.
+    pub fn set_content(&mut self, content: RetainedContent) {
         self.content = content;
-    }
-
-    fn set_visible(&mut self, visible: bool) {
-        self.visible = visible;
     }
 
     /// Installs a local keymap binding.
@@ -163,11 +141,9 @@ impl PluginWindow {
             self.pending_keys.clear();
             return editor::HandleKeyResult::Complete(intent);
         }
-
         if self.keymaps.is_prefix(&self.pending_keys) {
             return editor::HandleKeyResult::WaitForMore;
         }
-
         self.pending_keys.clear();
         editor::HandleKeyResult::InvalidSequence
     }
@@ -177,9 +153,142 @@ impl PluginWindow {
         self.pending_keys.clear();
     }
 
+    /// Renders retained content across a rectangle with the given body theme tag.
+    pub fn render(&self, screen: &mut Screen, rect: UiRect, body_tag: &Tag) {
+        if rect.size.rows == 0 || rect.size.cols == 0 {
+            return;
+        }
+        let body_style = globals::with_active_theme(|theme| {
+            theme
+                .map(|theme| theme.resolve_name_with_default(body_tag.as_str()))
+                .unwrap_or_default()
+        });
+        screen.fill_region(
+            rect.origin.row,
+            rect.origin.col,
+            rect.size.rows,
+            rect.size.cols,
+            body_style,
+        );
+        for (row_offset, line) in self
+            .content
+            .iter()
+            .take(rect.size.rows as usize)
+            .enumerate()
+        {
+            let row = rect.origin.row + row_offset as u16;
+            let mut col = rect.origin.col;
+            let right_col = rect.origin.col + rect.size.cols;
+            for segment in line {
+                if col >= right_col {
+                    break;
+                }
+                let style = segment
+                    .style
+                    .as_ref()
+                    .map(|tag| {
+                        globals::with_active_theme(|theme| {
+                            theme
+                                .map(|theme| theme.resolve_name_with_default(tag.as_str()))
+                                .unwrap_or_default()
+                        })
+                    })
+                    .unwrap_or_default();
+                let clipped = crate::ui::text_width::clip_text(
+                    segment.text.as_str(),
+                    usize::from(right_col - col),
+                    crate::ui::text_width::ClipSide::Start,
+                );
+                screen.write_string(row, col, body_style.overlay(style), clipped.text.as_str());
+                col = col.saturating_add(clipped.width as u16);
+            }
+        }
+    }
+
     fn has_explicit_escape_binding(&self) -> bool {
-        let escape = vec!["<Esc>".to_string()];
-        self.keymaps.is_prefix(&escape)
+        self.keymaps.is_prefix(&["<Esc>".to_string()])
+    }
+}
+
+/// A plugin-owned overlay and its retained UI state.
+#[derive(Debug)]
+pub struct Overlay {
+    surface: RetainedSurface,
+    options: OverlayOptions,
+    visible: bool,
+}
+
+impl Overlay {
+    /// Creates a retained plugin-owned overlay.
+    pub fn new(owner: String, options: OverlayOptions) -> Self {
+        Self {
+            surface: RetainedSurface::new(owner),
+            options,
+            visible: true,
+        }
+    }
+
+    /// Returns the plugin that owns this overlay.
+    pub fn owner(&self) -> &str {
+        self.surface.owner()
+    }
+
+    /// Returns the current overlay configuration.
+    pub fn options(&self) -> &OverlayOptions {
+        &self.options
+    }
+
+    /// Returns the current retained content.
+    pub fn content(&self) -> &RetainedContent {
+        self.surface.content()
+    }
+
+    /// Returns whether this overlay is visible.
+    pub fn is_visible(&self) -> bool {
+        self.visible
+    }
+
+    /// Updates the overlay's presentation options.
+    pub fn set_options(&mut self, options: OverlayOptions) {
+        self.options = options;
+    }
+
+    /// Replaces the retained overlay content.
+    pub fn set_content(&mut self, content: RetainedContent) {
+        self.surface.set_content(content);
+    }
+
+    fn set_visible(&mut self, visible: bool) {
+        self.visible = visible;
+    }
+
+    /// Installs a local keymap binding.
+    pub fn set_keymap(&mut self, keys: Vec<String>, rhs: String, intent: Intent) {
+        self.surface.set_keymap(keys, rhs, intent);
+    }
+
+    /// Removes a local keymap binding.
+    pub fn delete_keymap(&mut self, keys: &[String]) {
+        self.surface.delete_keymap(keys);
+    }
+
+    /// Returns all local keymap bindings.
+    pub fn keymaps(&self) -> Vec<(Vec<String>, String)> {
+        self.surface.keymaps()
+    }
+
+    /// Routes a key through the local keymap.
+    pub fn handle_key(&mut self, key: &Key) -> editor::HandleKeyResult {
+        self.surface.handle_key(key)
+    }
+
+    /// Clears any partially entered local key sequence.
+    pub fn clear_pending_keys(&mut self) {
+        self.surface.clear_pending_keys();
+    }
+
+    fn has_explicit_escape_binding(&self) -> bool {
+        self.surface.has_explicit_escape_binding()
     }
 
     /// Renders retained content across a rectangle using the configured body style.
@@ -201,7 +310,8 @@ impl PluginWindow {
         );
 
         for (row_offset, line) in self
-            .content
+            .surface
+            .content()
             .iter()
             .take(rect.size.rows as usize)
             .enumerate()
@@ -238,7 +348,7 @@ impl PluginWindow {
     }
 
     fn render_in_rect(&mut self, screen: &mut Screen, rect: UiRect, focused: bool) {
-        let Some(frame) = FloatingWindowFrame::resolve_placement(
+        let Some(frame) = OverlayFrame::resolve_placement(
             rect.origin,
             rect.size,
             self.options.rows,
@@ -250,7 +360,7 @@ impl PluginWindow {
         self.render_frame(screen, frame, focused);
     }
 
-    fn render_frame(&mut self, screen: &mut Screen, frame: FloatingWindowFrame, focused: bool) {
+    fn render_frame(&mut self, screen: &mut Screen, frame: OverlayFrame, focused: bool) {
         let (body_style, border_style) = globals::with_active_theme(|theme| {
             let body = theme
                 .map(|theme| theme.resolve_name_with_default(self.options.body_style.as_str()))
@@ -273,7 +383,7 @@ impl PluginWindow {
             self.options
                 .title
                 .as_deref()
-                .map(FloatingWindowFrameLabel::top_center),
+                .map(OverlayFrameLabel::top_center),
         );
 
         self.render_content_in_rect(
@@ -284,203 +394,206 @@ impl PluginWindow {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PluginWindowKeySequence {
+enum OverlayKeySequence {
     None,
     Local,
     Inherited,
 }
 
-/// Retained registry of plugin floating windows.
+/// Retained registry of plugin overlays.
 #[derive(Debug)]
-pub struct PluginWindowManager {
-    windows: BTreeMap<PluginWindowId, PluginWindow>,
+pub struct OverlayManager {
+    overlays: BTreeMap<OverlayId, Overlay>,
     next_id: usize,
-    focused: Option<PluginWindowId>,
+    focused: Option<OverlayId>,
     inherited_keymap: InheritedKeymap,
-    key_sequence: PluginWindowKeySequence,
+    key_sequence: OverlayKeySequence,
 }
 
-impl Default for PluginWindowManager {
+impl Default for OverlayManager {
     fn default() -> Self {
         Self {
-            windows: BTreeMap::new(),
+            overlays: BTreeMap::new(),
             next_id: 0,
             focused: None,
             inherited_keymap: InheritedKeymap::new(NormalMode::keymap()),
-            key_sequence: PluginWindowKeySequence::None,
+            key_sequence: OverlayKeySequence::None,
         }
     }
 }
 
-impl PluginWindowManager {
-    /// Creates an empty plugin-window registry.
+impl OverlayManager {
+    /// Creates an empty overlay registry.
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Returns all currently registered window IDs.
-    pub fn ids(&self) -> impl Iterator<Item = PluginWindowId> + '_ {
-        self.windows.keys().copied()
+    /// Returns all currently registered overlay IDs.
+    pub fn ids(&self) -> impl Iterator<Item = OverlayId> + '_ {
+        self.overlays.keys().copied()
     }
 
-    /// Returns the IDs of all visible plugin windows in stable creation order.
-    pub fn visible_ids(&self) -> impl Iterator<Item = PluginWindowId> + '_ {
-        self.windows
+    /// Returns visible overlay IDs in stable creation order.
+    pub fn visible_ids(&self) -> impl Iterator<Item = OverlayId> + '_ {
+        self.overlays
             .iter()
-            .filter_map(|(id, window)| window.is_visible().then_some(*id))
+            .filter_map(|(id, overlay)| overlay.is_visible().then_some(*id))
     }
 
-    /// Returns the currently focused plugin window, if any.
-    pub fn focused(&self) -> Option<PluginWindowId> {
+    /// Returns the currently focused overlay, if any.
+    pub fn focused(&self) -> Option<OverlayId> {
         self.focused
     }
 
-    /// Creates a visible, unfocused plugin window.
-    pub fn create(&mut self, owner: String, options: PluginWindowOptions) -> PluginWindowId {
-        let id = PluginWindowId(self.next_id);
+    /// Creates a visible, unfocused overlay.
+    pub fn create(&mut self, owner: String, options: OverlayOptions) -> OverlayId {
+        let id = OverlayId(self.next_id);
         self.next_id = self.next_id.saturating_add(1);
-        self.windows.insert(id, PluginWindow::new(owner, options));
+        self.overlays.insert(id, Overlay::new(owner, options));
         id
     }
 
-    /// Returns a window owned by `owner` or an ownership error.
-    pub fn owned_window(&self, owner: &str, id: PluginWindowId) -> Result<&PluginWindow, String> {
-        let window = self
-            .windows
+    /// Returns an overlay owned by `owner` or an ownership error.
+    pub fn owned_overlay(&self, owner: &str, id: OverlayId) -> Result<&Overlay, String> {
+        let overlay = self
+            .overlays
             .get(&id)
-            .ok_or_else(|| format!("unknown plugin window_id {}", id.0))?;
-        if window.owner() != owner {
-            return Err(format!("plugin {owner:?} does not own window_id {}", id.0));
+            .ok_or_else(|| format!("unknown overlay_id {}", id.0))?;
+        if overlay.owner() != owner {
+            return Err(format!("plugin {owner:?} does not own overlay_id {}", id.0));
         }
-        Ok(window)
+        Ok(overlay)
     }
 
-    /// Returns a mutable window owned by `owner` or an ownership error.
-    pub fn owned_window_mut(
+    /// Returns a mutable overlay owned by `owner` or an ownership error.
+    pub fn owned_overlay_mut(
         &mut self,
         owner: &str,
-        id: PluginWindowId,
-    ) -> Result<&mut PluginWindow, String> {
-        let window = self
-            .windows
+        id: OverlayId,
+    ) -> Result<&mut Overlay, String> {
+        let overlay = self
+            .overlays
             .get_mut(&id)
-            .ok_or_else(|| format!("unknown plugin window_id {}", id.0))?;
-        if window.owner() != owner {
-            return Err(format!("plugin {owner:?} does not own window_id {}", id.0));
+            .ok_or_else(|| format!("unknown overlay_id {}", id.0))?;
+        if overlay.owner() != owner {
+            return Err(format!("plugin {owner:?} does not own overlay_id {}", id.0));
         }
-        Ok(window)
+        Ok(overlay)
     }
 
-    /// Updates a window's configuration.
+    /// Updates an overlay's configuration.
     pub fn configure(
         &mut self,
         owner: &str,
-        id: PluginWindowId,
-        options: PluginWindowOptions,
+        id: OverlayId,
+        options: OverlayOptions,
     ) -> Result<(), String> {
-        self.owned_window_mut(owner, id)?.set_options(options);
+        self.owned_overlay_mut(owner, id)?.set_options(options);
         Ok(())
     }
 
-    /// Replaces a window's retained content.
+    /// Replaces an overlay's retained content.
     pub fn set_content(
         &mut self,
         owner: &str,
-        id: PluginWindowId,
-        content: PluginWindowContent,
+        id: OverlayId,
+        content: RetainedContent,
     ) -> Result<(), String> {
-        self.owned_window_mut(owner, id)?.set_content(content);
+        self.owned_overlay_mut(owner, id)?.set_content(content);
         Ok(())
     }
 
-    /// Shows a window.
-    pub fn show(&mut self, owner: &str, id: PluginWindowId) -> Result<(), String> {
-        self.owned_window_mut(owner, id)?.set_visible(true);
+    /// Shows an overlay.
+    pub fn show(&mut self, owner: &str, id: OverlayId) -> Result<(), String> {
+        self.owned_overlay_mut(owner, id)?.set_visible(true);
         Ok(())
     }
 
-    /// Hides a window and clears focus if necessary.
-    pub fn hide(&mut self, owner: &str, id: PluginWindowId) -> Result<(), String> {
-        self.owned_window_mut(owner, id)?.set_visible(false);
+    /// Hides an overlay and clears focus if necessary.
+    pub fn hide(&mut self, owner: &str, id: OverlayId) -> Result<(), String> {
+        self.owned_overlay_mut(owner, id)?.set_visible(false);
         if self.focused == Some(id) {
             self.blur_focused();
         }
         Ok(())
     }
 
-    /// Focuses a visible window.
-    pub fn focus(&mut self, owner: &str, id: PluginWindowId) -> Result<(), String> {
-        let window = self.owned_window(owner, id)?;
-        if !window.is_visible() {
-            return Err(format!("plugin window_id {} is hidden", id.0));
+    /// Focuses a visible overlay.
+    pub fn focus(&mut self, owner: &str, id: OverlayId) -> Result<(), String> {
+        let overlay = self.owned_overlay(owner, id)?;
+        if !overlay.is_visible() {
+            return Err(format!("overlay_id {} is hidden", id.0));
         }
         self.focus_id(id);
         Ok(())
     }
 
-    /// Focuses a visible plugin window by ID for layout-level focus traversal.
-    pub fn focus_id(&mut self, id: PluginWindowId) -> bool {
-        let Some(window) = self.windows.get(&id) else {
+    /// Focuses a visible overlay by ID for layout-level focus traversal.
+    pub fn focus_id(&mut self, id: OverlayId) -> bool {
+        let Some(overlay) = self.overlays.get(&id) else {
             return false;
         };
-        if !window.is_visible() {
+        if !overlay.is_visible() {
             return false;
         }
-        self.focused = Some(id);
         self.clear_pending_keys();
+        self.focused = Some(id);
+        if let Some(overlay) = self.overlays.get_mut(&id) {
+            overlay.clear_pending_keys();
+        }
         true
     }
 
-    /// Clears plugin-window focus without requiring an owning plugin.
+    /// Clears overlay focus without requiring an owning plugin.
     pub fn blur_focused(&mut self) {
-        self.focused = None;
         self.clear_pending_keys();
+        self.focused = None;
     }
 
-    /// Clears plugin-window focus.
-    pub fn blur(&mut self, owner: &str, id: PluginWindowId) -> Result<(), String> {
-        self.owned_window(owner, id)?;
+    /// Clears overlay focus.
+    pub fn blur(&mut self, owner: &str, id: OverlayId) -> Result<(), String> {
+        self.owned_overlay(owner, id)?;
         if self.focused == Some(id) {
             self.blur_focused();
         }
         Ok(())
     }
 
-    /// Closes a window and clears focus if necessary.
-    pub fn close(&mut self, owner: &str, id: PluginWindowId) -> Result<(), String> {
-        self.owned_window(owner, id)?;
-        self.windows.remove(&id);
+    /// Closes an overlay and clears focus if necessary.
+    pub fn close(&mut self, owner: &str, id: OverlayId) -> Result<(), String> {
+        self.owned_overlay(owner, id)?;
         if self.focused == Some(id) {
             self.blur_focused();
         }
+        self.overlays.remove(&id);
         Ok(())
     }
 
-    /// Closes all windows owned by a plugin.
+    /// Closes all overlays owned by a plugin.
     pub fn close_owned(&mut self, owner: &str) {
         let ids: Vec<_> = self
-            .windows
+            .overlays
             .iter()
-            .filter_map(|(id, window)| (window.owner() == owner).then_some(*id))
+            .filter_map(|(id, overlay)| (overlay.owner() == owner).then_some(*id))
             .collect();
         for id in ids {
-            self.windows.remove(&id);
             if self.focused == Some(id) {
                 self.blur_focused();
             }
+            self.overlays.remove(&id);
         }
     }
 
-    /// Installs a command binding for a window.
+    /// Installs a command binding for an overlay.
     pub fn set_keymap(
         &mut self,
         owner: &str,
-        id: PluginWindowId,
+        id: OverlayId,
         keys: Vec<String>,
         rhs: String,
         intent: Intent,
     ) -> Result<(), String> {
-        self.owned_window_mut(owner, id)?
+        self.owned_overlay_mut(owner, id)?
             .set_keymap(keys, rhs, intent);
         if self.focused == Some(id) {
             self.clear_pending_keys();
@@ -488,37 +601,37 @@ impl PluginWindowManager {
         Ok(())
     }
 
-    /// Removes a command binding from a window.
+    /// Removes a command binding from an overlay.
     pub fn delete_keymap(
         &mut self,
         owner: &str,
-        id: PluginWindowId,
+        id: OverlayId,
         keys: &[String],
     ) -> Result<(), String> {
-        self.owned_window_mut(owner, id)?.delete_keymap(keys);
+        self.owned_overlay_mut(owner, id)?.delete_keymap(keys);
         if self.focused == Some(id) {
             self.clear_pending_keys();
         }
         Ok(())
     }
 
-    /// Returns a plugin window's configured keymaps.
+    /// Returns an overlay's configured keymaps.
     pub fn keymaps(
         &self,
         owner: &str,
-        id: PluginWindowId,
+        id: OverlayId,
     ) -> Result<Vec<(Vec<String>, String)>, String> {
-        let window = self.owned_window(owner, id)?;
-        Ok(window.keymaps())
+        let overlay = self.owned_overlay(owner, id)?;
+        Ok(overlay.keymaps())
     }
 
-    /// Routes an event to the focused plugin window.
+    /// Routes an event to the focused overlay.
     pub fn route_ui_event(&mut self, event: &UiEvent) -> UiEventResult {
         let Some(id) = self.focused else {
             return UiEventResult::NotHandled;
         };
 
-        if !self.windows.contains_key(&id) {
+        if !self.overlays.contains_key(&id) {
             self.focused = None;
             return UiEventResult::NotHandled;
         }
@@ -526,34 +639,34 @@ impl PluginWindowManager {
         match event {
             UiEvent::Key(key) => {
                 // An inherited prefix owns the rest of its sequence; otherwise
-                // window-local mappings always receive the key first.
-                if self.key_sequence == PluginWindowKeySequence::Inherited {
+                // Overlay-local mappings always receive the key first.
+                if self.key_sequence == OverlayKeySequence::Inherited {
                     return self.route_inherited_key(key);
                 }
 
-                let Some(window) = self.windows.get_mut(&id) else {
+                let Some(overlay) = self.overlays.get_mut(&id) else {
                     self.focused = None;
                     return UiEventResult::NotHandled;
                 };
-                if key.canonical_string() == "<Esc>" && !window.has_explicit_escape_binding() {
-                    window.pending_keys.clear();
+                if key.canonical_string() == "<Esc>" && !overlay.has_explicit_escape_binding() {
+                    overlay.clear_pending_keys();
                     self.blur_focused();
                     return UiEventResult::Handled(Vec::new());
                 }
 
-                match window.handle_key(key) {
+                match overlay.handle_key(key) {
                     editor::HandleKeyResult::Complete(intent) => {
-                        self.key_sequence = PluginWindowKeySequence::None;
+                        self.key_sequence = OverlayKeySequence::None;
                         UiEventResult::Handled(vec![intent])
                     }
                     editor::HandleKeyResult::WaitForMore => {
-                        self.key_sequence = PluginWindowKeySequence::Local;
+                        self.key_sequence = OverlayKeySequence::Local;
                         UiEventResult::Handled(Vec::new())
                     }
                     editor::HandleKeyResult::InvalidSequence
-                        if self.key_sequence == PluginWindowKeySequence::Local =>
+                        if self.key_sequence == OverlayKeySequence::Local =>
                     {
-                        self.key_sequence = PluginWindowKeySequence::None;
+                        self.key_sequence = OverlayKeySequence::None;
                         UiEventResult::Handled(Vec::new())
                     }
                     editor::HandleKeyResult::InvalidSequence => self.route_inherited_key(key),
@@ -569,9 +682,9 @@ impl PluginWindowManager {
 
     fn clear_pending_keys(&mut self) {
         self.inherited_keymap.clear_pending();
-        self.key_sequence = PluginWindowKeySequence::None;
-        if let Some(window) = self.focused.and_then(|id| self.windows.get_mut(&id)) {
-            window.clear_pending_keys();
+        self.key_sequence = OverlayKeySequence::None;
+        if let Some(overlay) = self.focused.and_then(|id| self.overlays.get_mut(&id)) {
+            overlay.clear_pending_keys();
         }
     }
 
@@ -584,51 +697,47 @@ impl PluginWindowManager {
         });
         match result {
             editor::HandleKeyResult::Complete(intent) => {
-                self.key_sequence = PluginWindowKeySequence::None;
+                self.key_sequence = OverlayKeySequence::None;
                 UiEventResult::Handled(vec![intent])
             }
             editor::HandleKeyResult::WaitForMore => {
-                self.key_sequence = PluginWindowKeySequence::Inherited;
+                self.key_sequence = OverlayKeySequence::Inherited;
                 UiEventResult::Handled(Vec::new())
             }
             editor::HandleKeyResult::InvalidSequence => {
-                self.key_sequence = PluginWindowKeySequence::None;
+                self.key_sequence = OverlayKeySequence::None;
                 UiEventResult::Handled(Vec::new())
             }
         }
     }
 
-    /// Renders all visible plugin windows into the supplied UI rectangle.
+    /// Renders all visible overlays into the supplied UI rectangle.
     pub fn render(&mut self, screen: &mut Screen, rect: UiRect) {
         let focused = self.focused;
         let mut ids: Vec<_> = self
-            .windows
+            .overlays
             .iter()
-            .filter_map(|(id, window)| window.is_visible().then_some(*id))
+            .filter_map(|(id, overlay)| overlay.is_visible().then_some(*id))
             .collect();
         ids.sort_unstable();
         if let Some(focused) = focused {
             ids.retain(|id| *id != focused);
-            if self
-                .windows
-                .get(&focused)
-                .is_some_and(PluginWindow::is_visible)
-            {
+            if self.overlays.get(&focused).is_some_and(Overlay::is_visible) {
                 ids.push(focused);
             }
         }
 
         for id in ids {
-            if let Some(window) = self.windows.get_mut(&id) {
-                window.render_in_rect(screen, rect, Some(id) == focused);
+            if let Some(overlay) = self.overlays.get_mut(&id) {
+                overlay.render_in_rect(screen, rect, Some(id) == focused);
             }
         }
     }
 }
 
-impl Widget for PluginWindow {
+impl Widget for Overlay {
     fn render_widget(&mut self, screen: &mut Screen, rect: UiRect, _ctx: &UiContext) {
-        let Some(frame) = FloatingWindowFrame::resolve_placement(
+        let Some(frame) = OverlayFrame::resolve_placement(
             rect.origin,
             rect.size,
             self.options.rows,
@@ -646,30 +755,30 @@ impl Widget for PluginWindow {
 }
 
 /// Parses an anchor name from the plugin API.
-pub fn parse_anchor(value: &str) -> Result<FloatingAnchor, String> {
+pub fn parse_anchor(value: &str) -> Result<OverlayAnchor, String> {
     match value {
-        "center" => Ok(FloatingAnchor::Center),
-        "top_center" | "top-center" => Ok(FloatingAnchor::TopCenter),
-        "top_right" | "top-right" => Ok(FloatingAnchor::TopRight),
-        "bottom_right" | "bottom-right" => Ok(FloatingAnchor::BottomRight),
-        other => Err(format!("unknown plugin window anchor {other}")),
+        "center" => Ok(OverlayAnchor::Center),
+        "top_center" | "top-center" => Ok(OverlayAnchor::TopCenter),
+        "top_right" | "top-right" => Ok(OverlayAnchor::TopRight),
+        "bottom_right" | "bottom-right" => Ok(OverlayAnchor::BottomRight),
+        other => Err(format!("unknown overlay anchor {other}")),
     }
 }
 
-/// Converts a plugin window ID to the numeric script representation.
-pub fn id_to_number(id: PluginWindowId) -> f64 {
+/// Converts an overlay ID to the numeric script representation.
+pub fn id_to_number(id: OverlayId) -> f64 {
     id.0 as f64
 }
 
-/// Parses a numeric script value into a plugin window ID.
-pub fn id_from_number(value: f64) -> Result<PluginWindowId, String> {
+/// Parses a numeric script value into an overlay ID.
+pub fn id_from_number(value: f64) -> Result<OverlayId, String> {
     if !value.is_finite() || value < 0.0 || value.fract() != 0.0 || value > usize::MAX as f64 {
-        return Err("plugin window_id must be a non-negative integer".to_string());
+        return Err("overlay_id must be a non-negative integer".to_string());
     }
-    Ok(PluginWindowId(value as usize))
+    Ok(OverlayId(value as usize))
 }
 
-/// Parses a canonical key sequence for a plugin window binding.
+/// Parses a canonical key sequence for an overlay binding.
 pub fn parse_key_sequence(value: &str) -> Result<Vec<String>, String> {
     editor::validate_key_string(value).map_err(|error| error.to_string())
 }
@@ -679,11 +788,11 @@ mod tests {
     use super::*;
     use crate::config::{Config, KeymapsConfig};
     use crate::ui::Command;
-    use crate::window::{Position, Size};
+    use crate::ui::geometry::{Position, Size};
     use urvim_terminal::{Color, KeyCode, Modifiers, Style};
     use urvim_theme::{HighlightStyles, Tag, Theme, ThemeKind};
 
-    fn window_theme() -> Theme {
+    fn overlay_theme() -> Theme {
         let default_style = Style::new().fg(Color::ansi(1)).bg(Color::ansi(2));
         let mut highlights = HighlightStyles::default();
         highlights.insert(
@@ -702,33 +811,33 @@ mod tests {
             Tag::parse("ui.picker.accent").unwrap(),
             Style::new().fg(Color::ansi(9)).bg(Color::ansi(10)),
         );
-        Theme::new("window", ThemeKind::Ansi256, default_style, highlights)
+        Theme::new("overlay", ThemeKind::Ansi256, default_style, highlights)
     }
 
     #[test]
-    fn plugin_window_focus_changes_border_and_title_style() {
-        let theme = window_theme();
+    fn overlay_focus_changes_border_and_title_style() {
+        let theme = overlay_theme();
         let border_style = theme.resolve_name_with_default("ui.window.lines.border");
         let active_style = theme.resolve_name_with_default("ui.picker.accent");
         let _theme_guard = globals::set_test_active_theme(theme);
-        let mut manager = PluginWindowManager::new();
+        let mut manager = OverlayManager::new();
         let id = manager.create(
             "demo".to_string(),
-            PluginWindowOptions {
+            OverlayOptions {
                 rows: 2,
                 cols: 8,
                 title: Some("Demo".to_string()),
                 focused_border_style: Tag::parse("ui.picker.accent").unwrap(),
-                ..PluginWindowOptions::default()
+                ..OverlayOptions::default()
             },
         );
         let rect = UiRect::new(Position::new(0, 0), Size::new(8, 20));
-        let frame = FloatingWindowFrame::resolve_placement(
+        let frame = OverlayFrame::resolve_placement(
             rect.origin,
             rect.size,
             2,
             8,
-            PluginWindowOptions::default().placement,
+            OverlayOptions::default().placement,
         )
         .unwrap();
         let mut screen = Screen::new(8, 20);
@@ -778,28 +887,28 @@ mod tests {
     }
 
     #[test]
-    fn plugin_window_lifecycle_enforces_ownership_and_focus() {
-        let mut manager = PluginWindowManager::new();
-        let id = manager.create("demo".to_string(), PluginWindowOptions::default());
+    fn overlay_lifecycle_enforces_ownership_and_focus() {
+        let mut manager = OverlayManager::new();
+        let id = manager.create("demo".to_string(), OverlayOptions::default());
 
         assert_eq!(manager.ids().collect::<Vec<_>>(), vec![id]);
-        assert!(manager.owned_window("other", id).is_err());
+        assert!(manager.owned_overlay("other", id).is_err());
         manager
             .focus("demo", id)
-            .expect("owner should focus window");
+            .expect("owner should focus overlay");
         assert_eq!(manager.focused(), Some(id));
-        manager.hide("demo", id).expect("owner should hide window");
+        manager.hide("demo", id).expect("owner should hide overlay");
         assert_eq!(manager.focused(), None);
         manager
             .close("demo", id)
-            .expect("owner should close window");
+            .expect("owner should close overlay");
         assert!(manager.ids().next().is_none());
     }
 
     #[test]
-    fn focused_plugin_window_routes_keymap_intents_and_blurs_on_escape() {
-        let mut manager = PluginWindowManager::new();
-        let id = manager.create("demo".to_string(), PluginWindowOptions::default());
+    fn focused_overlay_routes_keymap_intents_and_blurs_on_escape() {
+        let mut manager = OverlayManager::new();
+        let id = manager.create("demo".to_string(), OverlayOptions::default());
         manager
             .set_keymap(
                 "demo",
@@ -809,7 +918,7 @@ mod tests {
                 Intent::Command(Command::ToggleWrap),
             )
             .expect("keymap should be accepted");
-        manager.focus("demo", id).expect("window should focus");
+        manager.focus("demo", id).expect("overlay should focus");
 
         let key = Key::new(KeyCode::Char('x'));
         assert_eq!(
@@ -830,11 +939,46 @@ mod tests {
     }
 
     #[test]
-    fn focused_plugin_window_inherits_global_focus_cycle_keys() {
-        let mut manager = PluginWindowManager::new();
-        let first = manager.create("demo".to_string(), PluginWindowOptions::default());
-        manager.create("demo".to_string(), PluginWindowOptions::default());
-        manager.focus("demo", first).expect("window should focus");
+    fn overlay_focus_changes_clear_previous_local_key_sequences() {
+        let mut manager = OverlayManager::new();
+        let first = manager.create("demo".to_string(), OverlayOptions::default());
+        let second = manager.create("demo".to_string(), OverlayOptions::default());
+        manager
+            .set_keymap(
+                "demo",
+                first,
+                vec!["g".to_string(), "g".to_string()],
+                "pane wrap-toggle".to_string(),
+                Intent::Command(Command::ToggleWrap),
+            )
+            .unwrap();
+        let g = Key::new(KeyCode::Char('g'));
+
+        manager.focus("demo", first).unwrap();
+        assert_eq!(
+            manager.route_ui_event(&UiEvent::Key(g)),
+            UiEventResult::Handled(Vec::new())
+        );
+        manager.focus("demo", second).unwrap();
+        assert!(manager.overlays[&first].surface.pending_keys.is_empty());
+
+        manager.focus("demo", first).unwrap();
+        manager.route_ui_event(&UiEvent::Key(g));
+        manager.blur_focused();
+        assert!(manager.overlays[&first].surface.pending_keys.is_empty());
+
+        manager.focus("demo", first).unwrap();
+        manager.route_ui_event(&UiEvent::Key(g));
+        manager.hide("demo", first).unwrap();
+        assert!(manager.overlays[&first].surface.pending_keys.is_empty());
+    }
+
+    #[test]
+    fn focused_overlay_inherits_global_focus_cycle_keys() {
+        let mut manager = OverlayManager::new();
+        let first = manager.create("demo".to_string(), OverlayOptions::default());
+        manager.create("demo".to_string(), OverlayOptions::default());
+        manager.focus("demo", first).expect("overlay should focus");
 
         let control_w = Key::with_modifiers(KeyCode::Char('w'), Modifiers::CTRL);
         assert_eq!(
@@ -843,13 +987,13 @@ mod tests {
         );
         assert_eq!(
             manager.route_ui_event(&UiEvent::Key(Key::new(KeyCode::Char('n')))),
-            UiEventResult::Handled(vec![Intent::Command(Command::FocusNextWindow)])
+            UiEventResult::Handled(vec![Intent::Command(Command::FocusNextTarget)])
         );
         assert_eq!(manager.focused(), Some(first));
     }
 
     #[test]
-    fn focused_plugin_window_inherits_rebound_focus_and_application_mappings() {
+    fn focused_overlay_inherits_rebound_focus_and_application_mappings() {
         let _config_guard = globals::set_test_config(Config {
             keymaps: KeymapsConfig {
                 normal: BTreeMap::from([
@@ -860,9 +1004,9 @@ mod tests {
             },
             ..Default::default()
         });
-        let mut manager = PluginWindowManager::new();
-        let id = manager.create("demo".to_string(), PluginWindowOptions::default());
-        manager.focus("demo", id).expect("window should focus");
+        let mut manager = OverlayManager::new();
+        let id = manager.create("demo".to_string(), OverlayOptions::default());
+        manager.focus("demo", id).expect("overlay should focus");
 
         let focus = Key::with_modifiers(KeyCode::Char('h'), Modifiers::CTRL);
         assert_eq!(
@@ -876,7 +1020,7 @@ mod tests {
     }
 
     #[test]
-    fn focused_plugin_window_local_mapping_wins_over_inherited_mapping() {
+    fn focused_overlay_local_mapping_wins_over_inherited_mapping() {
         let _config_guard = globals::set_test_config(Config {
             keymaps: KeymapsConfig {
                 normal: BTreeMap::from([("<F7>".to_string(), "try-quit".to_string())]),
@@ -884,8 +1028,8 @@ mod tests {
             },
             ..Default::default()
         });
-        let mut manager = PluginWindowManager::new();
-        let id = manager.create("demo".to_string(), PluginWindowOptions::default());
+        let mut manager = OverlayManager::new();
+        let id = manager.create("demo".to_string(), OverlayOptions::default());
         manager
             .set_keymap(
                 "demo",
@@ -895,7 +1039,7 @@ mod tests {
                 Intent::Command(Command::ToggleWrap),
             )
             .expect("local mapping should be accepted");
-        manager.focus("demo", id).expect("window should focus");
+        manager.focus("demo", id).expect("overlay should focus");
 
         assert_eq!(
             manager.route_ui_event(&UiEvent::Key(Key::new(KeyCode::F7))),
@@ -904,22 +1048,25 @@ mod tests {
     }
 
     #[test]
-    fn plugin_window_content_rejects_newline_only_at_host_boundary() {
-        let content = vec![vec![PluginWindowSegment {
+    fn overlay_content_rejects_newline_only_at_host_boundary() {
+        let content = vec![vec![RetainedSegment {
             text: "line".to_string(),
             style: None,
         }]];
-        let mut manager = PluginWindowManager::new();
-        let id = manager.create("demo".to_string(), PluginWindowOptions::default());
+        let mut manager = OverlayManager::new();
+        let id = manager.create("demo".to_string(), OverlayOptions::default());
         manager
             .set_content("demo", id, content)
             .expect("core manager stores retained content");
-        assert_eq!(manager.owned_window("demo", id).unwrap().content().len(), 1);
+        assert_eq!(
+            manager.owned_overlay("demo", id).unwrap().content().len(),
+            1
+        );
     }
 
     #[test]
-    fn plugin_window_margins_apply_to_every_anchor() {
-        let margins = FloatingMargins {
+    fn overlay_margins_apply_to_every_anchor() {
+        let margins = OverlayMargins {
             top: 2,
             right: 3,
             bottom: 4,
@@ -929,71 +1076,68 @@ mod tests {
         let size = Size::new(40, 100);
 
         let frame = |anchor| {
-            FloatingWindowFrame::resolve_placement(
+            OverlayFrame::resolve_placement(
                 origin,
                 size,
                 8,
                 20,
-                FloatingPlacement::Anchored { anchor, margins },
+                OverlayPlacement::Anchored { anchor, margins },
             )
-            .expect("window should fit inside the inset bounds")
+            .expect("overlay should fit inside the inset bounds")
         };
 
-        assert_eq!(frame(FloatingAnchor::Center).origin, Position::new(24, 60));
+        assert_eq!(frame(OverlayAnchor::Center).origin, Position::new(24, 60));
         assert_eq!(
-            frame(FloatingAnchor::TopCenter).origin,
+            frame(OverlayAnchor::TopCenter).origin,
             Position::new(12, 60)
         );
+        assert_eq!(frame(OverlayAnchor::TopRight).origin, Position::new(12, 95));
         assert_eq!(
-            frame(FloatingAnchor::TopRight).origin,
-            Position::new(12, 95)
-        );
-        assert_eq!(
-            frame(FloatingAnchor::BottomRight).origin,
+            frame(OverlayAnchor::BottomRight).origin,
             Position::new(36, 95)
         );
     }
 
     #[test]
-    fn plugin_window_margins_clip_to_inset_bounds() {
-        let options = PluginWindowOptions {
+    fn overlay_margins_clip_to_inset_bounds() {
+        let options = OverlayOptions {
             rows: 8,
             cols: 40,
-            placement: FloatingPlacement::Anchored {
-                anchor: FloatingAnchor::Center,
-                margins: FloatingMargins {
+            placement: OverlayPlacement::Anchored {
+                anchor: OverlayAnchor::Center,
+                margins: OverlayMargins {
                     top: 5,
                     right: 5,
                     bottom: 5,
                     left: 5,
                 },
             },
-            ..PluginWindowOptions::default()
+            ..OverlayOptions::default()
         };
-        let frame = FloatingWindowFrame::resolve_placement(
+        let frame = OverlayFrame::resolve_placement(
             Position::new(0, 0),
             Size::new(20, 30),
             options.rows,
             options.cols,
             options.placement,
         )
-        .expect("window should be clipped to the inset bounds");
+        .expect("overlay should be clipped to the inset bounds");
         assert_eq!(frame.origin, Position::new(5, 5));
         assert_eq!(frame.size, Size::new(10, 20));
 
-        let impossible = PluginWindowOptions {
-            placement: FloatingPlacement::Anchored {
-                anchor: FloatingAnchor::Center,
-                margins: FloatingMargins {
+        let impossible = OverlayOptions {
+            placement: OverlayPlacement::Anchored {
+                anchor: OverlayAnchor::Center,
+                margins: OverlayMargins {
                     top: 5,
                     bottom: 5,
-                    ..FloatingMargins::default()
+                    ..OverlayMargins::default()
                 },
             },
-            ..PluginWindowOptions::default()
+            ..OverlayOptions::default()
         };
         assert!(
-            FloatingWindowFrame::resolve_placement(
+            OverlayFrame::resolve_placement(
                 Position::new(0, 0),
                 Size::new(10, 20),
                 impossible.rows,
@@ -1005,21 +1149,21 @@ mod tests {
     }
 
     #[test]
-    fn plugin_window_fixed_position_preserves_origin_and_clips_size() {
-        let options = PluginWindowOptions {
-            placement: FloatingPlacement::Fixed { row: 4, col: 7 },
+    fn overlay_fixed_position_preserves_origin_and_clips_size() {
+        let options = OverlayOptions {
+            placement: OverlayPlacement::Fixed { row: 4, col: 7 },
             rows: 8,
             cols: 40,
-            ..PluginWindowOptions::default()
+            ..OverlayOptions::default()
         };
-        let frame = FloatingWindowFrame::resolve_placement(
+        let frame = OverlayFrame::resolve_placement(
             Position::new(10, 20),
             Size::new(20, 30),
             options.rows,
             options.cols,
             options.placement,
         )
-        .expect("fixed window should fit at least a bordered frame");
+        .expect("fixed overlay should fit at least a bordered frame");
 
         assert_eq!(frame.origin, Position::new(14, 27));
         assert_eq!(frame.size, Size::new(10, 23));
@@ -1027,13 +1171,13 @@ mod tests {
     }
 
     #[test]
-    fn plugin_window_fixed_position_rejects_origins_without_frame_space() {
-        let options = PluginWindowOptions {
-            placement: FloatingPlacement::Fixed { row: 19, col: 0 },
-            ..PluginWindowOptions::default()
+    fn overlay_fixed_position_rejects_origins_without_frame_space() {
+        let options = OverlayOptions {
+            placement: OverlayPlacement::Fixed { row: 19, col: 0 },
+            ..OverlayOptions::default()
         };
         assert!(
-            FloatingWindowFrame::resolve_placement(
+            OverlayFrame::resolve_placement(
                 Position::new(0, 0),
                 Size::new(20, 40),
                 options.rows,
@@ -1043,12 +1187,12 @@ mod tests {
             .is_none()
         );
 
-        let options = PluginWindowOptions {
-            placement: FloatingPlacement::Fixed { row: 0, col: 39 },
-            ..PluginWindowOptions::default()
+        let options = OverlayOptions {
+            placement: OverlayPlacement::Fixed { row: 0, col: 39 },
+            ..OverlayOptions::default()
         };
         assert!(
-            FloatingWindowFrame::resolve_placement(
+            OverlayFrame::resolve_placement(
                 Position::new(0, 0),
                 Size::new(20, 40),
                 options.rows,

@@ -11,6 +11,7 @@ mod inspect;
 mod json;
 mod keymaps;
 mod lists;
+mod panes;
 mod path;
 mod project;
 mod registers;
@@ -25,7 +26,7 @@ use super::jobs::{PluginJobRegistry, job_id_from_number};
 use super::timers::{PluginTimerRegistry, timer_id_from_number, timer_ms_from_number};
 use super::{
     SharedLayout, buffers_module, command_execute_fn, diagnostics_module, event_constants,
-    selection_module, windows_module,
+    selection_module,
 };
 use env::env_module;
 use filetypes::filetypes_module;
@@ -34,6 +35,7 @@ use inspect::inspect_fn;
 use json::json_module;
 use keymaps::keymaps_module;
 use lists::lists_module;
+use panes::panes_module;
 use path::path_module;
 use project::project_module;
 use registers::registers_module;
@@ -79,8 +81,12 @@ impl UrvimModuleBuilder {
         module.insert("events".to_string(), event_constants());
         module.insert("buffers".to_string(), buffers_module());
         module.insert(
-            "windows".to_string(),
-            windows_module(Rc::clone(&self.layout)),
+            "panes".to_string(),
+            panes_module(
+                self.plugin.clone(),
+                Rc::clone(&self.contributions),
+                Rc::clone(&self.layout),
+            ),
         );
         module.insert(
             "selection".to_string(),

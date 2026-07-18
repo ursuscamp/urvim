@@ -1,13 +1,12 @@
-//! Window rendering module.
+//! Editor-tab rendering module.
 //!
-//! This module provides the Window type, which owns a buffer view and is
-//! responsible for rendering its buffer content to the screen. A window has a
+//! This module provides the [`EditorTab`] type, which owns a buffer view and is
+//! responsible for rendering its buffer content to the screen. An editor tab has a
 //! screen position (origin) and size, and renders the shared buffer content
 //! starting from its origin.
 
 mod buffer_view;
 mod commands;
-mod geometry;
 mod gutter;
 mod motions;
 mod render;
@@ -32,6 +31,7 @@ use urvim_terminal::CursorStyle;
 use urvim_terminal::Key;
 use urvim_terminal::Style;
 
+pub use crate::ui::geometry::{Position, Size};
 pub use buffer_view::{
     BufferView, VisualSelection, VisualSelectionKind, YankFlash, YankFlashSelection,
 };
@@ -42,7 +42,7 @@ static NEXT_TAB_ID: AtomicU64 = AtomicU64::new(1);
 
 /// Stable identifier for a tab during the current editor process.
 ///
-/// Tab identifiers are allocated when a live [`Window`] is created and are not
+/// Tab identifiers are allocated when a live [`EditorTab`] is created and are not
 /// written to session state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct TabId(u64);
@@ -62,23 +62,7 @@ impl TabId {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct Position {
-    pub row: u16,
-    pub col: u16,
-}
-
-impl Position {}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct Size {
-    pub rows: u16,
-    pub cols: u16,
-}
-
-impl Size {}
-
-/// Gutter renders line numbers on the left side of the editor window.
+/// Gutter renders line numbers on the left side of the editor tab.
 ///
 /// The gutter displays line numbers for the visible buffer content,
 /// with a distinct background color to separate it from the content.
@@ -86,7 +70,7 @@ impl Size {}
 pub struct Gutter {
     /// First visible buffer line (scroll offset)
     start_line: usize,
-    /// Number of visible rows in the window
+    /// Number of visible rows in the tab
     visible_rows: u16,
     /// Total number of lines in the buffer (for width calculation)
     total_buffer_lines: usize,
@@ -162,7 +146,7 @@ pub struct RenderData {
     visible_rows: u16,
 }
 
-pub struct Window {
+pub struct EditorTab {
     tab_id: TabId,
     buffer_view: BufferView,
     render_data: RenderData,
@@ -180,9 +164,9 @@ struct ReplaceEdit {
     inserted: char,
 }
 
-impl fmt::Debug for Window {
+impl fmt::Debug for EditorTab {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Window")
+        f.debug_struct("EditorTab")
             .field("tab_id", &self.tab_id)
             .field("buffer_view", &self.buffer_view)
             .field("render_data", &self.render_data)
@@ -195,8 +179,8 @@ impl fmt::Debug for Window {
     }
 }
 
-impl Window {
-    /// Creates a new window backed by a buffer that will be registered in the
+impl EditorTab {
+    /// Creates a new tab backed by a buffer that will be registered in the
     /// global buffer pool.
     pub fn new(buffer: Buffer) -> Self {
         let buffer_view = BufferView::new(buffer);
@@ -212,7 +196,7 @@ impl Window {
         }
     }
 
-    /// Creates a window backed by an owned buffer that stays outside the global pool.
+    /// Creates a tab backed by an owned buffer that stays outside the global pool.
     pub fn from_owned_buffer(buffer: Buffer) -> Self {
         Self {
             tab_id: TabId::allocate(),
@@ -226,7 +210,7 @@ impl Window {
         }
     }
 
-    /// Creates a window from an existing buffer ID in the global buffer pool.
+    /// Creates a tab from an existing buffer ID in the global buffer pool.
     pub fn from_buffer_id(buffer_id: BufferId) -> Self {
         Self {
             tab_id: TabId::allocate(),
@@ -257,17 +241,17 @@ impl Window {
         self.size
     }
 
-    /// Returns whether visual wrapping is enabled for this window.
+    /// Returns whether visual wrapping is enabled for this tab.
     pub fn wrap_enabled(&self) -> bool {
         self.wrap_enabled
     }
 
-    /// Enables or disables visual wrapping for this window.
+    /// Enables or disables visual wrapping for this tab.
     pub fn set_wrap_enabled(&mut self, enabled: bool) {
         self.wrap_enabled = enabled;
     }
 
-    /// Toggles visual wrapping for this window.
+    /// Toggles visual wrapping for this tab.
     pub fn toggle_wrap(&mut self) {
         self.wrap_enabled = !self.wrap_enabled;
         crate::session::mark_dirty();
@@ -289,22 +273,22 @@ impl Window {
         );
     }
 
-    /// Returns the current mode kind owned by this window.
+    /// Returns the current mode kind owned by this tab.
     pub fn mode_kind(&self) -> ModeKind {
         self.mode.kind()
     }
 
-    /// Returns the current mode label owned by this window.
+    /// Returns the current mode label owned by this tab.
     pub fn mode_label(&self) -> &'static str {
         self.mode_kind().label()
     }
 
-    /// Returns the terminal cursor style for the current mode owned by this window.
+    /// Returns the terminal cursor style for the current mode owned by this tab.
     pub fn cursor_style(&self) -> CursorStyle {
         self.mode.cursor_style()
     }
 
-    /// Handles one key event through the window-owned mode.
+    /// Handles one key event through the tab-owned mode.
     pub fn handle_key(&mut self, key: &Key) -> crate::editor::HandleKeyResult {
         self.mode.handle_key(key)
     }
@@ -314,7 +298,7 @@ impl Window {
         self.mode.append_repeat_text(text);
     }
 
-    /// Switches this window to a different mode.
+    /// Switches this tab to a different mode.
     pub fn switch_mode(&mut self, to_mode: ModeKind) -> Option<String> {
         let repeat_text = if to_mode == ModeKind::Normal {
             self.mode.take_repeat_text()
@@ -337,12 +321,12 @@ impl Window {
             ModeKind::Resizing => Box::new(ResizingMode::new()),
             ModeKind::Visual => {
                 self.buffer_view
-                    .begin_visual_selection(crate::window::VisualSelectionKind::Character);
+                    .begin_visual_selection(VisualSelectionKind::Character);
                 Box::new(VisualMode::new())
             }
             ModeKind::VisualLine => {
                 self.buffer_view
-                    .begin_visual_selection(crate::window::VisualSelectionKind::Line);
+                    .begin_visual_selection(VisualSelectionKind::Line);
                 Box::new(VisualLineMode::new())
             }
         };
@@ -452,7 +436,7 @@ impl Window {
             origin,
             &mut self.buffer_view,
             &mut self.render_data,
-            renderer::WindowRenderTheme {
+            renderer::EditorTabRenderTheme {
                 gutter_style,
                 default_style,
                 active_gutter_style: if active_line_enabled {

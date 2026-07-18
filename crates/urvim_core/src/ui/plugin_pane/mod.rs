@@ -1,7 +1,7 @@
 //! Retained plugin UI rendered as a split-tree pane.
 
 use crate::screen::Screen;
-use crate::ui::plugin_window::{PluginWindow, PluginWindowContent, PluginWindowOptions};
+use crate::ui::overlay::{RetainedContent, RetainedSurface};
 use crate::ui::text_width::{ClipSide, clip_text};
 use crate::ui::{Intent, UiRect};
 use crate::{editor, globals};
@@ -25,7 +25,7 @@ impl Default for PluginPaneOptions {
     fn default() -> Self {
         Self {
             title: None,
-            body_style: Tag::parse("ui.window").expect("built-in window tag should parse"),
+            body_style: Tag::parse("ui.window").expect("built-in theme tag should parse"),
             header_style: Tag::parse("ui.tab.inactive")
                 .expect("built-in inactive tab tag should parse"),
             focused_header_style: Tag::parse("ui.tab.active")
@@ -38,26 +38,21 @@ impl Default for PluginPaneOptions {
 #[derive(Debug)]
 pub struct PluginPane {
     options: PluginPaneOptions,
-    window: PluginWindow,
+    surface: RetainedSurface,
 }
 
 impl PluginPane {
     /// Creates a retained plugin pane.
     pub fn new(owner: String, options: PluginPaneOptions) -> Self {
-        let window_options = PluginWindowOptions {
-            title: options.title.clone(),
-            body_style: options.body_style.clone(),
-            ..PluginWindowOptions::default()
-        };
         Self {
             options,
-            window: PluginWindow::new(owner, window_options),
+            surface: RetainedSurface::new(owner),
         }
     }
 
     /// Returns the plugin that owns this pane.
     pub fn owner(&self) -> &str {
-        self.window.owner()
+        self.surface.owner()
     }
 
     /// Returns the pane presentation options.
@@ -67,46 +62,42 @@ impl PluginPane {
 
     /// Updates the pane presentation options.
     pub fn set_options(&mut self, options: PluginPaneOptions) {
-        let mut window_options = self.window.options().clone();
-        window_options.title = options.title.clone();
-        window_options.body_style = options.body_style.clone();
-        self.window.set_options(window_options);
         self.options = options;
     }
 
     /// Returns the retained pane content.
-    pub fn content(&self) -> &PluginWindowContent {
-        self.window.content()
+    pub fn content(&self) -> &RetainedContent {
+        self.surface.content()
     }
 
     /// Replaces the retained pane content.
-    pub fn set_content(&mut self, content: PluginWindowContent) {
-        self.window.set_content(content);
+    pub fn set_content(&mut self, content: RetainedContent) {
+        self.surface.set_content(content);
     }
 
     /// Installs a local keymap binding.
     pub fn set_keymap(&mut self, keys: Vec<String>, rhs: String, intent: Intent) {
-        self.window.set_keymap(keys, rhs, intent);
+        self.surface.set_keymap(keys, rhs, intent);
     }
 
     /// Removes a local keymap binding.
     pub fn delete_keymap(&mut self, keys: &[String]) {
-        self.window.delete_keymap(keys);
+        self.surface.delete_keymap(keys);
     }
 
     /// Returns all local keymap bindings.
     pub fn keymaps(&self) -> Vec<(Vec<String>, String)> {
-        self.window.keymaps()
+        self.surface.keymaps()
     }
 
     /// Routes a key through the local keymap.
     pub fn handle_key(&mut self, key: &Key) -> editor::HandleKeyResult {
-        self.window.handle_key(key)
+        self.surface.handle_key(key)
     }
 
     /// Clears any partially entered local key sequence.
     pub fn clear_pending_keys(&mut self) {
-        self.window.clear_pending_keys();
+        self.surface.clear_pending_keys();
     }
 
     /// Renders the pane header and retained content.
@@ -135,12 +126,16 @@ impl PluginPane {
         }
 
         let content_rows = rect.size.rows.saturating_sub(1);
-        self.window.render_content_in_rect(
+        self.surface.render(
             screen,
             UiRect::new(
-                crate::window::Position::new(rect.origin.row.saturating_add(1), rect.origin.col),
-                crate::window::Size::new(content_rows, rect.size.cols),
+                crate::ui::geometry::Position::new(
+                    rect.origin.row.saturating_add(1),
+                    rect.origin.col,
+                ),
+                crate::ui::geometry::Size::new(content_rows, rect.size.cols),
             ),
+            &self.options.body_style,
         );
     }
 }
@@ -170,8 +165,8 @@ fn header_style(options: &PluginPaneOptions, focused: bool) -> Style {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ui::plugin_window::PluginWindowSegment;
-    use crate::window::{Position, Size};
+    use crate::ui::geometry::{Position, Size};
+    use crate::ui::overlay::RetainedSegment;
     use urvim_terminal::Color;
     use urvim_theme::{HighlightStyles, Theme, ThemeKind};
 
@@ -215,7 +210,7 @@ mod tests {
                 ..PluginPaneOptions::default()
             },
         );
-        pane.set_content(vec![vec![PluginWindowSegment {
+        pane.set_content(vec![vec![RetainedSegment {
             text: "content!".to_string(),
             style: None,
         }]]);

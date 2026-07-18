@@ -17,9 +17,9 @@ urvim does not parse source code into an AST. Instead, it chooses a syntax defin
 | `src/buffer/mod.rs`                  | Stores the active syntax name, resolves display labels, and refreshes syntax when the buffer changes.                      |
 | `src/buffer/syntax.rs`               | Tokenizes lines, caches syntax state, and computes highlight spans.                                                        |
 | `docs/background-jobs.md`            | Describes the internal deferred-work framework that syntax catch-up uses.                                                  |
-| `src/window/view.rs`                 | Requests spans for visible lines and converts tags into highlight overlays.                                                |
+| `src/editor_tab/buffer_view/view.rs` | Requests spans for visible lines and converts tags into highlight overlays.                                                |
 | `src/theme/model.rs`                 | Defines theme style data, including the unified highlight-name mapping.                                                    |
-| `src/window/render.rs`               | Applies the chosen line base style and writes styled chunks to the terminal screen.                                        |
+| `src/editor_tab/render.rs`           | Applies the chosen line base style and writes styled chunks to the terminal screen.                                        |
 
 ## Core Concepts
 
@@ -100,7 +100,7 @@ Context markers are the main way rules communicate with later rules:
 
 The tokenizer returns spans tagged with semantic labels like `keyword`, `string`, or `markup.code`.
 
-`src/window/view.rs` translates those tags into highlight overlays, then `src/window/render.rs` applies the chosen line base style and writes the final styled chunks to the terminal.
+`src/editor_tab/buffer_view/view.rs` translates those tags into highlight overlays, then `src/editor_tab/render.rs` applies the chosen line base style and writes the final styled chunks to the terminal.
 
 After the syntax spans are available, urvim can layer comment-scoped todo highlighting on top of them during rendering. That overlay scans only comment spans, looks for configured standalone markers such as `TODO` and `FIXME`, and applies marker-specific tags like `comment.todo` without changing the underlying buffer text.
 
@@ -115,7 +115,7 @@ Theme highlights use the unified hierarchical naming model:
 
 When a syntax tag is resolved, urvim maps the raw tag into the syntax highlight namespace before asking the theme for an overlay. That keeps the tokenizer vocabulary and the theme vocabulary aligned without requiring tokenizer code to include the `syntax.` prefix.
 
-Renderers then choose the base style explicitly. A window line uses the theme default style on ordinary lines and `theme.default_style().overlay(ui.window.active_line)` on the active line before chunk overlays are applied.
+Renderers then choose the base style explicitly. An editor-tab line uses the theme default style on ordinary lines and `theme.default_style().overlay(ui.window.active_line)` on the active line before chunk overlays are applied.
 
 So the pipeline is:
 

@@ -1,7 +1,7 @@
 //! Centralized icon and glyph lookup helpers.
 
+use crate::editor_tab::FoldGutterGlyph;
 use crate::globals;
-use crate::window::FoldGutterGlyph;
 use lsp_types::{CompletionItemKind, DiagnosticSeverity, SymbolKind};
 use smol_str::SmolStr;
 use std::path::Path;
@@ -51,7 +51,7 @@ impl FiletypeIcon {
     }
 }
 
-/// Glyph set used to draw bordered floating windows and separators.
+/// Glyph set used to draw bordered overlays and separators.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BorderGlyphs {
     /// Top-left corner glyph.

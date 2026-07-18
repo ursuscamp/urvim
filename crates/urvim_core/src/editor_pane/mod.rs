@@ -1,17 +1,18 @@
-//! Window group module.
+//! Editor-pane module.
 //!
-//! This module provides the `WindowGroup` container, which owns multiple windows,
-//! renders a horizontal tab bar, and routes actions to the active window.
+//! This module provides [`EditorPane`], which owns multiple editor tabs,
+//! renders a horizontal tab bar, and routes actions to the active tab.
 
 use crate::action::ActionResult;
 use crate::buffer::{Buffer, BufferId, Cursor};
 use crate::editor::EditorAction;
+use crate::editor_tab::{BufferView, EditorTab, TabId};
 use crate::globals;
 use crate::icon::FiletypeIcon;
 use crate::jumplist::JumpList;
 use crate::screen::Screen;
+use crate::ui::geometry::{Position, Size};
 use crate::ui::text_width::{ClipSide, clip_text};
-use crate::window::{BufferView, Position, Size, TabId, Window};
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -40,27 +41,26 @@ struct TabEntryRenderOptions {
     clip_label: bool,
 }
 
-/// Root window-group container for urvim.
+/// Editor pane containing one or more tabs.
 ///
-/// A window group owns multiple editor windows, keeps track of the active tab,
-/// and renders a tab bar above the active window content.
+/// An editor pane keeps track of the active tab and renders a tab bar above it.
 #[derive(Debug)]
-pub struct WindowGroup {
-    tabs: Vec<Window>,
+pub struct EditorPane {
+    tabs: Vec<EditorTab>,
     active_tab: usize,
     tab_bar_start: usize,
     jumplist: RefCell<JumpList>,
 }
 
-impl WindowGroup {
-    /// Creates a new window group from windows.
-    pub fn new(mut tabs: Vec<Window>) -> Self {
+impl EditorPane {
+    /// Creates an editor pane from tabs.
+    pub fn new(mut tabs: Vec<EditorTab>) -> Self {
         let mut seen_buffer_ids = HashSet::new();
-        tabs.retain(|window| seen_buffer_ids.insert(window.buffer_view().buffer_id()));
+        tabs.retain(|tab| seen_buffer_ids.insert(tab.buffer_view().buffer_id()));
 
         if tabs.is_empty() {
             let buffer_id = crate::globals::with_buffer_pool(|pool| pool.create_buffer());
-            tabs.push(Window::from_buffer_id(buffer_id));
+            tabs.push(EditorTab::from_buffer_id(buffer_id));
         }
 
         Self {
@@ -71,12 +71,12 @@ impl WindowGroup {
         }
     }
 
-    /// Creates a new window group from buffers.
+    /// Creates a new editor pane from buffers.
     pub fn from_buffers(buffers: Vec<Buffer>) -> Self {
-        Self::new(buffers.into_iter().map(Window::new).collect())
+        Self::new(buffers.into_iter().map(EditorTab::new).collect())
     }
 
-    /// Loads a window group from CLI file paths.
+    /// Loads an editor pane from CLI file paths.
     pub fn from_paths(paths: &[PathBuf]) -> Self {
         let mut tabs = Vec::new();
 
@@ -84,7 +84,7 @@ impl WindowGroup {
             match crate::globals::with_buffer_pool(|pool| pool.open_buffer(path)) {
                 Ok(buffer_id) => {
                     tracing::info!("Opened file: {:?}", path);
-                    tabs.push(Window::from_buffer_id(buffer_id));
+                    tabs.push(EditorTab::from_buffer_id(buffer_id));
                 }
                 Err(error) => {
                     crate::notify_error!("Failed to open file {:?}: {}", path, error);
@@ -95,27 +95,27 @@ impl WindowGroup {
         Self::new(tabs)
     }
 
-    /// Loads a window group from CLI file arguments with optional initial cursor positions.
+    /// Loads an editor pane from CLI file arguments with optional initial cursor positions.
     pub fn from_cli_files(files: &[crate::cli::CliFileSpec]) -> Self {
-        let mut tabs: Vec<Window> = Vec::new();
+        let mut tabs: Vec<EditorTab> = Vec::new();
 
         for file in files {
             match crate::globals::with_buffer_pool(|pool| pool.open_buffer(&file.path)) {
                 Ok(buffer_id) => {
                     tracing::info!("Opened file: {:?}", file.path);
-                    if let Some(window) = tabs
+                    if let Some(tab) = tabs
                         .iter_mut()
-                        .find(|window| window.buffer_view().buffer_id() == buffer_id)
+                        .find(|tab| tab.buffer_view().buffer_id() == buffer_id)
                     {
                         if let Some(cursor) = file.cursor {
-                            window.set_cursor_synced(cursor);
+                            tab.set_cursor_synced(cursor);
                         }
                     } else {
-                        let mut window = Window::from_buffer_id(buffer_id);
+                        let mut tab = EditorTab::from_buffer_id(buffer_id);
                         if let Some(cursor) = file.cursor {
-                            window.set_cursor_synced(cursor);
+                            tab.set_cursor_synced(cursor);
                         }
-                        tabs.push(window);
+                        tabs.push(tab);
                     }
                 }
                 Err(error) => {
@@ -132,38 +132,38 @@ impl WindowGroup {
         self.active_tab.min(self.tabs.len().saturating_sub(1))
     }
 
-    /// Returns true when the window group has no live tabs.
+    /// Returns true when the editor pane has no live tabs.
     pub fn is_empty(&self) -> bool {
         self.tabs.is_empty()
     }
 
-    /// Returns the active window.
-    pub fn active_window(&self) -> &Window {
+    /// Returns the active tab.
+    pub fn active_tab(&self) -> &EditorTab {
         &self.tabs[self.active_tab_index()]
     }
 
-    /// Returns the active window mutably.
-    pub fn active_window_mut(&mut self) -> &mut Window {
+    /// Returns the active tab mutably.
+    pub fn active_tab_mut(&mut self) -> &mut EditorTab {
         let index = self.active_tab_index();
         &mut self.tabs[index]
     }
 
-    /// Returns the active window's current mode kind.
-    pub fn active_window_mode_kind(&self) -> crate::editor::ModeKind {
-        self.active_window().mode_kind()
+    /// Returns the active tab's current mode kind.
+    pub fn active_tab_mode_kind(&self) -> crate::editor::ModeKind {
+        self.active_tab().mode_kind()
     }
 
-    /// Returns the active window's current mode label.
-    pub fn active_window_mode_label(&self) -> &'static str {
-        self.active_window().mode_label()
+    /// Returns the active tab's current mode label.
+    pub fn active_tab_mode_label(&self) -> &'static str {
+        self.active_tab().mode_label()
     }
 
-    /// Returns the active window's current cursor style.
-    pub fn active_window_cursor_style(&self) -> CursorStyle {
-        self.active_window().cursor_style()
+    /// Returns the active tab's current cursor style.
+    pub fn active_tab_cursor_style(&self) -> CursorStyle {
+        self.active_tab().cursor_style()
     }
 
-    /// Records the active cursor position in the window-group jumplist.
+    /// Records the active cursor position in the editor-pane jumplist.
     pub fn record_cursor_position(&mut self) {
         let view = self.active_buffer_view();
         let buffer_id = view.buffer_id();
@@ -176,19 +176,19 @@ impl WindowGroup {
 
     /// Returns the active buffer view.
     pub fn active_buffer_view(&self) -> &BufferView {
-        self.active_window().buffer_view()
+        self.active_tab().buffer_view()
     }
 
     /// Returns the active buffer view mutably.
     pub fn active_buffer_view_mut(&mut self) -> &mut BufferView {
-        self.active_window_mut().buffer_view_mut()
+        self.active_tab_mut().buffer_view_mut()
     }
 
-    /// Returns the buffer identifiers for every tab in this window group.
+    /// Returns the buffer identifiers for every tab in this editor pane.
     pub fn buffer_ids(&self) -> Vec<BufferId> {
         self.tabs
             .iter()
-            .map(|window| window.buffer_view().buffer_id())
+            .map(|tab| tab.buffer_view().buffer_id())
             .collect()
     }
 
@@ -196,16 +196,16 @@ impl WindowGroup {
     pub fn tab_ids_and_buffer_ids(&self) -> Vec<(TabId, BufferId)> {
         self.tabs
             .iter()
-            .map(|window| (window.tab_id(), window.buffer_view().buffer_id()))
+            .map(|tab| (tab.tab_id(), tab.buffer_view().buffer_id()))
             .collect()
     }
 
     /// Returns the active tab's stable runtime identifier.
     pub fn active_tab_id(&self) -> Option<TabId> {
-        (!self.tabs.is_empty()).then(|| self.active_window().tab_id())
+        (!self.tabs.is_empty()).then(|| self.active_tab().tab_id())
     }
 
-    /// Closes the active tab and returns true when the window group becomes empty.
+    /// Closes the active tab and returns true when the editor pane becomes empty.
     pub fn close_active_tab(&mut self) -> bool {
         if self.tabs.is_empty() {
             return true;
@@ -222,7 +222,7 @@ impl WindowGroup {
     pub fn close_buffer_tab(&mut self, buffer_id: BufferId) -> bool {
         let before = self.tabs.len();
         self.tabs
-            .retain(|window| window.buffer_view().buffer_id() != buffer_id);
+            .retain(|tab| tab.buffer_view().buffer_id() != buffer_id);
         if self.tabs.len() == before {
             return false;
         }
@@ -232,18 +232,18 @@ impl WindowGroup {
         true
     }
 
-    /// Returns and clears any repeat-text suffix produced by the active window.
+    /// Returns and clears any repeat-text suffix produced by the active tab.
     pub fn take_pending_repeat_suffix(&mut self) -> Option<String> {
-        self.active_window_mut().take_pending_repeat_suffix()
+        self.active_tab_mut().take_pending_repeat_suffix()
     }
 
-    /// Clears the active window's yank flash once it expires.
+    /// Clears the active tab's yank flash once it expires.
     pub fn prune_expired_yank_flash(&mut self, now: Instant) -> bool {
         if self.tabs.is_empty() {
             return false;
         }
 
-        self.active_window_mut()
+        self.active_tab_mut()
             .buffer_view_mut()
             .prune_yank_flash(now)
     }
@@ -272,11 +272,11 @@ impl WindowGroup {
     fn tab_index_for_buffer_id(&self, buffer_id: BufferId) -> Option<usize> {
         self.tabs
             .iter()
-            .position(|window| window.buffer_view().buffer_id() == buffer_id)
+            .position(|tab| tab.buffer_view().buffer_id() == buffer_id)
     }
 
     fn open_buffer_tab(&mut self, buffer_id: BufferId) -> usize {
-        self.tabs.push(Window::from_buffer_id(buffer_id));
+        self.tabs.push(EditorTab::from_buffer_id(buffer_id));
         self.tabs.len() - 1
     }
 
@@ -306,7 +306,7 @@ impl WindowGroup {
             .tab_index_for_buffer_id(buffer_id)
             .unwrap_or_else(|| self.open_buffer_tab(buffer_id));
         self.active_tab = index;
-        self.active_window_mut().set_cursor_synced(cursor);
+        self.active_tab_mut().set_cursor_synced(cursor);
         let restored_cursor = self.active_buffer_view().cursor();
         self.jumplist
             .borrow_mut()
@@ -331,7 +331,7 @@ impl WindowGroup {
         handled
     }
 
-    /// Moves backward in the window-group jumplist, restoring the selected tab.
+    /// Moves backward in the editor-pane jumplist, restoring the selected tab.
     pub fn jump_list_back(&mut self) -> bool {
         let Some((buffer_id, _cursor)) = self.jumplist.borrow().peek_back() else {
             return false;
@@ -346,7 +346,7 @@ impl WindowGroup {
         self.activate_jump_target(buffer_id, cursor)
     }
 
-    /// Moves forward in the window-group jumplist, restoring the selected tab.
+    /// Moves forward in the editor-pane jumplist, restoring the selected tab.
     pub fn jump_list_forward(&mut self) -> bool {
         let Some((buffer_id, _cursor)) = self.jumplist.borrow().peek_forward() else {
             return false;
@@ -361,7 +361,7 @@ impl WindowGroup {
         self.activate_jump_target(buffer_id, cursor)
     }
 
-    /// Renders the window group.
+    /// Renders the editor pane.
     pub fn render(&mut self, screen: &mut Screen, origin: Position, size: Size) {
         self.normalize_state();
 
@@ -386,7 +386,7 @@ impl WindowGroup {
         if self.tabs.is_empty() {
             return None;
         }
-        let mut pos = self.active_window().visual_cursor()?;
+        let mut pos = self.active_tab().visual_cursor()?;
         pos.row += 1;
         Some(pos)
     }
@@ -612,9 +612,8 @@ impl WindowGroup {
     }
 
     fn tab_label(&self, index: usize) -> String {
-        let window = &self.tabs[index];
-        window
-            .buffer_view()
+        let tab = &self.tabs[index];
+        tab.buffer_view()
             .file_name()
             .unwrap_or_else(|| "Untitled".to_string())
     }
@@ -718,8 +717,8 @@ impl WindowGroup {
     }
 }
 
-impl WindowGroup {
-    /// Dispatches an editor action to the active tab/window.
+impl EditorPane {
+    /// Dispatches an editor action to the active tab.
     pub fn dispatch_action(&mut self, action: &EditorAction) -> ActionResult {
         let before = self.active_cursor_snapshot();
         let result = match action.kind.as_ref() {
@@ -741,10 +740,10 @@ impl WindowGroup {
                         self.jump_forward_count(*count);
                         ActionResult::Handled
                     }
-                    _ => self.active_window_mut().dispatch_action(action),
+                    _ => self.active_tab_mut().dispatch_action(action),
                 }
             }
-            _ => self.active_window_mut().dispatch_action(action),
+            _ => self.active_tab_mut().dispatch_action(action),
         };
 
         if result == ActionResult::Handled && self.should_record_cursor_position(action) {
@@ -756,7 +755,7 @@ impl WindowGroup {
     }
 }
 
-impl WindowGroup {
+impl EditorPane {
     fn should_record_cursor_position(&self, action: &EditorAction) -> bool {
         match action.kind.as_ref() {
             Some(crate::editor::EditorOperation::JumpBackward)

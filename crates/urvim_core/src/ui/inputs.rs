@@ -1,9 +1,9 @@
 //! Reusable input widget.
 
 use crate::screen::Screen;
+use crate::ui::geometry::Position;
 use crate::ui::{FocusPolicy, UiContext, UiEvent, UiEventResult, UiRect};
 use crate::widget::Widget;
-use crate::window::Position;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 use urvim_terminal::{Key, KeyCode, Style};
@@ -657,9 +657,9 @@ fn next_word_boundary(text: &str, cursor: usize) -> usize {
 mod tests {
     use super::*;
     use crate::screen::Screen;
+    use crate::ui::geometry::{Position, Size};
     use crate::ui::{UiContext, UiRect};
     use crate::widget::Widget;
-    use crate::window::Position;
     use urvim_terminal::{KeyCode, Modifiers, Style};
 
     #[test]
@@ -688,7 +688,7 @@ mod tests {
         let ctx = UiContext;
         input.render_widget(
             &mut screen,
-            UiRect::new(Position::new(0, 0), crate::window::Size::new(1, 8)),
+            UiRect::new(Position::new(0, 0), Size::new(1, 8)),
             &ctx,
         );
 
@@ -747,7 +747,7 @@ mod tests {
         let ctx = UiContext;
         input.render_widget(
             &mut screen,
-            UiRect::new(Position::new(0, 0), crate::window::Size::new(1, 8)),
+            UiRect::new(Position::new(0, 0), Size::new(1, 8)),
             &ctx,
         );
 

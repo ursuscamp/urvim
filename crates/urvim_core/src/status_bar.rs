@@ -7,7 +7,7 @@ use crate::globals;
 use crate::icon::FiletypeIcon;
 use crate::lsp::diagnostics::{DiagnosticCounts, diagnostic_marker};
 use crate::screen::Screen;
-use crate::window::{Position, Size};
+use crate::ui::geometry::{Position, Size};
 use lsp_types::DiagnosticSeverity;
 use unicode_width::UnicodeWidthStr;
 use urvim_syntax::builtin_syntax_registry;

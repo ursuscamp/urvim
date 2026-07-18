@@ -21,7 +21,7 @@ pub fn resolve(invocation: &CommandInvocation) -> Result<Intent, CommandError> {
         "pick" => resolve_pick(&invocation.tokens[1..]),
         "lsp" => resolve_lsp(&invocation.tokens[1..]),
         "pane" => resolve_pane(&invocation.tokens[1..]),
-        "window" => resolve_window(&invocation.tokens[1..]),
+        "focus" => resolve_focus(&invocation.tokens[1..]),
         "app" => resolve_app(&invocation.tokens[1..]),
         other => Err(unknown_command(other)),
     }
@@ -780,19 +780,19 @@ fn resolve_pane(tokens: &[String]) -> Result<Intent, CommandError> {
     }
 }
 
-fn resolve_window(tokens: &[String]) -> Result<Intent, CommandError> {
+fn resolve_focus(tokens: &[String]) -> Result<Intent, CommandError> {
     let Some(subcommand) = tokens.first().map(String::as_str) else {
-        return Err(missing_argument("window", "subcommand"));
+        return Err(missing_argument("focus", "direction"));
     };
 
     let command = match subcommand {
-        "focus-next" => Command::FocusNextWindow,
-        "focus-previous" => Command::FocusPreviousWindow,
-        other => return Err(unknown_subcommand("window", other)),
+        "next" => Command::FocusNextTarget,
+        "previous" => Command::FocusPreviousTarget,
+        other => return Err(unknown_subcommand("focus", other)),
     };
 
     if tokens.len() > 1 {
-        return Err(unexpected_argument("window", &tokens[1]));
+        return Err(unexpected_argument("focus", &tokens[1]));
     }
 
     Ok(Intent::Command(command))

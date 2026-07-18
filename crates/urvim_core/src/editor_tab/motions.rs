@@ -7,7 +7,7 @@ enum ViewportAnchor {
     Bottom,
 }
 
-impl Window {
+impl EditorTab {
     pub(super) fn set_cursor_to_visual_col_on_line(
         &mut self,
         target_line: usize,

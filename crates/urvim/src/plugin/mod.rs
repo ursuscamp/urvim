@@ -884,7 +884,7 @@ impl BearscriptPluginRuntime {
         if let Err(error) = engine.eval_file(entry.to_string_lossy().as_ref()) {
             self.layout
                 .borrow_mut()
-                .plugin_windows_mut()
+                .overlays_mut()
                 .close_owned(plugin_name);
             self.layout
                 .borrow_mut()
@@ -906,7 +906,7 @@ impl BearscriptPluginRuntime {
         if let Err(error) = init_result {
             self.layout
                 .borrow_mut()
-                .plugin_windows_mut()
+                .overlays_mut()
                 .close_owned(plugin_name);
             self.layout
                 .borrow_mut()
@@ -1251,125 +1251,6 @@ fn buffers_module_list_fn() -> Value {
     })
 }
 
-fn windows_module(layout: SharedLayout) -> Value {
-    let active_layout = Rc::clone(&layout);
-    let list_layout = Rc::clone(&layout);
-    let buffer_layout = Rc::clone(&layout);
-    let cursor_layout = Rc::clone(&layout);
-    let set_cursor_layout = Rc::clone(&layout);
-    let visible_range_layout = Rc::clone(&layout);
-    let open_buffer_layout = Rc::clone(&layout);
-    Value::Module(
-        HashMap::from([
-            (
-                "active".to_string(),
-                native_fn("windows.active", move || {
-                    Ok(active_layout
-                        .borrow()
-                        .active_window_id()
-                        .map(|id| Value::Number(id.0 as f64))
-                        .unwrap_or(Value::Null))
-                }),
-            ),
-            (
-                "list".to_string(),
-                native_fn("windows.list", move || {
-                    Ok(Value::List(
-                        list_layout
-                            .borrow()
-                            .window_ids()
-                            .into_iter()
-                            .map(|id| Value::Number(id.0 as f64))
-                            .collect::<Vec<_>>()
-                            .into(),
-                    ))
-                }),
-            ),
-            (
-                "buffer".to_string(),
-                native_fn("windows.buffer", move |window_id: Value| {
-                    let window_id = window_id_from_value(&window_id)?;
-                    let layout = buffer_layout.borrow();
-                    let view = layout
-                        .buffer_view_for_window(window_id)
-                        .ok_or_else(|| unknown_window_error(window_id))?;
-                    Ok(view.buffer_id().get() as f64)
-                }),
-            ),
-            (
-                "cursor".to_string(),
-                native_fn("windows.cursor", move |window_id: Value| {
-                    let window_id = window_id_from_value(&window_id)?;
-                    let layout = cursor_layout.borrow();
-                    let view = layout
-                        .buffer_view_for_window(window_id)
-                        .ok_or_else(|| unknown_window_error(window_id))?;
-                    Ok(cursor_to_value(view.cursor()))
-                }),
-            ),
-            (
-                "set_cursor".to_string(),
-                native_fn(
-                    "windows.set_cursor",
-                    move |window_id: Value, row: Value, col: Value| {
-                        let window_id = window_id_from_value(&window_id)?;
-                        let cursor = Cursor::new(
-                            usize_from_value(&row, "row")?,
-                            usize_from_value(&col, "col")?,
-                        );
-                        let mut layout = set_cursor_layout.borrow_mut();
-                        let view = layout
-                            .buffer_view_for_window_mut(window_id)
-                            .ok_or_else(|| unknown_window_error(window_id))?;
-                        let buffer_id = view.buffer_id();
-                        globals::with_buffer(buffer_id, |buffer| {
-                            ensure_valid_cursor(buffer_id, buffer, cursor, "cursor")
-                        })
-                        .ok_or_else(|| unknown_buffer_error(buffer_id))??;
-                        view.set_cursor(cursor);
-                        Ok(())
-                    },
-                ),
-            ),
-            (
-                "visible_range".to_string(),
-                native_fn("windows.visible_range", move |window_id: Value| {
-                    let window_id = window_id_from_value(&window_id)?;
-                    let layout = visible_range_layout.borrow();
-                    let view = layout
-                        .buffer_view_for_window(window_id)
-                        .ok_or_else(|| unknown_window_error(window_id))?;
-                    let start_row = view.scroll_offset().row as usize;
-                    let buffer_id = view.buffer_id();
-                    let line_count = globals::with_buffer(buffer_id, |buffer| buffer.line_count())
-                        .ok_or_else(|| unknown_buffer_error(buffer_id))?;
-                    let height = layout
-                        .pane_region(window_id)
-                        .map(|region| region.size.rows)
-                        .unwrap_or_else(|| layout.size().rows.saturating_sub(1))
-                        as usize;
-                    let end_row = start_row.saturating_add(height).min(line_count);
-                    Ok(row_range_to_value(start_row, end_row))
-                }),
-            ),
-            (
-                "open_buffer".to_string(),
-                native_fn("windows.open_buffer", move |buffer_id: Value| {
-                    let buffer_id = buffer_id_from_value(&buffer_id)?;
-                    if globals::with_buffer(buffer_id, |_| ()).is_none() {
-                        return Err(unknown_buffer_error(buffer_id));
-                    }
-                    open_buffer_layout
-                        .borrow_mut()
-                        .activate_or_open_buffer(buffer_id);
-                    Ok(())
-                }),
-            ),
-        ])
-        .into(),
-    )
-}
-
 fn selection_module(layout: SharedLayout) -> Value {
     let get_layout = Rc::clone(&layout);
     let text_layout = Rc::clone(&layout);
@@ -1422,7 +1303,9 @@ fn selection_module(layout: SharedLayout) -> Value {
                         return Err("range start must be before or equal to range end".to_string());
                     }
                     view.set_cursor(range.start);
-                    view.begin_visual_selection(urvim_core::window::VisualSelectionKind::Character);
+                    view.begin_visual_selection(
+                        urvim_core::editor_tab::VisualSelectionKind::Character,
+                    );
                     view.set_visual_selection_range(urvim_core::buffer::TextObjectRange {
                         start: range.start,
                         end: range.end,
@@ -1666,13 +1549,6 @@ fn buffer_id_from_value(value: &Value) -> Result<BufferId, String> {
     Ok(BufferId::new(usize_from_value(value, "buffer_id")?))
 }
 
-fn window_id_from_value(value: &Value) -> Result<urvim_core::layout::PaneId, String> {
-    Ok(urvim_core::layout::PaneId(usize_from_value(
-        value,
-        "window_id",
-    )?))
-}
-
 fn usize_from_value(value: &Value, label: &str) -> Result<usize, String> {
     usize::from_bear(BearValueRef::new(value, label))
         .map_err(|_| format!("{label} must be a non-negative integer"))
@@ -1697,10 +1573,6 @@ fn with_existing_buffer_mut<R>(
 
 fn unknown_buffer_error(buffer_id: BufferId) -> String {
     format!("unknown buffer_id {}", buffer_id.get())
-}
-
-fn unknown_window_error(window_id: urvim_core::layout::PaneId) -> String {
-    format!("unknown window_id {}", window_id.0)
 }
 
 fn cursor_to_value(cursor: Cursor) -> Value {
@@ -1733,7 +1605,7 @@ fn range_to_value(range: ScriptRange) -> Value {
     )
 }
 
-fn selection_range_for_view(view: &urvim_core::window::BufferView) -> Option<ScriptRange> {
+fn selection_range_for_view(view: &urvim_core::editor_tab::BufferView) -> Option<ScriptRange> {
     view.visual_selection_range().map(|range| ScriptRange {
         start: range.start,
         end: range.end,
@@ -2121,14 +1993,14 @@ pub(super) fn loaded_buffer_ids() -> BTreeSet<urvim_core::buffer::BufferId> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use urvim_core::WindowGroup;
+    use urvim_core::EditorPane;
     use urvim_core::buffer::Buffer;
     use urvim_core::editor::ModeKind;
     use urvim_core::ui::{Command, Intent};
     use urvim_terminal::{Key, KeyCode};
 
     fn shared_test_layout() -> SharedLayout {
-        Rc::new(RefCell::new(Layout::new(WindowGroup::from_buffers(vec![
+        Rc::new(RefCell::new(Layout::new(EditorPane::from_buffers(vec![
             Buffer::new(),
         ]))))
     }
@@ -2242,7 +2114,7 @@ entry = "plugin.bear"
             "register_event_hook",
             "unregister_event_hook",
             "buffers",
-            "windows",
+            "panes",
             "selection",
             "registers",
             "commands",
@@ -2296,9 +2168,7 @@ entry = "plugin.bear"
     #[test]
     fn buffers_module_reads_buffer_state() {
         let _guard = buffer_pool_lock();
-        let mut layout = Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str(
-            "one\ntwo",
-        )]));
+        let mut layout = Layout::new(EditorPane::from_buffers(vec![Buffer::from_str("one\ntwo")]));
         layout
             .active_buffer_view_mut()
             .with_buffer_mut(|buffer| buffer.set_syntax_name("rust"));
@@ -2357,7 +2227,7 @@ entry = "plugin.bear"
     #[test]
     fn buffers_set_filetype_accepts_plugin_filetypes() {
         let _guard = buffer_pool_lock();
-        let layout = Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("hello")]));
+        let layout = Layout::new(EditorPane::from_buffers(vec![Buffer::from_str("hello")]));
         let buffer_id = layout.active_buffer_view().buffer_id();
         globals::set_active_buffer_id(buffer_id);
 
@@ -2440,7 +2310,7 @@ entry = "plugin.bear"
         let _guard = buffer_pool_lock();
         let mut buffer = Buffer::from_str("fn demo");
         buffer.set_syntax_name("simplelang");
-        let layout = Layout::new(WindowGroup::from_buffers(vec![buffer]));
+        let layout = Layout::new(EditorPane::from_buffers(vec![buffer]));
         let buffer_id = layout.active_buffer_view().buffer_id();
         globals::set_active_buffer_id(buffer_id);
         let mut runtime = runtime_with_script(
@@ -2482,7 +2352,7 @@ entry = "plugin.bear"
         let mut buffer = Buffer::from_str("fn demo");
         buffer.set_syntax_name("simplelang");
         let generation = buffer.syntax_generation();
-        let layout = Layout::new(WindowGroup::from_buffers(vec![buffer]));
+        let layout = Layout::new(EditorPane::from_buffers(vec![buffer]));
         let buffer_id = layout.active_buffer_view().buffer_id();
         globals::set_active_buffer_id(buffer_id);
         let mut runtime = runtime_with_script(
@@ -2522,7 +2392,7 @@ entry = "plugin.bear"
         let _guard = buffer_pool_lock();
         let mut buffer = Buffer::from_str("one\ntwo");
         buffer.set_syntax_name("simplelang");
-        let layout = Layout::new(WindowGroup::from_buffers(vec![buffer]));
+        let layout = Layout::new(EditorPane::from_buffers(vec![buffer]));
         let buffer_id = layout.active_buffer_view().buffer_id();
         globals::set_active_buffer_id(buffer_id);
         let mut runtime = runtime_with_script(
@@ -2563,7 +2433,7 @@ entry = "plugin.bear"
         let _guard = buffer_pool_lock();
         let mut buffer = Buffer::from_str("one\ntwo");
         buffer.set_syntax_name("simplelang");
-        let layout = Layout::new(WindowGroup::from_buffers(vec![buffer]));
+        let layout = Layout::new(EditorPane::from_buffers(vec![buffer]));
         let buffer_id = layout.active_buffer_view().buffer_id();
         globals::set_active_buffer_id(buffer_id);
         let mut runtime = runtime_with_script(
@@ -2614,7 +2484,7 @@ entry = "plugin.bear"
         let _guard = buffer_pool_lock();
         let mut buffer = Buffer::from_str("one");
         buffer.set_syntax_name("simplelang");
-        let layout = Layout::new(WindowGroup::from_buffers(vec![buffer]));
+        let layout = Layout::new(EditorPane::from_buffers(vec![buffer]));
         let buffer_id = layout.active_buffer_view().buffer_id();
         globals::set_active_buffer_id(buffer_id);
         let mut runtime = runtime_with_script(
@@ -2658,7 +2528,7 @@ entry = "plugin.bear"
         let _guard = buffer_pool_lock();
         let mut buffer = Buffer::from_str("alpha\nbeta");
         buffer.set_syntax_name("simplelang");
-        let layout = Layout::new(WindowGroup::from_buffers(vec![buffer]));
+        let layout = Layout::new(EditorPane::from_buffers(vec![buffer]));
         let buffer_id = layout.active_buffer_view().buffer_id();
         globals::set_active_buffer_id(buffer_id);
         let mut runtime = runtime_with_script(
@@ -2729,9 +2599,7 @@ entry = "plugin.bear"
     #[test]
     fn buffers_module_mutates_lines_and_ranges() {
         let _guard = buffer_pool_lock();
-        let layout = Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str(
-            "one\ntwo",
-        )]));
+        let layout = Layout::new(EditorPane::from_buffers(vec![Buffer::from_str("one\ntwo")]));
         let buffer_id = layout.active_buffer_view().buffer_id();
         globals::set_active_buffer_id(buffer_id);
 
@@ -2774,7 +2642,7 @@ entry = "plugin.bear"
     #[test]
     fn buffers_module_errors_for_missing_buffer_and_out_of_range_row() {
         let _guard = buffer_pool_lock();
-        let layout = Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("one")]));
+        let layout = Layout::new(EditorPane::from_buffers(vec![Buffer::from_str("one")]));
         globals::set_active_buffer_id(layout.active_buffer_view().buffer_id());
 
         let mut engine = Engine::new();
@@ -2821,7 +2689,7 @@ entry = "plugin.bear"
         let path = std::env::temp_dir().join(unique);
         let absolute_path = urvim_core::AbsolutePath::from_path(path.as_path())
             .expect("temp path should resolve absolutely");
-        let layout = Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str_with_path(
+        let layout = Layout::new(EditorPane::from_buffers(vec![Buffer::from_str_with_path(
             "saved text",
             absolute_path,
         )]));
@@ -2859,9 +2727,9 @@ entry = "plugin.bear"
     }
 
     #[test]
-    fn windows_module_reads_active_window_state() {
+    fn panes_module_reads_active_tab_state() {
         let _guard = buffer_pool_lock();
-        let mut layout = Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str(
+        let mut layout = Layout::new(EditorPane::from_buffers(vec![Buffer::from_str(
             "one\ntwo\nthree",
         )]));
         let buffer_id = layout.active_buffer_view().buffer_id();
@@ -2890,16 +2758,17 @@ entry = "plugin.bear"
         let value = engine
             .eval(
                 r#"
-                let win = urvim.windows.active()
+                let pane = urvim.panes.active()
+                let pane_id = pane["id"]
                 [
-                    win,
-                    urvim.windows.list(),
-                    urvim.windows.buffer(win),
-                    urvim.windows.cursor(win)
+                    pane_id,
+                    [urvim.panes.list()[0]["id"]],
+                    urvim.panes.buffer(pane_id),
+                    urvim.panes.cursor(pane_id)
                 ]
                 "#,
             )
-            .expect("windows API should read active window state");
+            .expect("panes API should read active pane state");
 
         assert_eq!(
             value,
@@ -2922,9 +2791,9 @@ entry = "plugin.bear"
     }
 
     #[test]
-    fn windows_module_sets_cursor_and_opens_loaded_buffer() {
+    fn panes_module_sets_cursor_and_opens_loaded_buffer() {
         let _guard = buffer_pool_lock();
-        let layout = Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("visible")]));
+        let layout = Layout::new(EditorPane::from_buffers(vec![Buffer::from_str("visible")]));
         let visible_id = layout.active_buffer_view().buffer_id();
         let hidden_id = globals::with_buffer_pool(|pool| pool.create_buffer());
         globals::set_active_buffer_id(visible_id);
@@ -2949,13 +2818,13 @@ entry = "plugin.bear"
         engine
             .eval(&format!(
                 r#"
-                let win = urvim.windows.active()
-                urvim.windows.set_cursor(win, 0, 3)
-                urvim.windows.open_buffer({})
+                let pane_id = urvim.panes.active()["id"]
+                urvim.panes.set_cursor(pane_id, 0, 3)
+                urvim.panes.open_buffer({})
                 "#,
                 hidden_id.get()
             ))
-            .expect("windows API should mutate active layout");
+            .expect("panes API should mutate active layout");
 
         let active_buffer = layout.borrow().active_buffer_view().buffer_id();
         assert_eq!(active_buffer, hidden_id);
@@ -2963,20 +2832,20 @@ entry = "plugin.bear"
     }
 
     #[test]
-    fn windows_module_exposes_distinct_split_window_ids() {
+    fn panes_module_exposes_distinct_split_editor_pane_ids() {
         let _guard = buffer_pool_lock();
-        let mut layout = Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str(
+        let mut layout = Layout::new(EditorPane::from_buffers(vec![Buffer::from_str(
             "one\ntwo\nthree",
         )]));
         let buffer_id = layout.active_buffer_view().buffer_id();
         assert!(layout.dispatch_intent(&Intent::Command(Command::SplitVertical)));
         layout
-            .buffer_view_for_window_mut(urvim_core::layout::PaneId(0))
-            .expect("original window should exist")
+            .buffer_view_for_pane_mut(urvim_core::layout::PaneId(0))
+            .expect("original pane should exist")
             .set_cursor(Cursor::new(0, 1));
         layout
-            .buffer_view_for_window_mut(urvim_core::layout::PaneId(1))
-            .expect("split window should exist")
+            .buffer_view_for_pane_mut(urvim_core::layout::PaneId(1))
+            .expect("split pane should exist")
             .set_cursor(Cursor::new(1, 2));
         globals::set_active_buffer_id(buffer_id);
         let layout = Rc::new(RefCell::new(layout));
@@ -3000,12 +2869,12 @@ entry = "plugin.bear"
         let value = engine
             .eval(
                 r#"
-                let wins = urvim.windows.list()
-                urvim.windows.set_cursor(wins[0], 2, 0)
-                [urvim.windows.active(), wins, urvim.windows.cursor(wins[0]), urvim.windows.cursor(wins[1])]
+                let panes = urvim.panes.list()
+                urvim.panes.set_cursor(panes[0]["id"], 2, 0)
+                [urvim.panes.active()["id"], [panes[0]["id"], panes[1]["id"]], urvim.panes.cursor(panes[0]["id"]), urvim.panes.cursor(panes[1]["id"])]
                 "#,
             )
-            .expect("windows API should address split windows independently");
+            .expect("panes API should address split panes independently");
 
         assert_eq!(
             value,
@@ -3034,15 +2903,15 @@ entry = "plugin.bear"
     }
 
     #[test]
-    fn windows_module_visible_range_stays_within_buffer_lines() {
+    fn panes_module_visible_range_stays_within_buffer_lines() {
         let _guard = buffer_pool_lock();
-        let mut layout = Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str(
+        let mut layout = Layout::new(EditorPane::from_buffers(vec![Buffer::from_str(
             "one\ntwo\nthree",
         )]));
         let buffer_id = layout.active_buffer_view().buffer_id();
         layout
             .active_buffer_view_mut()
-            .set_scroll_offset(urvim_core::window::Position::new(1, 0));
+            .set_scroll_offset(urvim_core::ui::geometry::Position::new(1, 0));
         globals::set_active_buffer_id(buffer_id);
         let layout = Rc::new(RefCell::new(layout));
 
@@ -3063,7 +2932,7 @@ entry = "plugin.bear"
         );
 
         let value = engine
-            .eval("urvim.windows.visible_range(urvim.windows.active())")
+            .eval("urvim.panes.visible_range(urvim.panes.active()[\"id\"])")
             .expect("visible_range should return viewport rows");
 
         assert_eq!(
@@ -3081,7 +2950,7 @@ entry = "plugin.bear"
     #[test]
     fn selection_module_returns_null_without_active_selection() {
         let _guard = buffer_pool_lock();
-        let layout = Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("hello")]));
+        let layout = Layout::new(EditorPane::from_buffers(vec![Buffer::from_str("hello")]));
         globals::set_active_buffer_id(layout.active_buffer_view().buffer_id());
         let layout = Rc::new(RefCell::new(layout));
 
@@ -3111,7 +2980,7 @@ entry = "plugin.bear"
     #[test]
     fn selection_module_sets_gets_text_and_clears_selection() {
         let _guard = buffer_pool_lock();
-        let layout = Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("hello")]));
+        let layout = Layout::new(EditorPane::from_buffers(vec![Buffer::from_str("hello")]));
         globals::set_active_buffer_id(layout.active_buffer_view().buffer_id());
         let layout = Rc::new(RefCell::new(layout));
 
@@ -3190,7 +3059,7 @@ entry = "plugin.bear"
     #[test]
     fn selection_module_replaces_selection_and_errors_without_selection() {
         let _guard = buffer_pool_lock();
-        let layout = Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("hello")]));
+        let layout = Layout::new(EditorPane::from_buffers(vec![Buffer::from_str("hello")]));
         let buffer_id = layout.active_buffer_view().buffer_id();
         globals::set_active_buffer_id(buffer_id);
         let layout = Rc::new(RefCell::new(layout));
@@ -3244,7 +3113,7 @@ entry = "plugin.bear"
     #[test]
     fn selection_module_errors_for_invalid_range() {
         let _guard = buffer_pool_lock();
-        let layout = Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("hello")]));
+        let layout = Layout::new(EditorPane::from_buffers(vec![Buffer::from_str("hello")]));
         globals::set_active_buffer_id(layout.active_buffer_view().buffer_id());
         let layout = Rc::new(RefCell::new(layout));
 
@@ -4161,7 +4030,7 @@ entry = "plugin.bear"
     #[test]
     fn command_execution_runs_safe_command_and_enqueues_event() {
         let _guard = buffer_pool_lock();
-        let layout = Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("hello")]));
+        let layout = Layout::new(EditorPane::from_buffers(vec![Buffer::from_str("hello")]));
         globals::set_active_buffer_id(layout.active_buffer_view().buffer_id());
         let layout = Rc::new(RefCell::new(layout));
         let mut engine = Engine::new();
@@ -4192,14 +4061,14 @@ entry = "plugin.bear"
                 command,
                 success: true,
                 error: None,
-            } if command == "window.toggle-wrap"
+            } if command == "pane.wrap-toggle"
         )));
     }
 
     #[test]
     fn commands_execute_uses_same_execution_path() {
         let _guard = buffer_pool_lock();
-        let layout = Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("hello")]));
+        let layout = Layout::new(EditorPane::from_buffers(vec![Buffer::from_str("hello")]));
         globals::set_active_buffer_id(layout.active_buffer_view().buffer_id());
         let mut engine = Engine::new();
         engine.set_global(
@@ -4228,7 +4097,7 @@ entry = "plugin.bear"
     fn command_execution_accepts_buffer_id_from_bearscript_api() {
         let _guard = buffer_pool_lock();
         globals::clear_editor_events_for_tests();
-        let layout = Layout::new(WindowGroup::from_buffers(vec![Buffer::new()]));
+        let layout = Layout::new(EditorPane::from_buffers(vec![Buffer::new()]));
         let buffer_id = layout.active_buffer_view().buffer_id();
         globals::set_active_buffer_id(buffer_id);
         let layout = Rc::new(RefCell::new(layout));
@@ -4295,7 +4164,7 @@ entry = "plugin.bear"
         let _guard = buffer_pool_lock();
         globals::clear_editor_events_for_tests();
         globals::clear_notifications();
-        let layout = Layout::new(WindowGroup::from_buffers(vec![Buffer::new()]));
+        let layout = Layout::new(EditorPane::from_buffers(vec![Buffer::new()]));
         globals::set_active_buffer_id(layout.active_buffer_view().buffer_id());
         let mut engine = Engine::new();
         engine.set_global(
@@ -4346,7 +4215,7 @@ entry = "plugin.bear"
     #[test]
     fn command_execution_returns_false_for_unhandled_commands() {
         let _guard = buffer_pool_lock();
-        let layout = Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("hello")]));
+        let layout = Layout::new(EditorPane::from_buffers(vec![Buffer::from_str("hello")]));
         globals::set_active_buffer_id(layout.active_buffer_view().buffer_id());
         let mut engine = Engine::new();
         engine.set_global(
@@ -4374,7 +4243,7 @@ entry = "plugin.bear"
     #[test]
     fn command_execution_rejects_unknown_plugin_and_quit_commands() {
         let _guard = buffer_pool_lock();
-        let layout = Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("hello")]));
+        let layout = Layout::new(EditorPane::from_buffers(vec![Buffer::from_str("hello")]));
         globals::set_active_buffer_id(layout.active_buffer_view().buffer_id());
         let mut engine = Engine::new();
         engine.set_global(
@@ -4480,7 +4349,7 @@ entry = "plugin.bear"
     fn keymaps_module_invokes_configured_command_string() {
         let _guard = buffer_pool_lock();
         globals::with_plugin_keymaps_mut(|keymaps| keymaps.normal.clear());
-        let mut layout = Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("hello")]));
+        let mut layout = Layout::new(EditorPane::from_buffers(vec![Buffer::from_str("hello")]));
         globals::set_active_buffer_id(layout.active_buffer_view().buffer_id());
         let mut engine = Engine::new();
         engine.set_global(
@@ -4501,16 +4370,17 @@ entry = "plugin.bear"
             .eval("urvim.keymaps.set(\"normal\", \"x\", \"pane wrap-toggle\")")
             .expect("keymap should be installed");
         layout
-            .active_window_group_mut()
-            .active_window_mut()
+            .active_editor_pane_mut()
+            .active_tab_mut()
             .switch_mode(ModeKind::Normal);
 
-        let result = layout
-            .active_window_group_mut()
-            .active_window_mut()
-            .handle_key(&urvim_terminal::Key::new(urvim_terminal::KeyCode::Char(
-                'x',
-            )));
+        let result =
+            layout
+                .active_editor_pane_mut()
+                .active_tab_mut()
+                .handle_key(&urvim_terminal::Key::new(urvim_terminal::KeyCode::Char(
+                    'x',
+                )));
 
         assert_eq!(
             result,
@@ -4576,7 +4446,7 @@ entry = "plugin.bear"
     fn diagnostics_module_sets_gets_filters_counts_and_clears() {
         let _guard = buffer_pool_lock();
         globals::with_diagnostics_store(|store| store.clear_all());
-        let layout = Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("hello")]));
+        let layout = Layout::new(EditorPane::from_buffers(vec![Buffer::from_str("hello")]));
         let buffer_id = layout.active_buffer_view().buffer_id();
         globals::set_active_buffer_id(buffer_id);
         let mut engine = Engine::new();
@@ -4672,7 +4542,7 @@ entry = "plugin.bear"
     fn diagnostics_module_errors_for_invalid_range_and_severity() {
         let _guard = buffer_pool_lock();
         globals::with_diagnostics_store(|store| store.clear_all());
-        let layout = Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("hello")]));
+        let layout = Layout::new(EditorPane::from_buffers(vec![Buffer::from_str("hello")]));
         let buffer_id = layout.active_buffer_view().buffer_id();
         globals::set_active_buffer_id(buffer_id);
         let mut engine = Engine::new();
@@ -5199,9 +5069,9 @@ entry = "plugin.bear"
     }
 
     #[test]
-    fn windows_module_errors_for_unknown_window_and_invalid_cursor() {
+    fn panes_module_errors_for_unknown_pane_and_invalid_cursor() {
         let _guard = buffer_pool_lock();
-        let layout = Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("one")]));
+        let layout = Layout::new(EditorPane::from_buffers(vec![Buffer::from_str("one")]));
         globals::set_active_buffer_id(layout.active_buffer_view().buffer_id());
         let layout = Rc::new(RefCell::new(layout));
 
@@ -5222,13 +5092,13 @@ entry = "plugin.bear"
         );
 
         let missing = engine
-            .eval("urvim.windows.buffer(999999)")
-            .expect_err("unknown window should error")
+            .eval("urvim.panes.buffer(999999)")
+            .expect_err("unknown pane should error")
             .to_string();
-        assert!(missing.contains("unknown window_id 999999"));
+        assert!(missing.contains("unknown pane_id 999999"));
 
         let invalid_cursor = engine
-            .eval("urvim.windows.set_cursor(urvim.windows.active(), 20, 0)")
+            .eval("urvim.panes.set_cursor(urvim.panes.active()[\"id\"], 20, 0)")
             .expect_err("invalid cursor should error")
             .to_string();
         assert!(invalid_cursor.contains("cursor row 20 col 0 is out of range"));
@@ -5372,7 +5242,7 @@ bg = "bg"
     }
 
     #[test]
-    fn ui_windows_module_creates_content_and_owned_plugin_keymaps() {
+    fn ui_overlays_module_creates_content_and_owned_plugin_keymaps() {
         let _guard = buffer_pool_lock();
         let layout = shared_test_layout();
         let contributions = Rc::new(RefCell::new(
@@ -5405,7 +5275,7 @@ bg = "bg"
         engine
             .eval(
                 r#"
-                let id = urvim.ui.windows.create({
+                let id = urvim.ui.overlays.create({
                     "placement": {
                         "type": "anchored",
                         "anchor": "top_right",
@@ -5415,11 +5285,11 @@ bg = "bg"
                     "cols": 20,
                     "title": "Demo"
                 })
-                urvim.ui.windows.set_content(id, [
+                urvim.ui.overlays.set_content(id, [
                     [{ "text": "hello", "style": "syntax.keyword" }]
                 ])
-                urvim.ui.windows.set_keymap(id, "q", "pane wrap-toggle")
-                urvim.ui.windows.configure(id, {
+                urvim.ui.overlays.set_keymap(id, "q", "pane wrap-toggle")
+                urvim.ui.overlays.configure(id, {
                     "placement": {
                         "type": "anchored",
                         "anchor": "top_right",
@@ -5428,25 +5298,25 @@ bg = "bg"
                 })
                 "#,
             )
-            .expect("plugin window API should evaluate");
+            .expect("overlay API should evaluate");
 
         let layout = layout.borrow();
         let id = layout
-            .plugin_windows()
+            .overlays()
             .ids()
             .next()
-            .expect("window should be created");
-        let window = layout
-            .plugin_windows()
-            .owned_window("demo", id)
-            .expect("demo should own its window");
-        assert!(window.is_visible());
-        assert_eq!(window.content().len(), 1);
+            .expect("overlay should be created");
+        let overlay = layout
+            .overlays()
+            .owned_overlay("demo", id)
+            .expect("demo should own its overlay");
+        assert!(overlay.is_visible());
+        assert_eq!(overlay.content().len(), 1);
         assert_eq!(
-            window.options().placement,
-            urvim_core::ui::floating_window::FloatingPlacement::Anchored {
-                anchor: urvim_core::ui::floating_window::FloatingAnchor::TopRight,
-                margins: urvim_core::ui::floating_window::FloatingMargins {
+            overlay.options().placement,
+            urvim_core::ui::overlay::frame::OverlayPlacement::Anchored {
+                anchor: urvim_core::ui::overlay::frame::OverlayAnchor::TopRight,
+                margins: urvim_core::ui::overlay::frame::OverlayMargins {
                     bottom: 3,
                     ..Default::default()
                 },
@@ -5454,7 +5324,7 @@ bg = "bg"
         );
         assert_eq!(
             layout
-                .plugin_windows()
+                .overlays()
                 .keymaps("demo", id)
                 .expect("keymaps should be readable"),
             vec![(vec!["q".to_string()], "pane wrap-toggle".to_string())]
@@ -5819,19 +5689,20 @@ bg = "bg"
                 test_timers(),
             ),
         );
-        engine
+        let descriptors = engine
             .eval(
                 r#"
-                let target = urvim.windows.active()
-                let id = urvim.ui.panes.create(target, {
+                let target = urvim.panes.active()["id"]
+                let id = urvim.panes.create(target, {
                     "axis": "vertical",
                     "ratio": { "first": 2, "second": 1 },
                     "title": "Pane Demo"
                 })
-                urvim.ui.panes.set_content(id, [
+                urvim.panes.set_content(id, [
                     [{ "text": "hello", "style": "syntax.keyword" }]
                 ])
-                urvim.ui.panes.set_keymap(id, "q", "pane close")
+                urvim.panes.set_keymap(id, "q", "pane close")
+                urvim.panes.list()
                 "#,
             )
             .expect("plugin pane API should evaluate");
@@ -5850,6 +5721,28 @@ bg = "bg"
         assert_eq!(layout.focused_plugin_pane(), Some(id));
         assert_eq!(layout.pane_regions().len(), 2);
         assert_eq!(
+            descriptors,
+            Value::List(
+                vec![
+                    Value::Map(
+                        HashMap::from([
+                            ("id".to_string(), Value::Number(0.0)),
+                            ("kind".to_string(), Value::String("editor".into())),
+                        ])
+                        .into(),
+                    ),
+                    Value::Map(
+                        HashMap::from([
+                            ("id".to_string(), Value::Number(id.0 as f64)),
+                            ("kind".to_string(), Value::String("plugin".into())),
+                        ])
+                        .into(),
+                    ),
+                ]
+                .into(),
+            )
+        );
+        assert_eq!(
             layout
                 .plugin_pane_keymaps("demo", id)
                 .expect("pane keymaps should be readable"),
@@ -5858,7 +5751,7 @@ bg = "bg"
     }
 
     #[test]
-    fn ui_windows_module_rejects_invalid_content() {
+    fn ui_overlays_module_rejects_invalid_content() {
         let _guard = buffer_pool_lock();
         let mut engine = Engine::new();
         engine.set_global(
@@ -5879,8 +5772,8 @@ bg = "bg"
         let error = engine
             .eval(
                 r#"
-                let id = urvim.ui.windows.create()
-                urvim.ui.windows.set_content(id, [
+                let id = urvim.ui.overlays.create()
+                urvim.ui.overlays.set_content(id, [
                     [{ "text": "bad\nline" }]
                 ])
                 "#,
@@ -5891,7 +5784,7 @@ bg = "bg"
     }
 
     #[test]
-    fn ui_windows_module_validates_placement() {
+    fn ui_overlays_module_validates_placement() {
         let _guard = buffer_pool_lock();
         let mut engine = Engine::new();
         engine.set_global(
@@ -5912,7 +5805,7 @@ bg = "bg"
         let error = engine
             .eval(
                 r#"
-                let id = urvim.ui.windows.create({
+                let id = urvim.ui.overlays.create({
                     "placement": {
                         "type": "anchored",
                         "anchor": "top_right",
@@ -5923,12 +5816,12 @@ bg = "bg"
             )
             .expect_err("unknown margin sides should be rejected")
             .to_string();
-        assert!(error.contains("unknown plugin window margin diagonal"));
+        assert!(error.contains("unknown overlay margin diagonal"));
 
         let error = engine
             .eval(
                 r#"
-                let id = urvim.ui.windows.create({
+                let id = urvim.ui.overlays.create({
                     "placement": {
                         "type": "anchored",
                         "anchor": "top_right",
@@ -5944,7 +5837,7 @@ bg = "bg"
         let error = engine
             .eval(
                 r#"
-                let id = urvim.ui.windows.create({
+                let id = urvim.ui.overlays.create({
                     "placement": { "type": "fixed", "row": 3, "col": 5, "margins": null }
                 })
                 "#,
@@ -5956,7 +5849,7 @@ bg = "bg"
         let error = engine
             .eval(
                 r#"
-                let id = urvim.ui.windows.create({
+                let id = urvim.ui.overlays.create({
                     "placement": { "type": "fixed", "row": -1, "col": 5 }
                 })
                 "#,
@@ -5968,17 +5861,17 @@ bg = "bg"
         let error = engine
             .eval(
                 r#"
-                let id = urvim.ui.windows.create({ "anchor": "center" })
+                let id = urvim.ui.overlays.create({ "anchor": "center" })
                 "#,
             )
             .expect_err("legacy placement fields should be rejected")
             .to_string();
-        assert!(error.contains("unknown plugin window option anchor"));
+        assert!(error.contains("unknown overlay option anchor"));
 
         let id = engine
             .eval(
                 r#"
-                urvim.ui.windows.create({
+                urvim.ui.overlays.create({
                     "placement": { "type": "fixed", "row": 3, "col": 5 }
                 })
                 "#,
@@ -5988,7 +5881,7 @@ bg = "bg"
     }
 
     #[test]
-    fn ui_line_format_render_returns_window_compatible_content() {
+    fn ui_line_format_render_returns_overlay_compatible_content() {
         let _guard = buffer_pool_lock();
         let layout = shared_test_layout();
         let mut engine = Engine::new();
@@ -6032,22 +5925,22 @@ bg = "bg"
                         }
                     ]
                 })
-                let id = urvim.ui.windows.create()
-                urvim.ui.windows.set_content(id, content)
+                let id = urvim.ui.overlays.create()
+                urvim.ui.overlays.set_content(id, content)
                 "#,
             )
-            .expect("formatted content should be accepted by plugin windows");
+            .expect("formatted content should be accepted by overlays");
 
         let layout = layout.borrow();
         let id = layout
-            .plugin_windows()
+            .overlays()
             .ids()
             .next()
-            .expect("window should be created");
+            .expect("overlay should be created");
         let content = layout
-            .plugin_windows()
-            .owned_window("demo", id)
-            .expect("demo should own the window")
+            .overlays()
+            .owned_overlay("demo", id)
+            .expect("demo should own the overlay")
             .content();
 
         assert_eq!(content.len(), 1);
@@ -6131,7 +6024,7 @@ bg = "bg"
         )]);
         let registry = urvim_plugin::PluginRegistry::load_from_config(&plugin_config)
             .expect("emoji picker registry should load");
-        let layout = Rc::new(RefCell::new(Layout::new(WindowGroup::from_buffers(vec![
+        let layout = Rc::new(RefCell::new(Layout::new(EditorPane::from_buffers(vec![
             Buffer::from_str("x"),
         ]))));
         let buffer_id = layout.borrow().active_buffer_view().buffer_id();
@@ -6198,7 +6091,7 @@ bg = "bg"
     }
 
     #[test]
-    fn window_demo_example_loads_and_creates_a_focused_window() {
+    fn window_demo_example_loads_and_creates_a_focused_overlay() {
         let _guard = buffer_pool_lock();
         let plugin_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../examples/plugins/window-demo");
@@ -6228,14 +6121,14 @@ bg = "bg"
 
         let layout = layout.borrow();
         let id = layout
-            .plugin_windows()
+            .overlays()
             .ids()
             .next()
-            .expect("window demo should create a window");
-        assert_eq!(layout.plugin_windows().focused(), Some(id));
+            .expect("window demo should create an overlay");
+        assert_eq!(layout.overlays().focused(), Some(id));
         let content = layout
-            .plugin_windows()
-            .owned_window("window-demo", id)
+            .overlays()
+            .owned_overlay("window-demo", id)
             .unwrap()
             .content();
         assert_eq!(content.len(), 13);
@@ -6258,7 +6151,7 @@ bg = "bg"
     }
 
     #[test]
-    fn window_demo_toggles_between_floating_and_docked_representations() {
+    fn window_demo_toggles_between_overlay_and_docked_representations() {
         let _guard = buffer_pool_lock();
         let plugin_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../examples/plugins/window-demo");
@@ -6296,7 +6189,7 @@ bg = "bg"
         ));
         {
             let layout = layout.borrow();
-            assert!(layout.plugin_windows().ids().next().is_none());
+            assert!(layout.overlays().ids().next().is_none());
             assert_eq!(layout.plugin_pane_ids("window-demo").len(), 1);
             assert!(layout.focused_plugin_pane().is_some());
         }
@@ -6311,12 +6204,12 @@ bg = "bg"
         ));
         let layout = layout.borrow();
         assert_eq!(layout.plugin_pane_ids("window-demo").len(), 0);
-        assert_eq!(layout.plugin_windows().ids().count(), 1);
-        assert!(layout.plugin_windows().focused().is_some());
+        assert_eq!(layout.overlays().ids().count(), 1);
+        assert!(layout.overlays().focused().is_some());
     }
 
     #[test]
-    fn focused_plugin_window_command_can_mutate_layout_without_reentrant_borrow() {
+    fn focused_overlay_command_can_mutate_layout_without_reentrant_borrow() {
         let _guard = buffer_pool_lock();
         let plugin_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../examples/plugins/window-demo");
@@ -6355,18 +6248,18 @@ bg = "bg"
 
         let layout = layout.borrow();
         let id = layout
-            .plugin_windows()
+            .overlays()
             .focused()
-            .expect("window should remain focused");
+            .expect("overlay should remain focused");
         assert!(matches!(
             layout
-                .plugin_windows()
-                .owned_window("window-demo", id)
-                .expect("demo should own its window")
+                .overlays()
+                .owned_overlay("window-demo", id)
+                .expect("demo should own its overlay")
                 .options()
                 .placement,
-            urvim_core::ui::floating_window::FloatingPlacement::Anchored {
-                anchor: urvim_core::ui::floating_window::FloatingAnchor::TopRight,
+            urvim_core::ui::overlay::frame::OverlayPlacement::Anchored {
+                anchor: urvim_core::ui::overlay::frame::OverlayAnchor::TopRight,
                 ..
             }
         ));

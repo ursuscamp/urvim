@@ -110,7 +110,7 @@ fn shutdown_reason_after_command(command: &Command, should_exit: bool) -> Option
         if matches!(command, Command::Quit | Command::TryQuit) {
             ShutdownReason::Quit
         } else {
-            ShutdownReason::LastWindowClosed
+            ShutdownReason::LastPaneClosed
         }
     })
 }
@@ -231,7 +231,7 @@ fn run_editor_loop<I: io::Read + rustix::fd::AsFd, O: io::Write + rustix::fd::As
     mut rows: u16,
     mut cols: u16,
 ) -> io::Result<ShutdownReason> {
-    terminal.set_cursor_style(layout.borrow().active_window_cursor_style())?;
+    terminal.set_cursor_style(layout.borrow().active_tab_cursor_style())?;
 
     let mut needs_redraw = true;
     loop {
@@ -317,7 +317,7 @@ fn run_editor_loop<I: io::Read + rustix::fd::AsFd, O: io::Write + rustix::fd::As
                         return Ok(if quit_requested {
                             ShutdownReason::Quit
                         } else {
-                            ShutdownReason::LastWindowClosed
+                            ShutdownReason::LastPaneClosed
                         });
                     }
                 }
@@ -363,7 +363,7 @@ fn run_editor_loop<I: io::Read + rustix::fd::AsFd, O: io::Write + rustix::fd::As
                         return Ok(if quit_requested {
                             ShutdownReason::Quit
                         } else {
-                            ShutdownReason::LastWindowClosed
+                            ShutdownReason::LastPaneClosed
                         });
                     }
                     if drain_editor_events(&mut plugin_runtime) {
@@ -373,7 +373,7 @@ fn run_editor_loop<I: io::Read + rustix::fd::AsFd, O: io::Write + rustix::fd::As
                 }
 
                 let Some(action) = crate::actions::raw_paste_action_for_mode(
-                    layout.borrow().active_window_mode_kind(),
+                    layout.borrow().active_tab_mode_kind(),
                     text,
                 ) else {
                     tracing::debug!("ignoring raw paste event in unsupported mode");
@@ -391,10 +391,10 @@ fn run_editor_loop<I: io::Read + rustix::fd::AsFd, O: io::Write + rustix::fd::As
                     if let Some(to_mode) = action.to_mode {
                         let repeat_text = {
                             let mut layout = layout.borrow_mut();
-                            let window = layout.active_window_group_mut().active_window_mut();
-                            window.switch_mode(to_mode)
+                            let tab = layout.active_editor_pane_mut().active_tab_mut();
+                            tab.switch_mode(to_mode)
                         };
-                        terminal.set_cursor_style(layout.borrow().active_window_cursor_style())?;
+                        terminal.set_cursor_style(layout.borrow().active_tab_cursor_style())?;
                         if let Some(repeat_text) = repeat_text.filter(|text| !text.is_empty())
                             && let Some(mut repeat_state) = globals::get_last_repeat()
                         {
@@ -425,14 +425,14 @@ fn run_editor_loop<I: io::Read + rustix::fd::AsFd, O: io::Write + rustix::fd::As
                 }
 
                 if layout.borrow().should_exit() {
-                    return Ok(ShutdownReason::LastWindowClosed);
+                    return Ok(ShutdownReason::LastPaneClosed);
                 }
 
                 if drain_editor_events(&mut plugin_runtime) {
                     needs_redraw = true;
                 }
 
-                terminal.set_cursor_style(layout.borrow().active_window_cursor_style())?;
+                terminal.set_cursor_style(layout.borrow().active_tab_cursor_style())?;
             }
             UiEvent::Resize(new_rows, new_cols) => {
                 rows = new_rows;
@@ -453,10 +453,10 @@ fn run_editor_loop<I: io::Read + rustix::fd::AsFd, O: io::Write + rustix::fd::As
                         return Ok(if quit_requested {
                             ShutdownReason::Quit
                         } else {
-                            ShutdownReason::LastWindowClosed
+                            ShutdownReason::LastPaneClosed
                         });
                     }
-                    terminal.set_cursor_style(layout.borrow().active_window_cursor_style())?;
+                    terminal.set_cursor_style(layout.borrow().active_tab_cursor_style())?;
                     if drain_editor_events(&mut plugin_runtime) {
                         needs_redraw = true;
                     }
@@ -465,8 +465,8 @@ fn run_editor_loop<I: io::Read + rustix::fd::AsFd, O: io::Write + rustix::fd::As
 
                 let result = layout
                     .borrow_mut()
-                    .active_window_group_mut()
-                    .active_window_mut()
+                    .active_editor_pane_mut()
+                    .active_tab_mut()
                     .handle_key(&key);
 
                 match result {
@@ -478,9 +478,8 @@ fn run_editor_loop<I: io::Read + rustix::fd::AsFd, O: io::Write + rustix::fd::As
                                 action,
                             ) {
                                 needs_redraw = true;
-                                terminal.set_cursor_style(
-                                    layout.borrow().active_window_cursor_style(),
-                                )?;
+                                terminal
+                                    .set_cursor_style(layout.borrow().active_tab_cursor_style())?;
                             }
                         }
                         Intent::Command(command) => {
@@ -501,12 +500,11 @@ fn run_editor_loop<I: io::Read + rustix::fd::AsFd, O: io::Write + rustix::fd::As
                                 }
 
                                 if layout.borrow().should_exit() {
-                                    return Ok(ShutdownReason::LastWindowClosed);
+                                    return Ok(ShutdownReason::LastPaneClosed);
                                 }
 
-                                terminal.set_cursor_style(
-                                    layout.borrow().active_window_cursor_style(),
-                                )?;
+                                terminal
+                                    .set_cursor_style(layout.borrow().active_tab_cursor_style())?;
                                 if drain_editor_events(&mut plugin_runtime) {
                                     needs_redraw = true;
                                 }
@@ -529,8 +527,7 @@ fn run_editor_loop<I: io::Read + rustix::fd::AsFd, O: io::Write + rustix::fd::As
                                 return Ok(reason);
                             }
 
-                            terminal
-                                .set_cursor_style(layout.borrow().active_window_cursor_style())?;
+                            terminal.set_cursor_style(layout.borrow().active_tab_cursor_style())?;
                             if drain_editor_events(&mut plugin_runtime) {
                                 needs_redraw = true;
                             }
@@ -614,7 +611,7 @@ mod tests {
         );
         assert_eq!(
             shutdown_reason_after_command(&Command::ClosePane, true),
-            Some(ShutdownReason::LastWindowClosed)
+            Some(ShutdownReason::LastPaneClosed)
         );
     }
 

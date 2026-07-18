@@ -1,18 +1,18 @@
-use super::WindowGroup;
-use crate::session::SessionWindowGroup;
+use super::EditorPane;
+use crate::session::SessionEditorPane;
 use std::path::Path;
 
-impl WindowGroup {
-    /// Converts a live window group into serializable session state.
-    pub fn to_session(&self) -> SessionWindowGroup {
-        SessionWindowGroup {
+impl EditorPane {
+    /// Converts a live editor pane into serializable session state.
+    pub fn to_session(&self) -> SessionEditorPane {
+        SessionEditorPane {
             active_tab: self.active_tab_index(),
-            tabs: self.tabs.iter().map(|window| window.to_session()).collect(),
+            tabs: self.tabs.iter().map(|tab| tab.to_session()).collect(),
         }
     }
 
-    /// Restores a live window group from serialized session state.
-    pub fn from_session(session: SessionWindowGroup) -> Self {
+    /// Restores a live editor pane from serialized session state.
+    pub fn from_session(session: SessionEditorPane) -> Self {
         let mut tabs = Vec::new();
 
         for tab in session.tabs {
@@ -27,7 +27,7 @@ impl WindowGroup {
                 continue;
             };
 
-            tabs.push(crate::window::Window::from_session(tab, buffer_id));
+            tabs.push(crate::editor_tab::EditorTab::from_session(tab, buffer_id));
         }
 
         let mut group = Self::new(tabs);

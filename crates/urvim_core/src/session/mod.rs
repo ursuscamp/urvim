@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 
 pub use format::*;
 
-const SESSION_VERSION: u32 = 1;
+const SESSION_VERSION: u32 = 2;
 const AUTOSAVE_INTERVAL: Duration = Duration::from_secs(10);
 
 struct SessionRuntime {
@@ -91,6 +91,22 @@ pub fn load_session_for_cwd(cwd: &Path) -> std::io::Result<Option<SessionFile>> 
     }
 
     let text = fs::read_to_string(&path)?;
+    #[derive(serde::Deserialize)]
+    struct SessionHeader {
+        version: u32,
+    }
+
+    let header = toml::from_str::<SessionHeader>(&text)
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
+    if header.version != SESSION_VERSION {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!(
+                "unsupported session version {}; expected {SESSION_VERSION}; v1 sessions are not migrated",
+                header.version
+            ),
+        ));
+    }
     let session = toml::from_str::<SessionFile>(&text)
         .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
     Ok(Some(session))
@@ -187,8 +203,8 @@ pub(crate) fn session_version() -> u32 {
 mod tests {
     use super::*;
     use crate::buffer::Buffer;
+    use crate::editor_pane::EditorPane;
     use crate::layout::Layout;
-    use crate::window_group::WindowGroup;
     use std::sync::{Mutex, OnceLock};
 
     #[test]
@@ -209,9 +225,9 @@ mod tests {
             focused_pane: 1,
             root: SessionNode::Pane(SessionPane {
                 pane_id: 1,
-                window_group: SessionWindowGroup {
+                editor_pane: SessionEditorPane {
                     active_tab: 0,
-                    tabs: vec![SessionWindow {
+                    tabs: vec![SessionEditorTab {
                         path: "/tmp/demo.txt".to_string(),
                         cursor: SessionCursor { row: 2, col: 4 },
                         scroll_offset: SessionPosition { row: 1, col: 0 },
@@ -225,6 +241,45 @@ mod tests {
         let text = toml::to_string_pretty(&session).expect("serialize session");
         let parsed = toml::from_str::<SessionFile>(&text).expect("deserialize session");
         assert_eq!(parsed, session);
+    }
+
+    #[test]
+    fn loading_v1_session_is_rejected_without_migration() {
+        let cwd = std::env::temp_dir().join(format!(
+            "urvim-v1-session-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&cwd).unwrap();
+        path::ensure_session_dir().unwrap();
+        let session_path = path::session_path_for_cwd(&cwd).unwrap();
+        std::fs::write(
+            session_path,
+            format!(
+                r#"version = 1
+cwd = {:?}
+label = "v1"
+focused_window = 0
+
+[window_group]
+active_window = 0
+
+[[window_group.windows]]
+path = "/tmp/old.txt"
+cursor_row = 0
+cursor_col = 0
+"#,
+                cwd.display().to_string()
+            ),
+        )
+        .unwrap();
+
+        let error = load_session_for_cwd(&cwd).unwrap_err();
+        assert!(error.to_string().contains("v1 sessions are not migrated"));
+        std::fs::remove_dir_all(cwd).unwrap();
     }
 
     fn cwd_lock() -> std::sync::MutexGuard<'static, ()> {
@@ -248,9 +303,7 @@ mod tests {
         let original_dir = std::env::current_dir().unwrap();
         std::env::set_current_dir(&temp_dir).unwrap();
 
-        let layout = Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str(
-            "autosave",
-        )]));
+        let layout = Layout::new(EditorPane::from_buffers(vec![Buffer::from_str("autosave")]));
         set_enabled(true);
         set_runtime_state_for_test(true, false, None, None);
         maybe_autosave(&layout);

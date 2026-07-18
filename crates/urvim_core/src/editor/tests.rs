@@ -219,7 +219,7 @@ fn test_normal_mode_split_management_bindings() {
     assert!(matches!(
         mode.handle_key(&key('n')),
         HandleKeyResult::Complete(intent)
-            if matches!(intent, crate::ui::Intent::Command(crate::ui::Command::FocusNextWindow))
+            if matches!(intent, crate::ui::Intent::Command(crate::ui::Command::FocusNextTarget))
     ));
 
     let mut mode = NormalMode::new();
@@ -230,7 +230,7 @@ fn test_normal_mode_split_management_bindings() {
     assert!(matches!(
         mode.handle_key(&key('p')),
         HandleKeyResult::Complete(intent)
-            if matches!(intent, crate::ui::Intent::Command(crate::ui::Command::FocusPreviousWindow))
+            if matches!(intent, crate::ui::Intent::Command(crate::ui::Command::FocusPreviousTarget))
     ));
 
     let mut mode = NormalMode::new();

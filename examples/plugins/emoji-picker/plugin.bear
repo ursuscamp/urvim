@@ -44,18 +44,19 @@ fn open(args) {
 }
 
 fn insert_emoji(emoji) {
-    let window_id = urvim.windows.active()
-    if window_id == null {
-        urvim.ui.show_message("No active editor window", { "level": "warn" })
+    let pane = urvim.panes.active()
+    if pane == null {
+        urvim.ui.show_message("No active editor pane", { "level": "warn" })
         return
     }
 
-    let buffer_id = urvim.windows.buffer(window_id)
-    let cursor = urvim.windows.cursor(window_id)
+    let pane_id = pane["id"]
+    let buffer_id = urvim.panes.buffer(pane_id)
+    let cursor = urvim.panes.cursor(pane_id)
     urvim.buffers.replace_range(buffer_id, {
         "start": cursor,
         "end": cursor
     }, emoji)
     let next_col = cursor["col"] + urvim.strings.byte_len(emoji)
-    urvim.windows.set_cursor(window_id, cursor["row"], next_col)
+    urvim.panes.set_cursor(pane_id, cursor["row"], next_col)
 }

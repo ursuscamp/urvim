@@ -7,12 +7,10 @@
 use crate::globals;
 use crate::lsp::runtime::LspServerStatus;
 use crate::screen::Screen;
-use crate::ui::floating_window::{
-    FloatingAnchor, FloatingMargins, FloatingPlacement, FloatingWindowFrame,
-};
+use crate::ui::geometry::{Position, Size};
+use crate::ui::overlay::frame::{OverlayAnchor, OverlayFrame, OverlayMargins, OverlayPlacement};
 use crate::ui::{FocusPolicy, UiContext, UiEvent, UiEventResult, UiRect};
 use crate::widget::Widget;
-use crate::window::{Position, Size};
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 use unicode_segmentation::UnicodeSegmentation;
@@ -345,14 +343,14 @@ fn render_notification_popup(
         return None;
     }
 
-    let frame = FloatingWindowFrame::resolve_placement(
+    let frame = OverlayFrame::resolve_placement(
         origin,
         size,
         popup_height.saturating_sub(2),
         popup_width.saturating_sub(2),
-        FloatingPlacement::Anchored {
-            anchor: FloatingAnchor::TopRight,
-            margins: FloatingMargins::default(),
+        OverlayPlacement::Anchored {
+            anchor: OverlayAnchor::TopRight,
+            margins: OverlayMargins::default(),
         },
     );
     let Some(frame) = frame else {
@@ -409,14 +407,14 @@ fn render_progress_popup(
         return;
     }
 
-    let frame = FloatingWindowFrame::resolve_placement(
+    let frame = OverlayFrame::resolve_placement(
         origin,
         size,
         popup_height.saturating_sub(2),
         popup_width.saturating_sub(2),
-        FloatingPlacement::Anchored {
-            anchor: FloatingAnchor::BottomRight,
-            margins: FloatingMargins::default(),
+        OverlayPlacement::Anchored {
+            anchor: OverlayAnchor::BottomRight,
+            margins: OverlayMargins::default(),
         },
     );
     let Some(frame) = frame else {
@@ -593,7 +591,7 @@ mod tests {
     use super::*;
     use crate::config::Config;
     use crate::screen::Screen;
-    use crate::window::{Position, Size};
+    use crate::ui::geometry::{Position, Size};
 
     #[test]
     fn enqueue_sets_visible_message_with_normal_ttl() {

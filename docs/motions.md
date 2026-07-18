@@ -37,16 +37,16 @@ Register behavior is documented separately in [docs/registers.md](docs/registers
 | `[e` / `]e` | Move to previous / next error diagnostic                                                              |
 | `[h` / `]h` | Move to previous / next diff hunk start                                                               |
 | `[H` / `]H` | Move to previous / next diff hunk end                                                                 |
-| `Ctrl-O`    | Jump backward through the current window group's jumplist                                             |
-| `Ctrl-I`    | Jump forward through the current window group's jumplist                                              |
+| `Ctrl-O`    | Jump backward through the current editor pane's jumplist                                              |
+| `Ctrl-I`    | Jump forward through the current editor pane's jumplist                                               |
 | `Ctrl-W v`  | Split the current pane vertically                                                                     |
 | `Ctrl-W s`  | Split the current pane horizontally                                                                   |
 | `Ctrl-W h`  | Move focus to the pane on the left                                                                    |
 | `Ctrl-W j`  | Move focus to the pane below                                                                          |
 | `Ctrl-W k`  | Move focus to the pane above                                                                          |
 | `Ctrl-W l`  | Move focus to the pane on the right                                                                   |
-| `Ctrl-W n`  | Focus the next persistent editor or plugin window                                                     |
-| `Ctrl-W p`  | Focus the previous persistent editor or plugin window                                                 |
+| `Ctrl-W n`  | Focus the next persistent editor pane, plugin pane, or overlay                                        |
+| `Ctrl-W p`  | Focus the previous persistent editor pane, plugin pane, or overlay                                    |
 | `Ctrl-W w`  | Toggle visual wrapping in the focused pane                                                            |
 | `Ctrl-W r`  | Enter resize mode                                                                                     |
 | `Ctrl-W q`  | Close the current pane                                                                                |
@@ -180,9 +180,9 @@ urvim supports count prefixes for most motions. There are two types of count beh
 
 > Note: urvim limits counts to values 1-9999 to prevent excessive operations.
 
-## Window Commands
+## Pane Commands
 
-urvim supports a Vim-style pane layout rooted in binary vertical and horizontal splits. Each pane hosts a window group.
+urvim supports a Vim-style pane layout rooted in binary vertical and horizontal splits. Each editor pane hosts one or more editor tabs.
 
 ### Ctrl-W v - Split Vertically
 
@@ -228,7 +228,7 @@ Toggles visual wrapping for the focused pane.
 - **Behavior**: when enabled, long logical lines render across multiple visual rows in that pane only
 - **Behavior**: gutter line numbers are shown once per logical line (on the first wrapped row)
 - **Behavior**: logical motions (`h`, `j`, `k`, `l`, `w`, `e`, and related motions) remain buffer-line based
-- **Default**: wrapping starts off for new panes/windows
+- **Default**: wrapping starts off for new editor panes
 
 ### Ctrl-W = - Equalize Splits
 
@@ -368,7 +368,7 @@ Example: On "hello" (cursor at or past 'o'):
 
 ### Ctrl-O - Jump Backward
 
-Moves backward through the current window group's jumplist.
+Moves backward through the current editor pane's jumplist.
 
 - **Behavior**: Activates the tab for the target buffer, or reopens the buffer in a new tab if it is not currently open.
 
@@ -377,7 +377,7 @@ Moves backward through the current window group's jumplist.
 
 ### Ctrl-I - Jump Forward
 
-Moves forward through the current window group's jumplist.
+Moves forward through the current editor pane's jumplist.
 
 - **Behavior**: Activates the tab for the target buffer, or reopens the buffer in a new tab if it is not currently open.
 
@@ -588,7 +588,7 @@ Scrolls so the cursor line appears at the bottom of the viewport when possible.
 
 ## Code Folding
 
-Fold points are derived from the syntax when the current language supports syntax-based folding; otherwise they fall back to indentation scopes. Fold state is local to the current window, so separate splits can show the same buffer with different folds.
+Fold points are derived from the syntax when the current language supports syntax-based folding; otherwise they fall back to indentation scopes. Fold state is local to the current editor tab, so separate splits can show the same buffer with different folds.
 
 The equivalent commands are `action fold toggle`, `action fold open`, and `action fold close`.
 
@@ -996,7 +996,7 @@ Examples:
 The last character search state is stored globally and persists when:
 
 - Switching to insert mode and back to normal mode
-- Using multiple windows (future feature)
+- Using multiple editor panes
 
 This allows you to:
 

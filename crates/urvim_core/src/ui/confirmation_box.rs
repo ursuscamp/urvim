@@ -4,9 +4,8 @@
 //! choose between two caller-defined responses.
 
 use crate::screen::Screen;
-use crate::ui::floating_window::{
-    FloatingAnchor, FloatingMargins, FloatingPlacement, FloatingWindowFrame,
-    FloatingWindowFrameLabel,
+use crate::ui::overlay::frame::{
+    OverlayAnchor, OverlayFrame, OverlayFrameLabel, OverlayMargins, OverlayPlacement,
 };
 use crate::ui::{FocusPolicy, Intent, UiContext, UiEvent, UiEventResult, UiRect};
 use crate::widget::Widget;
@@ -184,14 +183,14 @@ impl ConfirmationBox {
             return;
         }
 
-        let frame = FloatingWindowFrame::resolve_placement(
+        let frame = OverlayFrame::resolve_placement(
             rect.origin,
             rect.size,
             content_height as u16,
             content_width as u16,
-            FloatingPlacement::Anchored {
-                anchor: FloatingAnchor::Center,
-                margins: FloatingMargins::default(),
+            OverlayPlacement::Anchored {
+                anchor: OverlayAnchor::Center,
+                margins: OverlayMargins::default(),
             },
         );
         let Some(frame) = frame else {
@@ -202,7 +201,7 @@ impl ConfirmationBox {
             screen,
             border_style,
             body_style,
-            Some(FloatingWindowFrameLabel::top_center(self.title.as_str())),
+            Some(OverlayFrameLabel::top_center(self.title.as_str())),
         );
         for (line_idx, line) in prompt_lines
             .iter()
@@ -390,8 +389,8 @@ struct GraphemeSlice {
 mod tests {
     use super::*;
     use crate::screen::Screen;
+    use crate::ui::geometry::{Position, Size};
     use crate::ui::{Intent, UiContext, UiEvent};
-    use crate::window::{Position, Size};
     use urvim_terminal::{Key, KeyCode, Modifiers};
 
     fn key(code: KeyCode) -> Key {

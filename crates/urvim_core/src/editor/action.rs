@@ -222,7 +222,7 @@ pub struct EditorAction {
     pub register: Option<RegisterName>,
 }
 
-/// Operation interpreted against an editor window.
+/// Operation interpreted against an editor tab.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EditorOperation {
     /// Move the cursor one character to the left.
@@ -241,7 +241,7 @@ pub enum EditorOperation {
     InsertRawPaste(String),
     /// Replace the active visual selection with raw paste text.
     ReplaceSelectionRawPaste(String),
-    /// Insert a newline, letting the window decide whether to auto-indent it.
+    /// Insert a newline, letting the editor tab decide whether to auto-indent it.
     InsertNewline,
     /// Exit the editor.
     /// Move forward to the next boundary of the requested kind.
@@ -266,9 +266,9 @@ pub enum EditorOperation {
     MoveHalfPageUp,
     /// Move down by half of the viewport height.
     MoveHalfPageDown,
-    /// Move backward through the current window's jumplist.
+    /// Move backward through the current editor pane's jumplist.
     JumpBackward,
-    /// Move forward through the current window's jumplist.
+    /// Move forward through the current editor pane's jumplist.
     JumpForward,
     /// Move to the top of the screen.
     MoveToScreenTop,

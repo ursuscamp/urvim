@@ -30,7 +30,7 @@ impl LspRenamePrompt {
     }
 
     /// Returns the rendered cursor position, if available.
-    pub fn cursor(&self) -> Option<crate::window::Position> {
+    pub fn cursor(&self) -> Option<crate::ui::geometry::Position> {
         self.input.cursor()
     }
 

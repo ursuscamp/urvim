@@ -1,6 +1,6 @@
 //! Internal layout geometry and focus helpers.
 
-use crate::window::{Position, Size};
+use crate::ui::geometry::{Position, Size};
 
 use super::PaneId;
 

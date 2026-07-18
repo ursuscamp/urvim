@@ -84,12 +84,12 @@ pub enum PluginEventKind {
     BufferModifiedChanged,
     /// A buffer filetype changed.
     BufferFiletypeChanged,
-    /// A window was created.
-    WindowCreated,
-    /// A window was closed.
-    WindowClosed,
-    /// A window received focus.
-    WindowFocused,
+    /// A pane was created.
+    PaneCreated,
+    /// A pane was closed.
+    PaneClosed,
+    /// A pane received focus.
+    PaneFocused,
     /// A tab was opened.
     TabOpened,
     /// A tab was closed.
@@ -143,9 +143,9 @@ impl PluginEventKind {
         Self::InsertSessionChanged,
         Self::BufferModifiedChanged,
         Self::BufferFiletypeChanged,
-        Self::WindowCreated,
-        Self::WindowClosed,
-        Self::WindowFocused,
+        Self::PaneCreated,
+        Self::PaneClosed,
+        Self::PaneFocused,
         Self::TabOpened,
         Self::TabClosed,
         Self::TabActivated,
@@ -183,9 +183,9 @@ impl PluginEventKind {
             Self::InsertSessionChanged => "InsertSessionChanged",
             Self::BufferModifiedChanged => "BufferModifiedChanged",
             Self::BufferFiletypeChanged => "BufferFiletypeChanged",
-            Self::WindowCreated => "WindowCreated",
-            Self::WindowClosed => "WindowClosed",
-            Self::WindowFocused => "WindowFocused",
+            Self::PaneCreated => "PaneCreated",
+            Self::PaneClosed => "PaneClosed",
+            Self::PaneFocused => "PaneFocused",
             Self::TabOpened => "TabOpened",
             Self::TabClosed => "TabClosed",
             Self::TabActivated => "TabActivated",
@@ -233,9 +233,9 @@ impl FromStr for PluginEventKind {
             "InsertSessionChanged" => Ok(Self::InsertSessionChanged),
             "BufferModifiedChanged" => Ok(Self::BufferModifiedChanged),
             "BufferFiletypeChanged" => Ok(Self::BufferFiletypeChanged),
-            "WindowCreated" => Ok(Self::WindowCreated),
-            "WindowClosed" => Ok(Self::WindowClosed),
-            "WindowFocused" => Ok(Self::WindowFocused),
+            "PaneCreated" => Ok(Self::PaneCreated),
+            "PaneClosed" => Ok(Self::PaneClosed),
+            "PaneFocused" => Ok(Self::PaneFocused),
             "TabOpened" => Ok(Self::TabOpened),
             "TabClosed" => Ok(Self::TabClosed),
             "TabActivated" => Ok(Self::TabActivated),

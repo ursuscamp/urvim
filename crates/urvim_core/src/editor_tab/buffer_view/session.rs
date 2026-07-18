@@ -1,9 +1,9 @@
 use super::BufferView;
 use crate::buffer::{BufferId, Cursor};
-use crate::window::Position;
+use crate::ui::geometry::Position;
 
 impl BufferView {
-    /// Builds a window-local buffer view from saved state.
+    /// Builds a tab-local buffer view from saved state.
     pub fn from_session_state(
         buffer_id: BufferId,
         cursor: Cursor,

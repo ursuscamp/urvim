@@ -101,7 +101,7 @@ Defines custom key bindings for supported editor modes.
 - Type: TOML tables under `[keymaps.normal]`, `[keymaps.insert]`, `[keymaps.visual]`, `[keymaps.visual_line]`, and `[keymaps.resizing]`
 - Default: no custom mappings
 - Behavior: mappings are applied after built-in bindings, so configured mappings replace built-ins with the same key sequence
-- Inheritance: focused plugin panes and windows inherit normal-mode focus and application mappings after their local mappings; picker, input, rename, and confirmation dialogs inherit application mappings only after their local controls and text input
+- Inheritance: focused plugin panes and overlays inherit normal-mode focus and application mappings after their local mappings; picker, input, rename, and confirmation dialogs inherit application mappings only after their local controls and text input
 - Dialog input: printable normal-mode mappings are shadowed by picker, input, and rename text entry; unrecognized keys may start an inherited application mapping, and a failed inherited sequence is consumed
 - Keys: use urvim's canonical key string format, such as `jk`, `<Space>f`, `<C-s>`, or `<Esc>`
 - Values: command strings parsed the same way as command-line input, such as `write`, `pick file`, `mode normal`, or `action cursor right`
@@ -192,12 +192,12 @@ Controls whether insert mode automatically pairs supported brackets and quotes.
 
 ### `active_line`
 
-Controls whether the focused window highlights the cursor line in normal mode.
+Controls whether the focused editor tab highlights the cursor line in normal mode.
 
 - Type: boolean
 - Default: `false`
-- Behavior: when `true`, the current line in the focused window receives the theme's active-line UI style while the editor is in normal mode; when `false`, the editor keeps its current rendering behavior
-- Scope: focused window only, normal mode only
+- Behavior: when `true`, the current line in the focused editor tab receives the theme's active-line UI style while the editor is in normal mode; when `false`, the editor keeps its current rendering behavior
+- Scope: focused editor tab only, normal mode only
 
 ### `relative_number`
 
@@ -210,12 +210,12 @@ Controls whether the gutter shows relative line numbers around the cursor line.
 
 ### `indent_guides`
 
-Controls whether the focused window renders the active indent scope guide.
+Controls whether the focused editor tab renders the active indent scope guide.
 
 - Type: boolean
 - Default: `true`
 - Behavior: when `true`, the editor renders a vertical guide for the active indent scope at the cursor's current visual indentation depth; when `false`, indent guides are not rendered
-- Scope: focused window rendering
+- Scope: focused editor tab rendering
 
 ### `auto_indent`
 
@@ -312,13 +312,13 @@ Sets the visual margin bands near viewport edges that trigger scrolling before e
 
 ### `wrap_mode`
 
-Sets how long logical lines break when visual wrapping is enabled for a window.
+Sets how long logical lines break when visual wrapping is enabled for an editor tab.
 
 - Type: string enum
 - Default: `"hard"`
 - Supported values: `hard`, `soft`
 - Behavior: `hard` wraps at the exact content width; `soft` wraps at the nearest word boundary at or before the content width, and falls back to a hard split when no boundary exists
-- Scope: wrapped window rendering only (wrapping is toggled per window)
+- Scope: wrapped editor-tab rendering only (wrapping is toggled per editor pane)
 
 ### `lsp`
 

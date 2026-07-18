@@ -19,21 +19,20 @@ pub mod references;
 
 use crate::background::JobManager;
 use crate::screen::Screen;
-use crate::ui::floating_window::{
-    FloatingAnchor, FloatingMargins, FloatingPlacement, FloatingWindowFrame,
-    FloatingWindowFrameLabel,
-};
+use crate::ui::geometry::{Position, Size};
 use crate::ui::inputs::{InputWidget, PromptSegment};
 pub use crate::ui::line_format::{
     EllipsisPlacement, FormattedLineSection, FormattedLineSegment, FormattedLineTemplate,
     LineSectionAlignment, LineSectionOverflow, LineSectionWidth,
+};
+use crate::ui::overlay::frame::{
+    OverlayAnchor, OverlayFrame, OverlayFrameLabel, OverlayMargins, OverlayPlacement,
 };
 use crate::ui::picker::preview::PickerPreviewAdapter;
 use crate::ui::picker::query::PickerQueryMode;
 use crate::ui::text_width::{ClipSide, EllipsisSide, clip_text, ellipsize_text};
 use crate::ui::{FocusPolicy, Intent, UiContext, UiEvent, UiEventResult, UiRect};
 use crate::widget::Widget;
-use crate::window::{Position, Size};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender, TryRecvError};
 use unicode_width::UnicodeWidthStr;
@@ -303,12 +302,12 @@ pub struct PickerWidget<S: PickerSource> {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct PickerLayout {
-    picker: FloatingWindowFrame,
-    preview: Option<FloatingWindowFrame>,
+    picker: OverlayFrame,
+    preview: Option<OverlayFrame>,
 }
 
-fn frame_from_outer(origin: Position, size: Size) -> FloatingWindowFrame {
-    FloatingWindowFrame {
+fn frame_from_outer(origin: Position, size: Size) -> OverlayFrame {
+    OverlayFrame {
         origin,
         size,
         content_origin: Position::new(origin.row.saturating_add(1), origin.col.saturating_add(1)),
@@ -478,7 +477,7 @@ impl<S: PickerSource> PickerWidget<S> {
         ]
     }
 
-    fn resolve_frame(&self, rect: UiRect) -> Option<FloatingWindowFrame> {
+    fn resolve_frame(&self, rect: UiRect) -> Option<OverlayFrame> {
         self.resolve_layout(rect).map(|layout| layout.picker)
     }
 
@@ -537,16 +536,16 @@ impl<S: PickerSource> PickerWidget<S> {
             });
         }
 
-        let picker = FloatingWindowFrame::resolve_placement(
+        let picker = OverlayFrame::resolve_placement(
             rect.origin,
             rect.size,
             picker_content_rows as u16,
             picker_content_cols,
-            FloatingPlacement::Anchored {
-                anchor: FloatingAnchor::TopCenter,
-                margins: FloatingMargins {
+            OverlayPlacement::Anchored {
+                anchor: OverlayAnchor::TopCenter,
+                margins: OverlayMargins {
                     top: PICKER_TOP_MARGIN,
-                    ..FloatingMargins::default()
+                    ..OverlayMargins::default()
                 },
             },
         )?;
@@ -993,7 +992,7 @@ impl<S: PickerSource> Widget for PickerWidget<S> {
         }
     }
 
-    fn layout(&mut self, constraints: crate::ui::UiConstraints) -> crate::window::Size {
+    fn layout(&mut self, constraints: crate::ui::UiConstraints) -> crate::ui::geometry::Size {
         constraints.available
     }
 
@@ -1014,10 +1013,7 @@ impl<S: PickerSource> Widget for PickerWidget<S> {
         let border_style = theme_style("ui.window.lines.border");
         let body_style = theme_style("ui.window");
         let active_style = theme_style("ui.window.active_line");
-        let label = self
-            .label
-            .as_deref()
-            .map(FloatingWindowFrameLabel::top_center);
+        let label = self.label.as_deref().map(OverlayFrameLabel::top_center);
         frame.render_bordered_with_label(screen, border_style, body_style, label);
 
         self.query_input.set_text_style(body_style);
@@ -1175,7 +1171,7 @@ fn segment_width(segments: &[PickerRenderSegment]) -> usize {
 
 fn render_preview_frame(
     screen: &mut Screen,
-    frame: FloatingWindowFrame,
+    frame: OverlayFrame,
     state: &PickerPreviewState,
     preview_adapter: &mut PickerPreviewAdapter,
     border_style: Style,
@@ -1860,7 +1856,7 @@ mod tests {
         assert_eq!(right_prompt[1].text, "2/3");
         assert_eq!(right_prompt[1].style, Style::new().bold());
 
-        let rect = UiRect::new(Position::new(0, 0), crate::window::Size::new(12, 40));
+        let rect = UiRect::new(Position::new(0, 0), crate::ui::geometry::Size::new(12, 40));
         let layout = picker.resolve_layout(rect).expect("picker layout");
         let mut screen = crate::screen::Screen::new(12, 40);
         picker.render_widget(&mut screen, rect, &UiContext);
@@ -1892,7 +1888,7 @@ mod tests {
     fn picker_uses_fixed_content_width_when_space_allows() {
         let source = TestSource::new();
         let picker = PickerWidget::new(source);
-        let rect = UiRect::new(Position::new(0, 0), crate::window::Size::new(20, 120));
+        let rect = UiRect::new(Position::new(0, 0), crate::ui::geometry::Size::new(20, 120));
 
         let frame = picker.resolve_frame(rect).expect("picker frame");
 
@@ -1903,7 +1899,7 @@ mod tests {
     fn picker_uses_top_center_anchor() {
         let source = TestSource::new();
         let picker = PickerWidget::new(source);
-        let rect = UiRect::new(Position::new(0, 0), crate::window::Size::new(30, 120));
+        let rect = UiRect::new(Position::new(0, 0), crate::ui::geometry::Size::new(30, 120));
 
         let frame = picker.resolve_frame(rect).expect("picker frame");
 
@@ -1915,7 +1911,7 @@ mod tests {
     fn picker_content_width_clamps_to_available_space() {
         let source = TestSource::new();
         let picker = PickerWidget::new(source);
-        let rect = UiRect::new(Position::new(0, 0), crate::window::Size::new(20, 40));
+        let rect = UiRect::new(Position::new(0, 0), crate::ui::geometry::Size::new(20, 40));
 
         let frame = picker.resolve_frame(rect).expect("picker frame");
 
@@ -1929,7 +1925,7 @@ mod tests {
         picker.results = vec!["src/main.rs".to_string()];
         picker.highlighted = Some(0);
         picker.preview_key = Some("src/main.rs".to_string());
-        let rect = UiRect::new(Position::new(0, 0), crate::window::Size::new(30, 180));
+        let rect = UiRect::new(Position::new(0, 0), crate::ui::geometry::Size::new(30, 180));
 
         let layout = picker.resolve_layout(rect).expect("picker layout");
         let preview = layout.preview.expect("preview frame");
@@ -1949,7 +1945,7 @@ mod tests {
         picker.results = vec!["src/main.rs".to_string()];
         picker.highlighted = Some(0);
         picker.preview_key = Some("src/main.rs".to_string());
-        let rect = UiRect::new(Position::new(0, 0), crate::window::Size::new(18, 180));
+        let rect = UiRect::new(Position::new(0, 0), crate::ui::geometry::Size::new(18, 180));
 
         let layout = picker.resolve_layout(rect).expect("picker layout");
         let preview = layout.preview.expect("preview frame");
@@ -1964,7 +1960,7 @@ mod tests {
         picker.results = vec!["src/main.rs".to_string()];
         picker.highlighted = Some(0);
         picker.preview_key = Some("src/main.rs".to_string());
-        let rect = UiRect::new(Position::new(0, 0), crate::window::Size::new(30, 90));
+        let rect = UiRect::new(Position::new(0, 0), crate::ui::geometry::Size::new(30, 90));
 
         let layout = picker.resolve_layout(rect).expect("picker layout");
         let preview = layout.preview.expect("preview frame");
@@ -2010,7 +2006,7 @@ mod tests {
     }
 
     #[test]
-    fn preview_render_matches_window_body_layout() {
+    fn preview_render_matches_editor_tab_body_layout() {
         let temp_root = unique_temp_dir();
         std::fs::create_dir_all(&temp_root).unwrap();
         let file_path = temp_root.join("preview.rs");
@@ -2027,21 +2023,21 @@ mod tests {
             false,
         );
 
-        let mut window = crate::window::Window::new(crate::buffer::Buffer::from_str_with_path(
+        let mut tab = crate::editor_tab::EditorTab::new(crate::buffer::Buffer::from_str_with_path(
             "alpha\nbeta\n",
             crate::path::AbsolutePath::from_path(file_path.as_path()).unwrap(),
         ));
-        let mut window_screen = crate::screen::Screen::new(3, 18);
-        window.set_cursor(crate::buffer::Cursor::new(0, 0));
-        window.render(&mut window_screen, Position::new(1, 1), Size::new(3, 18));
+        let mut tab_screen = crate::screen::Screen::new(3, 18);
+        tab.set_cursor(crate::buffer::Cursor::new(0, 0));
+        tab.render(&mut tab_screen, Position::new(1, 1), Size::new(3, 18));
 
         assert_eq!(
             row_text(&mut preview_screen, 1, 0).trim_start().trim_end(),
-            row_text(&mut window_screen, 1, 0).trim_start().trim_end()
+            row_text(&mut tab_screen, 1, 0).trim_start().trim_end()
         );
         assert_eq!(
             row_text(&mut preview_screen, 2, 0).trim_start().trim_end(),
-            row_text(&mut window_screen, 2, 0).trim_start().trim_end()
+            row_text(&mut tab_screen, 2, 0).trim_start().trim_end()
         );
 
         std::fs::remove_file(file_path).ok();
@@ -2058,14 +2054,14 @@ mod tests {
                 "hello\nworld\n",
             )),
         );
-        let frame = crate::ui::floating_window::FloatingWindowFrame::resolve_placement(
+        let frame = crate::ui::overlay::frame::OverlayFrame::resolve_placement(
             Position::new(0, 0),
             Size::new(4, 16),
             2,
             14,
-            crate::ui::floating_window::FloatingPlacement::Anchored {
-                anchor: crate::ui::floating_window::FloatingAnchor::Center,
-                margins: crate::ui::floating_window::FloatingMargins::default(),
+            crate::ui::overlay::frame::OverlayPlacement::Anchored {
+                anchor: crate::ui::overlay::frame::OverlayAnchor::Center,
+                margins: crate::ui::overlay::frame::OverlayMargins::default(),
             },
         )
         .expect("preview frame");

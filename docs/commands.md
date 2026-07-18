@@ -373,13 +373,13 @@ Delimiter families:
 - `pane wrap-toggle`
 - `pane close`
 
-## Window
+## Focus
 
-- `window focus-next`
-- `window focus-previous`
+- `focus next`
+- `focus previous`
 
-These commands cycle through visible editor panes in screen order followed by
-visible plugin windows in creation order. Cycling wraps at both ends.
+These commands cycle through visible editor and plugin panes in screen order,
+followed by visible overlays in creation order. Cycling wraps at both ends.
 
 ## App
 

@@ -111,30 +111,30 @@ The global `urvim` module exposes the APIs below. All arguments and return value
 - `urvim.ui.close_confirmation(confirmation_id)`
 - `urvim.ui.input(opts) -> input_id`
 - `urvim.ui.close_input(input_id)`
-- `urvim.ui.windows.create(opts) -> window_id`
-- `urvim.ui.windows.configure(window_id, opts)`
-- `urvim.ui.windows.set_content(window_id, content)`
+- `urvim.ui.overlays.create(opts) -> overlay_id`
+- `urvim.ui.overlays.configure(overlay_id, opts)`
+- `urvim.ui.overlays.set_content(overlay_id, content)`
 - `urvim.ui.line_format.render(opts) -> content`
-- `urvim.ui.windows.show(window_id)`
-- `urvim.ui.windows.hide(window_id)`
-- `urvim.ui.windows.focus(window_id)`
-- `urvim.ui.windows.blur(window_id)`
-- `urvim.ui.windows.close(window_id)`
-- `urvim.ui.windows.list() -> [window_id]`
-- `urvim.ui.windows.active() -> window_id | null`
-- `urvim.ui.windows.set_keymap(window_id, lhs, rhs)`
-- `urvim.ui.windows.delete_keymap(window_id, lhs)`
-- `urvim.ui.windows.list_keymaps(window_id) -> [keymap]`
-- `urvim.ui.panes.create(target_pane_id, opts) -> pane_id`
-- `urvim.ui.panes.configure(pane_id, opts)`
-- `urvim.ui.panes.set_content(pane_id, content)`
-- `urvim.ui.panes.focus(pane_id)`
-- `urvim.ui.panes.close(pane_id)`
-- `urvim.ui.panes.list() -> [pane_id]`
-- `urvim.ui.panes.active() -> pane_id | null`
-- `urvim.ui.panes.set_keymap(pane_id, lhs, rhs)`
-- `urvim.ui.panes.delete_keymap(pane_id, lhs)`
-- `urvim.ui.panes.list_keymaps(pane_id) -> [keymap]`
+- `urvim.ui.overlays.show(overlay_id)`
+- `urvim.ui.overlays.hide(overlay_id)`
+- `urvim.ui.overlays.focus(overlay_id)`
+- `urvim.ui.overlays.blur(overlay_id)`
+- `urvim.ui.overlays.close(overlay_id)`
+- `urvim.ui.overlays.list() -> [overlay_id]`
+- `urvim.ui.overlays.active() -> overlay_id | null`
+- `urvim.ui.overlays.set_keymap(overlay_id, lhs, rhs)`
+- `urvim.ui.overlays.delete_keymap(overlay_id, lhs)`
+- `urvim.ui.overlays.list_keymaps(overlay_id) -> [keymap]`
+- `urvim.panes.create(target_pane_id, opts) -> pane_id`
+- `urvim.panes.configure(pane_id, opts)`
+- `urvim.panes.set_content(pane_id, content)`
+- `urvim.panes.focus(pane_id)`
+- `urvim.panes.close(pane_id)`
+- `urvim.panes.list() -> [{ id, kind }]`
+- `urvim.panes.active() -> { id, kind } | null`
+- `urvim.panes.set_keymap(pane_id, lhs, rhs)`
+- `urvim.panes.delete_keymap(pane_id, lhs)`
+- `urvim.panes.list_keymaps(pane_id) -> [keymap]`
 - `urvim.buffers.active() -> buffer_id | null`
 - `urvim.buffers.list() -> [buffer_id]`
 - `urvim.buffers.exists(buffer_id) -> bool`
@@ -152,13 +152,13 @@ The global `urvim` module exposes the APIs below. All arguments and return value
 - `urvim.buffers.delete_line(buffer_id, row)`
 - `urvim.buffers.replace_range(buffer_id, range, text)`
 - `urvim.buffers.save(buffer_id)`
-- `urvim.windows.active() -> window_id | null`
-- `urvim.windows.list() -> [window_id]`
-- `urvim.windows.buffer(window_id) -> buffer_id`
-- `urvim.windows.cursor(window_id) -> { row, col }`
-- `urvim.windows.set_cursor(window_id, row, col)`
-- `urvim.windows.visible_range(window_id) -> { start_row, end_row }`
-- `urvim.windows.open_buffer(buffer_id)`
+- `urvim.panes.active() -> { id, kind } | null`
+- `urvim.panes.list() -> [{ id, kind }]`
+- `urvim.panes.buffer(pane_id) -> buffer_id`
+- `urvim.panes.cursor(pane_id) -> { row, col }`
+- `urvim.panes.set_cursor(pane_id, row, col)`
+- `urvim.panes.visible_range(pane_id) -> { start_row, end_row }`
+- `urvim.panes.open_buffer(buffer_id)`
 
 ### Commands, Keymaps, and Events
 
@@ -175,10 +175,10 @@ The global `urvim` module exposes the APIs below. All arguments and return value
 
 Keymap modes are `normal`, `insert`, `visual`, `visual_line` (or `visual-line`), and `resizing` (or `resize`). Keymap right-hand sides are urvim command lines. The optional keymap options map is currently reserved and must be empty.
 
-Buffer commands accept a named `buffer=<buffer-id>` argument, allowing ids returned by the buffer and window APIs to target non-active buffers. BearScript string interpolation can construct the command line:
+Buffer commands accept a named `buffer=<buffer-id>` argument, allowing ids returned by the buffer and pane APIs to target non-active buffers. BearScript string interpolation can construct the command line:
 
 ```text
-let buffer_id = urvim.windows.buffer(window_id)
+let buffer_id = urvim.panes.buffer(pane_id)
 urvim.command("buffer write buffer={buffer_id}")
 urvim.command("buffer filetype rust buffer={buffer_id}")
 ```
@@ -278,7 +278,7 @@ Buffer rows and columns are 0-based. `urvim.buffers.lines(buffer_id, start_row, 
 
 Invalid buffer ids, rows, columns, and argument shapes raise errors. `urvim.buffers.save(buffer_id)` saves through the normal buffer save path and emits the same `BufferSaved` or `BufferSaveFailed` editor event.
 
-Window rows and columns are 0-based. Window ids are stable pane ids for currently visible editor windows; an id stays valid for the life of that pane and becomes invalid after the pane is closed. Invalid window ids raise errors. `urvim.windows.open_buffer(buffer_id)` mirrors normal editor behavior by activating an existing visible buffer tab or opening a tab for a loaded hidden buffer in the active window.
+Pane rows and columns are 0-based. Pane ids are stable for each split-tree leaf and become invalid after close. Editor-only methods reject plugin panes. `urvim.panes.open_buffer(buffer_id)` activates an existing visible editor tab or opens a loaded hidden buffer in the active or last-focused editor pane, including while a plugin pane or overlay has focus. The last editor pane cannot be closed.
 
 ### Confirmations
 
@@ -412,17 +412,17 @@ custom picker.
 See `examples/plugins/emoji-picker` for a complete picker that inserts the
 selected value into the active buffer.
 
-### Floating Plugin Windows
+### Plugin Overlays
 
-`urvim.ui.windows` creates transient floating windows that are separate from
-the buffer-backed windows in `urvim.windows`. They are retained by urvim and
+`urvim.ui.overlays` creates transient overlays that are separate from
+the split-tree panes in `urvim.panes`. They are retained by urvim and
 rendered as UI widgets; plugins do not provide a callback that runs during
 painting.
 
-Create a window with content dimensions and an anchored placement:
+Create an overlay with content dimensions and an anchored placement:
 
 ```text
-let window_id = urvim.ui.windows.create({
+let overlay_id = urvim.ui.overlays.create({
     "placement": {
         "type": "anchored",
         "anchor": "top_right",
@@ -447,7 +447,7 @@ For fixed placement, `row` and `col` are zero-based coordinates for the
 outer frame's top-left corner, relative to the editor UI area:
 
 ```text
-let window_id = urvim.ui.windows.create({
+let overlay_id = urvim.ui.overlays.create({
     "placement": { "type": "fixed", "row": 3, "col": 10 },
     "rows": 8,
     "cols": 40
@@ -461,12 +461,12 @@ remain. `rows` and `cols` describe the content area; the border is added
 outside those dimensions. Content is clipped to the available area and is not
 wrapped.
 
-When configuring an existing window, supplying `placement` replaces the
+When configuring an existing overlay, supplying `placement` replaces the
 complete placement. Omitted anchored margins default to zero; omit
 `placement` to leave the current placement unchanged:
 
 ```text
-urvim.ui.windows.configure(window_id, {
+urvim.ui.overlays.configure(overlay_id, {
     "placement": {
         "type": "anchored",
         "anchor": "top_right",
@@ -478,7 +478,7 @@ urvim.ui.windows.configure(window_id, {
 Content is a list of lines, where each line is a list of styled segments:
 
 ```text
-urvim.ui.windows.set_content(window_id, [
+urvim.ui.overlays.set_content(overlay_id, [
     [
         { "text": "hello ", "style": "ui.window" },
         { "text": "world", "style": "syntax.keyword" }
@@ -488,38 +488,38 @@ urvim.ui.windows.set_content(window_id, [
 ```
 
 Segment styles are named theme tags. The style is optional and defaults to the
-window body style. Segment text must not contain newlines.
+overlay body style. Segment text must not contain newlines.
 
-Windows are created visible but unfocused. An unfocused window frame and title
-use `border_style`, which defaults to `ui.window.lines.border`; a focused window
+Overlays are created visible but unfocused. An unfocused overlay frame and title
+use `border_style`, which defaults to `ui.window.lines.border`; a focused overlay
 uses `focused_border_style`, which defaults to `ui.window.lines.resize`. A
-focused window is modal and consumes key and paste events. `<Esc>` blurs the
-window unless it has an explicit keymap binding. Window-local keymaps use the
+focused overlay is modal and consumes key and paste events. `<Esc>` blurs the
+overlay unless it has an explicit keymap binding. Overlay-local keymaps use the
 normal urvim key syntax and command strings:
 
 ```text
-urvim.ui.windows.set_keymap(window_id, "q", "plugin my-plugin close")
-urvim.ui.windows.set_keymap(window_id, "r", "write")
+urvim.ui.overlays.set_keymap(overlay_id, "q", "plugin my-plugin close")
+urvim.ui.overlays.set_keymap(overlay_id, "r", "write")
 ```
 
 Bindings may invoke ordinary editor commands or commands registered by the
-owning plugin. While a window is focused, its local mappings take precedence,
+owning plugin. While an overlay is focused, its local mappings take precedence,
 then global normal-mode mappings for focus and application commands are
 inherited. Editor-only and unmapped keys are consumed rather than forwarded to
-the last editor pane. A plugin can only access windows it owns. Hiding,
-blurring, or closing the focused window returns focus to the editor. Floating
-plugin windows are not saved in sessions.
+the last editor pane. A plugin can only access overlays it owns. Hiding,
+blurring, or closing the focused overlay returns focus to the editor. Plugin
+overlays are not saved in sessions.
 
 ### Split Plugin Panes
 
-`urvim.ui.panes` creates retained plugin UI as a first-class split-tree pane.
+`urvim.panes` creates retained plugin UI as a first-class split-tree pane.
 The first argument to `create` is a visible editor or plugin pane id; pass
 `null` to split the currently focused pane. The existing pane remains the
 first split child and the new plugin pane is the second child and receives
 focus.
 
 ```text
-let pane_id = urvim.ui.panes.create(null, {
+let pane_id = urvim.panes.create(null, {
     "axis": "vertical",
     "ratio": { "first": 2, "second": 1 },
     "title": "My Plugin",
@@ -528,7 +528,7 @@ let pane_id = urvim.ui.panes.create(null, {
     "focused_header_style": "ui.tab.active"
 })
 
-urvim.ui.panes.set_content(pane_id, [
+urvim.panes.set_content(pane_id, [
     [{ "text": "hello", "style": "syntax.keyword" }]
 ])
 ```
@@ -537,10 +537,10 @@ urvim.ui.panes.set_content(pane_id, [
 panes. The optional ratio defaults to `1:1`. Pane content fills the assigned
 leaf and is clipped to the available content area. Pane ids use the same
 numeric identity as editor pane ids, so any visible pane can be used as a
-target. `urvim.ui.panes.list()` only returns panes owned by the current plugin.
+target. `urvim.panes.list()` returns every pane descriptor; plugin-only configuration, content, and keymap operations enforce ownership.
 
 Plugin panes support the same retained styled content and local keymaps as
-floating plugin windows. They participate in normal focus, resize, equalize,
+plugin overlays. They participate in normal focus, resize, equalize,
 and close operations, but cannot be hidden and are not saved in sessions.
 Closing a pane collapses its parent split. Plugin teardown closes all panes
 owned by that plugin.
@@ -550,18 +550,18 @@ title. The optional title is centered and clipped to the available width, and
 retained content starts on the next row. The header uses `focused_header_style`
 while focused and `header_style` while unfocused. They default to
 `ui.tab.active` and `ui.tab.inactive`, respectively. `body_style` controls the
-content area. Unlike floating plugin windows, plugin panes do not accept
+content area. Unlike plugin overlays, plugin panes do not accept
 `border_style` because they use the layout's split separators instead of
-drawing a window border.
+drawing a separate border.
 
 Plugin panes use the same keymap precedence and inheritance behavior as focused
-plugin windows.
+plugin overlays.
 
 ### Line Formatting
 
 `urvim.ui.line_format.render` exposes urvim's reusable line formatter to
 plugins. It formats one line and returns the same nested content value accepted
-by `urvim.ui.windows.set_content`:
+by `urvim.ui.overlays.set_content`:
 
 ```text
 let content = urvim.ui.line_format.render({
@@ -583,14 +583,14 @@ let content = urvim.ui.line_format.render({
         }
     ]
 })
-urvim.ui.windows.set_content(window_id, content)
+urvim.ui.overlays.set_content(overlay_id, content)
 ```
 
 `width` is the available content width for this one-shot render. Each section
 requires a width policy: `fixed` uses `value`, `measured` uses the value's
 display width, and `flex` shares remaining width by `weight`. Sections default
 to left alignment and clipping. Styles are optional theme tag names; `null` or
-an omitted style uses the window body style. Formatting does not automatically
+an omitted style uses the overlay body style. Formatting does not automatically
 repeat after a terminal resize, so plugins should render again when they need
 different width allocations.
 
@@ -660,9 +660,9 @@ Currently emitted event names:
 - `InsertSessionChanged`
 - `BufferModifiedChanged`
 - `BufferFiletypeChanged`
-- `WindowCreated`
-- `WindowClosed`
-- `WindowFocused`
+- `PaneCreated`
+- `PaneClosed`
+- `PaneFocused`
 - `TabOpened`
 - `TabClosed`
 - `TabActivated`
@@ -696,37 +696,37 @@ The buffer lifecycle events `BufferOpened`, `BufferLoaded`, `BufferSaved`, `Buff
 
 `BufferPathChanged` additionally contains `previous_path`, which is `null` when the buffer was previously unnamed. Save-as emits `BufferPathChanged` before `BufferSaved`; failed save-as operations do not change the path. `BufferReloaded` is emitted after a clean buffer is successfully reloaded from disk. `ExternalFileConflict` is emitted once for each distinct changed disk state observed while the buffer has unsaved edits, rather than on every filesystem poll.
 
-Window and tab ids are stable for the current editor process. Tab ids are newly allocated when session state is restored rather than persisted. Window lifecycle payloads are:
+Pane and tab ids are stable for the current editor process. Tab ids are newly allocated when session state is restored rather than persisted. Pane lifecycle payloads are:
 
-- `WindowCreated`: `window_id`, `buffer_id`, and `tab_id` for the initial active tab
-- `WindowClosed`: `window_id`, `buffer_id`, and `tab_id` for the final active tab
-- `WindowFocused`: `previous_window_id` (`null` when absent), `window_id`, `buffer_id`, and `tab_id`
+- `PaneCreated`: `pane_id`, `kind`, and editor-only `buffer_id` and `tab_id`
+- `PaneClosed`: `pane_id`, `kind`, and editor-only `buffer_id` and `tab_id`
+- `PaneFocused`: `previous_pane_id`, `pane_id`, `kind`, and editor-only `buffer_id` and `tab_id`
 
 Tab lifecycle payloads are:
 
-- `TabOpened`: `window_id`, `tab_id`, and the buffer snapshot fields listed above
-- `TabClosed`: `window_id`, `tab_id`, and the buffer snapshot fields captured before removal
-- `TabActivated`: `previous_tab_id` (`null` for a newly created window), `tab_id`, `window_id`, and `buffer_id`
+- `TabOpened`: `pane_id`, `tab_id`, and the buffer snapshot fields listed above
+- `TabClosed`: `pane_id`, `tab_id`, and the buffer snapshot fields captured before removal
+- `TabActivated`: `previous_tab_id` (`null` for a newly created pane), `tab_id`, `pane_id`, and `buffer_id`
 
-`ActiveBufferChanged` contains `previous_buffer_id` (`null` when absent), `buffer_id`, `window_id`, and `tab_id`.
+`ActiveBufferChanged` contains `previous_buffer_id` (`null` when absent), `buffer_id`, `pane_id`, and `tab_id`.
 
-High-frequency events are coalesced independently for each buffer or window over one completed terminal key, paste, maintenance/tick batch, plugin callback, or LSP effect. `BufferChanged` contains `buffer_id` and `changed_range`, but excludes edits owned by an active Insert or Replace session. `InsertBufferChanged` reports those edits granularly and contains `buffer_id` and `changed_range`. The range is the UTF-8-safe minimal replacement `{ start, old_end, new_end }`. Each position is `{ row, col }`, with zero-based rows and zero-based UTF-8 byte columns. `BufferModifiedChanged` contains `buffer_id`, `previous_modified`, and `modified`.
+High-frequency events are coalesced independently for each buffer or pane over one completed terminal key, paste, maintenance/tick batch, plugin callback, or LSP effect. `BufferChanged` contains `buffer_id` and `changed_range`, but excludes edits owned by an active Insert or Replace session. `InsertBufferChanged` reports those edits granularly and contains `buffer_id` and `changed_range`. The range is the UTF-8-safe minimal replacement `{ start, old_end, new_end }`. Each position is `{ row, col }`, with zero-based rows and zero-based UTF-8 byte columns. `BufferModifiedChanged` contains `buffer_id`, `previous_modified`, and `modified`.
 
-`InsertSessionChanged` is an aggregate notification emitted when an Insert or Replace session exits or its window, tab, or buffer focus changes. Replace mode counts as an insert session. Initiating edits from commands such as `c`, `cc`, `o`, and `O` belong to the session. Its payload contains `window_id`, `tab_id`, `buffer_id`, `mode`, and one `changed_range` covering the session's net text change. Plugin, LSP, reload, and maintenance edits remain ordinary `BufferChanged` events even while an insert session is active.
+`InsertSessionChanged` is an aggregate notification emitted when an Insert or Replace session exits or its pane, tab, or buffer focus changes. Replace mode counts as an insert session. Initiating edits from commands such as `c`, `cc`, `o`, and `O` belong to the session. Its payload contains `pane_id`, `tab_id`, `buffer_id`, `mode`, and one `changed_range` covering the session's net text change. Plugin, LSP, reload, and maintenance edits remain ordinary `BufferChanged` events even while an insert session is active.
 
-`ModeChanged` contains `window_id`, `buffer_id`, `previous_mode`, and `mode`. `CursorMoved` contains `window_id`, `buffer_id`, `previous_position`, and `position`. `SelectionChanged` contains `window_id`, `buffer_id`, `previous_selection`, and `selection`; either selection may be `null`, otherwise it is `{ anchor, cursor, linewise }` using the same byte-column positions. Net no-ops do not emit an event, and changes to text, modified state, mode, cursor, and selection are separate events.
+`ModeChanged` contains `pane_id`, `buffer_id`, `previous_mode`, and `mode`. `CursorMoved` contains `pane_id`, `buffer_id`, `previous_position`, and `position`. `SelectionChanged` contains `pane_id`, `buffer_id`, `previous_selection`, and `selection`; either selection may be `null`, otherwise it is `{ anchor, cursor, linewise }` using the same byte-column positions. Net no-ops do not emit an event, and changes to text, modified state, mode, cursor, and selection are separate events.
 
 `BufferChanged`, `InsertBufferChanged`, `BufferModifiedChanged`, `ModeChanged`, `CursorMoved`, and `SelectionChanged` also contain `source: { kind, name }`. Stable kinds are `user`, `paste`, `undo`, `redo`, `plugin`, `lsp`, `reload`, and `internal`. `name` is the plugin ID for `plugin`, an optional server name for `lsp`, and `null` otherwise. An event directly produced by plugin P is delivered to other plugins but not back to P. This suppression applies only to the direct origin: events produced later by another hook are not treated as descendants of P.
 
 Event draining captures one FIFO wave at a time, so events generated by hooks wait for the next dispatch wave and cannot overtake already queued lifecycle events. A causal chain is limited to 32 consecutive generated waves. On wave 33 urvim logs and displays a health warning, then drops the remaining generated chain to prevent unbounded hook processing.
 
-Events produced by one layout transition are enqueued in this order: closed tabs, globally closed buffers, closed windows, created windows, opened tabs, globally opened buffers, focused window, activated tabs, then active buffer change. Items within a category follow layout and tab order. Thus a whole-pane close emits all `TabClosed` events, then applicable `BufferClosed` events, then `WindowClosed`, followed by focus, tab activation, and active-buffer events. A split emits `WindowCreated`, `TabOpened`, applicable `BufferOpened`, `WindowFocused`, and `TabActivated` for its initial tab.
+Events produced by one layout transition are enqueued in this order: closed tabs, globally closed buffers, closed panes, created panes, opened tabs, globally opened buffers, focused pane, activated tabs, then active buffer change. Items within a category follow layout and tab order. Overlay lifecycle does not produce pane events. A split emits `PaneCreated`, editor-only tab and buffer events, and `PaneFocused`.
 
-Fresh and session-restored layouts emit their initial state as one transition from an empty layout. Initial `WindowCreated`, `TabOpened`, `BufferOpened`, `WindowFocused`, `TabActivated`, and `ActiveBufferChanged` events are queued in the order above before `EditorStarted`.
+Fresh and session-restored layouts emit their initial state as one transition from an empty layout. Initial `PaneCreated`, `TabOpened`, `BufferOpened`, `PaneFocused`, `TabActivated`, and `ActiveBufferChanged` events are queued in the order above before `EditorStarted`.
 
 `ThemeChanged` is emitted only when the committed theme name changes. Its payload contains `previous_theme`, `theme`, and `source`; stable source values are `picker`, `plugin`, and `fallback`. Picker highlight previews and cancel rollback are transient and do not emit events. Startup establishes the initial theme without emitting this event.
 
-`EditorWillShutdown` is an observational, non-cancellable final notification. Its payload contains `reason` (`quit`, `last_window_closed`, or `error`), sorted `modified_buffer_ids`, and `session_enabled`. Rejected `TryQuit` commands do not emit it. Once shutdown begins, urvim emits it exactly once and drains all hook-generated editor-event waves with the normal 32-wave protection while plugin APIs and the LSP runtime remain available. It then shuts down LSP and drains the resulting `LspBufferDetached`, diagnostics, and `LspServerStopped` events while plugin callbacks and editor APIs remain available. Session saving and terminal teardown happen only after those callbacks finish; commands issued by shutdown hooks cannot cancel this sequence.
+`EditorWillShutdown` is an observational, non-cancellable final notification. Its payload contains `reason` (`quit`, `last_pane_closed`, or `error`), sorted `modified_buffer_ids`, and `session_enabled`. Rejected `TryQuit` commands do not emit it. Once shutdown begins, urvim emits it exactly once and drains all hook-generated editor-event waves with the normal 32-wave protection while plugin APIs and the LSP runtime remain available. It then shuts down LSP and drains the resulting `LspBufferDetached`, diagnostics, and `LspServerStopped` events while plugin callbacks and editor APIs remain available. Session saving and terminal teardown happen only after those callbacks finish; commands issued by shutdown hooks cannot cancel this sequence.
 
 An LSP session is identified by `server_name` plus `workspace_root`. `LspServerStarted` contains those fields and is emitted only after initialization succeeds. `LspServerStartFailed` additionally contains `error`; one event is emitted for a failed live session state even if document synchronization repeats. Removing all matching documents clears that failed state, so a later matching document can produce a new attempt and failure event. `LspServerStopped` additionally contains `reason`, currently `shutdown`.
 
@@ -734,7 +734,7 @@ An LSP session is identified by `server_name` plus `workspace_root`. `LspServerS
 
 `DiagnosticsChanged` is a compact post-mutation snapshot. It contains `buffer_id`, `source` (an LSP server name or plugin diagnostics namespace), `cleared`, `source_count`, `total_count`, `errors`, `warnings`, `information`, and `hints`. Counts are captured after the source replacement or clear; severity counts aggregate all sources for that buffer. The full diagnostics are deliberately omitted and remain available through `urvim.diagnostics.get`. Replacing a source with identical diagnostics and clearing an absent source are no-ops and do not emit this event.
 
-`CommandExecuted` contains `command`, a stable dotted and kebab-case semantic identifier, `success`, and `error` (`null` on success). Examples include `buffer.save`, `buffer.save-as`, `buffer.close`, `window.next-tab`, and `lsp.hover`. Plugin commands include their identifiers as `plugin.<plugin>.<command>`, preserving the plugin and command text. Accepted asynchronous commands report success immediately. Buffer domain events are queued before the command completion event.
+`CommandExecuted` contains `command`, a stable dotted and kebab-case semantic identifier, `success`, and `error` (`null` on success). Examples include `buffer.save`, `buffer.save-as`, `buffer.close`, `tab.next`, and `lsp.hover`. Plugin commands include their identifiers as `plugin.<plugin>.<command>`, preserving the plugin and command text. Accepted asynchronous commands report success immediately. Buffer domain events are queued before the command completion event.
 
 Internal notification enqueueing, completion application, overwrite and git-discard confirmation results, and plugin picker, input, or confirmation responses do not emit `CommandExecuted`. `EditorStarted` has no additional fields.
 

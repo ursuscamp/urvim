@@ -6,9 +6,12 @@ pub mod command;
 pub mod config;
 pub mod diagnostics;
 pub mod editor;
+pub mod editor_pane;
+pub mod editor_tab;
 pub mod event;
 pub mod globals;
 pub mod icon;
+mod jumplist;
 pub mod layout;
 pub mod logger;
 pub mod lsp;
@@ -21,14 +24,10 @@ pub mod session;
 pub mod status_bar;
 pub mod ui;
 pub mod widget;
-pub mod window;
-pub mod window_group;
 
-mod jumplist;
-
+pub use editor_pane::EditorPane;
 pub use layout::Layout;
 pub use path::AbsolutePath;
-pub use window_group::WindowGroup;
 
 /// Logs and enqueues a notification with an explicit level.
 #[macro_export]

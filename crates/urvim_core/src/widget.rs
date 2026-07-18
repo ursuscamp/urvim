@@ -4,8 +4,8 @@
 //! in action handling, event routing, layout, and rendering.
 
 use crate::screen::Screen;
+use crate::ui::geometry::Size;
 use crate::ui::{FocusPolicy, UiConstraints, UiContext, UiEvent, UiEventResult, UiRect};
-use crate::window::Size;
 
 /// Trait for UI widgets.
 ///

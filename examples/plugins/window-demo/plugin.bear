@@ -2,8 +2,8 @@ let demo_title = "Window Demo"
 let docked = false
 
 fn init() {
-    urvim.commands.register("open", open, "Open and focus the window demo")
-    urvim.commands.register("close", close, "Close the window demo")
+    urvim.commands.register("open", open, "Open and focus the overlay demo")
+    urvim.commands.register("close", close, "Close the overlay demo")
     urvim.commands.register("center", center, "Move the demo to the center")
     urvim.commands.register("top_center", top_center, "Move the demo to the top center")
     urvim.commands.register("top_right", top_right, "Move the demo to the top right")
@@ -13,45 +13,45 @@ fn init() {
     urvim.commands.register("lower", lower, "Move the top-center demo lower")
     urvim.commands.register("refresh", refresh, "Refresh the demo help text")
     urvim.commands.register("title_update", title_update, "Change the demo title")
-    urvim.commands.register("show", show, "Show the demo window")
-    urvim.commands.register("focus", focus, "Focus the demo window")
+    urvim.commands.register("show", show, "Show the demo overlay")
+    urvim.commands.register("focus", focus, "Focus the demo overlay")
     urvim.commands.register("dock", dock, "Toggle the demo between floating and docked")
     open([])
 }
 
 fn open(args) {
-    let ids = urvim.ui.windows.list()
+    let ids = urvim.ui.overlays.list()
     if len(ids) > 0 {
-        urvim.ui.windows.show(ids[0])
-        urvim.ui.windows.focus(ids[0])
+        urvim.ui.overlays.show(ids[0])
+        urvim.ui.overlays.focus(ids[0])
         return
     }
     create_floating()
 }
 
 fn close(args) {
-    let ids = urvim.ui.windows.list()
+    let ids = urvim.ui.overlays.list()
     if len(ids) > 0 {
-        urvim.ui.windows.close(ids[0])
+        urvim.ui.overlays.close(ids[0])
         return
     }
-    let pane_ids = urvim.ui.panes.list()
+    let pane_ids = urvim.panes.list()
     if len(pane_ids) > 0 {
-        urvim.ui.panes.close(pane_ids[0])
+        urvim.panes.close(urvim.panes.active()["id"])
     }
 }
 
 fn dock(args) {
-    let floating_ids = urvim.ui.windows.list()
+    let floating_ids = urvim.ui.overlays.list()
     if len(floating_ids) > 0 {
-        urvim.ui.windows.close(floating_ids[0])
+        urvim.ui.overlays.close(floating_ids[0])
         create_docked()
         return
     }
 
-    let pane_ids = urvim.ui.panes.list()
+    let pane_ids = urvim.panes.list()
     if len(pane_ids) > 0 {
-        urvim.ui.panes.close(pane_ids[0])
+        urvim.panes.close(urvim.panes.active()["id"])
         create_floating()
     } else {
         create_floating()
@@ -60,7 +60,7 @@ fn dock(args) {
 
 fn create_floating() {
     docked = false
-    let id = urvim.ui.windows.create({
+    let id = urvim.ui.overlays.create({
         "placement": { "type": "anchored", "anchor": "center" },
         "rows": 17,
         "cols": 62,
@@ -71,12 +71,12 @@ fn create_floating() {
     })
     refresh_window(id)
     bind_window(id)
-    urvim.ui.windows.focus(id)
+    urvim.ui.overlays.focus(id)
 }
 
 fn create_docked() {
     docked = true
-    let id = urvim.ui.panes.create(null, {
+    let id = urvim.panes.create(null, {
         "axis": "vertical",
         "ratio": { "first": 2, "second": 1 },
         "title": demo_title,
@@ -86,7 +86,7 @@ fn create_docked() {
     })
     refresh_pane(id)
     bind_pane(id)
-    urvim.ui.panes.focus(id)
+    urvim.panes.focus(id)
 }
 
 fn center(args) {
@@ -148,14 +148,14 @@ fn lower(args) {
 }
 
 fn refresh(args) {
-    let ids = urvim.ui.windows.list()
+    let ids = urvim.ui.overlays.list()
     if len(ids) > 0 {
         refresh_window(ids[0])
         return
     }
-    let pane_ids = urvim.ui.panes.list()
+    let pane_ids = urvim.panes.list()
     if len(pane_ids) > 0 {
-        refresh_pane(pane_ids[0])
+        refresh_pane(urvim.panes.active()["id"])
     }
 }
 
@@ -165,41 +165,41 @@ fn title_update(args) {
 }
 
 fn show(args) {
-    let ids = urvim.ui.windows.list()
+    let ids = urvim.ui.overlays.list()
     if len(ids) > 0 {
-        urvim.ui.windows.show(ids[0])
+        urvim.ui.overlays.show(ids[0])
     } else {
         open([])
     }
 }
 
 fn focus(args) {
-    let ids = urvim.ui.windows.list()
+    let ids = urvim.ui.overlays.list()
     if len(ids) > 0 {
-        urvim.ui.windows.focus(ids[0])
+        urvim.ui.overlays.focus(ids[0])
     } else {
         open([])
     }
 }
 
 fn configure(opts) {
-    let ids = urvim.ui.windows.list()
+    let ids = urvim.ui.overlays.list()
     if len(ids) > 0 {
-        urvim.ui.windows.configure(ids[0], opts)
+        urvim.ui.overlays.configure(ids[0], opts)
         return
     }
-    let pane_ids = urvim.ui.panes.list()
+    let pane_ids = urvim.panes.list()
     if len(pane_ids) > 0 {
-        urvim.ui.panes.configure(pane_ids[0], opts)
+        urvim.panes.configure(urvim.panes.active()["id"], opts)
     }
 }
 
 fn refresh_window(id) {
-    urvim.ui.windows.set_content(id, demo_content())
+    urvim.ui.overlays.set_content(id, demo_content())
 }
 
 fn refresh_pane(id) {
-    urvim.ui.panes.set_content(id, demo_content())
+    urvim.panes.set_content(id, demo_content())
 }
 
 fn demo_content() {
@@ -245,7 +245,7 @@ fn demo_content() {
         heading_line("Other actions:", "retained content and focus"),
         key_line("r", "refresh the retained help text", "syntax.string"),
         key_line("t", "change the title", "syntax.string"),
-        key_line("q", "close the window or pane", "syntax.string"),
+        key_line("q", "close the overlay or pane", "syntax.string"),
         format_line({
             "width": 62,
             "values": ["Esc", "return focus to the editor or cancel a pane key sequence"],
@@ -296,20 +296,20 @@ fn key_line(key, text, style) {
 }
 
 fn bind_window(id) {
-    urvim.ui.windows.set_keymap(id, "h", "plugin window-demo center")
-    urvim.ui.windows.set_keymap(id, "j", "plugin window-demo lower")
-    urvim.ui.windows.set_keymap(id, "k", "plugin window-demo higher")
-    urvim.ui.windows.set_keymap(id, "l", "plugin window-demo top_right")
-    urvim.ui.windows.set_keymap(id, "f", "plugin window-demo fixed")
-    urvim.ui.windows.set_keymap(id, "r", "plugin window-demo refresh")
-    urvim.ui.windows.set_keymap(id, "t", "plugin window-demo title_update")
-    urvim.ui.windows.set_keymap(id, "q", "plugin window-demo close")
-    urvim.ui.windows.set_keymap(id, "d", "plugin window-demo dock")
+    urvim.ui.overlays.set_keymap(id, "h", "plugin window-demo center")
+    urvim.ui.overlays.set_keymap(id, "j", "plugin window-demo lower")
+    urvim.ui.overlays.set_keymap(id, "k", "plugin window-demo higher")
+    urvim.ui.overlays.set_keymap(id, "l", "plugin window-demo top_right")
+    urvim.ui.overlays.set_keymap(id, "f", "plugin window-demo fixed")
+    urvim.ui.overlays.set_keymap(id, "r", "plugin window-demo refresh")
+    urvim.ui.overlays.set_keymap(id, "t", "plugin window-demo title_update")
+    urvim.ui.overlays.set_keymap(id, "q", "plugin window-demo close")
+    urvim.ui.overlays.set_keymap(id, "d", "plugin window-demo dock")
 }
 
 fn bind_pane(id) {
-    urvim.ui.panes.set_keymap(id, "r", "plugin window-demo refresh")
-    urvim.ui.panes.set_keymap(id, "t", "plugin window-demo title_update")
-    urvim.ui.panes.set_keymap(id, "q", "plugin window-demo close")
-    urvim.ui.panes.set_keymap(id, "d", "plugin window-demo dock")
+    urvim.panes.set_keymap(id, "r", "plugin window-demo refresh")
+    urvim.panes.set_keymap(id, "t", "plugin window-demo title_update")
+    urvim.panes.set_keymap(id, "q", "plugin window-demo close")
+    urvim.panes.set_keymap(id, "d", "plugin window-demo dock")
 }

@@ -12,8 +12,8 @@ use urvim_core::buffer::{Buffer, BufferId};
 use urvim_core::cli::CliFileSpec;
 use urvim_core::editor::{EditorAction, EditorOperation, ModeKind, RepeatReplay};
 use urvim_core::ui::{Intent, UiEvent};
-use urvim_core::window::VisualSelectionKind;
-use urvim_core::window_group::WindowGroup;
+use urvim_core::editor_tab::VisualSelectionKind;
+use urvim_core::editor_pane::EditorPane;
 use urvim_core::{config::Config, globals, screen::Screen};
 use urvim_terminal::{Event, Key, KeyCode, Terminal};
 
@@ -24,7 +24,7 @@ struct TestBackend {
 
 fn shared_test_layout() -> SharedLayout {
     Rc::new(RefCell::new(urvim_core::Layout::new(
-        WindowGroup::from_buffers(vec![Buffer::new()]),
+        EditorPane::from_buffers(vec![Buffer::new()]),
     )))
 }
 
@@ -172,7 +172,7 @@ fn render_frame_if_needed_skips_idle_noop_frames() {
     let output = stdout.output.clone();
     let mut terminal = Terminal::new_for_testing(stdin, stdout);
     let mut layout =
-        urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("hello")]));
+        urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::from_str("hello")]));
     let mut screen = Screen::new(1, 5);
 
     assert!(!render_frame_if_needed(false, &mut layout, &mut screen, &mut terminal, 1, 5).unwrap());
@@ -181,7 +181,7 @@ fn render_frame_if_needed_skips_idle_noop_frames() {
 
 #[test]
 fn apply_undo_redo_requests_redraw_after_success() {
-    let mut layout = urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::new()]));
+    let mut layout = urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::new()]));
 
     assert!(
         layout
@@ -232,7 +232,7 @@ fn plugin_open_file_opens_existing_file() {
     let path = std::env::temp_dir().join(unique);
     std::fs::write(&path, "hello world").unwrap();
 
-    let mut layout = urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::new()]));
+    let mut layout = urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::new()]));
     let request = urvim_plugin::PluginRequest::new(
         200,
         "editor/openFile",
@@ -268,7 +268,7 @@ fn plugin_open_file_reports_false_when_file_already_open() {
     let path = std::env::temp_dir().join(unique);
     std::fs::write(&path, "hello world").unwrap();
 
-    let mut layout = urvim_core::Layout::new(WindowGroup::from_paths(std::slice::from_ref(&path)));
+    let mut layout = urvim_core::Layout::new(EditorPane::from_paths(std::slice::from_ref(&path)));
     let buffer_id = layout.active_buffer_view().buffer_id();
     drain_editor_events_serial();
 
@@ -313,7 +313,7 @@ fn plugin_open_file_opens_missing_file_backed_buffer() {
             .as_nanos()
     ));
 
-    let mut layout = urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::new()]));
+    let mut layout = urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::new()]));
     let request = urvim_plugin::PluginRequest::new(
         201,
         "editor/openFile",
@@ -332,7 +332,7 @@ fn plugin_open_file_opens_missing_file_backed_buffer() {
 #[test]
 fn plugin_open_file_requires_path() {
     let _guard = buffer_pool_lock();
-    let mut layout = urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::new()]));
+    let mut layout = urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::new()]));
     let request = urvim_plugin::PluginRequest::new(202, "editor/openFile", serde_json::json!({}));
 
     let response = resolve_test_plugin_editor_request(&mut layout, &request);
@@ -345,7 +345,7 @@ fn plugin_open_file_requires_path() {
 fn plugin_open_buffer_opens_hidden_loaded_buffer() {
     let _guard = buffer_pool_lock();
     let mut layout =
-        urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("visible")]));
+        urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::from_str("visible")]));
 
     let hidden_id = globals::with_buffer_pool(|pool| {
         let id = pool.create_buffer();
@@ -378,7 +378,7 @@ fn plugin_open_buffer_opens_hidden_loaded_buffer() {
 #[test]
 fn plugin_open_buffer_rejects_unknown_id() {
     let _guard = buffer_pool_lock();
-    let mut layout = urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::new()]));
+    let mut layout = urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::new()]));
     let request = urvim_plugin::PluginRequest::new(
         204,
         "editor/openBuffer",
@@ -394,7 +394,7 @@ fn plugin_open_buffer_rejects_unknown_id() {
 #[test]
 fn plugin_focus_buffer_focuses_visible_buffer() {
     let _guard = buffer_pool_lock();
-    let mut layout = urvim_core::Layout::new(WindowGroup::from_buffers(vec![
+    let mut layout = urvim_core::Layout::new(EditorPane::from_buffers(vec![
         Buffer::from_str("first"),
         Buffer::from_str("second"),
     ]));
@@ -423,7 +423,7 @@ fn plugin_focus_buffer_focuses_visible_buffer() {
 fn plugin_focus_buffer_rejects_hidden_without_open_if_needed() {
     let _guard = buffer_pool_lock();
     let mut layout =
-        urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("visible")]));
+        urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::from_str("visible")]));
 
     let hidden_id = globals::with_buffer_pool(|pool| {
         let id = pool.create_buffer();
@@ -449,7 +449,7 @@ fn plugin_focus_buffer_rejects_hidden_without_open_if_needed() {
 fn plugin_focus_buffer_opens_hidden_with_open_if_needed() {
     let _guard = buffer_pool_lock();
     let mut layout =
-        urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("visible")]));
+        urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::from_str("visible")]));
 
     let hidden_id = globals::with_buffer_pool(|pool| {
         let id = pool.create_buffer();
@@ -481,7 +481,7 @@ fn plugin_focus_buffer_opens_hidden_with_open_if_needed() {
 #[test]
 fn plugin_focus_buffer_rejects_unknown_id() {
     let _guard = buffer_pool_lock();
-    let mut layout = urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::new()]));
+    let mut layout = urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::new()]));
     let request = urvim_plugin::PluginRequest::new(
         208,
         "editor/focusBuffer",
@@ -498,7 +498,7 @@ fn plugin_focus_buffer_rejects_unknown_id() {
 fn plugin_execute_command_runs_safe_command() {
     let _guard = buffer_pool_lock();
     let mut layout =
-        urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("hello")]));
+        urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::from_str("hello")]));
     let request = urvim_plugin::PluginRequest::new(
         209,
         "editor/executeCommand",
@@ -517,7 +517,7 @@ fn plugin_execute_command_runs_safe_command() {
 #[test]
 fn plugin_execute_command_rejects_plugin_commands() {
     let _guard = buffer_pool_lock();
-    let mut layout = urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::new()]));
+    let mut layout = urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::new()]));
     let request = urvim_plugin::PluginRequest::new(
         210,
         "editor/executeCommand",
@@ -538,7 +538,7 @@ fn plugin_execute_command_rejects_plugin_commands() {
 #[test]
 fn plugin_execute_command_rejects_quit_commands() {
     let _guard = buffer_pool_lock();
-    let mut layout = urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::new()]));
+    let mut layout = urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::new()]));
     let request = urvim_plugin::PluginRequest::new(
         211,
         "editor/executeCommand",
@@ -559,7 +559,7 @@ fn plugin_execute_command_rejects_quit_commands() {
 #[test]
 fn plugin_execute_command_rejects_unknown_command() {
     let _guard = buffer_pool_lock();
-    let mut layout = urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::new()]));
+    let mut layout = urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::new()]));
     let request = urvim_plugin::PluginRequest::new(
         212,
         "editor/executeCommand",
@@ -575,7 +575,7 @@ fn plugin_execute_command_rejects_unknown_command() {
 #[test]
 fn plugin_execute_command_requires_command() {
     let _guard = buffer_pool_lock();
-    let mut layout = urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::new()]));
+    let mut layout = urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::new()]));
     let request =
         urvim_plugin::PluginRequest::new(213, "editor/executeCommand", serde_json::json!({}));
 
@@ -588,7 +588,7 @@ fn plugin_execute_command_requires_command() {
 #[test]
 fn plugin_close_buffer_closes_view() {
     let _guard = buffer_pool_lock();
-    let mut layout = urvim_core::Layout::new(WindowGroup::from_buffers(vec![
+    let mut layout = urvim_core::Layout::new(EditorPane::from_buffers(vec![
         Buffer::from_str("first"),
         Buffer::from_str("second"),
     ]));
@@ -612,7 +612,7 @@ fn plugin_close_buffer_closes_view() {
 fn plugin_close_buffer_returns_closed_false_for_non_visible_buffer() {
     let _guard = buffer_pool_lock();
     let mut layout =
-        urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("visible")]));
+        urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::from_str("visible")]));
 
     let hidden_id = globals::with_buffer_pool(|pool| {
         let id = pool.create_buffer();
@@ -639,7 +639,7 @@ fn plugin_close_buffer_returns_closed_false_for_non_visible_buffer() {
 #[test]
 fn plugin_close_buffer_requires_buffer_id() {
     let _guard = buffer_pool_lock();
-    let mut layout = urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::new()]));
+    let mut layout = urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::new()]));
     let request =
         urvim_plugin::PluginRequest::new(216, "editor/closeBuffer", serde_json::json!({}));
 
@@ -652,7 +652,7 @@ fn plugin_close_buffer_requires_buffer_id() {
 #[test]
 fn plugin_unload_buffer_refuses_modified_without_force() {
     let _guard = buffer_pool_lock();
-    let mut layout = urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str(
+    let mut layout = urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::from_str(
         "modified",
     )]));
     let buffer_id = layout.active_buffer_view().buffer_id();
@@ -678,7 +678,7 @@ fn plugin_unload_buffer_refuses_modified_without_force() {
 fn plugin_unload_buffer_force_unloads_modified_buffer() {
     let _guard = buffer_pool_lock();
     clear_editor_events_for_test();
-    let mut layout = urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str(
+    let mut layout = urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::from_str(
         "modified",
     )]));
     drain_editor_events_serial();
@@ -708,7 +708,7 @@ fn plugin_unload_buffer_force_unloads_modified_buffer() {
 #[test]
 fn plugin_unload_buffer_requires_buffer_id() {
     let _guard = buffer_pool_lock();
-    let mut layout = urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::new()]));
+    let mut layout = urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::new()]));
     let request =
         urvim_plugin::PluginRequest::new(219, "editor/unloadBuffer", serde_json::json!({}));
 
@@ -721,7 +721,7 @@ fn plugin_unload_buffer_requires_buffer_id() {
 #[test]
 fn plugin_get_editor_state_returns_snapshot() {
     let _guard = buffer_pool_lock();
-    let mut layout = urvim_core::Layout::new(WindowGroup::from_buffers(vec![
+    let mut layout = urvim_core::Layout::new(EditorPane::from_buffers(vec![
         Buffer::from_str("first"),
         Buffer::from_str("second"),
     ]));
@@ -756,7 +756,7 @@ fn plugin_open_buffer_enqueues_buffer_opened_for_hidden_loaded_buffer() {
     clear_editor_events_for_test();
 
     let mut layout =
-        urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("visible")]));
+        urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::from_str("visible")]));
     drain_editor_events_serial();
 
     let hidden_id = globals::with_buffer_pool(|pool| {
@@ -794,7 +794,7 @@ fn plugin_open_buffer_does_not_enqueue_buffer_opened_when_already_visible() {
     let _guard = buffer_pool_lock();
     clear_editor_events_for_test();
 
-    let mut layout = urvim_core::Layout::new(WindowGroup::from_buffers(vec![
+    let mut layout = urvim_core::Layout::new(EditorPane::from_buffers(vec![
         Buffer::from_str("first"),
         Buffer::from_str("second"),
     ]));
@@ -829,7 +829,7 @@ fn plugin_focus_buffer_open_if_needed_enqueues_buffer_opened() {
     clear_editor_events_for_test();
 
     let mut layout =
-        urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("visible")]));
+        urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::from_str("visible")]));
     drain_editor_events_serial();
 
     let hidden_id = globals::with_buffer_pool(|pool| {
@@ -880,7 +880,7 @@ fn plugin_close_buffer_runs_orphan_cleanup() {
     std::fs::write(&path, "orphan").unwrap();
 
     let visible_buffer = Buffer::from_str("visible");
-    let mut layout = urvim_core::Layout::new(WindowGroup::from_buffers(vec![visible_buffer]));
+    let mut layout = urvim_core::Layout::new(EditorPane::from_buffers(vec![visible_buffer]));
     let visible_id = layout.active_buffer_view().buffer_id();
 
     let orphan_id = globals::with_buffer_pool(|pool| {
@@ -921,7 +921,7 @@ fn plugin_close_buffer_runs_orphan_cleanup() {
 fn plugin_execute_command_reports_unhandled() {
     let _guard = buffer_pool_lock();
     let mut layout =
-        urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("hello")]));
+        urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::from_str("hello")]));
 
     let request = urvim_plugin::PluginRequest::new(
         225,
@@ -942,7 +942,7 @@ fn plugin_execute_command_reports_unhandled() {
 fn plugin_active_buffer_request_returns_metadata() {
     let _guard = buffer_pool_lock();
     let mut layout =
-        urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("hello")]));
+        urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::from_str("hello")]));
     layout
         .active_buffer_view_mut()
         .with_buffer_mut(|buffer| buffer.set_syntax_name("rust"));
@@ -963,7 +963,7 @@ fn plugin_active_buffer_request_returns_metadata() {
 #[test]
 fn plugin_buffer_text_request_returns_content() {
     let _guard = buffer_pool_lock();
-    let mut layout = urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str(
+    let mut layout = urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::from_str(
         "one\ntwo",
     )]));
     let buffer_id = layout.active_buffer_view().buffer_id().get();
@@ -985,7 +985,7 @@ fn plugin_buffer_text_request_returns_content() {
 #[test]
 fn plugin_config_request_returns_safe_subset() {
     let _guard = buffer_pool_lock();
-    let mut layout = urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::new()]));
+    let mut layout = urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::new()]));
     let config = Config {
         theme: "Demo Night".to_string(),
         syntax: false,
@@ -1009,7 +1009,7 @@ fn plugin_config_request_returns_safe_subset() {
 #[test]
 fn plugin_buffer_text_request_errors_for_unknown_buffer() {
     let _guard = buffer_pool_lock();
-    let mut layout = urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::new()]));
+    let mut layout = urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::new()]));
     let request = urvim_plugin::PluginRequest::new(
         10,
         "editor/getBufferText",
@@ -1025,7 +1025,7 @@ fn plugin_buffer_text_request_errors_for_unknown_buffer() {
 #[test]
 fn plugin_editor_request_errors_for_unsupported_method() {
     let _guard = buffer_pool_lock();
-    let mut layout = urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::new()]));
+    let mut layout = urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::new()]));
     let request = urvim_plugin::PluginRequest::new(11, "editor/mutate", serde_json::json!({}));
 
     let response = resolve_test_plugin_editor_request(&mut layout, &request);
@@ -1042,7 +1042,7 @@ fn plugin_editor_request_errors_for_unsupported_method() {
 #[test]
 fn plugin_register_command_request_updates_contributions() {
     let _guard = buffer_pool_lock();
-    let mut layout = urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::new()]));
+    let mut layout = urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::new()]));
     let mut contributions = urvim_plugin::PluginContributionRegistry::default();
     let request = urvim_plugin::PluginRequest::new(
         16,
@@ -1069,7 +1069,7 @@ fn plugin_register_command_request_updates_contributions() {
 #[test]
 fn plugin_unregister_command_request_removes_contribution() {
     let _guard = buffer_pool_lock();
-    let mut layout = urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::new()]));
+    let mut layout = urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::new()]));
     let mut contributions = urvim_plugin::PluginContributionRegistry::default();
     contributions
         .register_command(
@@ -1101,7 +1101,7 @@ fn plugin_unregister_command_request_removes_contribution() {
 #[test]
 fn plugin_register_script_request_updates_contributions() {
     let _guard = buffer_pool_lock();
-    let mut layout = urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::new()]));
+    let mut layout = urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::new()]));
     let mut contributions = urvim_plugin::PluginContributionRegistry::default();
     let request = urvim_plugin::PluginRequest::new(
         18,
@@ -1133,7 +1133,7 @@ fn plugin_register_script_request_updates_contributions() {
 #[test]
 fn plugin_unregister_script_request_removes_dynamic_script() {
     let _guard = buffer_pool_lock();
-    let mut layout = urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::new()]));
+    let mut layout = urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::new()]));
     let mut contributions = urvim_plugin::PluginContributionRegistry::default();
     contributions
         .register_script(
@@ -1169,7 +1169,7 @@ fn plugin_unregister_script_request_removes_dynamic_script() {
 #[test]
 fn plugin_register_script_rejects_manifest_script_conflict() {
     let _guard = buffer_pool_lock();
-    let mut layout = urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::new()]));
+    let mut layout = urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::new()]));
     let mut contributions = urvim_plugin::PluginContributionRegistry::default();
     contributions.register_static_script(
         "demo-plugin",
@@ -1205,7 +1205,7 @@ fn plugin_register_theme_request_loads_theme_and_records_owner() {
     globals::set_theme_registry(
         urvim_theme::ThemeRegistry::load_builtin().expect("builtins should load"),
     );
-    let mut layout = urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::new()]));
+    let mut layout = urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::new()]));
     let mut contributions = urvim_plugin::PluginContributionRegistry::default();
     let request = urvim_plugin::PluginRequest::new(
         21,
@@ -1251,7 +1251,7 @@ fn plugin_unregister_theme_request_removes_owned_theme() {
     .expect("theme should resolve");
     registry.insert(theme).expect("theme should insert");
     globals::set_theme_registry(registry);
-    let mut layout = urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::new()]));
+    let mut layout = urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::new()]));
     let mut contributions = urvim_plugin::PluginContributionRegistry::default();
     contributions
         .register_theme(
@@ -1296,7 +1296,7 @@ fn plugin_unregister_theme_request_removes_owned_theme() {
 #[test]
 fn plugin_register_event_hook_request_updates_contributions() {
     let _guard = buffer_pool_lock();
-    let mut layout = urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::new()]));
+    let mut layout = urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::new()]));
     let mut contributions = urvim_plugin::PluginContributionRegistry::default();
     let request = urvim_plugin::PluginRequest::new(
         23,
@@ -1323,7 +1323,7 @@ fn plugin_register_event_hook_request_updates_contributions() {
 #[test]
 fn plugin_register_event_hook_rejects_unknown_event() {
     let _guard = buffer_pool_lock();
-    let mut layout = urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::new()]));
+    let mut layout = urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::new()]));
     let mut contributions = urvim_plugin::PluginContributionRegistry::default();
     let request = urvim_plugin::PluginRequest::new(
         24,
@@ -1345,7 +1345,7 @@ fn plugin_register_event_hook_rejects_unknown_event() {
 #[test]
 fn plugin_unregister_event_hook_removes_only_calling_plugin_hook() {
     let _guard = buffer_pool_lock();
-    let mut layout = urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::new()]));
+    let mut layout = urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::new()]));
     let mut contributions = urvim_plugin::PluginContributionRegistry::default();
     contributions
         .register_event_hook(
@@ -1429,7 +1429,7 @@ fn plugin_command_empty_response_does_not_notify() {
 fn plugin_apply_edit_inserts_text() {
     let _guard = buffer_pool_lock();
     let mut layout =
-        urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("world")]));
+        urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::from_str("world")]));
     let buffer_id = layout.active_buffer_view().buffer_id().get();
     let request = urvim_plugin::PluginRequest::new(
         12,
@@ -1466,7 +1466,7 @@ fn plugin_save_buffer_saves_file_backed_buffer_and_emits_event() {
         .expect("temp path should resolve absolutely");
 
     let buffer = Buffer::with_path(absolute_path);
-    let mut layout = urvim_core::Layout::new(WindowGroup::from_buffers(vec![buffer]));
+    let mut layout = urvim_core::Layout::new(EditorPane::from_buffers(vec![buffer]));
     let buffer_id = layout.active_buffer_view().buffer_id();
     drain_editor_events_serial();
 
@@ -1511,7 +1511,7 @@ fn plugin_save_buffer_save_as_writes_path_and_emits_event() {
     let path = std::env::temp_dir().join(unique);
 
     let mut layout =
-        urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("save me")]));
+        urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::from_str("save me")]));
     let buffer_id = layout.active_buffer_view().buffer_id();
     drain_editor_events_serial();
 
@@ -1546,7 +1546,7 @@ fn plugin_save_buffer_save_as_writes_path_and_emits_event() {
 #[test]
 fn plugin_save_buffer_rejects_unknown_buffer() {
     let _guard = buffer_pool_lock();
-    let mut layout = urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::new()]));
+    let mut layout = urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::new()]));
     let request = urvim_plugin::PluginRequest::new(
         302,
         "editor/saveBuffer",
@@ -1562,7 +1562,7 @@ fn plugin_save_buffer_rejects_unknown_buffer() {
 #[test]
 fn plugin_save_buffer_rejects_unnamed_without_path() {
     let _guard = buffer_pool_lock();
-    let mut layout = urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::new()]));
+    let mut layout = urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::new()]));
     let buffer_id = layout.active_buffer_view().buffer_id();
     let request = urvim_plugin::PluginRequest::new(
         303,
@@ -1579,7 +1579,7 @@ fn plugin_save_buffer_rejects_unnamed_without_path() {
 #[test]
 fn plugin_set_buffer_filetype_sets_filetype() {
     let _guard = buffer_pool_lock();
-    let mut layout = urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::new()]));
+    let mut layout = urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::new()]));
     let buffer_id = layout.active_buffer_view().buffer_id();
     let request = urvim_plugin::PluginRequest::new(
         304,
@@ -1600,7 +1600,7 @@ fn plugin_set_buffer_filetype_sets_filetype() {
 fn plugin_set_buffer_filetype_enqueues_event() {
     let _guard = buffer_pool_lock();
     clear_editor_events_for_test();
-    let mut layout = urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::new()]));
+    let mut layout = urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::new()]));
     let buffer_id = layout.active_buffer_view().buffer_id();
     drain_editor_events_serial();
 
@@ -1630,7 +1630,7 @@ fn plugin_set_buffer_filetype_enqueues_event() {
 #[test]
 fn plugin_set_buffer_filetype_requires_filetype() {
     let _guard = buffer_pool_lock();
-    let mut layout = urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::new()]));
+    let mut layout = urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::new()]));
     let buffer_id = layout.active_buffer_view().buffer_id();
     let request = urvim_plugin::PluginRequest::new(
         306,
@@ -1647,7 +1647,7 @@ fn plugin_set_buffer_filetype_requires_filetype() {
 #[test]
 fn plugin_set_buffer_filetype_rejects_unknown_buffer() {
     let _guard = buffer_pool_lock();
-    let mut layout = urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::new()]));
+    let mut layout = urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::new()]));
     let request = urvim_plugin::PluginRequest::new(
         307,
         "editor/setBufferFiletype",
@@ -1664,7 +1664,7 @@ fn plugin_set_buffer_filetype_rejects_unknown_buffer() {
 fn plugin_set_buffer_filetype_rejects_unknown_filetype_without_event() {
     let _guard = buffer_pool_lock();
     clear_editor_events_for_test();
-    let mut layout = urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::new()]));
+    let mut layout = urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::new()]));
     let buffer_id = layout.active_buffer_view().buffer_id();
     drain_editor_events_serial();
     let request = urvim_plugin::PluginRequest::new(
@@ -1690,7 +1690,7 @@ fn plugin_list_themes_returns_registered_themes_and_active() {
     globals::set_theme_registry(
         urvim_theme::ThemeRegistry::load_builtin().expect("builtins should load"),
     );
-    let mut layout = urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::new()]));
+    let mut layout = urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::new()]));
     let request = urvim_plugin::PluginRequest::new(308, "editor/listThemes", serde_json::json!({}));
 
     let response = resolve_test_plugin_editor_request(&mut layout, &request);
@@ -1715,7 +1715,7 @@ fn plugin_set_theme_updates_active_theme() {
     globals::set_theme_registry(
         urvim_theme::ThemeRegistry::load_builtin().expect("builtins should load"),
     );
-    let mut layout = urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::new()]));
+    let mut layout = urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::new()]));
     let request = urvim_plugin::PluginRequest::new(
         309,
         "editor/setTheme",
@@ -1745,7 +1745,7 @@ fn plugin_set_theme_rejects_unknown_theme() {
     globals::set_theme_registry(
         urvim_theme::ThemeRegistry::load_builtin().expect("builtins should load"),
     );
-    let mut layout = urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::new()]));
+    let mut layout = urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::new()]));
     let request = urvim_plugin::PluginRequest::new(
         311,
         "editor/setTheme",
@@ -1761,7 +1761,7 @@ fn plugin_set_theme_rejects_unknown_theme() {
 #[test]
 fn plugin_list_commands_includes_builtin_roots() {
     let _guard = buffer_pool_lock();
-    let mut layout = urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::new()]));
+    let mut layout = urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::new()]));
     let request =
         urvim_plugin::PluginRequest::new(312, "editor/listCommands", serde_json::json!({}));
 
@@ -1799,7 +1799,7 @@ fn plugin_list_commands_includes_builtin_roots() {
 #[test]
 fn plugin_list_commands_includes_configured_alias_and_script() {
     let _guard = buffer_pool_lock();
-    let mut layout = urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::new()]));
+    let mut layout = urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::new()]));
     let request =
         urvim_plugin::PluginRequest::new(313, "editor/listCommands", serde_json::json!({}));
 
@@ -1830,7 +1830,7 @@ fn plugin_list_commands_includes_configured_alias_and_script() {
 #[test]
 fn plugin_list_commands_includes_dynamic_plugin_command_and_script() {
     let _guard = buffer_pool_lock();
-    let mut layout = urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::new()]));
+    let mut layout = urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::new()]));
     let mut contributions = urvim_plugin::PluginContributionRegistry::default();
     contributions
         .register_command(
@@ -1893,7 +1893,7 @@ fn plugin_list_commands_includes_dynamic_plugin_command_and_script() {
 #[test]
 fn plugin_list_plugin_contributions_returns_dynamic_contributions() {
     let _guard = buffer_pool_lock();
-    let mut layout = urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::new()]));
+    let mut layout = urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::new()]));
     let mut contributions = urvim_plugin::PluginContributionRegistry::default();
     contributions
         .register_command(
@@ -1943,7 +1943,7 @@ fn plugin_list_plugin_contributions_returns_dynamic_contributions() {
 #[test]
 fn plugin_list_plugin_contributions_filters_by_plugin() {
     let _guard = buffer_pool_lock();
-    let mut layout = urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::new()]));
+    let mut layout = urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::new()]));
     let mut contributions = urvim_plugin::PluginContributionRegistry::default();
     contributions
         .register_command(
@@ -1990,7 +1990,7 @@ fn plugin_list_plugin_contributions_filters_by_plugin() {
 #[test]
 fn plugin_list_plugin_contributions_returns_empty_for_no_contributions() {
     let _guard = buffer_pool_lock();
-    let mut layout = urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::new()]));
+    let mut layout = urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::new()]));
     let mut contributions = urvim_plugin::PluginContributionRegistry::default();
     let request = urvim_plugin::PluginRequest::new(
         317,
@@ -2017,7 +2017,7 @@ fn plugin_list_plugin_contributions_returns_empty_for_no_contributions() {
 fn plugin_get_visible_ranges_returns_active_pane_range() {
     let _guard = buffer_pool_lock();
     let mut layout =
-        urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("hello")]));
+        urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::from_str("hello")]));
     let request =
         urvim_plugin::PluginRequest::new(318, "editor/getVisibleRanges", serde_json::json!({}));
 
@@ -2038,7 +2038,7 @@ fn plugin_get_visible_ranges_returns_active_pane_range() {
 #[test]
 fn plugin_get_visible_ranges_filters_by_buffer() {
     let _guard = buffer_pool_lock();
-    let mut layout = urvim_core::Layout::new(WindowGroup::from_buffers(vec![
+    let mut layout = urvim_core::Layout::new(EditorPane::from_buffers(vec![
         Buffer::from_str("first"),
         Buffer::from_str("second"),
     ]));
@@ -2066,7 +2066,7 @@ fn plugin_get_visible_ranges_filters_by_buffer() {
 fn plugin_get_visible_ranges_rejects_unknown_buffer() {
     let _guard = buffer_pool_lock();
     let mut layout =
-        urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("hello")]));
+        urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::from_str("hello")]));
     let request = urvim_plugin::PluginRequest::new(
         320,
         "editor/getVisibleRanges",
@@ -2083,7 +2083,7 @@ fn plugin_get_visible_ranges_rejects_unknown_buffer() {
 fn plugin_get_pane_state_returns_single_pane() {
     let _guard = buffer_pool_lock();
     let mut layout =
-        urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("hello")]));
+        urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::from_str("hello")]));
     let buffer_id = layout.active_buffer_view().buffer_id();
     let request =
         urvim_plugin::PluginRequest::new(321, "editor/getPaneState", serde_json::json!({}));
@@ -2110,7 +2110,7 @@ fn plugin_get_pane_state_returns_single_pane() {
 fn plugin_get_pane_state_returns_split_panes() {
     let _guard = buffer_pool_lock();
     let mut layout =
-        urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("hello")]));
+        urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::from_str("hello")]));
     process_intent_queue(
         &mut layout,
         vec![Intent::Command(urvim_core::ui::Command::SplitVertical)],
@@ -2138,7 +2138,7 @@ fn plugin_get_pane_state_returns_split_panes() {
 #[test]
 fn plugin_get_pane_state_includes_tabs_and_active_tab() {
     let _guard = buffer_pool_lock();
-    let mut layout = urvim_core::Layout::new(WindowGroup::from_buffers(vec![
+    let mut layout = urvim_core::Layout::new(EditorPane::from_buffers(vec![
         Buffer::from_str("first"),
         Buffer::from_str("second"),
     ]));
@@ -2215,7 +2215,7 @@ fn plugin_list_diagnostics_returns_sorted_payloads() {
     let _pool_guard = buffer_pool_lock();
     clear_diagnostics_store_for_test();
 
-    let mut layout = urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str(
+    let mut layout = urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::from_str(
         "hello world",
     )]));
     let buffer_id = layout.active_buffer_view().buffer_id();
@@ -2273,7 +2273,7 @@ fn plugin_list_diagnostics_filters_by_severity() {
     clear_diagnostics_store_for_test();
 
     let mut layout =
-        urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("hello")]));
+        urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::from_str("hello")]));
     let buffer_id = layout.active_buffer_view().buffer_id();
 
     globals::with_diagnostics_store(|store| {
@@ -2323,7 +2323,7 @@ fn plugin_list_diagnostics_rejects_unknown_severity() {
     clear_diagnostics_store_for_test();
 
     let mut layout =
-        urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("hello")]));
+        urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::from_str("hello")]));
     let buffer_id = layout.active_buffer_view().buffer_id();
 
     let request = urvim_plugin::PluginRequest::new(
@@ -2344,7 +2344,7 @@ fn plugin_get_diagnostic_counts_returns_counts() {
     clear_diagnostics_store_for_test();
 
     let mut layout =
-        urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("hello")]));
+        urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::from_str("hello")]));
     let buffer_id = layout.active_buffer_view().buffer_id();
 
     globals::with_diagnostics_store(|store| {
@@ -2392,7 +2392,7 @@ fn plugin_get_diagnostics_at_cursor_returns_matching_diagnostics() {
     let _pool_guard = buffer_pool_lock();
     clear_diagnostics_store_for_test();
 
-    let mut layout = urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str(
+    let mut layout = urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::from_str(
         "hello world",
     )]));
     let buffer_id = layout.active_buffer_view().buffer_id();
@@ -2445,7 +2445,7 @@ fn plugin_get_diagnostics_at_cursor_rejects_invalid_cursor() {
     clear_diagnostics_store_for_test();
 
     let mut layout =
-        urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("hello")]));
+        urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::from_str("hello")]));
     let buffer_id = layout.active_buffer_view().buffer_id();
 
     let request = urvim_plugin::PluginRequest::new(
@@ -2505,7 +2505,7 @@ fn diagnostics_changed_event_dispatches_counts() {
 #[test]
 fn plugin_apply_edit_replaces_text() {
     let _guard = buffer_pool_lock();
-    let mut layout = urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str(
+    let mut layout = urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::from_str(
         "hello old",
     )]));
     let buffer_id = layout.active_buffer_view().buffer_id().get();
@@ -2530,7 +2530,7 @@ fn plugin_apply_edit_replaces_text() {
 fn plugin_apply_edit_rejects_invalid_range_without_mutating() {
     let _guard = buffer_pool_lock();
     let mut layout =
-        urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("hello")]));
+        urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::from_str("hello")]));
     let buffer_id = layout.active_buffer_view().buffer_id().get();
     let request = urvim_plugin::PluginRequest::new(
         14,
@@ -2553,7 +2553,7 @@ fn plugin_apply_edit_rejects_invalid_range_without_mutating() {
 fn plugin_apply_edit_participates_in_undo() {
     let _guard = buffer_pool_lock();
     let mut layout =
-        urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("hello")]));
+        urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::from_str("hello")]));
     let buffer_id = layout.active_buffer_view().buffer_id().get();
     let request = urvim_plugin::PluginRequest::new(
         15,
@@ -2583,7 +2583,7 @@ fn plugin_apply_edit_participates_in_undo() {
 fn insert_exit_commits_single_undo_snapshot_when_text_changes() {
     let _guard = buffer_pool_lock();
     let mut layout =
-        urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("world")]));
+        urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::from_str("world")]));
 
     assert!(
         layout
@@ -2624,7 +2624,7 @@ fn insert_exit_commits_single_undo_snapshot_when_text_changes() {
 fn insert_exit_does_not_commit_snapshot_without_text_changes() {
     let _guard = buffer_pool_lock();
     let mut layout =
-        urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("world")]));
+        urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::from_str("world")]));
 
     commit_insert_exit_snapshot(&mut layout);
 
@@ -2944,7 +2944,7 @@ fn terminal_event_adapter_converts_event_variants() {
 
 #[test]
 fn process_intent_queue_dispatches_actions() {
-    let mut layout = urvim_core::Layout::new(WindowGroup::from_buffers(vec![
+    let mut layout = urvim_core::Layout::new(EditorPane::from_buffers(vec![
         Buffer::new(),
         Buffer::new(),
     ]));
@@ -2953,7 +2953,7 @@ fn process_intent_queue_dispatches_actions() {
         &mut layout,
         vec![Intent::Command(Command::NextTab(1))]
     ));
-    assert_eq!(layout.window_group().active_tab_index(), 1);
+    assert_eq!(layout.active_editor_pane().active_tab_index(), 1);
 }
 
 #[test]
@@ -2965,7 +2965,7 @@ fn process_intent_queue_records_repeat_state_for_command_actions() {
         count: 99,
         insert_text: Some("stale".to_string()),
     });
-    let mut layout = urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str(
+    let mut layout = urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::from_str(
         "alpha\nbeta",
     )]));
 
@@ -2999,7 +2999,7 @@ fn process_intent_queue_records_repeat_state_for_command_actions() {
 
 #[test]
 fn process_intent_queue_returns_false_when_any_intent_is_unhandled() {
-    let mut layout = urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::new()]));
+    let mut layout = urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::new()]));
 
     let handled = process_intent_queue(
         &mut layout,
@@ -3020,7 +3020,7 @@ fn process_intent_queue_returns_false_when_any_intent_is_unhandled() {
 #[test]
 fn confirmed_try_quit_flows_through_ui_result_handling_and_exits() {
     let mut layout =
-        urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("one")]));
+        urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::from_str("one")]));
     let cursor = urvim_core::buffer::Cursor::new(0, 1);
     layout
         .active_buffer_view_mut()
@@ -3054,7 +3054,7 @@ fn handle_save_buffer_action_emits_success_notification() {
     let mut buffer = Buffer::with_path(absolute_path);
     buffer.insert_text(urvim_core::buffer::Cursor::new(0, 0), "hello");
 
-    let mut layout = urvim_core::Layout::new(WindowGroup::from_buffers(vec![buffer]));
+    let mut layout = urvim_core::Layout::new(EditorPane::from_buffers(vec![buffer]));
     assert!(handle_save_buffer_action(&mut layout, None, false));
 
     let saved_text = std::fs::read_to_string(path).expect("saved file should be readable");
@@ -3079,7 +3079,7 @@ fn handle_save_buffer_action_prompts_when_disk_changed() {
     std::fs::write(&path, "alpha").unwrap();
     let buffer = Buffer::load_from_file(&path).unwrap();
 
-    let mut layout = urvim_core::Layout::new(WindowGroup::from_buffers(vec![buffer]));
+    let mut layout = urvim_core::Layout::new(EditorPane::from_buffers(vec![buffer]));
     layout
         .active_buffer_view_mut()
         .with_buffer_mut(|buffer| {
@@ -3107,7 +3107,7 @@ fn handle_save_buffer_action_prompts_when_disk_changed() {
 fn handle_save_buffer_action_emits_error_notification_for_missing_buffer() {
     let _guard = notification_test_lock();
     globals::clear_notifications();
-    let mut layout = urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::new()]));
+    let mut layout = urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::new()]));
 
     assert!(handle_save_buffer_action(
         &mut layout,
@@ -3137,7 +3137,7 @@ fn try_quit_saves_session_before_layout_is_cleared() {
         urvim_core::session::set_enabled(true);
 
         let mut layout =
-            urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("one")]));
+            urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::from_str("one")]));
         assert!(process_intent_queue(
             &mut layout,
             vec![Intent::Command(urvim_core::ui::Command::SplitVertical)]
@@ -3190,7 +3190,7 @@ fn quit_saves_session_before_layout_is_cleared() {
         urvim_core::session::set_enabled(true);
 
         let mut layout =
-            urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("one")]));
+            urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::from_str("one")]));
         assert!(process_intent_queue(
             &mut layout,
             vec![Intent::Command(urvim_core::ui::Command::SplitVertical)]
@@ -3239,7 +3239,7 @@ fn startup_layout_restores_existing_session_when_no_files_are_passed() {
     let path = temp_dir.join("restore.txt");
     std::fs::write(&path, "saved session file\nsecond line").unwrap();
     let session = urvim_core::session::SessionFile {
-        version: 1,
+        version: 2,
         cwd: temp_dir.display().to_string(),
         label: temp_dir
             .file_name()
@@ -3249,9 +3249,9 @@ fn startup_layout_restores_existing_session_when_no_files_are_passed() {
         focused_pane: 0,
         root: urvim_core::session::SessionNode::Pane(urvim_core::session::SessionPane {
             pane_id: 0,
-            window_group: urvim_core::session::SessionWindowGroup {
+            editor_pane: urvim_core::session::SessionEditorPane {
                 active_tab: 0,
-                tabs: vec![urvim_core::session::SessionWindow {
+                tabs: vec![urvim_core::session::SessionEditorTab {
                     path: path.display().to_string(),
                     cursor: urvim_core::session::SessionCursor { row: 1, col: 0 },
                     scroll_offset: urvim_core::session::SessionPosition { row: 0, col: 0 },
@@ -3322,7 +3322,7 @@ fn startup_layout_with_files_does_not_restore_session() {
 
     let session_path = temp_dir.join("session.txt");
     std::fs::write(&session_path, "session state").unwrap();
-    let saved_layout = urvim_core::Layout::new(WindowGroup::from_paths(&[session_path.clone()]));
+    let saved_layout = urvim_core::Layout::new(EditorPane::from_paths(&[session_path.clone()]));
     urvim_core::session::save_session_for_cwd(&temp_dir, &saved_layout.to_session()).unwrap();
 
     let cli_path = temp_dir.join("cli.txt");
@@ -3438,7 +3438,7 @@ fn resolve_repeat_action_overrides_the_stored_count() {
 #[test]
 fn replay_repeat_action_applies_structural_count_once_before_insert_text() {
     let _guard = buffer_pool_lock();
-    let mut layout = urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str(
+    let mut layout = urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::from_str(
         "line1\nline2\nline3",
     )]));
     let replay = RepeatReplay {
@@ -3464,7 +3464,7 @@ fn replay_repeat_action_applies_structural_count_once_before_insert_text() {
 fn replay_repeat_action_replays_direct_insert_text() {
     let _guard = buffer_pool_lock();
     let mut layout =
-        urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("world")]));
+        urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::from_str("world")]));
     let replay = RepeatReplay {
         action: EditorAction::mode_transition(ModeKind::Insert),
         structural_count: 1,
@@ -3487,18 +3487,18 @@ fn replay_repeat_action_replays_direct_insert_text() {
 #[test]
 fn switch_mode_clears_visual_selection_when_leaving_visual() {
     let mut layout =
-        urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("hello")]));
+        urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::from_str("hello")]));
     let enter_repeat_text = layout
-        .window_group_mut()
-        .active_window_mut()
+        .active_editor_pane_mut()
+        .active_tab_mut()
         .switch_mode(ModeKind::Visual);
     let repeat_text = layout
-        .window_group_mut()
-        .active_window_mut()
+        .active_editor_pane_mut()
+        .active_tab_mut()
         .switch_mode(ModeKind::Normal);
 
     assert_eq!(
-        layout.window_group().active_window_mode_kind(),
+        layout.active_editor_pane().active_tab_mode_kind(),
         ModeKind::Normal
     );
     assert!(enter_repeat_text.is_none());
@@ -3509,15 +3509,15 @@ fn switch_mode_clears_visual_selection_when_leaving_visual() {
 #[test]
 fn switch_mode_restarts_visual_selection_when_entering_visual() {
     let mut layout =
-        urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("hello")]));
+        urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::from_str("hello")]));
 
     let repeat_text = layout
-        .window_group_mut()
-        .active_window_mut()
+        .active_editor_pane_mut()
+        .active_tab_mut()
         .switch_mode(ModeKind::Visual);
 
     assert_eq!(
-        layout.window_group().active_window_mode_kind(),
+        layout.active_editor_pane().active_tab_mode_kind(),
         ModeKind::Visual
     );
     assert!(repeat_text.is_none());
@@ -3527,15 +3527,15 @@ fn switch_mode_restarts_visual_selection_when_entering_visual() {
 #[test]
 fn switch_mode_starts_linewise_visual_selection_when_entering_visual_line() {
     let mut layout =
-        urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("hello")]));
+        urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::from_str("hello")]));
 
     let repeat_text = layout
-        .window_group_mut()
-        .active_window_mut()
+        .active_editor_pane_mut()
+        .active_tab_mut()
         .switch_mode(ModeKind::VisualLine);
 
     assert_eq!(
-        layout.window_group().active_window_mode_kind(),
+        layout.active_editor_pane().active_tab_mode_kind(),
         ModeKind::VisualLine
     );
     assert!(repeat_text.is_none());
@@ -3576,7 +3576,7 @@ fn save_buffer_action_enqueues_buffer_saved_event() {
         .expect("temp path should resolve absolutely");
 
     let buffer = Buffer::with_path(absolute_path);
-    let mut layout = urvim_core::Layout::new(WindowGroup::from_buffers(vec![buffer]));
+    let mut layout = urvim_core::Layout::new(EditorPane::from_buffers(vec![buffer]));
     drain_editor_events_serial();
 
     let buffer_id = layout.active_buffer_view().buffer_id();
@@ -3602,7 +3602,7 @@ fn close_buffer_enqueues_buffer_closed_event() {
     let _guard = buffer_pool_lock();
     clear_editor_events_for_test();
 
-    let mut layout = urvim_core::Layout::new(WindowGroup::from_buffers(vec![
+    let mut layout = urvim_core::Layout::new(EditorPane::from_buffers(vec![
         Buffer::from_str("first"),
         Buffer::from_str("second"),
     ]));
@@ -3632,7 +3632,7 @@ fn unload_buffer_with_force_enqueues_buffer_closed_and_unloaded() {
     clear_editor_events_for_test();
 
     let mut layout =
-        urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("alpha")]));
+        urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::from_str("alpha")]));
     drain_editor_events_serial();
 
     let active = layout.active_buffer_view().buffer_id();
@@ -3672,7 +3672,7 @@ fn unload_modified_buffer_without_force_emits_no_lifecycle_events() {
 
     let mut buffer = Buffer::from_str("hello");
     buffer.insert_text(urvim_core::buffer::Cursor::new(0, 5), " world");
-    let mut layout = urvim_core::Layout::new(WindowGroup::from_buffers(vec![buffer]));
+    let mut layout = urvim_core::Layout::new(EditorPane::from_buffers(vec![buffer]));
     drain_editor_events_serial();
 
     let active = layout.active_buffer_view().buffer_id();
@@ -3700,7 +3700,7 @@ fn set_buffer_filetype_enqueues_filetype_changed_event() {
     let _guard = buffer_pool_lock();
     clear_editor_events_for_test();
 
-    let mut layout = urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::new()]));
+    let mut layout = urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::new()]));
     drain_editor_events_serial();
 
     let active = layout.active_buffer_view().buffer_id();
@@ -3726,7 +3726,7 @@ fn non_plugin_command_enqueues_command_executed_event() {
     clear_editor_events_for_test();
 
     let mut layout =
-        urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("alpha")]));
+        urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::from_str("alpha")]));
     drain_editor_events_serial();
 
     let handled = process_intent_queue(
@@ -3758,7 +3758,7 @@ fn open_file_emits_buffer_loaded_before_buffer_opened() {
     let path = std::env::temp_dir().join(unique);
     std::fs::write(&path, "open me\n").unwrap();
 
-    let mut layout = urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::new()]));
+    let mut layout = urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::new()]));
     drain_editor_events_serial();
 
     let handled = process_intent_queue(
@@ -3808,7 +3808,7 @@ fn reopen_loaded_file_in_pane_emits_buffer_opened_only() {
     let path = std::env::temp_dir().join(unique);
     std::fs::write(&path, "alpha").unwrap();
 
-    let mut layout = urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::new()]));
+    let mut layout = urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::new()]));
     let loaded_buffer_id = globals::with_buffer_pool(|pool| {
         pool.open_buffer(&path)
             .expect("target file should load into buffer pool")
@@ -3819,7 +3819,7 @@ fn reopen_loaded_file_in_pane_emits_buffer_opened_only() {
     // active pane. Opening it here should add a UI tab/view without loading a
     // new buffer.
     let before = layout
-        .active_window_group()
+        .active_editor_pane()
         .buffer_ids()
         .into_iter()
         .collect::<std::collections::BTreeSet<_>>();
@@ -3831,7 +3831,7 @@ fn reopen_loaded_file_in_pane_emits_buffer_opened_only() {
     );
     assert!(handled);
     let after = layout
-        .active_window_group()
+        .active_editor_pane()
         .buffer_ids()
         .into_iter()
         .collect::<std::collections::BTreeSet<_>>();
@@ -3876,7 +3876,7 @@ fn orphan_cleanup_emits_buffer_unloaded_after_close_buffer() {
     let path = std::env::temp_dir().join(unique);
     std::fs::write(&path, "alpha").unwrap();
     let cli_path = path.clone();
-    let mut layout = urvim_core::Layout::new(WindowGroup::from_paths(&[cli_path.clone()]));
+    let mut layout = urvim_core::Layout::new(EditorPane::from_paths(&[cli_path.clone()]));
     let visible_buffer_id = layout.active_buffer_view().buffer_id();
     drain_editor_events_serial();
 
@@ -3931,7 +3931,7 @@ fn startup_loaded_buffers_emit_buffer_loaded_before_editor_started() {
     std::fs::write(&path, "startup content").unwrap();
     let cli_path = path.clone();
 
-    let layout = urvim_core::Layout::new(WindowGroup::from_paths(&[cli_path.clone()]));
+    let layout = urvim_core::Layout::new(EditorPane::from_paths(&[cli_path.clone()]));
     let startup_buffer_id = layout.active_buffer_view().buffer_id();
 
     let mut events = drain_editor_events_serial();
@@ -3968,7 +3968,7 @@ fn startup_loaded_buffers_emit_buffer_loaded_before_editor_started() {
 #[test]
 fn plugin_list_buffers_returns_loaded_buffer_metadata() {
     let _guard = buffer_pool_lock();
-    let mut layout = urvim_core::Layout::new(WindowGroup::from_buffers(vec![
+    let mut layout = urvim_core::Layout::new(EditorPane::from_buffers(vec![
         Buffer::from_str("first"),
         Buffer::from_str("second"),
     ]));
@@ -3997,7 +3997,7 @@ fn plugin_list_buffers_returns_loaded_buffer_metadata() {
 fn plugin_get_buffer_returns_metadata() {
     let _guard = buffer_pool_lock();
     let mut layout =
-        urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("hello")]));
+        urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::from_str("hello")]));
     let buffer_id = layout.active_buffer_view().buffer_id().get();
     let request = urvim_plugin::PluginRequest::new(
         101,
@@ -4019,7 +4019,7 @@ fn plugin_get_buffer_returns_metadata() {
 #[test]
 fn plugin_get_buffer_rejects_unknown_id() {
     let _guard = buffer_pool_lock();
-    let mut layout = urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::new()]));
+    let mut layout = urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::new()]));
     let request = urvim_plugin::PluginRequest::new(
         102,
         "editor/getBuffer",
@@ -4036,7 +4036,7 @@ fn plugin_get_buffer_rejects_unknown_id() {
 fn plugin_get_buffer_rejects_generic_id_alias() {
     let _guard = buffer_pool_lock();
     let mut layout =
-        urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("hello")]));
+        urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::from_str("hello")]));
     let buffer_id = layout.active_buffer_view().buffer_id().get();
     let request = urvim_plugin::PluginRequest::new(
         242,
@@ -4054,7 +4054,7 @@ fn plugin_get_buffer_rejects_generic_id_alias() {
 fn plugin_request_hover_rejects_camel_case_buffer_id() {
     let _guard = buffer_pool_lock();
     let mut layout =
-        urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("hello")]));
+        urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::from_str("hello")]));
     let buffer_id = layout.active_buffer_view().buffer_id().get();
     let request = urvim_plugin::PluginRequest::new(
         243,
@@ -4089,7 +4089,7 @@ fn plugin_find_buffer_by_path_returns_found_buffer() {
     std::fs::write(&path, "content").unwrap();
 
     let buffer = Buffer::load_from_file(&path).unwrap();
-    let mut layout = urvim_core::Layout::new(WindowGroup::from_buffers(vec![buffer]));
+    let mut layout = urvim_core::Layout::new(EditorPane::from_buffers(vec![buffer]));
     let request = urvim_plugin::PluginRequest::new(
         103,
         "editor/findBufferByPath",
@@ -4110,7 +4110,7 @@ fn plugin_find_buffer_by_path_returns_found_buffer() {
 #[test]
 fn plugin_find_buffer_by_path_returns_not_found_for_unloaded_path() {
     let _guard = buffer_pool_lock();
-    let mut layout = urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::new()]));
+    let mut layout = urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::new()]));
     let request = urvim_plugin::PluginRequest::new(
         104,
         "editor/findBufferByPath",
@@ -4128,7 +4128,7 @@ fn plugin_find_buffer_by_path_returns_not_found_for_unloaded_path() {
 #[test]
 fn plugin_get_buffer_lines_returns_requested_range() {
     let _guard = buffer_pool_lock();
-    let mut layout = urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str(
+    let mut layout = urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::from_str(
         "line0\nline1\nline2\nline3",
     )]));
     let buffer_id = layout.active_buffer_view().buffer_id().get();
@@ -4157,7 +4157,7 @@ fn plugin_get_buffer_lines_returns_requested_range() {
 #[test]
 fn plugin_get_buffer_lines_rejects_invalid_range() {
     let _guard = buffer_pool_lock();
-    let mut layout = urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str(
+    let mut layout = urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::from_str(
         "line0\nline1",
     )]));
     let buffer_id = layout.active_buffer_view().buffer_id().get();
@@ -4177,7 +4177,7 @@ fn plugin_get_buffer_lines_rejects_invalid_range() {
 fn plugin_get_cursor_returns_active_cursor() {
     let _guard = buffer_pool_lock();
     let mut layout =
-        urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("hello")]));
+        urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::from_str("hello")]));
     layout
         .active_buffer_view_mut()
         .set_cursor(urvim_core::buffer::Cursor::new(0, 3));
@@ -4199,7 +4199,7 @@ fn plugin_get_cursor_returns_active_cursor() {
 fn plugin_set_cursor_updates_active_cursor() {
     let _guard = buffer_pool_lock();
     let mut layout =
-        urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("hello")]));
+        urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::from_str("hello")]));
     let buffer_id = layout.active_buffer_view().buffer_id().get();
     let request = urvim_plugin::PluginRequest::new(
         108,
@@ -4225,7 +4225,7 @@ fn plugin_set_cursor_updates_active_cursor() {
 fn plugin_set_cursor_rejects_invalid_cursor() {
     let _guard = buffer_pool_lock();
     let mut layout =
-        urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("hello")]));
+        urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::from_str("hello")]));
     let request = urvim_plugin::PluginRequest::new(
         109,
         "editor/setCursor",
@@ -4241,13 +4241,13 @@ fn plugin_set_cursor_rejects_invalid_cursor() {
 #[test]
 fn plugin_set_cursor_rejects_non_active_buffer_id() {
     let _guard = buffer_pool_lock();
-    let mut layout = urvim_core::Layout::new(WindowGroup::from_buffers(vec![
+    let mut layout = urvim_core::Layout::new(EditorPane::from_buffers(vec![
         Buffer::from_str("first"),
         Buffer::from_str("second"),
     ]));
     let active_id = layout.active_buffer_view().buffer_id();
     let other_id = layout
-        .window_group()
+        .active_editor_pane()
         .buffer_ids()
         .into_iter()
         .find(|id| *id != active_id)
@@ -4268,13 +4268,13 @@ fn plugin_set_cursor_rejects_non_active_buffer_id() {
 fn plugin_get_selection_returns_character_selection() {
     let _guard = buffer_pool_lock();
     let mut layout =
-        urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("hello")]));
+        urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::from_str("hello")]));
     layout
         .active_buffer_view_mut()
         .set_cursor(urvim_core::buffer::Cursor::new(0, 1));
     layout
         .active_buffer_view_mut()
-        .begin_visual_selection(urvim_core::window::VisualSelectionKind::Character);
+        .begin_visual_selection(urvim_core::editor_tab::VisualSelectionKind::Character);
     layout
         .active_buffer_view_mut()
         .set_cursor(urvim_core::buffer::Cursor::new(0, 4));
@@ -4300,10 +4300,10 @@ fn plugin_get_selection_returns_character_selection() {
 fn plugin_clear_selection_clears_active_selection() {
     let _guard = buffer_pool_lock();
     let mut layout =
-        urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("hello")]));
+        urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::from_str("hello")]));
     layout
         .active_buffer_view_mut()
-        .begin_visual_selection(urvim_core::window::VisualSelectionKind::Line);
+        .begin_visual_selection(urvim_core::editor_tab::VisualSelectionKind::Line);
     let request =
         urvim_plugin::PluginRequest::new(112, "editor/clearSelection", serde_json::json!({}));
 
@@ -4319,7 +4319,7 @@ fn plugin_clear_selection_clears_active_selection() {
 #[test]
 fn plugin_get_buffer_range_reads_unicode_safely() {
     let _guard = buffer_pool_lock();
-    let mut layout = urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str(
+    let mut layout = urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::from_str(
         "aébc\nsecond",
     )]));
     let buffer_id = layout.active_buffer_view().buffer_id().get();
@@ -4346,7 +4346,7 @@ fn plugin_get_buffer_range_reads_unicode_safely() {
 fn plugin_apply_buffer_edits_applies_original_coordinate_order() {
     let _guard = buffer_pool_lock();
     let mut layout =
-        urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("abc")]));
+        urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::from_str("abc")]));
     let buffer_id = layout.active_buffer_view().buffer_id().get();
     let request = urvim_plugin::PluginRequest::new(
         114,
@@ -4385,7 +4385,7 @@ fn plugin_apply_buffer_edits_applies_original_coordinate_order() {
 fn plugin_apply_buffer_edits_rejects_insert_inside_replace_range_without_mutating() {
     let _guard = buffer_pool_lock();
     let mut layout =
-        urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("abcdef")]));
+        urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::from_str("abcdef")]));
     let buffer_id = layout.active_buffer_view().buffer_id().get();
     let request = urvim_plugin::PluginRequest::new(
         115,
@@ -4429,7 +4429,7 @@ fn plugin_apply_buffer_edits_rejects_insert_inside_replace_range_without_mutatin
 fn plugin_apply_buffer_edits_groups_undo_snapshot() {
     let _guard = buffer_pool_lock();
     let mut layout =
-        urvim_core::Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("abcdef")]));
+        urvim_core::Layout::new(EditorPane::from_buffers(vec![Buffer::from_str("abcdef")]));
     let buffer_id = layout.active_buffer_view().buffer_id().get();
     let request = urvim_plugin::PluginRequest::new(
         116,

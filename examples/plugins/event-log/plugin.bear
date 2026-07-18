@@ -26,9 +26,9 @@ fn init() {
     urvim.register_event_hook(urvim.events.BufferModifiedChanged, log_event)
     urvim.register_event_hook(urvim.events.BufferFiletypeChanged, log_event)
 
-    urvim.register_event_hook(urvim.events.WindowCreated, log_event)
-    urvim.register_event_hook(urvim.events.WindowClosed, log_event)
-    urvim.register_event_hook(urvim.events.WindowFocused, log_event)
+    urvim.register_event_hook(urvim.events.PaneCreated, log_event)
+    urvim.register_event_hook(urvim.events.PaneClosed, log_event)
+    urvim.register_event_hook(urvim.events.PaneFocused, log_event)
     urvim.register_event_hook(urvim.events.TabOpened, log_event)
     urvim.register_event_hook(urvim.events.TabClosed, log_event)
     urvim.register_event_hook(urvim.events.TabActivated, log_event)

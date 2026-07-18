@@ -116,7 +116,7 @@ fn execute_action_transaction(layout: &mut Layout, action: EditorAction) -> bool
     drop(transaction);
     if layout.should_exit()
         || !matches!(
-            layout.active_window_mode_kind(),
+            layout.active_tab_mode_kind(),
             ModeKind::Insert | ModeKind::Replace
         )
     {
@@ -128,7 +128,7 @@ fn execute_action_transaction(layout: &mut Layout, action: EditorAction) -> bool
 }
 
 fn insert_session_mode_for_action(layout: &Layout, action: &EditorAction) -> Option<ModeKind> {
-    let active_mode = layout.active_window_mode_kind();
+    let active_mode = layout.active_tab_mode_kind();
     if matches!(active_mode, ModeKind::Insert | ModeKind::Replace) {
         return Some(active_mode);
     }
@@ -178,14 +178,14 @@ fn execute_command_intent_transaction(
 ) -> bool {
     if !matches!(command, Command::ApplyCompletion(_))
         || !matches!(
-            layout.active_window_mode_kind(),
+            layout.active_tab_mode_kind(),
             ModeKind::Insert | ModeKind::Replace
         )
     {
         return execute_command_intent(layout, plugin_runtime, command);
     }
 
-    let mode = layout.active_window_mode_kind();
+    let mode = layout.active_tab_mode_kind();
     layout.begin_insert_session(mode);
     let transaction_before = layout.insert_session_text_snapshot();
     let transaction = EventTransaction::new_insert(EventSource::user());
@@ -378,7 +378,7 @@ fn execute_command_intent_inner(
         let closed = if buffer_id == layout.active_buffer_view().buffer_id() {
             layout.close_active_buffer_tab()
         } else {
-            layout.close_buffer_tab_in_active_window(buffer_id)
+            layout.close_buffer_tab_in_active_pane(buffer_id)
         };
         if closed {
             cleanup_orphaned_buffers(layout);
@@ -386,7 +386,7 @@ fn execute_command_intent_inner(
         return if closed {
             CommandOutcome::success()
         } else {
-            CommandOutcome::failure("buffer is not open in the active window")
+            CommandOutcome::failure("buffer is not open in the active editor pane")
         };
     }
 
@@ -510,8 +510,8 @@ pub(super) fn execute_action_intent(layout: &mut Layout, action: EditorAction) -
                     && let Some(to_mode) = replay.action.to_mode
                 {
                     let repeat_text = {
-                        let window = layout.active_window_group_mut().active_window_mut();
-                        window.switch_mode(to_mode)
+                        let tab = layout.active_editor_pane_mut().active_tab_mut();
+                        tab.switch_mode(to_mode)
                     };
                     if let Some(repeat_text) = repeat_text.filter(|text| !text.is_empty())
                         && let Some(mut repeat_state) = globals::get_last_repeat()
@@ -535,8 +535,8 @@ pub(super) fn execute_action_intent(layout: &mut Layout, action: EditorAction) -
                     let pending_repeat_suffix = layout.take_pending_repeat_suffix();
                     if let Some(suffix) = pending_repeat_suffix.as_deref() {
                         layout
-                            .active_window_group_mut()
-                            .active_window_mut()
+                            .active_editor_pane_mut()
+                            .active_tab_mut()
                             .append_repeat_text(suffix);
                     }
                     handled = true;
@@ -544,8 +544,8 @@ pub(super) fn execute_action_intent(layout: &mut Layout, action: EditorAction) -
 
                 if handled && let Some(to_mode) = dispatch_action.to_mode {
                     let repeat_text = {
-                        let window = layout.active_window_group_mut().active_window_mut();
-                        window.switch_mode(to_mode)
+                        let tab = layout.active_editor_pane_mut().active_tab_mut();
+                        tab.switch_mode(to_mode)
                     };
                     if let Some(repeat_text) = repeat_text.filter(|text| !text.is_empty())
                         && let Some(mut repeat_state) = globals::get_last_repeat()
@@ -623,7 +623,7 @@ pub(super) fn apply_undo_redo(layout: &mut Layout, redo: bool) -> bool {
     };
 
     layout.active_buffer_view_mut().set_cursor_synced(cursor);
-    layout.active_window_group_mut().record_cursor_position();
+    layout.active_editor_pane_mut().record_cursor_position();
     true
 }
 
@@ -703,20 +703,6 @@ fn cursor_after_text(mut cursor: Cursor, text: &str) -> Cursor {
     }
 
     cursor
-}
-
-#[cfg(test)]
-pub(super) fn handle_ui_result(layout: &mut Layout, result: urvim_core::ui::UiEventResult) -> bool {
-    if !result.handled() {
-        return false;
-    }
-
-    let intents = result.into_intents();
-    if !intents.is_empty() {
-        process_intent_queue(layout, intents);
-    }
-
-    true
 }
 
 /// Processes UI intents without holding a mutable layout borrow across a
@@ -858,8 +844,8 @@ mod tests {
     use super::*;
     use urvim_core::buffer::{Buffer, Cursor};
     use urvim_core::editor::EditorOperation;
+    use urvim_core::editor_pane::EditorPane;
     use urvim_core::ui::Command;
-    use urvim_core::window_group::WindowGroup;
 
     fn drain_editor_events() -> Vec<EditorEvent> {
         std::iter::from_fn(globals::take_editor_event).collect()
@@ -877,7 +863,7 @@ mod tests {
     fn insert_session_separates_granular_and_aggregate_changes() {
         let _pool_guard = action_test_lock();
         globals::clear_editor_events_for_tests();
-        let mut layout = Layout::new(WindowGroup::from_buffers(vec![Buffer::new()]));
+        let mut layout = Layout::new(EditorPane::from_buffers(vec![Buffer::new()]));
         drain_editor_events();
 
         execute(&mut layout, EditorAction::mode_transition(ModeKind::Insert));
@@ -926,7 +912,7 @@ mod tests {
         let _pool_guard = action_test_lock();
         let registers_before = globals::with_register_store(Clone::clone);
         globals::clear_editor_events_for_tests();
-        let mut layout = Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("abc")]));
+        let mut layout = Layout::new(EditorPane::from_buffers(vec![Buffer::from_str("abc")]));
         drain_editor_events();
 
         execute(
@@ -966,10 +952,7 @@ mod tests {
     fn switching_tabs_finishes_insert_session() {
         let _pool_guard = action_test_lock();
         globals::clear_editor_events_for_tests();
-        let mut layout = Layout::new(WindowGroup::from_buffers(vec![
-            Buffer::new(),
-            Buffer::new(),
-        ]));
+        let mut layout = Layout::new(EditorPane::from_buffers(vec![Buffer::new(), Buffer::new()]));
         drain_editor_events();
 
         execute(&mut layout, EditorAction::mode_transition(ModeKind::Insert));
@@ -990,10 +973,47 @@ mod tests {
     }
 
     #[test]
+    fn unloading_final_buffer_keeps_editor_pane_valid_beside_plugin_pane() {
+        let _pool_guard = action_test_lock();
+        let mut layout = Layout::new(EditorPane::from_buffers(vec![Buffer::from_str("visible")]));
+        let buffer_id = layout.active_buffer_view().buffer_id();
+        let plugin_id = layout
+            .create_plugin_pane(
+                "demo".to_string(),
+                Some(urvim_core::layout::PaneId(0)),
+                urvim_core::layout::SplitAxis::Vertical,
+                urvim_core::layout::SplitSize::even(),
+                urvim_core::ui::plugin_pane::PluginPaneOptions::default(),
+            )
+            .unwrap();
+
+        let outcome = execute_command_intent(
+            &mut layout,
+            None,
+            Command::UnloadBuffer {
+                buffer_id: Some(buffer_id),
+                force: true,
+            },
+        );
+
+        assert!(outcome);
+        assert_eq!(
+            layout.pane_ids(),
+            vec![urvim_core::layout::PaneId(0), plugin_id]
+        );
+        assert_eq!(
+            layout.editor_pane_ids(),
+            vec![urvim_core::layout::PaneId(0)]
+        );
+        assert_ne!(layout.active_buffer_view().buffer_id(), buffer_id);
+        assert!(!layout.should_exit());
+    }
+
+    #[test]
     fn replace_mode_uses_insert_session_events() {
         let _pool_guard = action_test_lock();
         globals::clear_editor_events_for_tests();
-        let mut layout = Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("abc")]));
+        let mut layout = Layout::new(EditorPane::from_buffers(vec![Buffer::from_str("abc")]));
         drain_editor_events();
 
         execute(
@@ -1030,7 +1050,7 @@ mod tests {
     fn net_no_op_insert_session_has_no_summary() {
         let _pool_guard = action_test_lock();
         globals::clear_editor_events_for_tests();
-        let mut layout = Layout::new(WindowGroup::from_buffers(vec![Buffer::new()]));
+        let mut layout = Layout::new(EditorPane::from_buffers(vec![Buffer::new()]));
         drain_editor_events();
 
         execute(&mut layout, EditorAction::mode_transition(ModeKind::Insert));
@@ -1058,7 +1078,7 @@ mod tests {
     fn external_edit_during_insert_remains_a_regular_buffer_change() {
         let _pool_guard = action_test_lock();
         globals::clear_editor_events_for_tests();
-        let mut layout = Layout::new(WindowGroup::from_buffers(vec![Buffer::new()]));
+        let mut layout = Layout::new(EditorPane::from_buffers(vec![Buffer::new()]));
         drain_editor_events();
 
         execute(&mut layout, EditorAction::mode_transition(ModeKind::Insert));
@@ -1093,13 +1113,13 @@ mod tests {
     #[test]
     fn save_as_targets_non_active_buffer() {
         let _pool_guard = action_test_lock();
-        let mut layout = Layout::new(WindowGroup::from_buffers(vec![
+        let mut layout = Layout::new(EditorPane::from_buffers(vec![
             Buffer::from_str("first"),
             Buffer::from_str("second"),
         ]));
         let active = layout.active_buffer_view().buffer_id();
         let target = layout
-            .active_window_group()
+            .active_editor_pane()
             .buffer_ids()
             .into_iter()
             .find(|buffer_id| *buffer_id != active)
@@ -1133,7 +1153,7 @@ mod tests {
     fn save_as_emits_domain_events_before_command_completion() {
         let _pool_guard = action_test_lock();
         globals::clear_editor_events_for_tests();
-        let mut layout = Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("text")]));
+        let mut layout = Layout::new(EditorPane::from_buffers(vec![Buffer::from_str("text")]));
         let path = std::env::temp_dir().join(format!(
             "urvim-action-save-as-events-{}.txt",
             std::process::id()
@@ -1173,7 +1193,7 @@ mod tests {
     fn failed_save_emits_domain_failure_before_command_failure() {
         let _pool_guard = action_test_lock();
         globals::clear_editor_events_for_tests();
-        let mut layout = Layout::new(WindowGroup::from_buffers(vec![Buffer::from_str("text")]));
+        let mut layout = Layout::new(EditorPane::from_buffers(vec![Buffer::from_str("text")]));
         drain_editor_events();
 
         assert!(execute_command_intent(
@@ -1203,7 +1223,7 @@ mod tests {
     fn internal_plugin_responses_do_not_emit_command_events() {
         let _pool_guard = action_test_lock();
         globals::clear_editor_events_for_tests();
-        let mut layout = Layout::new(WindowGroup::from_buffers(vec![Buffer::new()]));
+        let mut layout = Layout::new(EditorPane::from_buffers(vec![Buffer::new()]));
         drain_editor_events();
 
         assert!(execute_command_intent(
@@ -1235,7 +1255,7 @@ mod tests {
     fn plugin_command_event_preserves_plugin_identity() {
         let _pool_guard = action_test_lock();
         globals::clear_editor_events_for_tests();
-        let mut layout = Layout::new(WindowGroup::from_buffers(vec![Buffer::new()]));
+        let mut layout = Layout::new(EditorPane::from_buffers(vec![Buffer::new()]));
         drain_editor_events();
 
         assert!(execute_command_intent(

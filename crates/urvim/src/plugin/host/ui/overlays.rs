@@ -4,16 +4,16 @@ use std::rc::Rc;
 
 use bearscript::Value;
 use urvim_core::ui::Intent;
-use urvim_core::ui::floating_window::{FloatingMargins, FloatingPlacement};
-use urvim_core::ui::plugin_window::{
-    PluginWindowContent, PluginWindowOptions, PluginWindowSegment, id_from_number, id_to_number,
-    parse_anchor, parse_key_sequence,
+use urvim_core::ui::overlay::frame::{OverlayMargins, OverlayPlacement};
+use urvim_core::ui::overlay::{
+    OverlayOptions, RetainedContent, RetainedSegment, id_from_number, id_to_number, parse_anchor,
+    parse_key_sequence,
 };
 
 use super::super::super::{SharedLayout, native_fn, validate_plugin_command_execution_intent};
 use crate::plugin::conversion::{BearValueRef, FromBearValue};
 
-pub(in crate::plugin::host::ui) fn windows_module(
+pub(in crate::plugin::host::ui) fn overlays_module(
     plugin: String,
     contributions: Rc<RefCell<urvim_plugin::PluginContributionRegistry>>,
     layout: SharedLayout,
@@ -50,105 +50,102 @@ pub(in crate::plugin::host::ui) fn windows_module(
         HashMap::from([
             (
                 "create".to_string(),
-                native_fn("ui.windows.create", move |opts: Option<Value>| {
+                native_fn("ui.overlays.create", move |opts: Option<Value>| {
                     let options = options_from_value(opts, None)?;
                     let id = create_layout
                         .borrow_mut()
-                        .create_plugin_window(create_plugin.clone(), options);
+                        .create_overlay(create_plugin.clone(), options);
                     Ok(id_to_number(id))
                 }),
             ),
             (
                 "configure".to_string(),
                 native_fn(
-                    "ui.windows.configure",
-                    move |window_id: f64, opts: Value| {
-                        let id = id_from_number(window_id)?;
+                    "ui.overlays.configure",
+                    move |overlay_id: f64, opts: Value| {
+                        let id = id_from_number(overlay_id)?;
                         let current = configure_layout
                             .borrow()
-                            .plugin_windows()
-                            .owned_window(&configure_plugin, id)?
+                            .overlays()
+                            .owned_overlay(&configure_plugin, id)?
                             .options()
                             .clone();
                         let options = options_from_value(Some(opts), Some(current))?;
-                        configure_layout
-                            .borrow_mut()
-                            .plugin_windows_mut()
-                            .configure(&configure_plugin, id, options)
+                        configure_layout.borrow_mut().overlays_mut().configure(
+                            &configure_plugin,
+                            id,
+                            options,
+                        )
                     },
                 ),
             ),
             (
                 "set_content".to_string(),
                 native_fn(
-                    "ui.windows.set_content",
-                    move |window_id: f64, content: Value| {
-                        let id = id_from_number(window_id)?;
+                    "ui.overlays.set_content",
+                    move |overlay_id: f64, content: Value| {
+                        let id = id_from_number(overlay_id)?;
                         let content = content_from_value(&content)?;
-                        content_layout
-                            .borrow_mut()
-                            .plugin_windows_mut()
-                            .set_content(&content_plugin, id, content)
+                        content_layout.borrow_mut().overlays_mut().set_content(
+                            &content_plugin,
+                            id,
+                            content,
+                        )
                     },
                 ),
             ),
             (
                 "show".to_string(),
-                native_fn("ui.windows.show", move |window_id: f64| {
+                native_fn("ui.overlays.show", move |overlay_id: f64| {
                     show_layout
                         .borrow_mut()
-                        .plugin_windows_mut()
-                        .show(&show_plugin, id_from_number(window_id)?)
+                        .overlays_mut()
+                        .show(&show_plugin, id_from_number(overlay_id)?)
                 }),
             ),
             (
                 "hide".to_string(),
-                native_fn("ui.windows.hide", move |window_id: f64| {
+                native_fn("ui.overlays.hide", move |overlay_id: f64| {
                     hide_layout
                         .borrow_mut()
-                        .plugin_windows_mut()
-                        .hide(&hide_plugin, id_from_number(window_id)?)
+                        .overlays_mut()
+                        .hide(&hide_plugin, id_from_number(overlay_id)?)
                 }),
             ),
             (
                 "focus".to_string(),
-                native_fn("ui.windows.focus", move |window_id: f64| {
+                native_fn("ui.overlays.focus", move |overlay_id: f64| {
                     focus_layout
                         .borrow_mut()
-                        .focus_plugin_window(&focus_plugin, id_from_number(window_id)?)
+                        .focus_overlay(&focus_plugin, id_from_number(overlay_id)?)
                 }),
             ),
             (
                 "blur".to_string(),
-                native_fn("ui.windows.blur", move |window_id: f64| {
+                native_fn("ui.overlays.blur", move |overlay_id: f64| {
                     blur_layout
                         .borrow_mut()
-                        .plugin_windows_mut()
-                        .blur(&blur_plugin, id_from_number(window_id)?)
+                        .overlays_mut()
+                        .blur(&blur_plugin, id_from_number(overlay_id)?)
                 }),
             ),
             (
                 "close".to_string(),
-                native_fn("ui.windows.close", move |window_id: f64| {
+                native_fn("ui.overlays.close", move |overlay_id: f64| {
                     close_layout
                         .borrow_mut()
-                        .plugin_windows_mut()
-                        .close(&close_plugin, id_from_number(window_id)?)
+                        .overlays_mut()
+                        .close(&close_plugin, id_from_number(overlay_id)?)
                 }),
             ),
             (
                 "list".to_string(),
-                native_fn("ui.windows.list", move || {
+                native_fn("ui.overlays.list", move || {
                     let layout = list_layout.borrow();
                     let ids = layout
-                        .plugin_windows()
+                        .overlays()
                         .ids()
-                        .filter(|id| {
-                            layout
-                                .plugin_windows()
-                                .owned_window(&list_plugin, *id)
-                                .is_ok()
-                        })
+                        .filter(|id| layout.overlays().owned_overlay(&list_plugin, *id).is_ok())
                         .map(|id| Value::Number(id_to_number(id)))
                         .collect::<Vec<_>>();
                     Ok(Value::List(ids.into()))
@@ -156,17 +153,12 @@ pub(in crate::plugin::host::ui) fn windows_module(
             ),
             (
                 "active".to_string(),
-                native_fn("ui.windows.active", move || {
+                native_fn("ui.overlays.active", move || {
                     let layout = active_layout.borrow();
                     let value = layout
-                        .plugin_windows()
+                        .overlays()
                         .focused()
-                        .filter(|id| {
-                            layout
-                                .plugin_windows()
-                                .owned_window(&active_plugin, *id)
-                                .is_ok()
-                        })
+                        .filter(|id| layout.overlays().owned_overlay(&active_plugin, *id).is_ok())
                         .map(id_to_number)
                         .map(Value::Number)
                         .unwrap_or(Value::Null);
@@ -176,42 +168,49 @@ pub(in crate::plugin::host::ui) fn windows_module(
             (
                 "set_keymap".to_string(),
                 native_fn(
-                    "ui.windows.set_keymap",
-                    move |window_id: f64, lhs: String, rhs: String| {
-                        let id = id_from_number(window_id)?;
+                    "ui.overlays.set_keymap",
+                    move |overlay_id: f64, lhs: String, rhs: String| {
+                        let id = id_from_number(overlay_id)?;
                         let keys = parse_key_sequence(&lhs)?;
-                        let intent = parse_window_command(
+                        let intent = parse_overlay_command(
                             &set_keymap_plugin,
                             &rhs,
                             &set_keymap_contributions,
                         )?;
-                        set_keymap_layout
-                            .borrow_mut()
-                            .plugin_windows_mut()
-                            .set_keymap(&set_keymap_plugin, id, keys, rhs, intent)
+                        set_keymap_layout.borrow_mut().overlays_mut().set_keymap(
+                            &set_keymap_plugin,
+                            id,
+                            keys,
+                            rhs,
+                            intent,
+                        )
                     },
                 ),
             ),
             (
                 "delete_keymap".to_string(),
                 native_fn(
-                    "ui.windows.delete_keymap",
-                    move |window_id: f64, lhs: String| {
+                    "ui.overlays.delete_keymap",
+                    move |overlay_id: f64, lhs: String| {
                         let keys = parse_key_sequence(&lhs)?;
                         delete_keymap_layout
                             .borrow_mut()
-                            .plugin_windows_mut()
-                            .delete_keymap(&delete_keymap_plugin, id_from_number(window_id)?, &keys)
+                            .overlays_mut()
+                            .delete_keymap(
+                                &delete_keymap_plugin,
+                                id_from_number(overlay_id)?,
+                                &keys,
+                            )
                     },
                 ),
             ),
             (
                 "list_keymaps".to_string(),
-                native_fn("ui.windows.list_keymaps", move |window_id: f64| {
+                native_fn("ui.overlays.list_keymaps", move |overlay_id: f64| {
                     let bindings = list_keymap_layout
                         .borrow()
-                        .plugin_windows()
-                        .keymaps(&list_keymap_plugin, id_from_number(window_id)?)?;
+                        .overlays()
+                        .keymaps(&list_keymap_plugin, id_from_number(overlay_id)?)?;
                     Ok(Value::List(
                         bindings
                             .into_iter()
@@ -236,14 +235,14 @@ pub(in crate::plugin::host::ui) fn windows_module(
 
 fn options_from_value(
     value: Option<Value>,
-    mut options: Option<PluginWindowOptions>,
-) -> Result<PluginWindowOptions, String> {
+    mut options: Option<OverlayOptions>,
+) -> Result<OverlayOptions, String> {
     let value = value.unwrap_or(Value::Null);
     if matches!(value, Value::Null) {
         return Ok(options.unwrap_or_default());
     }
     let Value::Map(map) = value else {
-        return Err("plugin window options must be a map or null".to_string());
+        return Err("overlay options must be a map or null".to_string());
     };
     let allowed = [
         "placement",
@@ -255,7 +254,7 @@ fn options_from_value(
         "focused_border_style",
     ];
     if let Some(key) = map.keys().find(|key| !allowed.contains(&key.as_str())) {
-        return Err(format!("unknown plugin window option {key}"));
+        return Err(format!("unknown overlay option {key}"));
     }
     let mut current = options.take().unwrap_or_default();
     if let Some(value) = map.get("rows") {
@@ -283,18 +282,18 @@ fn options_from_value(
         )?;
     }
     if current.rows == 0 || current.cols == 0 {
-        return Err("plugin window rows and cols must be positive".to_string());
+        return Err("overlay rows and cols must be positive".to_string());
     }
     Ok(current)
 }
 
-fn placement_from_value(value: &Value) -> Result<FloatingPlacement, String> {
+fn placement_from_value(value: &Value) -> Result<OverlayPlacement, String> {
     let Value::Map(map) = value else {
         return Err("placement must be a map".to_string());
     };
     for key in map.keys() {
         if !matches!(key.as_str(), "type" | "anchor" | "margins" | "row" | "col") {
-            return Err(format!("unknown plugin window placement option {key}"));
+            return Err(format!("unknown overlay placement option {key}"));
         }
     }
 
@@ -315,10 +314,10 @@ fn placement_from_value(value: &Value) -> Result<FloatingPlacement, String> {
             )?)?;
             let margins = map
                 .get("margins")
-                .map(|value| margins_from_value(value, FloatingMargins::default()))
+                .map(|value| margins_from_value(value, OverlayMargins::default()))
                 .transpose()?
                 .unwrap_or_default();
-            Ok(FloatingPlacement::Anchored { anchor, margins })
+            Ok(OverlayPlacement::Anchored { anchor, margins })
         }
         "fixed" => {
             if map.contains_key("anchor") || map.contains_key("margins") {
@@ -334,15 +333,17 @@ fn placement_from_value(value: &Value) -> Result<FloatingPlacement, String> {
                     .ok_or_else(|| "fixed placement requires col".to_string())?,
                 "placement.col",
             )?;
-            Ok(FloatingPlacement::Fixed { row, col })
+            Ok(OverlayPlacement::Fixed { row, col })
         }
-        other => Err(format!("unknown plugin window placement type {other}")),
+        other => Err(format!("unknown overlay placement type {other}")),
     }
 }
 
-pub(super) fn content_from_value(value: &Value) -> Result<PluginWindowContent, String> {
+pub(in crate::plugin::host) fn content_from_value(
+    value: &Value,
+) -> Result<RetainedContent, String> {
     let Value::List(lines) = value else {
-        return Err("plugin window content must be a list of lines".to_string());
+        return Err("overlay content must be a list of lines".to_string());
     };
     lines
         .iter()
@@ -351,9 +352,9 @@ pub(super) fn content_from_value(value: &Value) -> Result<PluginWindowContent, S
         .collect()
 }
 
-fn line_from_value(value: &Value, line_index: usize) -> Result<Vec<PluginWindowSegment>, String> {
+fn line_from_value(value: &Value, line_index: usize) -> Result<Vec<RetainedSegment>, String> {
     let Value::List(segments) = value else {
-        return Err(format!("plugin window line {line_index} must be a list"));
+        return Err(format!("overlay line {line_index} must be a list"));
     };
     segments
         .iter()
@@ -361,21 +362,21 @@ fn line_from_value(value: &Value, line_index: usize) -> Result<Vec<PluginWindowS
         .map(|(segment_index, value)| {
             let Value::Map(map) = value else {
                 return Err(format!(
-                    "plugin window segment {line_index}:{segment_index} must be a map"
+                    "overlay segment {line_index}:{segment_index} must be a map"
                 ));
             };
             for key in map.keys() {
                 if key != "text" && key != "style" {
-                    return Err(format!("unknown plugin window segment option {key}"));
+                    return Err(format!("unknown overlay segment option {key}"));
                 }
             }
             let text = string_value(
                 map.get("text")
-                    .ok_or_else(|| "plugin window segment requires text".to_string())?,
+                    .ok_or_else(|| "overlay segment requires text".to_string())?,
                 "text",
             )?;
             if text.contains('\n') {
-                return Err("plugin window segment text must not contain newlines".to_string());
+                return Err("overlay segment text must not contain newlines".to_string());
             }
             let style = map
                 .get("style")
@@ -385,12 +386,12 @@ fn line_from_value(value: &Value, line_index: usize) -> Result<Vec<PluginWindowS
                 })
                 .transpose()?
                 .flatten();
-            Ok(PluginWindowSegment { text, style })
+            Ok(RetainedSegment { text, style })
         })
         .collect()
 }
 
-pub(super) fn parse_window_command(
+pub(in crate::plugin::host) fn parse_overlay_command(
     plugin: &str,
     rhs: &str,
     contributions: &Rc<RefCell<urvim_plugin::PluginContributionRegistry>>,
@@ -404,7 +405,7 @@ pub(super) fn parse_window_command(
     {
         if target != plugin {
             return Err(
-                "plugin window keymaps may only invoke commands from their owner".to_string(),
+                "plugin overlay keymaps may only invoke commands from their owner".to_string(),
             );
         }
         if contributions.borrow().command(plugin, command).is_none() {
@@ -430,17 +431,17 @@ fn coordinate_value(value: &Value, label: &str) -> Result<u16, String> {
 
 fn margins_from_value(
     value: &Value,
-    mut margins: FloatingMargins,
-) -> Result<FloatingMargins, String> {
+    mut margins: OverlayMargins,
+) -> Result<OverlayMargins, String> {
     if matches!(value, Value::Null) {
-        return Ok(FloatingMargins::default());
+        return Ok(OverlayMargins::default());
     }
     let Value::Map(map) = value else {
         return Err("margins must be a map or null".to_string());
     };
     for key in map.keys() {
         if !matches!(key.as_str(), "top" | "right" | "bottom" | "left") {
-            return Err(format!("unknown plugin window margin {key}"));
+            return Err(format!("unknown overlay margin {key}"));
         }
     }
     if let Some(value) = map.get("top") {

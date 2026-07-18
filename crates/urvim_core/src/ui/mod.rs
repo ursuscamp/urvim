@@ -6,22 +6,22 @@
 pub mod completion;
 pub mod confirmation_box;
 pub mod diagnostic_hover;
-pub mod floating_window;
+pub mod geometry;
 pub mod hover;
 pub mod input_box;
 pub mod inputs;
 pub mod line_format;
 pub mod lsp_rename;
+pub mod overlay;
 pub mod picker;
 pub mod plugin_pane;
-pub mod plugin_window;
 pub mod text_width;
 
 use crate::buffer::BufferId;
 use crate::buffer::Cursor;
 use crate::editor::EditorAction;
 use crate::notification::NotificationLevel;
-use crate::window::{Position, Size};
+pub use geometry::{Position, Size};
 use std::borrow::Cow;
 use std::path::PathBuf;
 use urvim_terminal::{Event, Key};
@@ -66,7 +66,7 @@ impl UiEventResult {
 /// Unified dispatch envelope for editor operations and UI commands.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Intent {
-    /// An operation interpreted against an editor window and its modal state.
+    /// An operation interpreted against an editor tab and its modal state.
     Editor(EditorAction),
     /// UI/app orchestration command.
     Command(Command),
@@ -269,7 +269,7 @@ pub enum Command {
     PreviousTab(usize),
     /// Switch forward through editor tabs by the provided count.
     NextTab(usize),
-    /// Toggle visual wrapping for the focused window.
+    /// Toggle visual wrapping for the focused editor pane.
     ToggleWrap,
     /// Split the focused pane vertically.
     SplitVertical,
@@ -283,10 +283,10 @@ pub enum Command {
     FocusPaneUp,
     /// Focus the pane to the right.
     FocusPaneRight,
-    /// Focus the next persistent editor or plugin window.
-    FocusNextWindow,
-    /// Focus the previous persistent editor or plugin window.
-    FocusPreviousWindow,
+    /// Focus the next persistent pane or overlay target.
+    FocusNextTarget,
+    /// Focus the previous persistent pane or overlay target.
+    FocusPreviousTarget,
     /// Close the focused pane.
     ClosePane,
     /// Attempt to exit the editor, allowing the app to confirm first if needed.
@@ -346,23 +346,23 @@ impl Command {
             Self::GitPickerToggleStage(_) => Cow::Borrowed("git.toggle-stage"),
             Self::GitPickerDiscard(_) => Cow::Borrowed("git.discard"),
             Self::GitPickerDiscardConfirmed(_) => Cow::Borrowed("git.discard-confirmed"),
-            Self::ResizePaneLeft(_) => Cow::Borrowed("window.resize-left"),
-            Self::ResizePaneRight(_) => Cow::Borrowed("window.resize-right"),
-            Self::ResizePaneUp(_) => Cow::Borrowed("window.resize-up"),
-            Self::ResizePaneDown(_) => Cow::Borrowed("window.resize-down"),
-            Self::EqualizeSplits => Cow::Borrowed("window.equalize-splits"),
-            Self::PreviousTab(_) => Cow::Borrowed("window.previous-tab"),
-            Self::NextTab(_) => Cow::Borrowed("window.next-tab"),
-            Self::ToggleWrap => Cow::Borrowed("window.toggle-wrap"),
-            Self::SplitVertical => Cow::Borrowed("window.split-vertical"),
-            Self::SplitHorizontal => Cow::Borrowed("window.split-horizontal"),
-            Self::FocusPaneLeft => Cow::Borrowed("window.focus-left"),
-            Self::FocusPaneDown => Cow::Borrowed("window.focus-down"),
-            Self::FocusPaneUp => Cow::Borrowed("window.focus-up"),
-            Self::FocusPaneRight => Cow::Borrowed("window.focus-right"),
-            Self::FocusNextWindow => Cow::Borrowed("window.focus-next"),
-            Self::FocusPreviousWindow => Cow::Borrowed("window.focus-previous"),
-            Self::ClosePane => Cow::Borrowed("window.close"),
+            Self::ResizePaneLeft(_) => Cow::Borrowed("pane.resize-left"),
+            Self::ResizePaneRight(_) => Cow::Borrowed("pane.resize-right"),
+            Self::ResizePaneUp(_) => Cow::Borrowed("pane.resize-up"),
+            Self::ResizePaneDown(_) => Cow::Borrowed("pane.resize-down"),
+            Self::EqualizeSplits => Cow::Borrowed("pane.equalize"),
+            Self::PreviousTab(_) => Cow::Borrowed("tab.previous"),
+            Self::NextTab(_) => Cow::Borrowed("tab.next"),
+            Self::ToggleWrap => Cow::Borrowed("pane.wrap-toggle"),
+            Self::SplitVertical => Cow::Borrowed("pane.split-vertical"),
+            Self::SplitHorizontal => Cow::Borrowed("pane.split-horizontal"),
+            Self::FocusPaneLeft => Cow::Borrowed("pane.focus-left"),
+            Self::FocusPaneDown => Cow::Borrowed("pane.focus-down"),
+            Self::FocusPaneUp => Cow::Borrowed("pane.focus-up"),
+            Self::FocusPaneRight => Cow::Borrowed("pane.focus-right"),
+            Self::FocusNextTarget => Cow::Borrowed("focus.next"),
+            Self::FocusPreviousTarget => Cow::Borrowed("focus.previous"),
+            Self::ClosePane => Cow::Borrowed("pane.close"),
             Self::TryQuit => Cow::Borrowed("editor.try-quit"),
             Self::Quit => Cow::Borrowed("editor.quit"),
         }
@@ -394,8 +394,8 @@ impl Command {
             | Self::FocusPaneDown
             | Self::FocusPaneUp
             | Self::FocusPaneRight
-            | Self::FocusNextWindow
-            | Self::FocusPreviousWindow
+            | Self::FocusNextTarget
+            | Self::FocusPreviousTarget
             | Self::ClosePane => KeymapInheritance::Focus,
             Self::OpenCommandLine
             | Self::OpenBufferPicker
@@ -593,7 +593,7 @@ mod tests {
             "buffer.save-as"
         );
         assert_eq!(Command::CloseBuffer(None).event_name(), "buffer.close");
-        assert_eq!(Command::NextTab(1).event_name(), "window.next-tab");
+        assert_eq!(Command::NextTab(1).event_name(), "tab.next");
         assert_eq!(Command::LspHover.event_name(), "lsp.hover");
         assert_eq!(
             Command::PluginRequest {

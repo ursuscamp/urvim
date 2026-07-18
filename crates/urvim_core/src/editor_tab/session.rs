@@ -1,11 +1,11 @@
-use super::Window;
+use super::EditorTab;
 use crate::buffer::{BufferId, Cursor};
-use crate::session::{SessionCursor, SessionPosition, SessionWindow};
-use crate::window::Position;
+use crate::session::{SessionCursor, SessionEditorTab, SessionPosition};
+use crate::ui::geometry::Position;
 
-impl Window {
-    /// Converts a live window into serializable session state.
-    pub fn to_session(&self) -> SessionWindow {
+impl EditorTab {
+    /// Converts a live tab into serializable session state.
+    pub fn to_session(&self) -> SessionEditorTab {
         let path = self
             .buffer_view()
             .with_buffer(|buffer| {
@@ -16,7 +16,7 @@ impl Window {
             })
             .unwrap_or_default();
 
-        SessionWindow {
+        SessionEditorTab {
             path,
             cursor: SessionCursor {
                 row: self.buffer_view().cursor().line,
@@ -31,12 +31,12 @@ impl Window {
         }
     }
 
-    /// Restores a live window from serialized session state.
-    pub fn from_session(session: SessionWindow, buffer_id: BufferId) -> Self {
-        let mut window = Self::from_buffer_id(buffer_id);
-        window.set_wrap_enabled(session.wrap_enabled);
+    /// Restores a live tab from serialized session state.
+    pub fn from_session(session: SessionEditorTab, buffer_id: BufferId) -> Self {
+        let mut tab = Self::from_buffer_id(buffer_id);
+        tab.set_wrap_enabled(session.wrap_enabled);
         {
-            let view = window.buffer_view_mut();
+            let view = tab.buffer_view_mut();
             view.set_cursor_synced(Cursor::new(session.cursor.row, session.cursor.col));
             let clamped_scroll = view
                 .with_buffer(|buffer| {
@@ -58,6 +58,6 @@ impl Window {
             view.set_scroll_offset(clamped_scroll);
             view.set_wrapped_row_offset(session.wrapped_row_offset);
         }
-        window
+        tab
     }
 }

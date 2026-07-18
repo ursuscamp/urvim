@@ -29,8 +29,8 @@ fn buffer_with_lines(label: &str, line_count: usize) -> Buffer {
     Buffer::from_str_with_path(&text, abs_path(&path))
 }
 
-fn window_group_with_labels(labels: &[&str]) -> WindowGroup {
-    WindowGroup::from_buffers(
+fn editor_pane_with_labels(labels: &[&str]) -> EditorPane {
+    EditorPane::from_buffers(
         labels
             .iter()
             .map(|label| buffer_with_label(label))
@@ -40,7 +40,7 @@ fn window_group_with_labels(labels: &[&str]) -> WindowGroup {
 
 #[test]
 fn tab_ids_are_unique_and_stable_across_activation() {
-    let mut group = window_group_with_labels(&["first", "second"]);
+    let mut group = editor_pane_with_labels(&["first", "second"]);
     let ids = group.tab_ids_and_buffer_ids();
 
     assert_ne!(ids[0].0, ids[1].0);
@@ -130,9 +130,9 @@ fn buffer_cursor(view: &BufferView) -> Cursor {
 }
 
 #[test]
-fn test_window_group_session_skips_missing_files_during_restore() {
+fn test_editor_pane_session_skips_missing_files_during_restore() {
     let temp_dir = std::env::temp_dir().join(format!(
-        "urvim-window-group-session-{}-{}",
+        "urvim-editor-pane-session-{}-{}",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -146,29 +146,29 @@ fn test_window_group_session_skips_missing_files_during_restore() {
     fs::write(&first, "alpha").unwrap();
     fs::write(&second, "beta").unwrap();
 
-    let group = WindowGroup::from_paths(&[first.clone(), second.clone()]);
+    let group = EditorPane::from_paths(&[first.clone(), second.clone()]);
     let original_tab_id = group.tabs[0].tab_id();
     let session = group.to_session();
     fs::remove_file(&second).unwrap();
 
-    let restored = WindowGroup::from_session(session);
+    let restored = EditorPane::from_session(session);
     assert_eq!(restored.tabs.len(), 1);
     assert_ne!(restored.tabs[0].tab_id(), original_tab_id);
     assert_eq!(
-        buffer_file_name(restored.active_window().buffer_view()).unwrap(),
+        buffer_file_name(restored.active_tab().buffer_view()).unwrap(),
         first.file_name().unwrap()
     );
 }
 
 #[test]
-fn test_window_group_new_creates_empty_tab() {
-    let group = WindowGroup::new(Vec::new());
+fn test_editor_pane_new_creates_empty_tab() {
+    let group = EditorPane::new(Vec::new());
     assert_eq!(group.active_tab_index(), 0);
     assert_eq!(buffer_line_count(group.active_buffer_view()), 1);
 }
 
 #[test]
-fn test_window_group_from_paths_opens_missing_files_as_empty_buffers() {
+fn test_editor_pane_from_paths_opens_missing_files_as_empty_buffers() {
     let temp_dir = std::env::temp_dir().join(format!(
         "urvim-tab-group-{}-{}",
         std::process::id(),
@@ -185,11 +185,11 @@ fn test_window_group_from_paths_opens_missing_files_as_empty_buffers() {
     std::fs::write(&first, "alpha").unwrap();
     std::fs::write(&second, "beta").unwrap();
 
-    let group = WindowGroup::from_paths(&[first.clone(), missing, second.clone()]);
+    let group = EditorPane::from_paths(&[first.clone(), missing, second.clone()]);
 
     assert_eq!(group.tabs.len(), 3);
     assert_eq!(
-        buffer_file_name(group.active_window().buffer_view()).unwrap(),
+        buffer_file_name(group.active_tab().buffer_view()).unwrap(),
         first.file_name().unwrap()
     );
     assert_eq!(
@@ -206,7 +206,7 @@ fn test_window_group_from_paths_opens_missing_files_as_empty_buffers() {
 }
 
 #[test]
-fn test_window_group_from_paths_deduplicates_duplicate_files() {
+fn test_editor_pane_from_paths_deduplicates_duplicate_files() {
     let temp_dir = std::env::temp_dir().join(format!(
         "urvim-tab-group-{}-{}",
         std::process::id(),
@@ -220,11 +220,11 @@ fn test_window_group_from_paths_deduplicates_duplicate_files() {
     let path = temp_dir.join("duplicate.txt");
     std::fs::write(&path, "alpha").unwrap();
 
-    let group = WindowGroup::from_paths(&[path.clone(), path.clone()]);
+    let group = EditorPane::from_paths(&[path.clone(), path.clone()]);
 
     assert_eq!(group.tabs.len(), 1);
     assert_eq!(
-        buffer_file_name(group.active_window().buffer_view()).unwrap(),
+        buffer_file_name(group.active_tab().buffer_view()).unwrap(),
         path.file_name().unwrap()
     );
 
@@ -233,7 +233,7 @@ fn test_window_group_from_paths_deduplicates_duplicate_files() {
 }
 
 #[test]
-fn test_window_group_from_cli_files_applies_and_syncs_cursor() {
+fn test_editor_pane_from_cli_files_applies_and_syncs_cursor() {
     let temp_dir = std::env::temp_dir().join(format!(
         "urvim-cli-file-{}-{}",
         std::process::id(),
@@ -247,13 +247,13 @@ fn test_window_group_from_cli_files_applies_and_syncs_cursor() {
     let path = temp_dir.join("cursor.txt");
     std::fs::write(&path, "a😀b").unwrap();
 
-    let group = WindowGroup::from_cli_files(&[CliFileSpec {
+    let group = EditorPane::from_cli_files(&[CliFileSpec {
         path: path.clone(),
         cursor: Some(Cursor::new(0, 2)),
     }]);
 
     assert_eq!(
-        buffer_cursor(group.active_window().buffer_view()),
+        buffer_cursor(group.active_tab().buffer_view()),
         Cursor::new(0, 1)
     );
 
@@ -262,7 +262,7 @@ fn test_window_group_from_cli_files_applies_and_syncs_cursor() {
 }
 
 #[test]
-fn test_window_group_from_cli_files_clamps_cursor_to_file_bounds() {
+fn test_editor_pane_from_cli_files_clamps_cursor_to_file_bounds() {
     let temp_dir = std::env::temp_dir().join(format!(
         "urvim-cli-file-{}-{}",
         std::process::id(),
@@ -276,13 +276,13 @@ fn test_window_group_from_cli_files_clamps_cursor_to_file_bounds() {
     let path = temp_dir.join("clamp.txt");
     std::fs::write(&path, "alpha\nbeta").unwrap();
 
-    let group = WindowGroup::from_cli_files(&[CliFileSpec {
+    let group = EditorPane::from_cli_files(&[CliFileSpec {
         path: path.clone(),
         cursor: Some(Cursor::new(98, 98)),
     }]);
 
     assert_eq!(
-        buffer_cursor(group.active_window().buffer_view()),
+        buffer_cursor(group.active_tab().buffer_view()),
         Cursor::new(1, 4)
     );
 
@@ -292,7 +292,7 @@ fn test_window_group_from_cli_files_clamps_cursor_to_file_bounds() {
 
 #[test]
 fn test_tab_navigation_wraps_and_supports_counts() {
-    let mut group = window_group_with_labels(&["a", "b", "c", "d", "e"]);
+    let mut group = editor_pane_with_labels(&["a", "b", "c", "d", "e"]);
 
     group.previous_tab(1);
     assert_eq!(group.active_tab_index(), 4);
@@ -305,30 +305,30 @@ fn test_tab_navigation_wraps_and_supports_counts() {
 }
 
 #[test]
-fn test_each_window_restores_its_own_mode() {
+fn test_each_tab_restores_its_own_mode() {
     let mut group =
-        WindowGroup::from_buffers(vec![Buffer::from_str("first"), Buffer::from_str("second")]);
+        EditorPane::from_buffers(vec![Buffer::from_str("first"), Buffer::from_str("second")]);
 
-    group.active_window_mut().switch_mode(ModeKind::Insert);
+    group.active_tab_mut().switch_mode(ModeKind::Insert);
 
     group.next_tab(1);
     assert_eq!(group.active_tab_index(), 1);
-    assert_eq!(group.active_window_mode_kind(), ModeKind::Normal);
+    assert_eq!(group.active_tab_mode_kind(), ModeKind::Normal);
 
-    group.active_window_mut().switch_mode(ModeKind::VisualLine);
+    group.active_tab_mut().switch_mode(ModeKind::VisualLine);
 
     group.previous_tab(1);
     assert_eq!(group.active_tab_index(), 0);
-    assert_eq!(group.active_window_mode_kind(), ModeKind::Insert);
+    assert_eq!(group.active_tab_mode_kind(), ModeKind::Insert);
 
     group.next_tab(1);
     assert_eq!(group.active_tab_index(), 1);
-    assert_eq!(group.active_window_mode_kind(), ModeKind::VisualLine);
+    assert_eq!(group.active_tab_mode_kind(), ModeKind::VisualLine);
 }
 
 #[test]
 fn test_tab_bar_scrolls_only_when_active_tab_is_offscreen() {
-    let mut group = window_group_with_labels(&["a", "b", "c", "d", "e"]);
+    let mut group = editor_pane_with_labels(&["a", "b", "c", "d", "e"]);
     let mut screen = crate::screen::Screen::new(2, 12);
 
     group.active_tab = 4;
@@ -344,7 +344,7 @@ fn test_tab_bar_scrolls_only_when_active_tab_is_offscreen() {
 
 #[test]
 fn test_tab_bar_indicators_appear_when_tabs_are_offscreen() {
-    let mut group = window_group_with_labels(&["a", "b", "c", "d", "e"]);
+    let mut group = editor_pane_with_labels(&["a", "b", "c", "d", "e"]);
     let mut screen = crate::screen::Screen::new(2, 12);
 
     group.active_tab = 3;
@@ -357,7 +357,7 @@ fn test_tab_bar_indicators_appear_when_tabs_are_offscreen() {
 
 #[test]
 fn test_tab_bar_right_indicator_appears_when_only_right_tabs_are_offscreen() {
-    let mut group = window_group_with_labels(&["aaaa", "bbbb", "cccc", "dddd"]);
+    let mut group = editor_pane_with_labels(&["aaaa", "bbbb", "cccc", "dddd"]);
     let mut screen = crate::screen::Screen::new(2, 10);
 
     group.active_tab = 0;
@@ -369,7 +369,7 @@ fn test_tab_bar_right_indicator_appears_when_only_right_tabs_are_offscreen() {
 
 #[test]
 fn test_tab_bar_active_style_and_unicode_width() {
-    let mut group = window_group_with_labels(&["あ", "b"]);
+    let mut group = editor_pane_with_labels(&["あ", "b"]);
     let mut screen = crate::screen::Screen::new(2, 12);
 
     group.render(&mut screen, Position::new(0, 0), Size::new(2, 12));
@@ -387,7 +387,7 @@ fn test_tab_bar_uses_theme_modified_marker_style() {
     let mut buffer = Buffer::from_str_with_path("line1", abs_path(&path));
     buffer.insert_char(Cursor::new(0, 5), '!');
 
-    let mut group = WindowGroup::from_buffers(vec![buffer]);
+    let mut group = EditorPane::from_buffers(vec![buffer]);
     let theme = themed_group();
     let expected_style = theme.resolve_name_with_default("ui.tab.active");
     let expected_marker_style =
@@ -407,7 +407,7 @@ fn test_tab_bar_uses_theme_modified_marker_style() {
 
 #[test]
 fn test_tab_bar_uses_theme_styles() {
-    let mut group = window_group_with_labels(&["demo"]);
+    let mut group = editor_pane_with_labels(&["demo"]);
     let theme = themed_group();
     let expected_style = theme.resolve_name_with_default("ui.tab.active");
     let _theme_guard = globals::set_test_active_theme(theme);
@@ -422,7 +422,7 @@ fn test_tab_bar_uses_theme_styles() {
 fn test_tab_bar_renders_glyph_when_enabled() {
     let path = PathBuf::from("/tmp/rust-icon.rs");
     let buffer = Buffer::from_str_with_path("fn main() {}", abs_path(&path));
-    let mut group = WindowGroup::from_buffers(vec![buffer]);
+    let mut group = EditorPane::from_buffers(vec![buffer]);
     let theme = themed_group();
     let expected_tab_style = theme.resolve_name_with_default("ui.tab.active");
     let expected_glyph_style =
@@ -450,7 +450,7 @@ fn test_tab_bar_renders_glyph_when_enabled() {
 
 #[test]
 fn test_visual_cursor_is_offset_by_tab_bar_row() {
-    let mut group = window_group_with_labels(&["a"]);
+    let mut group = editor_pane_with_labels(&["a"]);
     group
         .active_buffer_view_mut()
         .set_cursor(crate::buffer::Cursor::new(0, 0));
@@ -464,7 +464,7 @@ fn test_visual_cursor_is_offset_by_tab_bar_row() {
 
 #[test]
 fn test_jump_navigation_selects_existing_tab() {
-    let mut group = window_group_with_labels(&["a", "b"]);
+    let mut group = editor_pane_with_labels(&["a", "b"]);
 
     group.active_buffer_view_mut().set_cursor(Cursor::new(0, 1));
     let first_buffer = group.active_buffer_view().buffer_id();
@@ -480,26 +480,20 @@ fn test_jump_navigation_selects_existing_tab() {
         ActionResult::Handled
     );
     assert_eq!(group.active_tab_index(), 0);
-    assert_eq!(
-        group.active_window().buffer_view().buffer_id(),
-        first_buffer
-    );
+    assert_eq!(group.active_tab().buffer_view().buffer_id(), first_buffer);
     assert_eq!(buffer_cursor(group.active_buffer_view()), Cursor::new(0, 1));
     assert_eq!(
         group.dispatch_action(&EditorAction::jump_forward()),
         ActionResult::Handled
     );
     assert_eq!(group.active_tab_index(), 1);
-    assert_eq!(
-        group.active_window().buffer_view().buffer_id(),
-        second_buffer
-    );
+    assert_eq!(group.active_tab().buffer_view().buffer_id(), second_buffer);
     assert_eq!(buffer_cursor(group.active_buffer_view()), Cursor::new(0, 3));
 }
 
 #[test]
 fn test_jump_navigation_reopens_missing_tab() {
-    let mut group = window_group_with_labels(&["a", "b"]);
+    let mut group = editor_pane_with_labels(&["a", "b"]);
 
     group.active_buffer_view_mut().set_cursor(Cursor::new(0, 1));
     let first_buffer = group.active_buffer_view().buffer_id();
@@ -518,16 +512,13 @@ fn test_jump_navigation_reopens_missing_tab() {
     );
     assert_eq!(group.tabs.len(), 2);
     assert_eq!(group.active_tab_index(), 1);
-    assert_eq!(
-        group.active_window().buffer_view().buffer_id(),
-        first_buffer
-    );
+    assert_eq!(group.active_tab().buffer_view().buffer_id(), first_buffer);
     assert_eq!(buffer_cursor(group.active_buffer_view()), Cursor::new(0, 1));
 }
 
 #[test]
 fn test_counted_jump_down_creates_a_new_entry() {
-    let mut group = WindowGroup::from_buffers(vec![buffer_with_lines("jumplist-50j", 80)]);
+    let mut group = EditorPane::from_buffers(vec![buffer_with_lines("jumplist-50j", 80)]);
 
     group.active_buffer_view_mut().set_cursor(Cursor::new(0, 0));
     group.record_cursor_position();
@@ -553,7 +544,7 @@ fn test_counted_jump_down_creates_a_new_entry() {
 
 #[test]
 fn test_smaller_counted_jump_down_updates_current_entry() {
-    let mut group = WindowGroup::from_buffers(vec![buffer_with_lines("jumplist-5j", 20)]);
+    let mut group = EditorPane::from_buffers(vec![buffer_with_lines("jumplist-5j", 20)]);
 
     group.active_buffer_view_mut().set_cursor(Cursor::new(0, 0));
     group.record_cursor_position();

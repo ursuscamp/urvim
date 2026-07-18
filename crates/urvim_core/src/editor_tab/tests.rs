@@ -27,25 +27,23 @@ use urvim_theme::{HighlightStyles, Tag, Theme, ThemeKind};
 
 const CONTENT_COL: u16 = 5;
 
-fn process_action_and_snapshot(window: &mut Window, action: &EditorAction) {
-    assert_eq!(window.dispatch_action(action), ActionResult::Handled);
+fn process_action_and_snapshot(tab: &mut EditorTab, action: &EditorAction) {
+    assert_eq!(tab.dispatch_action(action), ActionResult::Handled);
 
     if action.is_snapshottable() {
-        let cursor = window.buffer_view.cursor();
-        window
-            .buffer_view
+        let cursor = tab.buffer_view.cursor();
+        tab.buffer_view
             .with_buffer_mut(|buffer| buffer.push_snapshot(cursor))
             .unwrap_or(());
     }
 }
 
-fn dispatch_with_main_loop_snapshot(window: &mut Window, action: &EditorAction) {
-    assert_eq!(window.dispatch_action(action), ActionResult::Handled);
+fn dispatch_with_main_loop_snapshot(tab: &mut EditorTab, action: &EditorAction) {
+    assert_eq!(tab.dispatch_action(action), ActionResult::Handled);
 
     if action.is_snapshottable() {
-        let cursor = window.buffer_view.cursor();
-        window
-            .buffer_view
+        let cursor = tab.buffer_view.cursor();
+        tab.buffer_view
             .with_buffer_mut(|buffer| buffer.push_snapshot(cursor))
             .unwrap_or(());
     }
@@ -53,22 +51,21 @@ fn dispatch_with_main_loop_snapshot(window: &mut Window, action: &EditorAction) 
 
 #[test]
 fn test_surround_replace_updates_nearest_enclosing_pair() {
-    let mut window = Window::new(Buffer::from_str("one {two {three} four} five"));
-    window.set_cursor(Cursor::new(0, 10));
+    let mut tab = EditorTab::new(Buffer::from_str("one {two {three} four} five"));
+    tab.set_cursor(Cursor::new(0, 10));
 
     let action = EditorAction::new(EditorOperation::SurroundReplace {
         target: DelimiterFamily::Curly,
         replacement: DelimiterFamily::Square,
     });
-    assert_eq!(window.dispatch_action(&action), ActionResult::Handled);
+    assert_eq!(tab.dispatch_action(&action), ActionResult::Handled);
     assert_eq!(
-        buffer_text(window.buffer_view()),
+        buffer_text(tab.buffer_view()),
         "one {two [three] four} five"
     );
     assert_eq!(
-        window
-            .buffer_view()
-            .with_buffer(|buffer| buffer.char_at_cursor(window.buffer_view().cursor()))
+        tab.buffer_view()
+            .with_buffer(|buffer| buffer.char_at_cursor(tab.buffer_view().cursor()))
             .unwrap_or(None),
         Some('[')
     );
@@ -76,19 +73,19 @@ fn test_surround_replace_updates_nearest_enclosing_pair() {
 
 #[test]
 fn test_surround_delete_works_across_lines() {
-    let mut window = Window::new(Buffer::from_str("foo \"bar\nbaz\" qux"));
-    window.set_cursor(Cursor::new(1, 1));
+    let mut tab = EditorTab::new(Buffer::from_str("foo \"bar\nbaz\" qux"));
+    tab.set_cursor(Cursor::new(1, 1));
 
     let action = EditorAction::new(EditorOperation::SurroundDelete {
         target: DelimiterFamily::DoubleQuote,
     });
-    assert_eq!(window.dispatch_action(&action), ActionResult::Handled);
-    assert_eq!(buffer_text(window.buffer_view()), "foo bar\nbaz qux");
+    assert_eq!(tab.dispatch_action(&action), ActionResult::Handled);
+    assert_eq!(buffer_text(tab.buffer_view()), "foo bar\nbaz qux");
 }
 
 #[test]
 fn test_surround_actions_noop_when_unresolvable_or_same_family() {
-    let mut missing = Window::new(Buffer::from_str("no delimiters here"));
+    let mut missing = EditorTab::new(Buffer::from_str("no delimiters here"));
     missing.set_cursor(Cursor::new(0, 3));
     let delete_action = EditorAction::new(EditorOperation::SurroundDelete {
         target: DelimiterFamily::Curly,
@@ -99,7 +96,7 @@ fn test_surround_actions_noop_when_unresolvable_or_same_family() {
     );
     assert_eq!(buffer_text(missing.buffer_view()), "no delimiters here");
 
-    let mut same_family = Window::new(Buffer::from_str("wrap (me) please"));
+    let mut same_family = EditorTab::new(Buffer::from_str("wrap (me) please"));
     same_family.set_cursor(Cursor::new(0, 6));
     let replace_action = EditorAction::new(EditorOperation::SurroundReplace {
         target: DelimiterFamily::Paren,
@@ -114,58 +111,58 @@ fn test_surround_actions_noop_when_unresolvable_or_same_family() {
 
 #[test]
 fn test_surround_replace_is_single_undoable_edit() {
-    let mut window = Window::new(Buffer::from_str("foo(bar)baz"));
-    window.set_cursor(Cursor::new(0, 4));
+    let mut tab = EditorTab::new(Buffer::from_str("foo(bar)baz"));
+    tab.set_cursor(Cursor::new(0, 4));
 
     process_action_and_snapshot(
-        &mut window,
+        &mut tab,
         &EditorAction::new(EditorOperation::SurroundReplace {
             target: DelimiterFamily::Paren,
             replacement: DelimiterFamily::Square,
         }),
     );
-    assert_eq!(buffer_text(window.buffer_view()), "foo[bar]baz");
+    assert_eq!(buffer_text(tab.buffer_view()), "foo[bar]baz");
 
-    apply_undo_synced(&mut window);
-    assert_eq!(buffer_text(window.buffer_view()), "foo(bar)baz");
+    apply_undo_synced(&mut tab);
+    assert_eq!(buffer_text(tab.buffer_view()), "foo(bar)baz");
 }
 
 #[test]
 fn test_replace_mode_edits_undo_as_single_snapshot() {
-    let mut window = Window::new(Buffer::from_str("hello"));
-    window.set_cursor(Cursor::new(0, 1));
+    let mut tab = EditorTab::new(Buffer::from_str("hello"));
+    tab.set_cursor(Cursor::new(0, 1));
 
     dispatch_with_main_loop_snapshot(
-        &mut window,
+        &mut tab,
         &EditorAction::new(EditorOperation::ReplaceChar('a')).with_from_mode(ModeKind::Replace),
     );
     dispatch_with_main_loop_snapshot(
-        &mut window,
+        &mut tab,
         &EditorAction::new(EditorOperation::ReplaceChar('b')).with_from_mode(ModeKind::Replace),
     );
-    commit_insert_exit_snapshot(&mut window);
+    commit_insert_exit_snapshot(&mut tab);
 
-    assert_eq!(buffer_text(window.buffer_view()), "hablo");
-    apply_undo_synced(&mut window);
-    assert_eq!(buffer_text(window.buffer_view()), "hello");
+    assert_eq!(buffer_text(tab.buffer_view()), "hablo");
+    apply_undo_synced(&mut tab);
+    assert_eq!(buffer_text(tab.buffer_view()), "hello");
 }
 
 #[test]
 fn test_replace_backspace_restores_overwritten_character() {
-    let mut window = Window::new(Buffer::from_str("hello"));
-    window.set_cursor(Cursor::new(0, 1));
+    let mut tab = EditorTab::new(Buffer::from_str("hello"));
+    tab.set_cursor(Cursor::new(0, 1));
 
     assert_eq!(
-        window.dispatch_action(
+        tab.dispatch_action(
             &EditorAction::new(EditorOperation::ReplaceChar('a')).with_from_mode(ModeKind::Replace)
         ),
         ActionResult::Handled
     );
-    assert_eq!(buffer_text(window.buffer_view()), "hallo");
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 2));
+    assert_eq!(buffer_text(tab.buffer_view()), "hallo");
+    assert_eq!(tab.buffer_view().cursor(), Cursor::new(0, 2));
 
     assert_eq!(
-        window.dispatch_action(
+        tab.dispatch_action(
             &EditorAction::new(EditorOperation::ReplaceBackspace {
                 cursor: Cursor::new(0, 1),
                 replaced: Some('e'),
@@ -175,61 +172,61 @@ fn test_replace_backspace_restores_overwritten_character() {
         ),
         ActionResult::Handled
     );
-    assert_eq!(buffer_text(window.buffer_view()), "hello");
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 1));
+    assert_eq!(buffer_text(tab.buffer_view()), "hello");
+    assert_eq!(tab.buffer_view().cursor(), Cursor::new(0, 1));
 }
 
 #[test]
 fn test_replace_backspace_restores_successive_live_replace_positions() {
-    let mut window = Window::new(Buffer::from_str("hello"));
-    window.set_cursor(Cursor::new(0, 1));
+    let mut tab = EditorTab::new(Buffer::from_str("hello"));
+    tab.set_cursor(Cursor::new(0, 1));
 
     dispatch_with_main_loop_snapshot(
-        &mut window,
+        &mut tab,
         &EditorAction::new(EditorOperation::ReplaceChar('a')).with_from_mode(ModeKind::Replace),
     );
     dispatch_with_main_loop_snapshot(
-        &mut window,
+        &mut tab,
         &EditorAction::new(EditorOperation::ReplaceChar('b')).with_from_mode(ModeKind::Replace),
     );
     dispatch_with_main_loop_snapshot(
-        &mut window,
+        &mut tab,
         &EditorAction::new(EditorOperation::ReplaceChar('c')).with_from_mode(ModeKind::Replace),
     );
-    assert_eq!(buffer_text(window.buffer_view()), "habco");
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 4));
+    assert_eq!(buffer_text(tab.buffer_view()), "habco");
+    assert_eq!(tab.buffer_view().cursor(), Cursor::new(0, 4));
 
     dispatch_with_main_loop_snapshot(
-        &mut window,
+        &mut tab,
         &EditorAction::new(EditorOperation::ReplaceBackspaceLast).with_from_mode(ModeKind::Replace),
     );
-    assert_eq!(buffer_text(window.buffer_view()), "hablo");
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 3));
+    assert_eq!(buffer_text(tab.buffer_view()), "hablo");
+    assert_eq!(tab.buffer_view().cursor(), Cursor::new(0, 3));
 
     dispatch_with_main_loop_snapshot(
-        &mut window,
+        &mut tab,
         &EditorAction::new(EditorOperation::ReplaceBackspaceLast).with_from_mode(ModeKind::Replace),
     );
-    assert_eq!(buffer_text(window.buffer_view()), "hallo");
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 2));
+    assert_eq!(buffer_text(tab.buffer_view()), "hallo");
+    assert_eq!(tab.buffer_view().cursor(), Cursor::new(0, 2));
 }
 
 #[test]
 fn test_replace_backspace_removes_inserted_character_past_line_end() {
-    let mut window = Window::new(Buffer::from_str("hi"));
-    window.set_cursor(Cursor::new(0, 2));
+    let mut tab = EditorTab::new(Buffer::from_str("hi"));
+    tab.set_cursor(Cursor::new(0, 2));
 
     assert_eq!(
-        window.dispatch_action(
+        tab.dispatch_action(
             &EditorAction::new(EditorOperation::ReplaceChar('x')).with_from_mode(ModeKind::Replace)
         ),
         ActionResult::Handled
     );
-    assert_eq!(buffer_text(window.buffer_view()), "hix");
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 2));
+    assert_eq!(buffer_text(tab.buffer_view()), "hix");
+    assert_eq!(tab.buffer_view().cursor(), Cursor::new(0, 2));
 
     assert_eq!(
-        window.dispatch_action(
+        tab.dispatch_action(
             &EditorAction::new(EditorOperation::ReplaceBackspace {
                 cursor: Cursor::new(0, 2),
                 replaced: None,
@@ -239,178 +236,170 @@ fn test_replace_backspace_removes_inserted_character_past_line_end() {
         ),
         ActionResult::Handled
     );
-    assert_eq!(buffer_text(window.buffer_view()), "hi");
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 1));
+    assert_eq!(buffer_text(tab.buffer_view()), "hi");
+    assert_eq!(tab.buffer_view().cursor(), Cursor::new(0, 1));
 }
 
 #[test]
 fn test_replace_backspace_rejoins_line_split_by_replace_newline() {
-    let mut window = Window::new(Buffer::from_str("hello"));
-    window.set_cursor(Cursor::new(0, 2));
+    let mut tab = EditorTab::new(Buffer::from_str("hello"));
+    tab.set_cursor(Cursor::new(0, 2));
 
     dispatch_with_main_loop_snapshot(
-        &mut window,
+        &mut tab,
         &EditorAction::insert_newline().with_from_mode(ModeKind::Replace),
     );
-    assert_eq!(buffer_text(window.buffer_view()), "he\nllo");
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(1, 0));
+    assert_eq!(buffer_text(tab.buffer_view()), "he\nllo");
+    assert_eq!(tab.buffer_view().cursor(), Cursor::new(1, 0));
 
     dispatch_with_main_loop_snapshot(
-        &mut window,
+        &mut tab,
         &EditorAction::new(EditorOperation::ReplaceBackspaceLast).with_from_mode(ModeKind::Replace),
     );
-    assert_eq!(buffer_text(window.buffer_view()), "hello");
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 2));
+    assert_eq!(buffer_text(tab.buffer_view()), "hello");
+    assert_eq!(tab.buffer_view().cursor(), Cursor::new(0, 2));
 }
 
 #[test]
 fn test_surround_add_inner_word_with_quotes() {
-    let mut window = Window::new(Buffer::from_str("hello world"));
-    window.set_cursor(Cursor::new(0, 1));
+    let mut tab = EditorTab::new(Buffer::from_str("hello world"));
+    tab.set_cursor(Cursor::new(0, 1));
 
     let action = EditorAction::new(EditorOperation::SurroundAdd {
         target: TextObject::InnerWord,
         delimiter: DelimiterFamily::DoubleQuote,
     });
-    assert_eq!(window.dispatch_action(&action), ActionResult::Handled);
-    assert_eq!(buffer_text(window.buffer_view()), "\"hello\" world");
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 0));
+    assert_eq!(tab.dispatch_action(&action), ActionResult::Handled);
+    assert_eq!(buffer_text(tab.buffer_view()), "\"hello\" world");
+    assert_eq!(tab.buffer_view().cursor(), Cursor::new(0, 0));
 }
 
 #[test]
 fn test_surround_add_bracket_selector_result() {
-    let mut window = Window::new(Buffer::from_str("hello world"));
-    window.set_cursor(Cursor::new(0, 1));
+    let mut tab = EditorTab::new(Buffer::from_str("hello world"));
+    tab.set_cursor(Cursor::new(0, 1));
 
     let action = EditorAction::new(EditorOperation::SurroundAdd {
         target: TextObject::InnerWord,
         delimiter: DelimiterFamily::Paren,
     });
-    assert_eq!(window.dispatch_action(&action), ActionResult::Handled);
-    assert_eq!(buffer_text(window.buffer_view()), "(hello) world");
+    assert_eq!(tab.dispatch_action(&action), ActionResult::Handled);
+    assert_eq!(buffer_text(tab.buffer_view()), "(hello) world");
 }
 
 #[test]
 fn test_surround_add_noops_when_text_object_unresolvable() {
-    let mut window = Window::new(Buffer::from_str("hello"));
-    window.set_cursor(Cursor::new(0, 0));
+    let mut tab = EditorTab::new(Buffer::from_str("hello"));
+    tab.set_cursor(Cursor::new(0, 0));
 
     let action = EditorAction::new(EditorOperation::SurroundAdd {
         target: TextObject::InnerBracket(BracketKind::Paren),
         delimiter: DelimiterFamily::DoubleQuote,
     });
-    assert_eq!(window.dispatch_action(&action), ActionResult::NotHandled);
-    assert_eq!(buffer_text(window.buffer_view()), "hello");
+    assert_eq!(tab.dispatch_action(&action), ActionResult::NotHandled);
+    assert_eq!(buffer_text(tab.buffer_view()), "hello");
 }
 
 #[test]
 fn test_surround_add_visual_selection_with_quotes() {
-    let mut window = Window::new(Buffer::from_str("foo bar baz"));
-    window.buffer_view_mut().set_cursor(Cursor::new(0, 4));
-    window
-        .buffer_view_mut()
+    let mut tab = EditorTab::new(Buffer::from_str("foo bar baz"));
+    tab.buffer_view_mut().set_cursor(Cursor::new(0, 4));
+    tab.buffer_view_mut()
         .begin_visual_selection(VisualSelectionKind::Character);
-    window.buffer_view_mut().set_cursor(Cursor::new(0, 6));
+    tab.buffer_view_mut().set_cursor(Cursor::new(0, 6));
 
     let action = EditorAction::new(EditorOperation::SurroundAddSelection {
         delimiter: DelimiterFamily::DoubleQuote,
     })
     .with_from_mode(ModeKind::Visual)
     .with_to_mode(ModeKind::Normal);
-    assert_eq!(window.dispatch_action(&action), ActionResult::Handled);
-    assert_eq!(buffer_text(window.buffer_view()), "foo \"bar\" baz");
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 4));
+    assert_eq!(tab.dispatch_action(&action), ActionResult::Handled);
+    assert_eq!(buffer_text(tab.buffer_view()), "foo \"bar\" baz");
+    assert_eq!(tab.buffer_view().cursor(), Cursor::new(0, 4));
 }
 
 #[test]
 fn test_surround_add_visual_selection_with_square_brackets() {
-    let mut window = Window::new(Buffer::from_str("foo bar baz"));
-    window.buffer_view_mut().set_cursor(Cursor::new(0, 4));
-    window
-        .buffer_view_mut()
+    let mut tab = EditorTab::new(Buffer::from_str("foo bar baz"));
+    tab.buffer_view_mut().set_cursor(Cursor::new(0, 4));
+    tab.buffer_view_mut()
         .begin_visual_selection(VisualSelectionKind::Character);
-    window.buffer_view_mut().set_cursor(Cursor::new(0, 6));
+    tab.buffer_view_mut().set_cursor(Cursor::new(0, 6));
 
     let action = EditorAction::new(EditorOperation::SurroundAddSelection {
         delimiter: DelimiterFamily::Square,
     })
     .with_from_mode(ModeKind::Visual)
     .with_to_mode(ModeKind::Normal);
-    assert_eq!(window.dispatch_action(&action), ActionResult::Handled);
-    assert_eq!(buffer_text(window.buffer_view()), "foo [bar] baz");
+    assert_eq!(tab.dispatch_action(&action), ActionResult::Handled);
+    assert_eq!(buffer_text(tab.buffer_view()), "foo [bar] baz");
 }
 
 #[test]
 fn test_surround_add_visual_line_selection_without_auto_indent() {
     let _config_guard = globals::set_test_config(auto_indent_test_config(AutoIndentMode::Off));
-    let mut window = Window::new(Buffer::from_str("alpha\nbeta"));
-    window.buffer_view_mut().set_cursor(Cursor::new(0, 0));
-    window
-        .buffer_view_mut()
+    let mut tab = EditorTab::new(Buffer::from_str("alpha\nbeta"));
+    tab.buffer_view_mut().set_cursor(Cursor::new(0, 0));
+    tab.buffer_view_mut()
         .begin_visual_selection(VisualSelectionKind::Line);
-    window.buffer_view_mut().set_cursor(Cursor::new(1, 0));
+    tab.buffer_view_mut().set_cursor(Cursor::new(1, 0));
 
     let action = EditorAction::new(EditorOperation::SurroundAddSelection {
         delimiter: DelimiterFamily::Curly,
     })
     .with_from_mode(ModeKind::VisualLine)
     .with_to_mode(ModeKind::Normal);
-    assert_eq!(window.dispatch_action(&action), ActionResult::Handled);
-    assert_eq!(buffer_text(window.buffer_view()), "{\nalpha\nbeta\n}");
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 0));
+    assert_eq!(tab.dispatch_action(&action), ActionResult::Handled);
+    assert_eq!(buffer_text(tab.buffer_view()), "{\nalpha\nbeta\n}");
+    assert_eq!(tab.buffer_view().cursor(), Cursor::new(0, 0));
 }
 
 #[test]
 fn test_surround_add_visual_line_selection_with_auto_indent() {
     let _config_guard = globals::set_test_config(auto_indent_test_config(AutoIndentMode::Neighbor));
-    let mut window = Window::new(Buffer::from_str("alpha\nbeta"));
-    window.buffer_view_mut().set_cursor(Cursor::new(0, 0));
-    window
-        .buffer_view_mut()
+    let mut tab = EditorTab::new(Buffer::from_str("alpha\nbeta"));
+    tab.buffer_view_mut().set_cursor(Cursor::new(0, 0));
+    tab.buffer_view_mut()
         .begin_visual_selection(VisualSelectionKind::Line);
-    window.buffer_view_mut().set_cursor(Cursor::new(1, 0));
+    tab.buffer_view_mut().set_cursor(Cursor::new(1, 0));
 
     let action = EditorAction::new(EditorOperation::SurroundAddSelection {
         delimiter: DelimiterFamily::Curly,
     })
     .with_from_mode(ModeKind::VisualLine)
     .with_to_mode(ModeKind::Normal);
-    assert_eq!(window.dispatch_action(&action), ActionResult::Handled);
-    assert_eq!(
-        buffer_text(window.buffer_view()),
-        "{\n    alpha\n    beta\n}"
-    );
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 0));
+    assert_eq!(tab.dispatch_action(&action), ActionResult::Handled);
+    assert_eq!(buffer_text(tab.buffer_view()), "{\n    alpha\n    beta\n}");
+    assert_eq!(tab.buffer_view().cursor(), Cursor::new(0, 0));
 }
 
 #[test]
 fn test_surround_add_is_single_undoable_edit() {
-    let mut window = Window::new(Buffer::from_str("hello world"));
-    window.set_cursor(Cursor::new(0, 1));
+    let mut tab = EditorTab::new(Buffer::from_str("hello world"));
+    tab.set_cursor(Cursor::new(0, 1));
 
     process_action_and_snapshot(
-        &mut window,
+        &mut tab,
         &EditorAction::new(EditorOperation::SurroundAdd {
             target: TextObject::InnerWord,
             delimiter: DelimiterFamily::DoubleQuote,
         }),
     );
-    assert_eq!(buffer_text(window.buffer_view()), "\"hello\" world");
+    assert_eq!(buffer_text(tab.buffer_view()), "\"hello\" world");
 
-    apply_undo_synced(&mut window);
-    assert_eq!(buffer_text(window.buffer_view()), "hello world");
+    apply_undo_synced(&mut tab);
+    assert_eq!(buffer_text(tab.buffer_view()), "hello world");
 }
 
-fn commit_insert_exit_snapshot(window: &mut Window) {
-    let cursor = window.buffer_view.cursor();
-    let should_snapshot = window
+fn commit_insert_exit_snapshot(tab: &mut EditorTab) {
+    let cursor = tab.buffer_view.cursor();
+    let should_snapshot = tab
         .buffer_view
         .with_buffer(|buffer| !buffer.current_text_matches_undo_head())
         .unwrap_or(false);
 
     if should_snapshot {
-        window
-            .buffer_view
+        tab.buffer_view
             .with_buffer_mut(|buffer| buffer.push_snapshot(cursor))
             .unwrap_or(());
     }
@@ -427,7 +416,7 @@ fn temp_path_with_ext(name: &str, ext: &str) -> AbsolutePath {
         .expect("time should move forward")
         .as_nanos();
     let path = std::env::temp_dir().join(format!(
-        "urvim-window-tests-{}-{}-{}.{}",
+        "urvim-tab-tests-{}-{}-{}.{}",
         std::process::id(),
         nanos,
         name,
@@ -436,7 +425,7 @@ fn temp_path_with_ext(name: &str, ext: &str) -> AbsolutePath {
     AbsolutePath::from_path(path.as_path()).unwrap()
 }
 
-fn themed_window() -> Theme {
+fn themed_tab() -> Theme {
     let default_style = Style::new().fg(Color::ansi(15)).bg(Color::ansi(30));
     let mut highlights = HighlightStyles::default();
     highlights.insert(
@@ -500,7 +489,7 @@ fn themed_window() -> Theme {
     Theme::new("demo", ThemeKind::Ansi256, default_style, highlights)
 }
 
-fn syntax_themed_window() -> Theme {
+fn syntax_themed_tab() -> Theme {
     let default_style = Style::new().fg(Color::ansi(15)).bg(Color::ansi(30));
     let mut highlights = HighlightStyles::default();
     highlights.insert(
@@ -572,8 +561,8 @@ fn syntax_themed_window() -> Theme {
     Theme::new("demo-syntax", ThemeKind::Ansi256, default_style, highlights)
 }
 
-fn syntax_themed_window_with_string_background() -> Theme {
-    let mut theme = syntax_themed_window();
+fn syntax_themed_tab_with_string_background() -> Theme {
+    let mut theme = syntax_themed_tab();
     theme.highlights.insert(
         Tag::parse("syntax.string").expect("valid tag"),
         Style::new().fg(Color::ansi(27)).bg(Color::ansi(40)),
@@ -595,8 +584,8 @@ fn repeated_rust_buffer(lines: usize) -> String {
     .join("\n")
 }
 
-fn todo_marker_themed_window() -> Theme {
-    let mut theme = syntax_themed_window();
+fn todo_marker_themed_tab() -> Theme {
+    let mut theme = syntax_themed_tab();
     theme
         .highlights
         .insert(tag("comment.todo"), Style::new().fg(Color::ansi(31)));
@@ -633,7 +622,7 @@ fn auto_indent_test_config(auto_indent: AutoIndentMode) -> Config {
 }
 
 fn visual_test_setup() -> (impl Drop, impl Drop) {
-    let theme = themed_window();
+    let theme = themed_tab();
     let theme_guard = globals::set_test_active_theme(theme);
     let config_guard = globals::set_test_config(Config {
         theme: "demo".to_string(),
@@ -646,38 +635,37 @@ fn visual_test_setup() -> (impl Drop, impl Drop) {
     (theme_guard, config_guard)
 }
 
-fn apply_undo(window: &mut Window) {
-    if let Some(cursor) = window
+fn apply_undo(tab: &mut EditorTab) {
+    if let Some(cursor) = tab
         .buffer_view
         .with_buffer_mut(|buffer| buffer.undo())
         .flatten()
     {
-        window.buffer_view.set_cursor(cursor);
+        tab.buffer_view.set_cursor(cursor);
     }
 }
 
-fn apply_undo_synced(window: &mut Window) {
-    let cursor = window
+fn apply_undo_synced(tab: &mut EditorTab) {
+    let cursor = tab
         .buffer_view
         .with_buffer_mut(|buffer| buffer.undo())
         .flatten()
         .expect("undo should restore previous state");
-    window.set_cursor_synced(cursor);
+    tab.set_cursor_synced(cursor);
 }
 
-fn apply_redo(window: &mut Window) {
-    if let Some(cursor) = window
+fn apply_redo(tab: &mut EditorTab) {
+    if let Some(cursor) = tab
         .buffer_view
         .with_buffer_mut(|buffer| buffer.redo())
         .flatten()
     {
-        window.buffer_view.set_cursor(cursor);
+        tab.buffer_view.set_cursor(cursor);
     }
 }
 
-fn rendered_line<'a>(window: &'a Window, idx: usize) -> &'a [RenderChunk] {
-    window
-        .render_data()
+fn rendered_line<'a>(tab: &'a EditorTab, idx: usize) -> &'a [RenderChunk] {
+    tab.render_data()
         .get_line(idx)
         .expect("rendered line should exist")
 }
@@ -887,20 +875,20 @@ fn test_buffer_view_modified_state_tracks_buffer() {
 }
 
 #[test]
-fn test_window_new() {
+fn test_tab_new() {
     let buffer = Buffer::from_str("test");
-    let window = Window::new(buffer);
+    let tab = EditorTab::new(buffer);
 
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 0));
+    assert_eq!(tab.buffer_view().cursor(), Cursor::new(0, 0));
 }
 
 #[test]
-fn test_window_render() {
+fn test_tab_render() {
     let buffer = Buffer::from_str("line1\nline2\nline3");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
     let mut screen = crate::screen::Screen::new(3, 80);
-    window.render(&mut screen, Position::new(0, 0), Size::new(3, 80));
+    tab.render(&mut screen, Position::new(0, 0), Size::new(3, 80));
 
     // With gutter (5 columns: digits(3) + 2 + fold sign), buffer starts at col 5
     // Check gutter background is rendered
@@ -911,16 +899,16 @@ fn test_window_render() {
 }
 
 #[test]
-fn test_window_render_uses_theme_styles() {
+fn test_tab_render_uses_theme_styles() {
     let buffer = Buffer::from_str("line1");
-    let mut window = Window::new(buffer);
-    let theme = themed_window();
+    let mut tab = EditorTab::new(buffer);
+    let theme = themed_tab();
     let expected_gutter_style = theme.resolve_name_with_default("ui.window.gutter");
     let expected_default_style = theme.default_style();
     let _theme_guard = globals::set_test_active_theme(theme);
 
     let mut screen = crate::screen::Screen::new(1, 12);
-    window.render(&mut screen, Position::new(0, 0), Size::new(1, 12));
+    tab.render(&mut screen, Position::new(0, 0), Size::new(1, 12));
 
     assert_eq!(
         screen.get_cell_mut(0, 0).unwrap().style,
@@ -937,11 +925,11 @@ fn test_window_render_uses_theme_styles() {
 }
 
 #[test]
-fn test_window_render_highlights_active_line_in_normal_mode() {
+fn test_tab_render_highlights_active_line_in_normal_mode() {
     let path = temp_path_with_ext("active-line", "rs");
     let buffer = Buffer::from_str_with_path("fn main() {}", path);
-    let mut window = Window::new(buffer);
-    let theme = syntax_themed_window();
+    let mut tab = EditorTab::new(buffer);
+    let theme = syntax_themed_tab();
     let expected_line_fill_style = theme
         .default_style()
         .overlay(theme.highlight_style_for_name("ui.window.active_line"));
@@ -954,7 +942,7 @@ fn test_window_render_highlights_active_line_in_normal_mode() {
     });
 
     let mut screen = crate::screen::Screen::new(1, 20);
-    window.render(&mut screen, Position::new(0, 0), Size::new(1, 20));
+    tab.render(&mut screen, Position::new(0, 0), Size::new(1, 20));
 
     assert_eq!(
         screen.get_cell_mut(0, CONTENT_COL + 1).unwrap().style,
@@ -967,11 +955,11 @@ fn test_window_render_highlights_active_line_in_normal_mode() {
 }
 
 #[test]
-fn test_window_render_keeps_explicit_token_background_on_active_line() {
+fn test_tab_render_keeps_explicit_token_background_on_active_line() {
     let path = temp_path_with_ext("active-line-background", "rs");
     let buffer = Buffer::from_str_with_path("let s = \"hi\";", path);
-    let mut window = Window::new(buffer);
-    let theme = syntax_themed_window_with_string_background();
+    let mut tab = EditorTab::new(buffer);
+    let theme = syntax_themed_tab_with_string_background();
     let expected_keyword_style = Style::new().fg(Color::ansi(23)).bg(Color::ansi(21));
     let expected_string_style = Style::new().fg(Color::ansi(27)).bg(Color::ansi(40));
     let _theme_guard = globals::set_test_active_theme(theme);
@@ -982,7 +970,7 @@ fn test_window_render_keeps_explicit_token_background_on_active_line() {
     });
 
     let mut screen = crate::screen::Screen::new(1, 20);
-    window.render(&mut screen, Position::new(0, 0), Size::new(1, 20));
+    tab.render(&mut screen, Position::new(0, 0), Size::new(1, 20));
 
     assert_eq!(
         screen.get_cell_mut(0, CONTENT_COL + 1).unwrap().style,
@@ -995,11 +983,11 @@ fn test_window_render_keeps_explicit_token_background_on_active_line() {
 }
 
 #[test]
-fn test_window_render_keeps_todo_marker_above_active_line_base_style() {
+fn test_tab_render_keeps_todo_marker_above_active_line_base_style() {
     let path = temp_path_with_ext("todo-active-line", "rs");
     let buffer = Buffer::from_str_with_path("fn main() { // TODO FIXME }", path);
-    let mut window = Window::new(buffer);
-    let theme = todo_marker_themed_window();
+    let mut tab = EditorTab::new(buffer);
+    let theme = todo_marker_themed_tab();
     let expected_todo_style = theme
         .default_style()
         .overlay(theme.highlight_style_for_name("ui.window.active_line"))
@@ -1016,7 +1004,7 @@ fn test_window_render_keeps_todo_marker_above_active_line_base_style() {
     });
 
     let mut screen = crate::screen::Screen::new(1, 80);
-    window.render(&mut screen, Position::new(0, 0), Size::new(1, 80));
+    tab.render(&mut screen, Position::new(0, 0), Size::new(1, 80));
 
     assert_eq!(
         screen.get_cell_mut(0, 21).unwrap().style,
@@ -1025,11 +1013,11 @@ fn test_window_render_keeps_todo_marker_above_active_line_base_style() {
 }
 
 #[test]
-fn test_window_render_keeps_inlay_hint_background_on_active_line() {
+fn test_tab_render_keeps_inlay_hint_background_on_active_line() {
     let mut buffer = Buffer::from_str("abcd");
     buffer.insert_inlay_hint(Cursor::new(0, 2), crate::buffer::Gravity::Right, "hint");
-    let mut window = Window::new(buffer);
-    let theme = syntax_themed_window();
+    let mut tab = EditorTab::new(buffer);
+    let theme = syntax_themed_tab();
     let expected_hint_style = theme
         .default_style()
         .overlay(theme.highlight_style_for_name("ui.window.active_line"))
@@ -1042,7 +1030,7 @@ fn test_window_render_keeps_inlay_hint_background_on_active_line() {
     });
 
     let mut screen = crate::screen::Screen::new(1, 20);
-    window.render(&mut screen, Position::new(0, 0), Size::new(1, 20));
+    tab.render(&mut screen, Position::new(0, 0), Size::new(1, 20));
 
     assert_eq!(
         screen.get_cell_mut(0, 5).unwrap().style,
@@ -1051,11 +1039,11 @@ fn test_window_render_keeps_inlay_hint_background_on_active_line() {
 }
 
 #[test]
-fn test_window_render_ghost_text_inherits_active_line_background() {
+fn test_tab_render_ghost_text_inherits_active_line_background() {
     let mut buffer = Buffer::from_str("abcd");
     buffer.insert_ghost_text(Cursor::new(0, 2), crate::buffer::Gravity::Right, "ghost");
-    let mut window = Window::new(buffer);
-    let theme = syntax_themed_window();
+    let mut tab = EditorTab::new(buffer);
+    let theme = syntax_themed_tab();
     let expected_ghost_style = theme
         .default_style()
         .overlay(theme.highlight_style_for_name("ui.window.active_line"))
@@ -1073,7 +1061,7 @@ fn test_window_render_ghost_text_inherits_active_line_background() {
     });
 
     let mut screen = crate::screen::Screen::new(1, 20);
-    window.render(&mut screen, Position::new(0, 0), Size::new(1, 20));
+    tab.render(&mut screen, Position::new(0, 0), Size::new(1, 20));
 
     assert_eq!(
         screen.get_cell_mut(0, CONTENT_COL + 2).unwrap().style,
@@ -1082,33 +1070,33 @@ fn test_window_render_ghost_text_inherits_active_line_background() {
 }
 
 #[test]
-fn test_window_render_records_buffer_visual_generation() {
+fn test_tab_render_records_buffer_visual_generation() {
     let mut buffer = Buffer::from_str("abcd");
     buffer.insert_inlay_hint(Cursor::new(0, 2), crate::buffer::Gravity::Right, "hint");
     let expected_generation = buffer.visual_generation();
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
     let _config_guard = globals::set_test_config(Config {
         syntax: false,
         ..Default::default()
     });
 
-    assert_eq!(window.buffer_view().rendered_visual_generation(), 0);
+    assert_eq!(tab.buffer_view().rendered_visual_generation(), 0);
 
     let mut screen = crate::screen::Screen::new(1, 20);
-    window.render(&mut screen, Position::new(0, 0), Size::new(1, 20));
+    tab.render(&mut screen, Position::new(0, 0), Size::new(1, 20));
 
     assert_eq!(
-        window.buffer_view().rendered_visual_generation(),
+        tab.buffer_view().rendered_visual_generation(),
         expected_generation
     );
 }
 
 #[test]
-fn test_window_render_keeps_active_gutter_style_in_insert_mode() {
+fn test_tab_render_keeps_active_gutter_style_in_insert_mode() {
     let path = temp_path_with_ext("active-line-insert", "rs");
     let buffer = Buffer::from_str_with_path("fn main() {}", path);
-    let mut window = Window::new(buffer);
-    let theme = syntax_themed_window();
+    let mut tab = EditorTab::new(buffer);
+    let theme = syntax_themed_tab();
     let expected_style = theme
         .default_style()
         .overlay(theme.highlight_style_for_tag(&tag("keyword")));
@@ -1121,10 +1109,10 @@ fn test_window_render_keeps_active_gutter_style_in_insert_mode() {
         syntax: true,
         ..Default::default()
     });
-    window.switch_mode(ModeKind::Insert);
+    tab.switch_mode(ModeKind::Insert);
 
     let mut screen = crate::screen::Screen::new(1, 20);
-    window.render(&mut screen, Position::new(0, 0), Size::new(1, 20));
+    tab.render(&mut screen, Position::new(0, 0), Size::new(1, 20));
 
     assert_eq!(
         screen.get_cell_mut(0, 0).unwrap().style,
@@ -1134,11 +1122,11 @@ fn test_window_render_keeps_active_gutter_style_in_insert_mode() {
 }
 
 #[test]
-fn test_window_render_skips_active_line_when_disabled() {
+fn test_tab_render_skips_active_line_when_disabled() {
     let path = temp_path_with_ext("active-line-disabled", "rs");
     let buffer = Buffer::from_str_with_path("fn main() {}", path);
-    let mut window = Window::new(buffer);
-    let theme = syntax_themed_window();
+    let mut tab = EditorTab::new(buffer);
+    let theme = syntax_themed_tab();
     let expected_style = theme
         .default_style()
         .overlay(theme.highlight_style_for_tag(&tag("keyword")));
@@ -1150,7 +1138,7 @@ fn test_window_render_skips_active_line_when_disabled() {
     });
 
     let mut screen = crate::screen::Screen::new(1, 20);
-    window.render(&mut screen, Position::new(0, 0), Size::new(1, 20));
+    tab.render(&mut screen, Position::new(0, 0), Size::new(1, 20));
 
     assert_eq!(
         screen.get_cell_mut(0, CONTENT_COL + 1).unwrap().style,
@@ -1159,16 +1147,16 @@ fn test_window_render_skips_active_line_when_disabled() {
 }
 
 #[test]
-fn test_window_render_refreshes_visible_syntax_after_edit() {
+fn test_tab_render_refreshes_visible_syntax_after_edit() {
     let path =
         AbsolutePath::from_path(temp_path_with_ext("visible-syntax-refresh", "rs").as_path())
             .unwrap();
     let buffer = Buffer::from_str_with_path("let value = true;\nlet other = false;", path);
-    let mut window = Window::new(buffer);
-    let buffer_id = window.buffer_view().buffer_id();
-    let mut second_window = Window::from_buffer_id(buffer_id);
+    let mut tab = EditorTab::new(buffer);
+    let buffer_id = tab.buffer_view().buffer_id();
+    let mut second_tab = EditorTab::from_buffer_id(buffer_id);
 
-    let theme = syntax_themed_window();
+    let theme = syntax_themed_tab();
     let expected_default_style = theme.default_style();
     let expected_comment_style =
         expected_default_style.overlay(theme.highlight_style_for_tag(&tag("comment")));
@@ -1182,21 +1170,20 @@ fn test_window_render_refreshes_visible_syntax_after_edit() {
     });
 
     let mut prime_screen = crate::screen::Screen::new(1, 24);
-    window.render(&mut prime_screen, Position::new(0, 0), Size::new(1, 24));
+    tab.render(&mut prime_screen, Position::new(0, 0), Size::new(1, 24));
 
-    window
-        .buffer_view_mut()
+    tab.buffer_view_mut()
         .with_buffer_mut(|buffer| buffer.insert_text(Cursor::new(0, 0), "// "))
         .unwrap();
 
     let mut first_screen = crate::screen::Screen::new(1, 24);
-    window.render(&mut first_screen, Position::new(0, 0), Size::new(1, 24));
+    tab.render(&mut first_screen, Position::new(0, 0), Size::new(1, 24));
     let mut second_screen = crate::screen::Screen::new(1, 24);
-    second_window.render(&mut second_screen, Position::new(0, 0), Size::new(1, 24));
+    second_tab.render(&mut second_screen, Position::new(0, 0), Size::new(1, 24));
 
     let first_cell = first_screen.get_cell_mut(0, CONTENT_COL + 1).unwrap();
     let second_cell = second_screen.get_cell_mut(0, CONTENT_COL + 1).unwrap();
-    let offscreen_cache = window
+    let offscreen_cache = tab
         .buffer_view()
         .with_buffer(|buffer| buffer.cached_syntax_spans_for_line(1))
         .unwrap();
@@ -1207,15 +1194,14 @@ fn test_window_render_refreshes_visible_syntax_after_edit() {
     assert_eq!(second_cell.style, expected_comment_style);
     assert!(offscreen_cache.is_some());
     assert!(
-        window
-            .buffer_view()
+        tab.buffer_view()
             .with_buffer(|buffer| buffer.syntax_cache_complete())
             .unwrap_or(false)
     );
 }
 
 #[test]
-fn test_window_render_refreshes_scrolled_visible_syntax_after_edit() {
+fn test_tab_render_refreshes_scrolled_visible_syntax_after_edit() {
     let _lock = syntax_worker_lock();
     let path = AbsolutePath::from_path(
         temp_path_with_ext("scrolled-visible-syntax-refresh", "rs").as_path(),
@@ -1225,10 +1211,10 @@ fn test_window_render_refreshes_scrolled_visible_syntax_after_edit() {
         "let first = true;\nlet second = false;\nlet third = true;\nlet fourth = false;\nlet fifth = true;",
         path,
     );
-    let mut window = Window::new(buffer);
-    let buffer_id = window.buffer_view().buffer_id();
-    let mut second_window = Window::from_buffer_id(buffer_id);
-    let theme = syntax_themed_window();
+    let mut tab = EditorTab::new(buffer);
+    let buffer_id = tab.buffer_view().buffer_id();
+    let mut second_tab = EditorTab::from_buffer_id(buffer_id);
+    let theme = syntax_themed_tab();
     let expected_comment_style = theme.highlight_style_for_tag(&tag("comment"));
     let _theme_guard = globals::set_test_active_theme(theme);
     let _config_guard = globals::set_test_config(Config {
@@ -1240,26 +1226,25 @@ fn test_window_render_refreshes_scrolled_visible_syntax_after_edit() {
     });
 
     let mut prime_screen = crate::screen::Screen::new(2, 24);
-    window.set_cursor(Cursor::new(3, 0));
-    window.render(&mut prime_screen, Position::new(0, 0), Size::new(2, 24));
+    tab.set_cursor(Cursor::new(3, 0));
+    tab.render(&mut prime_screen, Position::new(0, 0), Size::new(2, 24));
 
-    window
-        .buffer_view_mut()
+    tab.buffer_view_mut()
         .with_buffer_mut(|buffer| buffer.insert_text(Cursor::new(2, 0), "// "))
         .unwrap();
 
     let mut screen = crate::screen::Screen::new(2, 24);
-    window.render(&mut screen, Position::new(0, 0), Size::new(2, 24));
+    tab.render(&mut screen, Position::new(0, 0), Size::new(2, 24));
     let mut second_screen = crate::screen::Screen::new(2, 24);
-    second_window.render(&mut second_screen, Position::new(0, 0), Size::new(2, 24));
+    second_tab.render(&mut second_screen, Position::new(0, 0), Size::new(2, 24));
 
-    let rendered_line = rendered_line(&window, 0);
+    let rendered_line = rendered_line(&tab, 0);
     assert!(
         rendered_line
             .iter()
             .any(|chunk| chunk.text.starts_with("//") && chunk.style == expected_comment_style)
     );
-    let cached_line = window
+    let cached_line = tab
         .buffer_view()
         .with_buffer(|buffer| buffer.cached_syntax_spans_for_line(2))
         .unwrap();
@@ -1267,15 +1252,15 @@ fn test_window_render_refreshes_scrolled_visible_syntax_after_edit() {
 }
 
 #[test]
-fn test_window_render_expands_tabs_using_configured_width() {
+fn test_tab_render_expands_tabs_using_configured_width() {
     let buffer = Buffer::from_str("a\tb");
-    let window = Window::new(buffer);
+    let tab = EditorTab::new(buffer);
     let _config_guard = globals::set_test_config(Config {
         tab_width: 4,
         ..Default::default()
     });
 
-    let render_data = window
+    let render_data = tab
         .buffer_view()
         .build_render_data_with_style(Size::new(1, 8), Style::default());
     let mut screen = crate::screen::Screen::new(1, 8);
@@ -1295,16 +1280,16 @@ fn test_window_render_expands_tabs_using_configured_width() {
 }
 
 #[test]
-fn test_window_render_expands_leading_tabs_after_gutter() {
+fn test_tab_render_expands_leading_tabs_after_gutter() {
     let buffer = Buffer::from_str("\tX\n\n\n\n\n\n\n\n\n");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
     let _config_guard = globals::set_test_config(Config {
         tab_width: 4,
         ..Default::default()
     });
 
     let mut screen = crate::screen::Screen::new(2, 12);
-    window.render(&mut screen, Position::new(0, 0), Size::new(2, 12));
+    tab.render(&mut screen, Position::new(0, 0), Size::new(2, 12));
 
     assert_eq!(screen.get_cell_mut(0, 5).unwrap().text, " ");
     assert_eq!(screen.get_cell_mut(0, 6).unwrap().text, " ");
@@ -1314,18 +1299,18 @@ fn test_window_render_expands_leading_tabs_after_gutter() {
 }
 
 #[test]
-fn test_window_render_collapses_indent_scope_fold() {
-    let mut window = Window::new(Buffer::from_str("outer\n  inner1\n  inner2\nafter\ntail"));
-    window.set_cursor(Cursor::new(1, 0));
+fn test_tab_render_collapses_indent_scope_fold() {
+    let mut tab = EditorTab::new(Buffer::from_str("outer\n  inner1\n  inner2\nafter\ntail"));
+    tab.set_cursor(Cursor::new(1, 0));
 
     assert_eq!(
-        window.dispatch_action(&EditorAction::new(EditorOperation::CloseFold)),
+        tab.dispatch_action(&EditorAction::new(EditorOperation::CloseFold)),
         ActionResult::Handled
     );
     let mut screen = crate::screen::Screen::new(4, 40);
-    window.render(&mut screen, Position::new(0, 0), Size::new(4, 40));
+    tab.render(&mut screen, Position::new(0, 0), Size::new(4, 40));
 
-    let rendered = window
+    let rendered = tab
         .render_data()
         .get_line(0)
         .expect("folded start line should render")
@@ -1335,11 +1320,11 @@ fn test_window_render_collapses_indent_scope_fold() {
 
     assert!(rendered.contains("outer"));
     assert!(rendered.contains("... 2 lines folded"));
-    assert_eq!(window.render_data().line_data[1].buffer_line, 3);
+    assert_eq!(tab.render_data().line_data[1].buffer_line, 3);
 }
 
 #[test]
-fn test_window_render_uses_syntax_folds_for_rust() {
+fn test_tab_render_uses_syntax_folds_for_rust() {
     let path = AbsolutePath::from_path(
         std::env::temp_dir()
             .join(format!("urvim-test-{}.rs", std::process::id()))
@@ -1348,18 +1333,18 @@ fn test_window_render_uses_syntax_folds_for_rust() {
     .unwrap();
     let mut buffer = Buffer::from_str_with_path("fn main() {\n    let x = 1;\n}\n", path);
     buffer.ensure_syntax_through(buffer.line_count().saturating_sub(1));
-    let mut window = Window::from_owned_buffer(buffer);
-    window.set_cursor(Cursor::new(0, 0));
+    let mut tab = EditorTab::from_owned_buffer(buffer);
+    tab.set_cursor(Cursor::new(0, 0));
 
     assert_eq!(
-        window.dispatch_action(&EditorAction::new(EditorOperation::CloseFold)),
+        tab.dispatch_action(&EditorAction::new(EditorOperation::CloseFold)),
         ActionResult::Handled
     );
 
     let mut screen = crate::screen::Screen::new(3, 40);
-    window.render(&mut screen, Position::new(0, 0), Size::new(3, 40));
+    tab.render(&mut screen, Position::new(0, 0), Size::new(3, 40));
 
-    let rendered = window
+    let rendered = tab
         .render_data()
         .get_line(0)
         .expect("folded start line should render")
@@ -1372,7 +1357,7 @@ fn test_window_render_uses_syntax_folds_for_rust() {
 }
 
 #[test]
-fn test_window_syntax_folds_take_precedence_over_indent_folds() {
+fn test_tab_syntax_folds_take_precedence_over_indent_folds() {
     let path = AbsolutePath::from_path(
         std::env::temp_dir()
             .join(format!("urvim-test-{}.rs", std::process::id()))
@@ -1383,15 +1368,15 @@ fn test_window_syntax_folds_take_precedence_over_indent_folds() {
     // continues through the closing brace on line 3.
     let mut buffer = Buffer::from_str_with_path("fn main() {\n    let x = 1;\n}\nafter\n", path);
     buffer.ensure_syntax_through(buffer.line_count().saturating_sub(1));
-    let mut window = Window::from_owned_buffer(buffer);
-    window.set_cursor(Cursor::new(0, 0));
+    let mut tab = EditorTab::from_owned_buffer(buffer);
+    tab.set_cursor(Cursor::new(0, 0));
 
     assert_eq!(
-        window.dispatch_action(&EditorAction::new(EditorOperation::CloseFold)),
+        tab.dispatch_action(&EditorAction::new(EditorOperation::CloseFold)),
         ActionResult::Handled
     );
 
-    let regions: Vec<SyntaxFoldRegion> = window
+    let regions: Vec<SyntaxFoldRegion> = tab
         .buffer_view()
         .with_buffer_mut(|buffer| buffer.syntax_fold_regions().to_vec())
         .unwrap();
@@ -1404,12 +1389,12 @@ fn test_window_syntax_folds_take_precedence_over_indent_folds() {
     );
 
     let mut screen = crate::screen::Screen::new(3, 40);
-    window.render(&mut screen, Position::new(0, 0), Size::new(3, 40));
-    assert_eq!(window.render_data().line_data[1].buffer_line, 3);
+    tab.render(&mut screen, Position::new(0, 0), Size::new(3, 40));
+    assert_eq!(tab.render_data().line_data[1].buffer_line, 3);
 }
 
 #[test]
-fn test_window_renders_syntax_fold_marker_without_indented_interior() {
+fn test_tab_renders_syntax_fold_marker_without_indented_interior() {
     let path = AbsolutePath::from_path(
         std::env::temp_dir()
             .join(format!("urvim-test-{}.rs", std::process::id()))
@@ -1418,9 +1403,9 @@ fn test_window_renders_syntax_fold_marker_without_indented_interior() {
     .unwrap();
     let mut buffer = Buffer::from_str_with_path("fn main() {\nlet x = 1;\n}\n", path);
     buffer.ensure_syntax_through(buffer.line_count().saturating_sub(1));
-    let window = Window::from_owned_buffer(buffer);
+    let tab = EditorTab::from_owned_buffer(buffer);
 
-    let render_data = window
+    let render_data = tab
         .buffer_view()
         .build_render_data_with_style(Size::new(3, 40), Style::default());
 
@@ -1431,7 +1416,7 @@ fn test_window_renders_syntax_fold_marker_without_indented_interior() {
 }
 
 #[test]
-fn test_window_renders_markdown_heading_fold_marker() {
+fn test_tab_renders_markdown_heading_fold_marker() {
     let path = AbsolutePath::from_path(
         std::env::temp_dir()
             .join(format!(
@@ -1443,9 +1428,9 @@ fn test_window_renders_markdown_heading_fold_marker() {
     .unwrap();
     let mut buffer = Buffer::from_str_with_path("# Heading\nbody\n", path);
     buffer.ensure_syntax_through(buffer.line_count().saturating_sub(1));
-    let window = Window::from_owned_buffer(buffer);
+    let tab = EditorTab::from_owned_buffer(buffer);
 
-    let render_data = window
+    let render_data = tab
         .buffer_view()
         .build_render_data_with_style(Size::new(2, 40), Style::default());
 
@@ -1456,7 +1441,7 @@ fn test_window_renders_markdown_heading_fold_marker() {
 }
 
 #[test]
-fn test_window_keeps_markdown_fold_markers_after_body_line_insert() {
+fn test_tab_keeps_markdown_fold_markers_after_body_line_insert() {
     let path = AbsolutePath::from_path(
         std::env::temp_dir()
             .join(format!(
@@ -1468,42 +1453,41 @@ fn test_window_keeps_markdown_fold_markers_after_body_line_insert() {
     .unwrap();
     let mut buffer = Buffer::from_str_with_path("# A\nintro\n## B\nbody\n# C\nend\n", path);
     buffer.ensure_syntax_through(buffer.line_count().saturating_sub(1));
-    let mut window = Window::from_owned_buffer(buffer);
-    window.set_cursor(Cursor::new(1, 0));
+    let mut tab = EditorTab::from_owned_buffer(buffer);
+    tab.set_cursor(Cursor::new(1, 0));
 
     let mut screen = crate::screen::Screen::new(8, 80);
-    window.render(&mut screen, Position::new(0, 0), Size::new(8, 80));
+    tab.render(&mut screen, Position::new(0, 0), Size::new(8, 80));
     assert!(
-        window.render_data().line_data.iter().any(|line| {
+        tab.render_data().line_data.iter().any(|line| {
             line.buffer_line == 0 && line.fold_glyph == Some(FoldGutterGlyph::Open)
         })
     );
     assert!(
-        window.render_data().line_data.iter().any(|line| {
+        tab.render_data().line_data.iter().any(|line| {
             line.buffer_line == 2 && line.fold_glyph == Some(FoldGutterGlyph::Open)
         })
     );
 
-    window
-        .buffer_view_mut()
+    tab.buffer_view_mut()
         .with_buffer_mut(|buffer| buffer.insert_text(Cursor::new(1, 0), "inserted\n"))
         .unwrap();
 
-    window.render(&mut screen, Position::new(0, 0), Size::new(8, 80));
+    tab.render(&mut screen, Position::new(0, 0), Size::new(8, 80));
     assert!(
-        window.render_data().line_data.iter().any(|line| {
+        tab.render_data().line_data.iter().any(|line| {
             line.buffer_line == 0 && line.fold_glyph == Some(FoldGutterGlyph::Open)
         })
     );
     assert!(
-        window.render_data().line_data.iter().any(|line| {
+        tab.render_data().line_data.iter().any(|line| {
             line.buffer_line == 3 && line.fold_glyph == Some(FoldGutterGlyph::Open)
         })
     );
 }
 
 #[test]
-fn test_window_keeps_syntax_fold_marker_after_open_line_above_main() {
+fn test_tab_keeps_syntax_fold_marker_after_open_line_above_main() {
     let path = AbsolutePath::from_path(
         std::env::temp_dir()
             .join(format!("urvim-test-main-fold-{}.rs", std::process::id()))
@@ -1515,23 +1499,23 @@ fn test_window_keeps_syntax_fold_marker_after_open_line_above_main() {
         path,
     );
     buffer.ensure_syntax_through(buffer.line_count().saturating_sub(1));
-    let mut window = Window::from_owned_buffer(buffer);
-    window.set_cursor(Cursor::new(5, 0));
+    let mut tab = EditorTab::from_owned_buffer(buffer);
+    tab.set_cursor(Cursor::new(5, 0));
 
     let mut screen = crate::screen::Screen::new(10, 80);
-    window.render(&mut screen, Position::new(0, 0), Size::new(10, 80));
+    tab.render(&mut screen, Position::new(0, 0), Size::new(10, 80));
     assert_eq!(
-        window.render_data().line_data[5].fold_glyph,
+        tab.render_data().line_data[5].fold_glyph,
         Some(FoldGutterGlyph::Open)
     );
 
     assert_eq!(
-        window.dispatch_action(&EditorAction::new(EditorOperation::OpenLineAbove)),
+        tab.dispatch_action(&EditorAction::new(EditorOperation::OpenLineAbove)),
         ActionResult::Handled
     );
 
-    window.render(&mut screen, Position::new(0, 0), Size::new(10, 80));
-    let main_line = window
+    tab.render(&mut screen, Position::new(0, 0), Size::new(10, 80));
+    let main_line = tab
         .render_data()
         .line_data
         .iter()
@@ -1541,7 +1525,7 @@ fn test_window_keeps_syntax_fold_marker_after_open_line_above_main() {
 }
 
 #[test]
-fn test_window_keeps_syntax_fold_marker_after_open_line_above_main_in_scrolled_file() {
+fn test_tab_keeps_syntax_fold_marker_after_open_line_above_main_in_scrolled_file() {
     let path = AbsolutePath::from_path(
         std::env::temp_dir()
             .join(format!(
@@ -1568,29 +1552,29 @@ fn test_window_keeps_syntax_fold_marker_after_open_line_above_main_in_scrolled_f
         .expect("main line exists");
     let mut buffer = Buffer::from_str_with_path(&source, path);
     buffer.ensure_syntax_through(buffer.line_count().saturating_sub(1));
-    let mut window = Window::from_owned_buffer(buffer);
-    window.set_cursor(Cursor::new(main_line, 0));
-    window.reveal_cursor(Cursor::new(main_line, 0));
+    let mut tab = EditorTab::from_owned_buffer(buffer);
+    tab.set_cursor(Cursor::new(main_line, 0));
+    tab.reveal_cursor(Cursor::new(main_line, 0));
 
     let mut screen = crate::screen::Screen::new(8, 80);
-    window.render(&mut screen, Position::new(0, 0), Size::new(8, 80));
-    assert!(window.render_data().line_data.iter().any(|line| {
+    tab.render(&mut screen, Position::new(0, 0), Size::new(8, 80));
+    assert!(tab.render_data().line_data.iter().any(|line| {
         line.buffer_line == main_line && line.fold_glyph == Some(FoldGutterGlyph::Open)
     }));
 
     assert_eq!(
-        window.dispatch_action(&EditorAction::new(EditorOperation::OpenLineAbove)),
+        tab.dispatch_action(&EditorAction::new(EditorOperation::OpenLineAbove)),
         ActionResult::Handled
     );
 
-    window.render(&mut screen, Position::new(0, 0), Size::new(8, 80));
-    assert!(window.render_data().line_data.iter().any(|line| {
+    tab.render(&mut screen, Position::new(0, 0), Size::new(8, 80));
+    assert!(tab.render_data().line_data.iter().any(|line| {
         line.buffer_line == main_line + 1 && line.fold_glyph == Some(FoldGutterGlyph::Open)
     }));
 }
 
 #[test]
-fn test_window_keeps_syntax_fold_marker_after_open_line_above_large_main() {
+fn test_tab_keeps_syntax_fold_marker_after_open_line_above_large_main() {
     let path = AbsolutePath::from_path(std::path::Path::new("/tmp/urvim-main-fixture.rs")).unwrap();
     let mut source = String::from(
         "use clap::Parser;\n\n#[derive(Parser)]\nstruct Cli {\n    files: Vec<String>,\n}\n\nfn main() {\n",
@@ -1605,32 +1589,32 @@ fn test_window_keeps_syntax_fold_marker_after_open_line_above_large_main() {
         .expect("main line exists");
     let mut buffer = Buffer::from_str_with_path(&source, path);
     buffer.ensure_syntax_through(buffer.line_count().saturating_sub(1));
-    let mut window = Window::from_owned_buffer(buffer);
-    window.set_cursor(Cursor::new(main_line, 0));
-    window.reveal_cursor(Cursor::new(main_line, 0));
+    let mut tab = EditorTab::from_owned_buffer(buffer);
+    tab.set_cursor(Cursor::new(main_line, 0));
+    tab.reveal_cursor(Cursor::new(main_line, 0));
 
     let mut screen = crate::screen::Screen::new(12, 100);
-    window.render(&mut screen, Position::new(0, 0), Size::new(12, 100));
-    assert!(window.render_data().line_data.iter().any(|line| {
+    tab.render(&mut screen, Position::new(0, 0), Size::new(12, 100));
+    assert!(tab.render_data().line_data.iter().any(|line| {
         line.buffer_line == main_line && line.fold_glyph == Some(FoldGutterGlyph::Open)
     }));
 
     assert_eq!(
-        window.dispatch_action(&EditorAction::new(EditorOperation::OpenLineAbove)),
+        tab.dispatch_action(&EditorAction::new(EditorOperation::OpenLineAbove)),
         ActionResult::Handled
     );
 
-    window.render(&mut screen, Position::new(0, 0), Size::new(12, 100));
-    assert!(window.render_data().line_data.iter().any(|line| {
+    tab.render(&mut screen, Position::new(0, 0), Size::new(12, 100));
+    assert!(tab.render_data().line_data.iter().any(|line| {
         line.buffer_line == main_line + 1 && line.fold_glyph == Some(FoldGutterGlyph::Open)
     }));
 }
 
 #[test]
-fn test_window_render_fold_text_inherits_active_line_background() {
-    let mut window = Window::new(Buffer::from_str("outer\n  inner1\n  inner2\nafter"));
-    window.set_cursor(Cursor::new(0, 0));
-    let theme = syntax_themed_window();
+fn test_tab_render_fold_text_inherits_active_line_background() {
+    let mut tab = EditorTab::new(Buffer::from_str("outer\n  inner1\n  inner2\nafter"));
+    tab.set_cursor(Cursor::new(0, 0));
+    let theme = syntax_themed_tab();
     let expected_fold_style = theme
         .default_style()
         .overlay(theme.highlight_style_for_name("ui.window.active_line"))
@@ -1648,11 +1632,11 @@ fn test_window_render_fold_text_inherits_active_line_background() {
     });
 
     assert_eq!(
-        window.dispatch_action(&EditorAction::new(EditorOperation::CloseFold)),
+        tab.dispatch_action(&EditorAction::new(EditorOperation::CloseFold)),
         ActionResult::Handled
     );
     let mut screen = crate::screen::Screen::new(4, 40);
-    window.render(&mut screen, Position::new(0, 0), Size::new(4, 40));
+    tab.render(&mut screen, Position::new(0, 0), Size::new(4, 40));
 
     assert_eq!(
         screen
@@ -1664,18 +1648,18 @@ fn test_window_render_fold_text_inherits_active_line_background() {
 }
 
 #[test]
-fn test_window_render_fold_spans_blank_lines() {
-    let mut window = Window::new(Buffer::from_str("outer\n  inner1\n\n  inner2\nafter"));
-    window.set_cursor(Cursor::new(0, 0));
+fn test_tab_render_fold_spans_blank_lines() {
+    let mut tab = EditorTab::new(Buffer::from_str("outer\n  inner1\n\n  inner2\nafter"));
+    tab.set_cursor(Cursor::new(0, 0));
 
     assert_eq!(
-        window.dispatch_action(&EditorAction::new(EditorOperation::CloseFold)),
+        tab.dispatch_action(&EditorAction::new(EditorOperation::CloseFold)),
         ActionResult::Handled
     );
     let mut screen = crate::screen::Screen::new(5, 40);
-    window.render(&mut screen, Position::new(0, 0), Size::new(5, 40));
+    tab.render(&mut screen, Position::new(0, 0), Size::new(5, 40));
 
-    let rendered = window
+    let rendered = tab
         .render_data()
         .get_line(0)
         .expect("folded start line should render")
@@ -1684,42 +1668,38 @@ fn test_window_render_fold_spans_blank_lines() {
         .collect::<String>();
 
     assert!(rendered.contains("... 3 lines folded"));
-    assert_eq!(window.render_data().line_data[1].buffer_line, 4);
+    assert_eq!(tab.render_data().line_data[1].buffer_line, 4);
 }
 
 #[test]
-fn test_window_render_does_not_fold_blank_only_suffix() {
-    let mut window = Window::new(Buffer::from_str("outer\n\n"));
-    window.set_cursor(Cursor::new(0, 0));
+fn test_tab_render_does_not_fold_blank_only_suffix() {
+    let mut tab = EditorTab::new(Buffer::from_str("outer\n\n"));
+    tab.set_cursor(Cursor::new(0, 0));
 
     assert_eq!(
-        window.dispatch_action(&EditorAction::new(EditorOperation::CloseFold)),
+        tab.dispatch_action(&EditorAction::new(EditorOperation::CloseFold)),
         ActionResult::Handled
     );
     let mut screen = crate::screen::Screen::new(3, 20);
-    window.render(&mut screen, Position::new(0, 0), Size::new(3, 20));
-    assert!(
-        window.render_data().line_data[0]
-            .folded_line_count
-            .is_none()
-    );
+    tab.render(&mut screen, Position::new(0, 0), Size::new(3, 20));
+    assert!(tab.render_data().line_data[0].folded_line_count.is_none());
 }
 
 #[test]
-fn test_window_indent_fold_excludes_trailing_blank_lines() {
-    let mut window = Window::new(Buffer::from_str(
+fn test_tab_indent_fold_excludes_trailing_blank_lines() {
+    let mut tab = EditorTab::new(Buffer::from_str(
         "def foo():\n    x = 1\n    y = 2\n\ndef bar():\n    z = 3",
     ));
-    window.set_cursor(Cursor::new(0, 0));
+    tab.set_cursor(Cursor::new(0, 0));
 
     assert_eq!(
-        window.dispatch_action(&EditorAction::new(EditorOperation::CloseFold)),
+        tab.dispatch_action(&EditorAction::new(EditorOperation::CloseFold)),
         ActionResult::Handled
     );
     let mut screen = crate::screen::Screen::new(5, 40);
-    window.render(&mut screen, Position::new(0, 0), Size::new(5, 40));
+    tab.render(&mut screen, Position::new(0, 0), Size::new(5, 40));
 
-    let rendered = window
+    let rendered = tab
         .render_data()
         .get_line(0)
         .expect("folded start line should render")
@@ -1728,15 +1708,15 @@ fn test_window_indent_fold_excludes_trailing_blank_lines() {
         .collect::<String>();
 
     assert!(rendered.contains("... 2 lines folded"));
-    assert_eq!(window.render_data().line_data[1].buffer_line, 3);
-    assert_eq!(window.render_data().line_data[2].buffer_line, 4);
+    assert_eq!(tab.render_data().line_data[1].buffer_line, 3);
+    assert_eq!(tab.render_data().line_data[2].buffer_line, 4);
 }
 
 #[test]
-fn test_window_fold_state_is_window_local() {
+fn test_tab_fold_state_is_tab_local() {
     let buffer = Buffer::from_str("outer\n  inner1\n  inner2\nafter");
-    let mut folded = Window::from_owned_buffer(buffer.clone());
-    let unfolded = Window::from_owned_buffer(buffer);
+    let mut folded = EditorTab::from_owned_buffer(buffer.clone());
+    let unfolded = EditorTab::from_owned_buffer(buffer);
     folded.set_cursor(Cursor::new(1, 0));
 
     assert_eq!(
@@ -1756,160 +1736,160 @@ fn test_window_fold_state_is_window_local() {
 }
 
 #[test]
-fn test_window_move_down_skips_folded_lines() {
-    let mut window = Window::new(Buffer::from_str("outer\n  inner1\n  inner2\nafter"));
-    window.set_cursor(Cursor::new(1, 0));
+fn test_tab_move_down_skips_folded_lines() {
+    let mut tab = EditorTab::new(Buffer::from_str("outer\n  inner1\n  inner2\nafter"));
+    tab.set_cursor(Cursor::new(1, 0));
 
     assert_eq!(
-        window.dispatch_action(&EditorAction::new(EditorOperation::CloseFold)),
+        tab.dispatch_action(&EditorAction::new(EditorOperation::CloseFold)),
         ActionResult::Handled
     );
     assert_eq!(
-        window.dispatch_action(&EditorAction::new(EditorOperation::MoveDown)),
+        tab.dispatch_action(&EditorAction::new(EditorOperation::MoveDown)),
         ActionResult::Handled
     );
 
-    assert_eq!(window.buffer_view().cursor().line, 3);
+    assert_eq!(tab.buffer_view().cursor().line, 3);
 }
 
 #[test]
-fn test_window_move_up_skips_large_fold_without_scanning_each_line() {
+fn test_tab_move_up_skips_large_fold_without_scanning_each_line() {
     let mut text = String::from("outer\n");
     for idx in 0..1000 {
         text.push_str(&format!("  inner{idx}\n"));
     }
     text.push_str("after");
-    let mut window = Window::new(Buffer::from_str(&text));
-    window.set_cursor(Cursor::new(0, 0));
+    let mut tab = EditorTab::new(Buffer::from_str(&text));
+    tab.set_cursor(Cursor::new(0, 0));
     assert_eq!(
-        window.dispatch_action(&EditorAction::new(EditorOperation::CloseFold)),
+        tab.dispatch_action(&EditorAction::new(EditorOperation::CloseFold)),
         ActionResult::Handled
     );
-    window.set_cursor(Cursor::new(1001, 0));
+    tab.set_cursor(Cursor::new(1001, 0));
 
     assert_eq!(
-        window.dispatch_action(&EditorAction::new(EditorOperation::MoveUp)),
+        tab.dispatch_action(&EditorAction::new(EditorOperation::MoveUp)),
         ActionResult::Handled
     );
 
-    assert_eq!(window.buffer_view().cursor().line, 0);
+    assert_eq!(tab.buffer_view().cursor().line, 0);
 }
 
 #[test]
 fn test_counted_line_jump_opens_fold_containing_target() {
-    let mut window = Window::new(Buffer::from_str("outer\n  inner1\n  inner2\nafter"));
-    window.set_cursor(Cursor::new(0, 0));
+    let mut tab = EditorTab::new(Buffer::from_str("outer\n  inner1\n  inner2\nafter"));
+    tab.set_cursor(Cursor::new(0, 0));
     assert_eq!(
-        window.dispatch_action(&EditorAction::new(EditorOperation::CloseFold)),
+        tab.dispatch_action(&EditorAction::new(EditorOperation::CloseFold)),
         ActionResult::Handled
     );
 
     assert_eq!(
-        window.dispatch_action(&EditorAction::count(
+        tab.dispatch_action(&EditorAction::count(
             3,
             Box::new(EditorAction::new(EditorOperation::MoveToLastLine)),
         )),
         ActionResult::Handled
     );
     let mut screen = crate::screen::Screen::new(4, 40);
-    window.render(&mut screen, Position::new(0, 0), Size::new(4, 40));
+    tab.render(&mut screen, Position::new(0, 0), Size::new(4, 40));
 
-    assert_eq!(window.buffer_view().cursor().line, 2);
-    assert_eq!(window.render_data().line_data[1].buffer_line, 1);
-    assert_eq!(window.render_data().line_data[2].buffer_line, 2);
+    assert_eq!(tab.buffer_view().cursor().line, 2);
+    assert_eq!(tab.render_data().line_data[1].buffer_line, 1);
+    assert_eq!(tab.render_data().line_data[2].buffer_line, 2);
 }
 
 #[test]
 fn test_move_left_from_fold_closing_line_stays_on_line_start() {
-    let mut window = Window::new(Buffer::from_str("struct Cli {\n    files: Vec<File>,\n}"));
-    window.set_cursor(Cursor::new(0, 0));
+    let mut tab = EditorTab::new(Buffer::from_str("struct Cli {\n    files: Vec<File>,\n}"));
+    tab.set_cursor(Cursor::new(0, 0));
     assert_eq!(
-        window.dispatch_action(&EditorAction::new(EditorOperation::CloseFold)),
+        tab.dispatch_action(&EditorAction::new(EditorOperation::CloseFold)),
         ActionResult::Handled
     );
-    window.set_cursor(Cursor::new(2, 0));
+    tab.set_cursor(Cursor::new(2, 0));
 
     assert_eq!(
-        window.dispatch_action(&EditorAction::new(EditorOperation::MoveLeft)),
+        tab.dispatch_action(&EditorAction::new(EditorOperation::MoveLeft)),
         ActionResult::Handled
     );
     let mut screen = crate::screen::Screen::new(3, 40);
-    window.render(&mut screen, Position::new(0, 0), Size::new(3, 40));
+    tab.render(&mut screen, Position::new(0, 0), Size::new(3, 40));
 
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(2, 0));
-    assert_eq!(window.render_data().line_data[1].buffer_line, 2);
+    assert_eq!(tab.buffer_view().cursor(), Cursor::new(2, 0));
+    assert_eq!(tab.render_data().line_data[1].buffer_line, 2);
 }
 
 #[test]
 fn test_open_line_below_opens_fold_when_cursor_enters_hidden_line() {
-    let mut window = Window::new(Buffer::from_str("outer\n  inner1\n  inner2\nafter"));
-    window.set_cursor(Cursor::new(1, 0));
+    let mut tab = EditorTab::new(Buffer::from_str("outer\n  inner1\n  inner2\nafter"));
+    tab.set_cursor(Cursor::new(1, 0));
     assert_eq!(
-        window.dispatch_action(&EditorAction::new(EditorOperation::CloseFold)),
+        tab.dispatch_action(&EditorAction::new(EditorOperation::CloseFold)),
         ActionResult::Handled
     );
 
     assert_eq!(
-        window.dispatch_action(&EditorAction::new(EditorOperation::OpenLineBelow)),
+        tab.dispatch_action(&EditorAction::new(EditorOperation::OpenLineBelow)),
         ActionResult::Handled
     );
     let mut screen = crate::screen::Screen::new(5, 40);
-    window.render(&mut screen, Position::new(0, 0), Size::new(5, 40));
+    tab.render(&mut screen, Position::new(0, 0), Size::new(5, 40));
 
-    assert_eq!(window.buffer_view().cursor().line, 1);
-    assert_eq!(window.render_data().line_data[1].buffer_line, 1);
-    assert_eq!(window.render_data().line_data[2].buffer_line, 2);
+    assert_eq!(tab.buffer_view().cursor().line, 1);
+    assert_eq!(tab.render_data().line_data[1].buffer_line, 1);
+    assert_eq!(tab.render_data().line_data[2].buffer_line, 2);
 }
 
 #[test]
 fn test_open_line_above_opens_fold_when_cursor_enters_hidden_line() {
-    let mut window = Window::new(Buffer::from_str("outer\n  inner1\n  inner2\nafter"));
-    window.set_cursor(Cursor::new(1, 0));
+    let mut tab = EditorTab::new(Buffer::from_str("outer\n  inner1\n  inner2\nafter"));
+    tab.set_cursor(Cursor::new(1, 0));
     assert_eq!(
-        window.dispatch_action(&EditorAction::new(EditorOperation::CloseFold)),
+        tab.dispatch_action(&EditorAction::new(EditorOperation::CloseFold)),
         ActionResult::Handled
     );
-    window.set_cursor(Cursor::new(3, 0));
+    tab.set_cursor(Cursor::new(3, 0));
 
     assert_eq!(
-        window.dispatch_action(&EditorAction::new(EditorOperation::OpenLineAbove)),
+        tab.dispatch_action(&EditorAction::new(EditorOperation::OpenLineAbove)),
         ActionResult::Handled
     );
     let mut screen = crate::screen::Screen::new(5, 40);
-    window.render(&mut screen, Position::new(0, 0), Size::new(5, 40));
+    tab.render(&mut screen, Position::new(0, 0), Size::new(5, 40));
 
-    assert_eq!(window.buffer_view().cursor().line, 3);
-    assert_eq!(window.render_data().line_data[2].buffer_line, 2);
-    assert_eq!(window.render_data().line_data[3].buffer_line, 3);
+    assert_eq!(tab.buffer_view().cursor().line, 3);
+    assert_eq!(tab.render_data().line_data[2].buffer_line, 2);
+    assert_eq!(tab.render_data().line_data[3].buffer_line, 3);
 }
 
 #[test]
 fn test_open_line_above_on_brace_fold_end_inserts_above_brace() {
-    let mut window = Window::new(Buffer::from_str(
+    let mut tab = EditorTab::new(Buffer::from_str(
         "struct Cli {\n    theme: Option<String>,\n    no_syntax: bool,\n    files: Vec<File>,\n}\n",
     ));
-    window.set_cursor(Cursor::new(0, 0));
+    tab.set_cursor(Cursor::new(0, 0));
     assert_eq!(
-        window.dispatch_action(&EditorAction::new(EditorOperation::CloseFold)),
+        tab.dispatch_action(&EditorAction::new(EditorOperation::CloseFold)),
         ActionResult::Handled
     );
-    window.set_cursor(Cursor::new(4, 0));
+    tab.set_cursor(Cursor::new(4, 0));
 
     let mut folded_screen = crate::screen::Screen::new(3, 40);
-    window.render(&mut folded_screen, Position::new(0, 0), Size::new(3, 40));
-    assert_eq!(window.render_data().line_data[1].buffer_line, 4);
+    tab.render(&mut folded_screen, Position::new(0, 0), Size::new(3, 40));
+    assert_eq!(tab.render_data().line_data[1].buffer_line, 4);
 
     assert_eq!(
-        window.dispatch_action(&EditorAction::new(EditorOperation::OpenLineAbove)),
+        tab.dispatch_action(&EditorAction::new(EditorOperation::OpenLineAbove)),
         ActionResult::Handled
     );
 
-    let text = window
+    let text = tab
         .buffer_view()
         .with_buffer(|buffer| buffer.as_str())
         .expect("buffer should exist");
 
-    assert_eq!(window.buffer_view().cursor().line, 4);
+    assert_eq!(tab.buffer_view().cursor().line, 4);
     assert_eq!(
         text,
         "struct Cli {\n    theme: Option<String>,\n    no_syntax: bool,\n    files: Vec<File>,\n\n}"
@@ -1919,45 +1899,45 @@ fn test_open_line_above_on_brace_fold_end_inserts_above_brace() {
 #[test]
 fn test_counted_line_jump_opens_all_nested_folds() {
     let buffer = Buffer::from_str("outer\n  inner\n    deep\nafter");
-    let mut window = Window::from_owned_buffer(buffer);
-    window.set_cursor(Cursor::new(0, 0));
+    let mut tab = EditorTab::from_owned_buffer(buffer);
+    tab.set_cursor(Cursor::new(0, 0));
     assert_eq!(
-        window.dispatch_action(&EditorAction::new(EditorOperation::CloseFold)),
+        tab.dispatch_action(&EditorAction::new(EditorOperation::CloseFold)),
         ActionResult::Handled
     );
-    window.set_cursor(Cursor::new(1, 0));
+    tab.set_cursor(Cursor::new(1, 0));
     assert_eq!(
-        window.dispatch_action(&EditorAction::new(EditorOperation::CloseFold)),
+        tab.dispatch_action(&EditorAction::new(EditorOperation::CloseFold)),
         ActionResult::Handled
     );
 
     assert_eq!(
-        window.dispatch_action(&EditorAction::count(
+        tab.dispatch_action(&EditorAction::count(
             3,
             Box::new(EditorAction::new(EditorOperation::MoveToLastLine)),
         )),
         ActionResult::Handled
     );
     let mut screen = crate::screen::Screen::new(4, 40);
-    window.render(&mut screen, Position::new(0, 0), Size::new(4, 40));
+    tab.render(&mut screen, Position::new(0, 0), Size::new(4, 40));
 
-    assert_eq!(window.buffer_view().cursor().line, 2);
-    assert_eq!(window.render_data().line_data[1].buffer_line, 1);
-    assert_eq!(window.render_data().line_data[2].buffer_line, 2);
+    assert_eq!(tab.buffer_view().cursor().line, 2);
+    assert_eq!(tab.render_data().line_data[1].buffer_line, 1);
+    assert_eq!(tab.render_data().line_data[2].buffer_line, 2);
 }
 
 #[test]
-fn test_window_render_draws_indent_guide_between_scope_boundaries() {
+fn test_tab_render_draws_indent_guide_between_scope_boundaries() {
     let buffer = Buffer::from_str("  outer\n    inner1\n\n    inner2\n  close\nafter");
-    let mut window = Window::new(buffer);
-    window.set_cursor(Cursor::new(1, 2));
+    let mut tab = EditorTab::new(buffer);
+    tab.set_cursor(Cursor::new(1, 2));
     let _config_guard = globals::set_test_config(Config {
         indent_guides: true,
         ..Default::default()
     });
 
     let mut screen = crate::screen::Screen::new(6, 24);
-    window.render(&mut screen, Position::new(0, 0), Size::new(6, 24));
+    tab.render(&mut screen, Position::new(0, 0), Size::new(6, 24));
 
     assert_ne!(screen.get_cell_mut(0, 7).unwrap().text, "|");
     assert_eq!(screen.get_cell_mut(1, 7).unwrap().text, "|");
@@ -1967,17 +1947,17 @@ fn test_window_render_draws_indent_guide_between_scope_boundaries() {
 }
 
 #[test]
-fn test_window_render_skips_indent_guide_when_disabled() {
+fn test_tab_render_skips_indent_guide_when_disabled() {
     let buffer = Buffer::from_str("  outer\n    inner1\n\n    inner2\n  close\nafter");
-    let mut window = Window::new(buffer);
-    window.set_cursor(Cursor::new(1, 2));
+    let mut tab = EditorTab::new(buffer);
+    tab.set_cursor(Cursor::new(1, 2));
     let _config_guard = globals::set_test_config(Config {
         indent_guides: false,
         ..Default::default()
     });
 
     let mut screen = crate::screen::Screen::new(6, 24);
-    window.render(&mut screen, Position::new(0, 0), Size::new(6, 24));
+    tab.render(&mut screen, Position::new(0, 0), Size::new(6, 24));
 
     assert_ne!(screen.get_cell_mut(1, 7).unwrap().text, "|");
     assert_ne!(screen.get_cell_mut(2, 7).unwrap().text, "|");
@@ -1985,10 +1965,10 @@ fn test_window_render_skips_indent_guide_when_disabled() {
 }
 
 #[test]
-fn test_window_render_uses_unicode_indent_glyph_when_capability_enabled() {
+fn test_tab_render_uses_unicode_indent_glyph_when_capability_enabled() {
     let buffer = Buffer::from_str("  outer\n    inner1\n\n    inner2\n  close\nafter");
-    let mut window = Window::new(buffer);
-    window.set_cursor(Cursor::new(1, 2));
+    let mut tab = EditorTab::new(buffer);
+    tab.set_cursor(Cursor::new(1, 2));
     let _config_guard = globals::set_test_config(Config {
         indent_guides: true,
         advanced_glyphs: BTreeSet::from([AdvancedGlyphCapability::UnicodeIndent]),
@@ -1996,17 +1976,17 @@ fn test_window_render_uses_unicode_indent_glyph_when_capability_enabled() {
     });
 
     let mut screen = crate::screen::Screen::new(6, 24);
-    window.render(&mut screen, Position::new(0, 0), Size::new(6, 24));
+    tab.render(&mut screen, Position::new(0, 0), Size::new(6, 24));
 
     assert_eq!(screen.get_cell_mut(2, 7).unwrap().text, "│");
 }
 
 #[test]
-fn test_window_render_indent_guide_uses_split_border_style() {
+fn test_tab_render_indent_guide_uses_split_border_style() {
     let buffer = Buffer::from_str("  outer\n    inner1\n\n    inner2\n  close\nafter");
-    let mut window = Window::new(buffer);
-    window.set_cursor(Cursor::new(1, 2));
-    let theme = themed_window();
+    let mut tab = EditorTab::new(buffer);
+    tab.set_cursor(Cursor::new(1, 2));
+    let theme = themed_tab();
     let expected_style = theme
         .default_style()
         .accent(theme.resolve_name_with_default("ui.window.lines.indent"));
@@ -2017,7 +1997,7 @@ fn test_window_render_indent_guide_uses_split_border_style() {
     });
 
     let mut screen = crate::screen::Screen::new(6, 24);
-    window.render(&mut screen, Position::new(0, 0), Size::new(6, 24));
+    tab.render(&mut screen, Position::new(0, 0), Size::new(6, 24));
 
     let cell = screen.get_cell_mut(2, 7).unwrap();
     assert_eq!(cell.text, "|");
@@ -2025,10 +2005,10 @@ fn test_window_render_indent_guide_uses_split_border_style() {
 }
 
 #[test]
-fn test_window_render_indent_guide_uses_visual_column_for_tabs() {
+fn test_tab_render_indent_guide_uses_visual_column_for_tabs() {
     let buffer = Buffer::from_str(" \touter\n \t\tinner\n\n \t\tclose\n \tend\nend");
-    let mut window = Window::new(buffer);
-    window.set_cursor(Cursor::new(1, 2));
+    let mut tab = EditorTab::new(buffer);
+    tab.set_cursor(Cursor::new(1, 2));
     let _config_guard = globals::set_test_config(Config {
         indent_guides: true,
         tab_width: 4,
@@ -2036,14 +2016,14 @@ fn test_window_render_indent_guide_uses_visual_column_for_tabs() {
     });
 
     let mut screen = crate::screen::Screen::new(6, 24);
-    window.render(&mut screen, Position::new(0, 0), Size::new(6, 24));
+    tab.render(&mut screen, Position::new(0, 0), Size::new(6, 24));
 
     assert_eq!(screen.get_cell_mut(2, 10).unwrap().text, "|");
 }
 
 #[test]
-fn test_window_render_indent_guide_preserves_visual_selection_background() {
-    let mut theme = themed_window();
+fn test_tab_render_indent_guide_preserves_visual_selection_background() {
+    let mut theme = themed_tab();
     theme.highlights.insert(
         Tag::parse("ui.selection").expect("valid tag"),
         Style::new().bg(Color::ansi(99)),
@@ -2058,15 +2038,14 @@ fn test_window_render_indent_guide_preserves_visual_selection_background() {
     });
 
     let buffer = Buffer::from_str("  outer\n    inner1\n    inner2\n  close\nafter");
-    let mut window = Window::new(buffer);
-    window.buffer_view_mut().set_cursor(Cursor::new(1, 1));
-    window
-        .buffer_view_mut()
+    let mut tab = EditorTab::new(buffer);
+    tab.buffer_view_mut().set_cursor(Cursor::new(1, 1));
+    tab.buffer_view_mut()
         .begin_visual_selection(VisualSelectionKind::Character);
-    window.buffer_view_mut().set_cursor(Cursor::new(1, 3));
+    tab.buffer_view_mut().set_cursor(Cursor::new(1, 3));
 
     let mut screen = crate::screen::Screen::new(5, 24);
-    window.render(&mut screen, Position::new(0, 0), Size::new(5, 24));
+    tab.render(&mut screen, Position::new(0, 0), Size::new(5, 24));
 
     let cell = screen.get_cell_mut(1, 7).unwrap();
     assert_eq!(cell.text, "|");
@@ -2074,17 +2053,17 @@ fn test_window_render_indent_guide_preserves_visual_selection_background() {
 }
 
 #[test]
-fn test_window_render_skips_indent_guide_without_eligible_scope() {
+fn test_tab_render_skips_indent_guide_without_eligible_scope() {
     let buffer = Buffer::from_str("  outer\n    inner1\n\n    inner2\n  close\nafter");
-    let mut window = Window::new(buffer);
-    window.set_cursor(Cursor::new(1, 0));
+    let mut tab = EditorTab::new(buffer);
+    tab.set_cursor(Cursor::new(1, 0));
     let _config_guard = globals::set_test_config(Config {
         indent_guides: true,
         ..Default::default()
     });
 
     let mut screen = crate::screen::Screen::new(6, 24);
-    window.render(&mut screen, Position::new(0, 0), Size::new(6, 24));
+    tab.render(&mut screen, Position::new(0, 0), Size::new(6, 24));
 
     assert_ne!(screen.get_cell_mut(1, 7).unwrap().text, "|");
     assert_ne!(screen.get_cell_mut(2, 7).unwrap().text, "|");
@@ -2092,18 +2071,18 @@ fn test_window_render_skips_indent_guide_without_eligible_scope() {
 }
 
 #[test]
-fn test_window_render_indent_guide_does_not_overwrite_wrapped_continuation_text() {
+fn test_tab_render_indent_guide_does_not_overwrite_wrapped_continuation_text() {
     let _config_guard = globals::set_test_config(Config {
         indent_guides: true,
         wrap_mode: WrapMode::Hard,
         ..Default::default()
     });
-    let mut window = Window::new(Buffer::from_str("a\n  abcdefghij\n  tail\nz"));
-    window.set_wrap_enabled(true);
-    window.set_cursor(Cursor::new(1, 2));
+    let mut tab = EditorTab::new(Buffer::from_str("a\n  abcdefghij\n  tail\nz"));
+    tab.set_wrap_enabled(true);
+    tab.set_cursor(Cursor::new(1, 2));
 
     let mut screen = crate::screen::Screen::new(6, 9);
-    window.render(&mut screen, Position::new(0, 0), Size::new(6, 9));
+    tab.render(&mut screen, Position::new(0, 0), Size::new(6, 9));
 
     // Row 2 is the second wrapped segment of line 2 ("efghij"), and the guide
     // column intersects that segment. The rendered text must win over the guide.
@@ -2111,16 +2090,16 @@ fn test_window_render_indent_guide_does_not_overwrite_wrapped_continuation_text(
 }
 
 #[test]
-fn test_window_render_fills_empty_content_rows_with_theme_default() {
+fn test_tab_render_fills_empty_content_rows_with_theme_default() {
     let buffer = Buffer::from_str("line1");
-    let mut window = Window::new(buffer);
-    let theme = themed_window();
+    let mut tab = EditorTab::new(buffer);
+    let theme = themed_tab();
     let expected_gutter_style = theme.resolve_name_with_default("ui.window.gutter");
     let expected_default_style = theme.default_style();
     let _theme_guard = globals::set_test_active_theme(theme);
 
     let mut screen = crate::screen::Screen::new(3, 12);
-    window.render(&mut screen, Position::new(0, 0), Size::new(3, 12));
+    tab.render(&mut screen, Position::new(0, 0), Size::new(3, 12));
 
     assert_eq!(
         screen.get_cell_mut(1, 0).unwrap().style,
@@ -2137,14 +2116,14 @@ fn test_window_render_fills_empty_content_rows_with_theme_default() {
 }
 
 #[test]
-fn test_window_render_uses_syntax_styles_for_supported_filetypes() {
+fn test_tab_render_uses_syntax_styles_for_supported_filetypes() {
     let path = temp_path_with_ext("syntax", "rs");
     let buffer = Buffer::from_str_with_path(
         "fn main() { let value: Option<String> = Some(\"hi\"); } // note",
         path,
     );
-    let mut window = Window::new(buffer);
-    let theme = syntax_themed_window();
+    let mut tab = EditorTab::new(buffer);
+    let theme = syntax_themed_tab();
     let expected_keyword_style = theme.highlight_style_for_tag(&tag("keyword"));
     let expected_constant_style = theme.highlight_style_for_tag(&tag("constant"));
     let expected_type_style = theme.highlight_style_for_tag(&tag("type"));
@@ -2154,9 +2133,9 @@ fn test_window_render_uses_syntax_styles_for_supported_filetypes() {
     let _theme_guard = globals::set_test_active_theme(theme);
 
     let mut screen = crate::screen::Screen::new(1, 80);
-    window.render(&mut screen, Position::new(0, 0), Size::new(1, 80));
+    tab.render(&mut screen, Position::new(0, 0), Size::new(1, 80));
 
-    let line = rendered_line(&window, 0);
+    let line = rendered_line(&tab, 0);
     assert!(
         line.iter()
             .any(|chunk| chunk.text == "fn" && chunk.style == expected_keyword_style)
@@ -2184,14 +2163,14 @@ fn test_window_render_uses_syntax_styles_for_supported_filetypes() {
 }
 
 #[test]
-fn test_window_render_omits_syntax_styles_when_disabled() {
+fn test_tab_render_omits_syntax_styles_when_disabled() {
     let path = temp_path_with_ext("syntax-disabled", "rs");
     let buffer = Buffer::from_str_with_path(
         "fn main() { let value: Option<String> = Some(\"hi\"); } // note",
         path,
     );
-    let mut window = Window::new(buffer);
-    let theme = syntax_themed_window();
+    let mut tab = EditorTab::new(buffer);
+    let theme = syntax_themed_tab();
     let expected_default_style = Style::default();
     let _theme_guard = globals::set_test_active_theme(theme);
     let _config_guard = globals::set_test_config(Config {
@@ -2203,9 +2182,9 @@ fn test_window_render_omits_syntax_styles_when_disabled() {
     });
 
     let mut screen = crate::screen::Screen::new(1, 80);
-    window.render(&mut screen, Position::new(0, 0), Size::new(1, 80));
+    tab.render(&mut screen, Position::new(0, 0), Size::new(1, 80));
 
-    let line = rendered_line(&window, 0);
+    let line = rendered_line(&tab, 0);
 
     assert!(!line.is_empty());
     assert!(
@@ -2214,17 +2193,16 @@ fn test_window_render_omits_syntax_styles_when_disabled() {
     );
     assert!(line.iter().any(|chunk| chunk.text.contains("fn main()")));
     assert!(
-        !window
-            .buffer_view()
+        !tab.buffer_view()
             .with_buffer(|buffer| buffer.syntax_background_pending())
             .unwrap_or(true)
     );
 }
 
 #[test]
-fn test_window_render_does_not_force_full_syntax_warmup_on_bottom_jump() {
+fn test_tab_render_does_not_force_full_syntax_warmup_on_bottom_jump() {
     let _lock = syntax_worker_lock();
-    let theme = syntax_themed_window();
+    let theme = syntax_themed_tab();
     let _theme_guard = globals::set_test_active_theme(theme);
     let _config_guard = globals::set_test_config(Config {
         theme: "demo-syntax".to_string(),
@@ -2237,26 +2215,26 @@ fn test_window_render_does_not_force_full_syntax_warmup_on_bottom_jump() {
 
     let path = temp_path_with_ext("bottom-jump", "rs");
     let buffer = Buffer::from_str_with_path(&repeated_rust_buffer(256), path);
-    let mut window = Window::new(buffer);
-    window.set_cursor(Cursor::new(255, 0));
+    let mut tab = EditorTab::new(buffer);
+    tab.set_cursor(Cursor::new(255, 0));
 
     let mut screen = crate::screen::Screen::new(4, 80);
-    window.render(&mut screen, Position::new(0, 0), Size::new(4, 80));
+    tab.render(&mut screen, Position::new(0, 0), Size::new(4, 80));
 
-    let rendered_line = rendered_line(&window, 0);
-    let syntax_pending = window
+    let rendered_line = rendered_line(&tab, 0);
+    let syntax_pending = tab
         .buffer_view()
         .with_buffer(|buffer| buffer.syntax_background_pending())
         .unwrap_or(false);
-    let cache_complete = window
+    let cache_complete = tab
         .buffer_view()
         .with_buffer(|buffer| buffer.syntax_cache_complete())
         .unwrap_or(true);
-    let beyond_viewport_cached = window
+    let beyond_viewport_cached = tab
         .buffer_view()
         .with_buffer(|buffer| buffer.cached_syntax_spans_for_line(200).is_some())
         .unwrap_or(true);
-    let eof_line_cached = window
+    let eof_line_cached = tab
         .buffer_view()
         .with_buffer(|buffer| buffer.cached_syntax_spans_for_line(255).is_some())
         .unwrap_or(true);
@@ -2274,9 +2252,9 @@ fn test_window_render_does_not_force_full_syntax_warmup_on_bottom_jump() {
 }
 
 #[test]
-fn test_window_render_keeps_bottom_viewport_highlighted_after_completion_top_edit() {
+fn test_tab_render_keeps_bottom_viewport_highlighted_after_completion_top_edit() {
     let _lock = syntax_worker_lock();
-    let theme = syntax_themed_window();
+    let theme = syntax_themed_tab();
     let expected_keyword_style = theme.highlight_style_for_tag(&tag("keyword"));
     let _theme_guard = globals::set_test_active_theme(theme);
     let _config_guard = globals::set_test_config(Config {
@@ -2295,16 +2273,15 @@ fn test_window_render_keeps_bottom_viewport_highlighted_after_completion_top_edi
     let source = format!("fn main() {{\n    let guard = String::new();\n}}\n{body}");
     let path = temp_path_with_ext("completion-render-fallback", "rs");
     let buffer = Buffer::from_str_with_path(&source, path);
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
-    window
-        .buffer_view_mut()
+    tab.buffer_view_mut()
         .with_buffer_mut(|buffer| {
             buffer.ensure_syntax_through(buffer.line_count().saturating_sub(1))
         })
         .unwrap();
 
-    let completion_line = window
+    let completion_line = tab
         .buffer_view()
         .with_buffer(|buffer| {
             (0..buffer.line_count())
@@ -2316,7 +2293,7 @@ fn test_window_render_keeps_bottom_viewport_highlighted_after_completion_top_edi
                 .expect("guard line should exist")
         })
         .unwrap();
-    let line_text = window
+    let line_text = tab
         .buffer_view()
         .with_buffer(|buffer| buffer.line_at(completion_line).map(|line| line.to_string()))
         .flatten()
@@ -2334,8 +2311,7 @@ fn test_window_render_keeps_bottom_viewport_highlighted_after_completion_top_edi
         text: "use std::borrow::Cow;\n".to_string(),
     }];
 
-    window
-        .buffer_view_mut()
+    tab.buffer_view_mut()
         .with_buffer_mut(|buffer| {
             buffer
                 .apply_completion(
@@ -2348,7 +2324,7 @@ fn test_window_render_keeps_bottom_viewport_highlighted_after_completion_top_edi
         })
         .unwrap();
 
-    let filler_line_idx = window
+    let filler_line_idx = tab
         .buffer_view()
         .with_buffer(|buffer| {
             (0..buffer.line_count())
@@ -2361,11 +2337,11 @@ fn test_window_render_keeps_bottom_viewport_highlighted_after_completion_top_edi
         })
         .unwrap();
 
-    window.set_cursor(Cursor::new(filler_line_idx, 0));
+    tab.set_cursor(Cursor::new(filler_line_idx, 0));
     let mut screen = crate::screen::Screen::new(1, 120);
-    window.render(&mut screen, Position::new(0, 0), Size::new(1, 120));
+    tab.render(&mut screen, Position::new(0, 0), Size::new(1, 120));
 
-    let rendered_line = rendered_line(&window, 0);
+    let rendered_line = rendered_line(&tab, 0);
     assert!(
         rendered_line
             .iter()
@@ -2374,9 +2350,9 @@ fn test_window_render_keeps_bottom_viewport_highlighted_after_completion_top_edi
 }
 
 #[test]
-fn test_window_render_requests_async_syntax_without_warmup() {
+fn test_tab_render_requests_async_syntax_without_warmup() {
     let _lock = syntax_worker_lock();
-    let theme = syntax_themed_window();
+    let theme = syntax_themed_tab();
     let _theme_guard = globals::set_test_active_theme(theme);
     let _config_guard = globals::set_test_config(Config {
         theme: "demo-syntax".to_string(),
@@ -2389,13 +2365,13 @@ fn test_window_render_requests_async_syntax_without_warmup() {
 
     let path = temp_path_with_ext("top-warmup", "rs");
     let buffer = Buffer::from_str_with_path(&repeated_rust_buffer(256), path);
-    let mut window = Window::new(buffer);
-    window.set_cursor(Cursor::new(0, 0));
+    let mut tab = EditorTab::new(buffer);
+    tab.set_cursor(Cursor::new(0, 0));
 
     let mut screen = crate::screen::Screen::new(4, 80);
-    window.render(&mut screen, Position::new(0, 0), Size::new(4, 80));
+    tab.render(&mut screen, Position::new(0, 0), Size::new(4, 80));
 
-    let far_line_cached = window
+    let far_line_cached = tab
         .buffer_view()
         .with_buffer(|buffer| buffer.cached_syntax_spans_for_line(120).is_some())
         .unwrap_or(true);
@@ -2435,9 +2411,9 @@ fn test_buffer_view_set_cursor_debug_logging_does_not_force_syntax_warmup() {
 }
 
 #[test]
-fn test_window_render_uses_background_syntax_after_tick() {
+fn test_tab_render_uses_background_syntax_after_tick() {
     let _lock = syntax_worker_lock();
-    let theme = syntax_themed_window();
+    let theme = syntax_themed_tab();
     let _theme_guard = globals::set_test_active_theme(theme.clone());
     let _config_guard = globals::set_test_config(Config {
         theme: "demo-syntax".to_string(),
@@ -2463,7 +2439,7 @@ fn test_window_render_uses_background_syntax_after_tick() {
         &repeated_rust_buffer(64),
         temp_path_with_ext("background-syntax", "rs"),
     );
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
     let expected_keyword_style = theme.highlight_style_for_tag(&tag("keyword"));
     let expected_constant_style = theme.highlight_style_for_tag(&tag("constant"));
     let expected_type_style = theme.highlight_style_for_tag(&tag("type"));
@@ -2473,13 +2449,12 @@ fn test_window_render_uses_background_syntax_after_tick() {
     let _expected_default_style = Style::default();
 
     let mut screen = crate::screen::Screen::new(1, 80);
-    window.render(&mut screen, Position::new(0, 0), Size::new(1, 80));
+    tab.render(&mut screen, Position::new(0, 0), Size::new(1, 80));
 
-    let line = rendered_line(&window, 0);
+    let line = rendered_line(&tab, 0);
     assert!(!line.is_empty());
     assert!(
-        window
-            .buffer_view()
+        tab.buffer_view()
             .with_buffer(|buffer| buffer.syntax_background_pending())
             .unwrap_or(false)
     );
@@ -2505,9 +2480,9 @@ fn test_window_render_uses_background_syntax_after_tick() {
 
     assert!(applied);
 
-    window.render(&mut screen, Position::new(0, 0), Size::new(1, 80));
+    tab.render(&mut screen, Position::new(0, 0), Size::new(1, 80));
 
-    let line = rendered_line(&window, 0);
+    let line = rendered_line(&tab, 0);
     assert!(
         line.iter()
             .any(|chunk| chunk.text == "fn" && chunk.style == expected_keyword_style)
@@ -2535,19 +2510,19 @@ fn test_window_render_uses_background_syntax_after_tick() {
 }
 
 #[test]
-fn test_window_render_distinguishes_rust_format_string_escapes() {
+fn test_tab_render_distinguishes_rust_format_string_escapes() {
     let path = temp_path_with_ext("syntax-format-escape", "rs");
     let buffer = Buffer::from_str_with_path("let msg = format!(\"{{literal}}\");", path);
-    let mut window = Window::new(buffer);
-    let theme = syntax_themed_window();
+    let mut tab = EditorTab::new(buffer);
+    let theme = syntax_themed_tab();
     let expected_string_style = theme.highlight_style_for_tag(&tag("string"));
     let expected_escape_style = theme.highlight_style_for_tag(&tag("string.escape"));
     let _theme_guard = globals::set_test_active_theme(theme);
 
     let mut screen = crate::screen::Screen::new(1, 80);
-    window.render(&mut screen, Position::new(0, 0), Size::new(1, 80));
+    tab.render(&mut screen, Position::new(0, 0), Size::new(1, 80));
 
-    let line = rendered_line(&window, 0);
+    let line = rendered_line(&tab, 0);
 
     assert!(
         line.iter()
@@ -2564,11 +2539,11 @@ fn test_window_render_distinguishes_rust_format_string_escapes() {
 }
 
 #[test]
-fn test_window_render_highlights_todo_markers_inside_comments() {
+fn test_tab_render_highlights_todo_markers_inside_comments() {
     let path = temp_path_with_ext("todo-markers", "rs");
     let buffer = Buffer::from_str_with_path("fn main() { let value = 1; // TODO FIXME }", path);
-    let mut window = Window::new(buffer);
-    let theme = todo_marker_themed_window();
+    let mut tab = EditorTab::new(buffer);
+    let theme = todo_marker_themed_tab();
     let expected_keyword_style = theme.highlight_style_for_tag(&tag("keyword"));
     let expected_comment_style = theme.highlight_style_for_tag(&tag("comment"));
     let expected_todo_style = theme.highlight_style_for_tag(&tag("comment.todo"));
@@ -2584,9 +2559,9 @@ fn test_window_render_highlights_todo_markers_inside_comments() {
     });
 
     let mut screen = crate::screen::Screen::new(1, 80);
-    window.render(&mut screen, Position::new(0, 0), Size::new(1, 80));
+    tab.render(&mut screen, Position::new(0, 0), Size::new(1, 80));
 
-    let line = rendered_line(&window, 0);
+    let line = rendered_line(&tab, 0);
     assert!(
         line.iter()
             .any(|chunk| chunk.text == "fn" && chunk.style == expected_keyword_style)
@@ -2610,11 +2585,11 @@ fn test_window_render_highlights_todo_markers_inside_comments() {
 }
 
 #[test]
-fn test_window_render_skips_todo_markers_when_syntax_is_disabled() {
+fn test_tab_render_skips_todo_markers_when_syntax_is_disabled() {
     let path = temp_path_with_ext("todo-markers-disabled", "rs");
     let buffer = Buffer::from_str_with_path("fn main() { // TODO FIXME }", path);
-    let mut window = Window::new(buffer);
-    let theme = todo_marker_themed_window();
+    let mut tab = EditorTab::new(buffer);
+    let theme = todo_marker_themed_tab();
     let expected_default_style = Style::default();
     let _theme_guard = globals::set_test_active_theme(theme);
     let _config_guard = globals::set_test_config(Config {
@@ -2627,9 +2602,9 @@ fn test_window_render_skips_todo_markers_when_syntax_is_disabled() {
     });
 
     let mut screen = crate::screen::Screen::new(1, 80);
-    window.render(&mut screen, Position::new(0, 0), Size::new(1, 80));
+    tab.render(&mut screen, Position::new(0, 0), Size::new(1, 80));
 
-    let line = rendered_line(&window, 0);
+    let line = rendered_line(&tab, 0);
     assert!(!line.is_empty());
     assert!(
         line.iter()
@@ -2640,408 +2615,393 @@ fn test_window_render_skips_todo_markers_when_syntax_is_disabled() {
 
 #[test]
 fn test_open_line_below_uses_neighbor_indent() {
-    let mut window = Window::new(Buffer::from_str(
+    let mut tab = EditorTab::new(Buffer::from_str(
         "    fn main() {\n  println!(\"hi\");\n    }",
     ));
     let _config_guard = globals::set_test_config(auto_indent_test_config(AutoIndentMode::Neighbor));
-    window.set_cursor(Cursor::new(0, 4));
+    tab.set_cursor(Cursor::new(0, 4));
 
     assert_eq!(
-        window.handle_count(1, &EditorAction::new(EditorOperation::OpenLineBelow)),
+        tab.handle_count(1, &EditorAction::new(EditorOperation::OpenLineBelow)),
         ActionResult::Handled
     );
     assert_eq!(
-        buffer_text(window.buffer_view()),
+        buffer_text(tab.buffer_view()),
         "    fn main() {\n    \n  println!(\"hi\");\n    }"
     );
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(1, 4));
+    assert_eq!(tab.buffer_view().cursor(), Cursor::new(1, 4));
 }
 
 #[test]
 fn test_open_line_above_uses_neighbor_indent() {
-    let mut window = Window::new(Buffer::from_str(
+    let mut tab = EditorTab::new(Buffer::from_str(
         "  fn main() {\n    println!(\"hi\");\n  }",
     ));
     let _config_guard = globals::set_test_config(auto_indent_test_config(AutoIndentMode::Neighbor));
-    window.set_cursor(Cursor::new(1, 4));
+    tab.set_cursor(Cursor::new(1, 4));
 
     assert_eq!(
-        window.dispatch_action(&EditorAction::new(EditorOperation::OpenLineAbove)),
+        tab.dispatch_action(&EditorAction::new(EditorOperation::OpenLineAbove)),
         ActionResult::Handled
     );
     assert_eq!(
-        buffer_text(window.buffer_view()),
+        buffer_text(tab.buffer_view()),
         "  fn main() {\n    \n    println!(\"hi\");\n  }"
     );
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(1, 3));
+    assert_eq!(tab.buffer_view().cursor(), Cursor::new(1, 3));
 }
 
 #[test]
 fn test_open_line_below_undo_restores_original_text() {
-    let mut window = Window::new(Buffer::from_str("hello"));
-    window.set_cursor(Cursor::new(0, 5));
+    let mut tab = EditorTab::new(Buffer::from_str("hello"));
+    tab.set_cursor(Cursor::new(0, 5));
 
     assert_eq!(
-        window.dispatch_action(
+        tab.dispatch_action(
             &EditorAction::new(EditorOperation::OpenLineBelow).with_to_mode(ModeKind::Insert)
         ),
         ActionResult::Handled
     );
-    assert_eq!(buffer_text(window.buffer_view()), "hello\n");
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(1, 0));
+    assert_eq!(buffer_text(tab.buffer_view()), "hello\n");
+    assert_eq!(tab.buffer_view().cursor(), Cursor::new(1, 0));
 
     assert_eq!(
-        window.dispatch_action(
+        tab.dispatch_action(
             &EditorAction::insert_text("world".to_string()).with_from_mode(ModeKind::Insert)
         ),
         ActionResult::Handled
     );
-    assert_eq!(buffer_text(window.buffer_view()), "hello\nworld");
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(1, 5));
+    assert_eq!(buffer_text(tab.buffer_view()), "hello\nworld");
+    assert_eq!(tab.buffer_view().cursor(), Cursor::new(1, 5));
 
-    commit_insert_exit_snapshot(&mut window);
+    commit_insert_exit_snapshot(&mut tab);
 
-    apply_undo(&mut window);
+    apply_undo(&mut tab);
 
-    assert_eq!(buffer_text(window.buffer_view()), "hello");
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 0));
+    assert_eq!(buffer_text(tab.buffer_view()), "hello");
+    assert_eq!(tab.buffer_view().cursor(), Cursor::new(0, 0));
 }
 
 #[test]
 fn test_insert_newline_uses_neighbor_indent_and_reports_suffix() {
-    let mut window = Window::new(Buffer::from_str(
+    let mut tab = EditorTab::new(Buffer::from_str(
         "    fn main() {\n  println!(\"hi\");\n    }",
     ));
     let _config_guard = globals::set_test_config(auto_indent_test_config(AutoIndentMode::Neighbor));
-    let line_end = window.buffer_view().line_len(0);
-    window.set_cursor(Cursor::new(0, line_end));
+    let line_end = tab.buffer_view().line_len(0);
+    tab.set_cursor(Cursor::new(0, line_end));
 
     assert_eq!(
-        window.dispatch_action(&EditorAction::insert_newline().with_from_mode(ModeKind::Insert)),
+        tab.dispatch_action(&EditorAction::insert_newline().with_from_mode(ModeKind::Insert)),
         ActionResult::Handled
     );
     assert_eq!(
-        buffer_text(window.buffer_view()),
+        buffer_text(tab.buffer_view()),
         "    fn main() {\n    \n  println!(\"hi\");\n    }"
     );
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(1, 4));
-    assert_eq!(window.take_pending_repeat_suffix().as_deref(), Some("    "));
+    assert_eq!(tab.buffer_view().cursor(), Cursor::new(1, 4));
+    assert_eq!(tab.take_pending_repeat_suffix().as_deref(), Some("    "));
 }
 
 #[test]
 fn test_change_line_preserves_current_indentation_when_auto_indent_is_enabled() {
-    let mut window = Window::new(Buffer::from_str("    fn main() {\n  println!(\"hi\");"));
+    let mut tab = EditorTab::new(Buffer::from_str("    fn main() {\n  println!(\"hi\");"));
     let _config_guard = globals::set_test_config(auto_indent_test_config(AutoIndentMode::Neighbor));
-    window.set_cursor(Cursor::new(0, 4));
+    tab.set_cursor(Cursor::new(0, 4));
 
     assert_eq!(
-        window.dispatch_action(
+        tab.dispatch_action(
             &EditorAction::new(EditorOperation::ChangeLine).with_to_mode(ModeKind::Insert)
         ),
         ActionResult::Handled
     );
-    assert_eq!(
-        buffer_text(window.buffer_view()),
-        "    \n  println!(\"hi\");"
-    );
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 4));
-    assert_eq!(window.take_pending_repeat_suffix().as_deref(), Some("    "));
+    assert_eq!(buffer_text(tab.buffer_view()), "    \n  println!(\"hi\");");
+    assert_eq!(tab.buffer_view().cursor(), Cursor::new(0, 4));
+    assert_eq!(tab.take_pending_repeat_suffix().as_deref(), Some("    "));
 }
 
 #[test]
 fn test_change_line_undo_restores_original_text() {
-    let mut window = Window::new(Buffer::from_str("    fn main() {\n  println!(\"hi\");"));
+    let mut tab = EditorTab::new(Buffer::from_str("    fn main() {\n  println!(\"hi\");"));
     let _config_guard = globals::set_test_config(auto_indent_test_config(AutoIndentMode::Neighbor));
-    window.set_cursor(Cursor::new(0, 4));
+    tab.set_cursor(Cursor::new(0, 4));
 
     assert_eq!(
-        window.dispatch_action(
+        tab.dispatch_action(
             &EditorAction::new(EditorOperation::ChangeLine).with_to_mode(ModeKind::Insert)
         ),
         ActionResult::Handled
     );
-    assert_eq!(
-        buffer_text(window.buffer_view()),
-        "    \n  println!(\"hi\");"
-    );
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 4));
-    assert_eq!(window.take_pending_repeat_suffix().as_deref(), Some("    "));
+    assert_eq!(buffer_text(tab.buffer_view()), "    \n  println!(\"hi\");");
+    assert_eq!(tab.buffer_view().cursor(), Cursor::new(0, 4));
+    assert_eq!(tab.take_pending_repeat_suffix().as_deref(), Some("    "));
 
     assert_eq!(
-        window.dispatch_action(
+        tab.dispatch_action(
             &EditorAction::insert_text("x".to_string()).with_from_mode(ModeKind::Insert)
         ),
         ActionResult::Handled
     );
-    assert_eq!(
-        buffer_text(window.buffer_view()),
-        "    x\n  println!(\"hi\");"
-    );
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 5));
+    assert_eq!(buffer_text(tab.buffer_view()), "    x\n  println!(\"hi\");");
+    assert_eq!(tab.buffer_view().cursor(), Cursor::new(0, 5));
 
-    commit_insert_exit_snapshot(&mut window);
+    commit_insert_exit_snapshot(&mut tab);
 
-    apply_undo(&mut window);
+    apply_undo(&mut tab);
 
     assert_eq!(
-        buffer_text(window.buffer_view()),
+        buffer_text(tab.buffer_view()),
         "    fn main() {\n  println!(\"hi\");"
     );
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 0));
+    assert_eq!(tab.buffer_view().cursor(), Cursor::new(0, 0));
 }
 
 #[test]
 fn test_change_to_line_end_undo_restores_original_text() {
-    let mut window = Window::new(Buffer::from_str("hello world"));
-    window.set_cursor(Cursor::new(0, 3));
+    let mut tab = EditorTab::new(Buffer::from_str("hello world"));
+    tab.set_cursor(Cursor::new(0, 3));
 
     assert_eq!(
-        window.dispatch_action(
+        tab.dispatch_action(
             &EditorAction::new(EditorOperation::ChangeToLineEnd).with_to_mode(ModeKind::Insert)
         ),
         ActionResult::Handled
     );
-    assert_eq!(buffer_text(window.buffer_view()), "hel");
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 3));
+    assert_eq!(buffer_text(tab.buffer_view()), "hel");
+    assert_eq!(tab.buffer_view().cursor(), Cursor::new(0, 3));
 
     assert_eq!(
-        window.dispatch_action(
+        tab.dispatch_action(
             &EditorAction::insert_text("p".to_string()).with_from_mode(ModeKind::Insert)
         ),
         ActionResult::Handled
     );
-    assert_eq!(buffer_text(window.buffer_view()), "help");
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 4));
+    assert_eq!(buffer_text(tab.buffer_view()), "help");
+    assert_eq!(tab.buffer_view().cursor(), Cursor::new(0, 4));
 
-    commit_insert_exit_snapshot(&mut window);
+    commit_insert_exit_snapshot(&mut tab);
 
-    apply_undo(&mut window);
+    apply_undo(&mut tab);
 
-    assert_eq!(buffer_text(window.buffer_view()), "hello world");
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 0));
+    assert_eq!(buffer_text(tab.buffer_view()), "hello world");
+    assert_eq!(tab.buffer_view().cursor(), Cursor::new(0, 0));
 }
 
 #[test]
 fn test_insert_newline_reports_no_suffix_when_disabled() {
-    let mut window = Window::new(Buffer::from_str(
+    let mut tab = EditorTab::new(Buffer::from_str(
         "    fn main() {\n  println!(\"hi\");\n    }",
     ));
     let _config_guard = globals::set_test_config(auto_indent_test_config(AutoIndentMode::Off));
-    let line_end = window.buffer_view().line_len(0);
-    window.set_cursor(Cursor::new(0, line_end));
+    let line_end = tab.buffer_view().line_len(0);
+    tab.set_cursor(Cursor::new(0, line_end));
 
     assert_eq!(
-        window.dispatch_action(&EditorAction::insert_newline().with_from_mode(ModeKind::Insert)),
+        tab.dispatch_action(&EditorAction::insert_newline().with_from_mode(ModeKind::Insert)),
         ActionResult::Handled
     );
     assert_eq!(
-        buffer_text(window.buffer_view()),
+        buffer_text(tab.buffer_view()),
         "    fn main() {\n\n  println!(\"hi\");\n    }"
     );
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(1, 0));
-    assert_eq!(window.take_pending_repeat_suffix(), None);
+    assert_eq!(tab.buffer_view().cursor(), Cursor::new(1, 0));
+    assert_eq!(tab.take_pending_repeat_suffix(), None);
 }
 
 #[test]
 fn test_insert_newline_prefers_next_line_indent_when_it_is_more_indented() {
-    let mut window = Window::new(Buffer::from_str("  if ready {\n    println!(\"hi\");"));
+    let mut tab = EditorTab::new(Buffer::from_str("  if ready {\n    println!(\"hi\");"));
     let _config_guard = globals::set_test_config(auto_indent_test_config(AutoIndentMode::Neighbor));
-    let line_end = window.buffer_view().line_len(0);
-    window.set_cursor(Cursor::new(0, line_end));
+    let line_end = tab.buffer_view().line_len(0);
+    tab.set_cursor(Cursor::new(0, line_end));
 
     assert_eq!(
-        window.dispatch_action(&EditorAction::insert_newline().with_from_mode(ModeKind::Insert)),
+        tab.dispatch_action(&EditorAction::insert_newline().with_from_mode(ModeKind::Insert)),
         ActionResult::Handled
     );
     assert_eq!(
-        buffer_text(window.buffer_view()),
+        buffer_text(tab.buffer_view()),
         "  if ready {\n    \n    println!(\"hi\");"
     );
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(1, 4));
-    assert_eq!(window.take_pending_repeat_suffix().as_deref(), Some("    "));
+    assert_eq!(tab.buffer_view().cursor(), Cursor::new(1, 4));
+    assert_eq!(tab.take_pending_repeat_suffix().as_deref(), Some("    "));
 }
 
 #[test]
 fn test_raw_paste_in_insert_mode_bypasses_auto_pair_and_auto_indent() {
-    let mut window = Window::new(Buffer::from_str("fn main() {"));
+    let mut tab = EditorTab::new(Buffer::from_str("fn main() {"));
     let _config_guard = globals::set_test_config(Config {
         auto_close_pairs: true,
         auto_indent: AutoIndentMode::Neighbor,
         ..Default::default()
     });
-    window.switch_mode(ModeKind::Insert);
-    let cursor = Cursor::new(0, window.buffer_view().line_len(0));
-    window.set_cursor(cursor);
-    window
-        .buffer_view_mut()
+    tab.switch_mode(ModeKind::Insert);
+    let cursor = Cursor::new(0, tab.buffer_view().line_len(0));
+    tab.set_cursor(cursor);
+    tab.buffer_view_mut()
         .with_buffer_mut(|buffer| buffer.push_snapshot(cursor))
         .unwrap();
 
     process_action_and_snapshot(
-        &mut window,
+        &mut tab,
         &EditorAction::insert_raw_paste("(\n".to_string()).with_from_mode(ModeKind::Insert),
     );
 
-    assert_eq!(buffer_text(window.buffer_view()), "fn main() {(\n");
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(1, 0));
-    assert_eq!(window.take_pending_repeat_suffix(), None);
+    assert_eq!(buffer_text(tab.buffer_view()), "fn main() {(\n");
+    assert_eq!(tab.buffer_view().cursor(), Cursor::new(1, 0));
+    assert_eq!(tab.take_pending_repeat_suffix(), None);
 
-    apply_undo(&mut window);
+    apply_undo(&mut tab);
 
-    assert_eq!(buffer_text(window.buffer_view()), "fn main() {");
-    assert_eq!(window.buffer_view().cursor(), cursor);
+    assert_eq!(buffer_text(tab.buffer_view()), "fn main() {");
+    assert_eq!(tab.buffer_view().cursor(), cursor);
 }
 
 #[test]
 fn test_raw_paste_in_normal_mode_inserts_text_without_mode_change() {
-    let mut window = Window::new(Buffer::from_str("hello"));
-    let cursor = Cursor::new(0, window.buffer_view().line_len(0));
-    window.set_cursor(cursor);
-    window
-        .buffer_view_mut()
+    let mut tab = EditorTab::new(Buffer::from_str("hello"));
+    let cursor = Cursor::new(0, tab.buffer_view().line_len(0));
+    tab.set_cursor(cursor);
+    tab.buffer_view_mut()
         .with_buffer_mut(|buffer| buffer.push_snapshot(cursor))
         .unwrap();
 
     process_action_and_snapshot(
-        &mut window,
+        &mut tab,
         &EditorAction::insert_raw_paste(" world".to_string()).with_from_mode(ModeKind::Normal),
     );
 
-    assert_eq!(buffer_text(window.buffer_view()), "hello world");
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 10));
-    assert_eq!(window.mode_kind(), ModeKind::Normal);
+    assert_eq!(buffer_text(tab.buffer_view()), "hello world");
+    assert_eq!(tab.buffer_view().cursor(), Cursor::new(0, 10));
+    assert_eq!(tab.mode_kind(), ModeKind::Normal);
 
-    apply_undo(&mut window);
+    apply_undo(&mut tab);
 
-    assert_eq!(buffer_text(window.buffer_view()), "hello");
-    assert_eq!(window.buffer_view().cursor(), cursor);
+    assert_eq!(buffer_text(tab.buffer_view()), "hello");
+    assert_eq!(tab.buffer_view().cursor(), cursor);
 }
 
 #[test]
 fn test_raw_paste_replaces_visual_selection_and_exits_to_normal_mode() {
-    let mut window = Window::new(Buffer::from_str("abcdef"));
-    window.set_cursor(Cursor::new(0, 1));
-    window
-        .buffer_view_mut()
+    let mut tab = EditorTab::new(Buffer::from_str("abcdef"));
+    tab.set_cursor(Cursor::new(0, 1));
+    tab.buffer_view_mut()
         .with_buffer_mut(|buffer| buffer.push_snapshot(Cursor::new(0, 1)))
         .unwrap();
-    window.switch_mode(ModeKind::Visual);
-    window.buffer_view_mut().set_cursor(Cursor::new(0, 4));
+    tab.switch_mode(ModeKind::Visual);
+    tab.buffer_view_mut().set_cursor(Cursor::new(0, 4));
 
     process_action_and_snapshot(
-        &mut window,
+        &mut tab,
         &EditorAction::replace_selection_raw_paste("zap".to_string())
             .with_mode(Some(ModeKind::Visual), Some(ModeKind::Normal)),
     );
-    window.switch_mode(ModeKind::Normal);
+    tab.switch_mode(ModeKind::Normal);
 
-    assert_eq!(buffer_text(window.buffer_view()), "azapf");
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 4));
-    assert_eq!(window.mode_kind(), ModeKind::Normal);
-    assert_eq!(window.buffer_view().visual_selection(), None);
+    assert_eq!(buffer_text(tab.buffer_view()), "azapf");
+    assert_eq!(tab.buffer_view().cursor(), Cursor::new(0, 4));
+    assert_eq!(tab.mode_kind(), ModeKind::Normal);
+    assert_eq!(tab.buffer_view().visual_selection(), None);
 
-    apply_undo(&mut window);
+    apply_undo(&mut tab);
 
-    assert_eq!(buffer_text(window.buffer_view()), "abcdef");
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 1));
+    assert_eq!(buffer_text(tab.buffer_view()), "abcdef");
+    assert_eq!(tab.buffer_view().cursor(), Cursor::new(0, 1));
 }
 
 #[test]
 fn test_raw_paste_replaces_visual_line_selection_and_exits_to_normal_mode() {
-    let mut window = Window::new(Buffer::from_str("abc\ndef\nghi"));
-    window.set_cursor(Cursor::new(0, 0));
-    window.switch_mode(ModeKind::VisualLine);
-    window.buffer_view_mut().set_cursor(Cursor::new(1, 0));
+    let mut tab = EditorTab::new(Buffer::from_str("abc\ndef\nghi"));
+    tab.set_cursor(Cursor::new(0, 0));
+    tab.switch_mode(ModeKind::VisualLine);
+    tab.buffer_view_mut().set_cursor(Cursor::new(1, 0));
 
     process_action_and_snapshot(
-        &mut window,
+        &mut tab,
         &EditorAction::replace_selection_raw_paste("Z".to_string())
             .with_mode(Some(ModeKind::VisualLine), Some(ModeKind::Normal)),
     );
-    window.switch_mode(ModeKind::Normal);
+    tab.switch_mode(ModeKind::Normal);
 
-    assert_eq!(buffer_text(window.buffer_view()), "Z\nghi");
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 0));
-    assert_eq!(window.mode_kind(), ModeKind::Normal);
-    assert_eq!(window.buffer_view().visual_selection(), None);
+    assert_eq!(buffer_text(tab.buffer_view()), "Z\nghi");
+    assert_eq!(tab.buffer_view().cursor(), Cursor::new(0, 0));
+    assert_eq!(tab.mode_kind(), ModeKind::Normal);
+    assert_eq!(tab.buffer_view().visual_selection(), None);
 }
 
 #[test]
 fn test_indent_decrease_shifts_current_line() {
-    let mut window = Window::new(Buffer::from_str("    hello\n  world"));
-    window.set_cursor(Cursor::new(0, 4));
+    let mut tab = EditorTab::new(Buffer::from_str("    hello\n  world"));
+    tab.set_cursor(Cursor::new(0, 4));
 
     assert_eq!(
-        window.dispatch_action(&EditorAction::new(EditorOperation::IndentDecrease)),
+        tab.dispatch_action(&EditorAction::new(EditorOperation::IndentDecrease)),
         ActionResult::Handled
     );
-    assert_eq!(buffer_text(window.buffer_view()), "hello\n  world");
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 0));
+    assert_eq!(buffer_text(tab.buffer_view()), "hello\n  world");
+    assert_eq!(tab.buffer_view().cursor(), Cursor::new(0, 0));
 }
 
 #[test]
 fn test_counted_indent_decrease_shifts_multiple_lines() {
-    let mut window = Window::new(Buffer::from_str("    hello\n        world\n  done"));
-    window.set_cursor(Cursor::new(0, 4));
+    let mut tab = EditorTab::new(Buffer::from_str("    hello\n        world\n  done"));
+    tab.set_cursor(Cursor::new(0, 4));
 
     assert_eq!(
-        window.dispatch_action(
+        tab.dispatch_action(
             &EditorAction::new(EditorOperation::IndentDecrease)
                 .with_count(2)
                 .expect("counted indent decrease should be allowed"),
         ),
         ActionResult::Handled
     );
-    assert_eq!(
-        buffer_text(window.buffer_view()),
-        "hello\n    world\n  done"
-    );
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 0));
+    assert_eq!(buffer_text(tab.buffer_view()), "hello\n    world\n  done");
+    assert_eq!(tab.buffer_view().cursor(), Cursor::new(0, 0));
 }
 
 #[test]
 fn test_insert_mode_shift_tab_dedents_without_leaving_insert_mode() {
-    let mut window = Window::new(Buffer::from_str("    hello"));
-    window.set_cursor(Cursor::new(0, 4));
+    let mut tab = EditorTab::new(Buffer::from_str("    hello"));
+    tab.set_cursor(Cursor::new(0, 4));
 
     assert_eq!(
-        window.dispatch_action(
+        tab.dispatch_action(
             &EditorAction::new(EditorOperation::IndentDecrease).with_from_mode(ModeKind::Insert),
         ),
         ActionResult::Handled
     );
-    assert_eq!(buffer_text(window.buffer_view()), "hello");
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 0));
+    assert_eq!(buffer_text(tab.buffer_view()), "hello");
+    assert_eq!(tab.buffer_view().cursor(), Cursor::new(0, 0));
 }
 
 #[test]
 fn test_insert_mode_backspace_dedents_inside_leading_whitespace() {
-    let mut window = Window::new(Buffer::from_str("    hello"));
-    window.set_cursor(Cursor::new(0, 2));
+    let mut tab = EditorTab::new(Buffer::from_str("    hello"));
+    tab.set_cursor(Cursor::new(0, 2));
 
     assert_eq!(
-        window.dispatch_action(
+        tab.dispatch_action(
             &EditorAction::new(EditorOperation::DeleteBackward).with_from_mode(ModeKind::Insert)
         ),
         ActionResult::Handled
     );
-    assert_eq!(buffer_text(window.buffer_view()), "hello");
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 0));
+    assert_eq!(buffer_text(tab.buffer_view()), "hello");
+    assert_eq!(tab.buffer_view().cursor(), Cursor::new(0, 0));
 }
 
 #[test]
 fn test_insert_mode_backspace_keeps_plain_deletion_outside_indentation() {
-    let mut window = Window::new(Buffer::from_str("    hello"));
-    window.set_cursor(Cursor::new(0, 5));
+    let mut tab = EditorTab::new(Buffer::from_str("    hello"));
+    tab.set_cursor(Cursor::new(0, 5));
 
     assert_eq!(
-        window.dispatch_action(
+        tab.dispatch_action(
             &EditorAction::new(EditorOperation::DeleteBackward).with_from_mode(ModeKind::Insert)
         ),
         ActionResult::Handled
     );
-    assert_eq!(buffer_text(window.buffer_view()), "    ello");
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 4));
+    assert_eq!(buffer_text(tab.buffer_view()), "    ello");
+    assert_eq!(tab.buffer_view().cursor(), Cursor::new(0, 4));
 }
 
 #[test]
@@ -3380,26 +3340,26 @@ fn test_gutter_render_for_render_data_uses_nerdfont_diff_signs_when_enabled() {
 
 #[test]
 fn test_gutter_render_for_render_data_uses_ascii_fold_glyphs() {
-    let mut window = Window::new(Buffer::from_str("outer\n  inner\nafter\ntail"));
+    let mut tab = EditorTab::new(Buffer::from_str("outer\n  inner\nafter\ntail"));
     let mut screen = crate::screen::Screen::new(4, 20);
-    window.render(&mut screen, Position::new(0, 0), Size::new(4, 20));
+    tab.render(&mut screen, Position::new(0, 0), Size::new(4, 20));
 
     assert_eq!(screen.get_cell_mut(0, 3).unwrap().text, "v");
     assert_eq!(screen.get_cell_mut(3, 3).unwrap().text, " ");
 
-    window.set_cursor(Cursor::new(0, 0));
-    window.dispatch_action(&EditorAction::new(EditorOperation::CloseFold));
-    window.render(&mut screen, Position::new(0, 0), Size::new(4, 20));
+    tab.set_cursor(Cursor::new(0, 0));
+    tab.dispatch_action(&EditorAction::new(EditorOperation::CloseFold));
+    tab.render(&mut screen, Position::new(0, 0), Size::new(4, 20));
 
     assert_eq!(screen.get_cell_mut(0, 3).unwrap().text, ">");
-    assert_eq!(window.render_data().line_data[1].buffer_line, 2);
+    assert_eq!(tab.render_data().line_data[1].buffer_line, 2);
 }
 
 #[test]
 fn test_gutter_render_only_marks_fold_starts() {
-    let mut window = Window::new(Buffer::from_str("outer\n  inner\nafter"));
+    let mut tab = EditorTab::new(Buffer::from_str("outer\n  inner\nafter"));
     let mut screen = crate::screen::Screen::new(4, 20);
-    window.render(&mut screen, Position::new(0, 0), Size::new(4, 20));
+    tab.render(&mut screen, Position::new(0, 0), Size::new(4, 20));
 
     assert_eq!(screen.get_cell_mut(0, 3).unwrap().text, "v");
     assert_eq!(screen.get_cell_mut(1, 3).unwrap().text, " ");
@@ -3408,9 +3368,9 @@ fn test_gutter_render_only_marks_fold_starts() {
 
 #[test]
 fn test_gutter_render_does_not_mark_blank_lines_as_fold_starts() {
-    let mut window = Window::new(Buffer::from_str("outer\n  inner\n\n  nested\nafter"));
+    let mut tab = EditorTab::new(Buffer::from_str("outer\n  inner\n\n  nested\nafter"));
     let mut screen = crate::screen::Screen::new(5, 20);
-    window.render(&mut screen, Position::new(0, 0), Size::new(5, 20));
+    tab.render(&mut screen, Position::new(0, 0), Size::new(5, 20));
 
     assert_eq!(screen.get_cell_mut(0, 3).unwrap().text, "v");
     assert_eq!(screen.get_cell_mut(2, 3).unwrap().text, " ");
@@ -3422,27 +3382,26 @@ fn test_gutter_render_for_render_data_uses_unicode_fold_glyphs() {
         advanced_glyphs: BTreeSet::from([AdvancedGlyphCapability::UnicodeFolds]),
         ..Default::default()
     });
-    let mut window = Window::new(Buffer::from_str("outer\n  inner\nafter"));
+    let mut tab = EditorTab::new(Buffer::from_str("outer\n  inner\nafter"));
     let mut screen = crate::screen::Screen::new(3, 20);
-    window.render(&mut screen, Position::new(0, 0), Size::new(3, 20));
+    tab.render(&mut screen, Position::new(0, 0), Size::new(3, 20));
 
     assert_eq!(screen.get_cell_mut(0, 3).unwrap().text, "▼");
 
-    window.set_cursor(Cursor::new(0, 0));
-    window.dispatch_action(&EditorAction::new(EditorOperation::CloseFold));
-    window.render(&mut screen, Position::new(0, 0), Size::new(3, 20));
+    tab.set_cursor(Cursor::new(0, 0));
+    tab.dispatch_action(&EditorAction::new(EditorOperation::CloseFold));
+    tab.render(&mut screen, Position::new(0, 0), Size::new(3, 20));
 
     assert_eq!(screen.get_cell_mut(0, 3).unwrap().text, "▶");
 }
 
 #[test]
-fn test_window_render_applies_diff_markers_to_full_gutter_row() {
+fn test_tab_render_applies_diff_markers_to_full_gutter_row() {
     let path = temp_path_with_ext("diff-gutter", "txt");
     let buffer = Buffer::from_str_with_path("one\ntwo\nthree", path);
-    let mut window = Window::new(buffer);
-    let buffer_id = window.buffer_view().buffer_id();
-    window
-        .buffer_view_mut()
+    let mut tab = EditorTab::new(buffer);
+    let buffer_id = tab.buffer_view().buffer_id();
+    tab.buffer_view_mut()
         .with_buffer_mut(|buffer| {
             buffer.apply_diff_refresh_result(DiffRefreshResult {
                 buffer_id,
@@ -3454,19 +3413,18 @@ fn test_window_render_applies_diff_markers_to_full_gutter_row() {
         .unwrap_or(());
 
     let mut screen = crate::screen::Screen::new(3, 20);
-    window.render(&mut screen, Position::new(0, 0), Size::new(3, 20));
+    tab.render(&mut screen, Position::new(0, 0), Size::new(3, 20));
 
     assert_eq!(screen.get_cell_mut(1, 0).unwrap().text, "~");
 }
 
 #[test]
-fn test_window_diff_hunk_navigation_moves_between_hunks() {
+fn test_tab_diff_hunk_navigation_moves_between_hunks() {
     let path = temp_path_with_ext("diff-hunks", "txt");
     let buffer = Buffer::from_str_with_path("one\ntwo\nthree\nfour\nfive", path);
-    let mut window = Window::new(buffer);
-    let buffer_id = window.buffer_view().buffer_id();
-    window
-        .buffer_view_mut()
+    let mut tab = EditorTab::new(buffer);
+    let buffer_id = tab.buffer_view().buffer_id();
+    tab.buffer_view_mut()
         .with_buffer_mut(|buffer| {
             buffer.apply_diff_refresh_result(DiffRefreshResult {
                 buffer_id,
@@ -3477,52 +3435,52 @@ fn test_window_diff_hunk_navigation_moves_between_hunks() {
         })
         .unwrap_or(());
 
-    window.set_cursor(Cursor::new(0, 0));
+    tab.set_cursor(Cursor::new(0, 0));
     assert_eq!(
-        window.dispatch_action(&EditorAction::new(EditorOperation::MoveToNextDiffHunk)),
+        tab.dispatch_action(&EditorAction::new(EditorOperation::MoveToNextDiffHunk)),
         ActionResult::Handled
     );
-    assert_eq!(window.buffer_view().cursor().line, 1);
-    assert_eq!(window.buffer_view().cursor().col, 0);
+    assert_eq!(tab.buffer_view().cursor().line, 1);
+    assert_eq!(tab.buffer_view().cursor().col, 0);
 
     assert_eq!(
-        window.dispatch_action(&EditorAction::new(EditorOperation::MoveToNextDiffHunk)),
+        tab.dispatch_action(&EditorAction::new(EditorOperation::MoveToNextDiffHunk)),
         ActionResult::Handled
     );
-    assert_eq!(window.buffer_view().cursor().line, 4);
-    assert_eq!(window.buffer_view().cursor().col, 0);
+    assert_eq!(tab.buffer_view().cursor().line, 4);
+    assert_eq!(tab.buffer_view().cursor().col, 0);
 
     assert_eq!(
-        window.dispatch_action(&EditorAction::new(EditorOperation::MoveToPreviousDiffHunk)),
+        tab.dispatch_action(&EditorAction::new(EditorOperation::MoveToPreviousDiffHunk)),
         ActionResult::Handled
     );
-    assert_eq!(window.buffer_view().cursor().line, 1);
-    assert_eq!(window.buffer_view().cursor().col, 0);
+    assert_eq!(tab.buffer_view().cursor().line, 1);
+    assert_eq!(tab.buffer_view().cursor().col, 0);
 
-    window.set_cursor(Cursor::new(2, 0));
+    tab.set_cursor(Cursor::new(2, 0));
     assert_eq!(
-        window.dispatch_action(&EditorAction::new(EditorOperation::MoveToNextDiffHunk)),
+        tab.dispatch_action(&EditorAction::new(EditorOperation::MoveToNextDiffHunk)),
         ActionResult::Handled
     );
-    assert_eq!(window.buffer_view().cursor().line, 1);
-    assert_eq!(window.buffer_view().cursor().col, 0);
+    assert_eq!(tab.buffer_view().cursor().line, 1);
+    assert_eq!(tab.buffer_view().cursor().col, 0);
 
     assert_eq!(
-        window.dispatch_action(&EditorAction::new(EditorOperation::MoveToNextDiffHunkEnd)),
+        tab.dispatch_action(&EditorAction::new(EditorOperation::MoveToNextDiffHunkEnd)),
         ActionResult::Handled
     );
-    assert_eq!(window.buffer_view().cursor().line, 2);
-    assert_eq!(window.buffer_view().cursor().col, 0);
+    assert_eq!(tab.buffer_view().cursor().line, 2);
+    assert_eq!(tab.buffer_view().cursor().col, 0);
 
-    window.set_cursor(Cursor::new(1, 0));
+    tab.set_cursor(Cursor::new(1, 0));
     assert_eq!(
-        window.dispatch_action(&EditorAction::new(
+        tab.dispatch_action(&EditorAction::new(
             EditorOperation::MoveToPreviousDiffHunkEnd
         )),
         ActionResult::Handled
     );
-    assert_eq!(window.buffer_view().cursor().line, 2);
-    assert_eq!(window.buffer_view().cursor().col, 0);
+    assert_eq!(tab.buffer_view().cursor().line, 2);
+    assert_eq!(tab.buffer_view().cursor().col, 0);
 }
 
 #[test]
@@ -3537,8 +3495,8 @@ fn test_gutter_digit_count() {
 }
 
 #[test]
-fn test_window_render_supports_relative_line_numbers_in_all_modes() {
-    let theme = syntax_themed_window();
+fn test_tab_render_supports_relative_line_numbers_in_all_modes() {
+    let theme = syntax_themed_tab();
     let _theme_guard = globals::set_test_active_theme(theme);
     let _config_guard = globals::set_test_config(Config {
         relative_number: true,
@@ -3553,14 +3511,14 @@ fn test_window_render_supports_relative_line_numbers_in_all_modes() {
         ModeKind::Visual,
         ModeKind::VisualLine,
     ] {
-        let mut mode_window = Window::new(Buffer::from_str_with_path(
+        let mut mode_tab = EditorTab::new(Buffer::from_str_with_path(
             "a\nb\nc\nd\ne",
             temp_path_with_ext(&format!("relative-number-{mode:?}"), "txt"),
         ));
-        mode_window.switch_mode(mode);
+        mode_tab.switch_mode(mode);
         let mut screen = crate::screen::Screen::new(5, 20);
-        mode_window.set_cursor(crate::buffer::Cursor::new(2, 0));
-        mode_window.render(&mut screen, Position::new(0, 0), Size::new(5, 20));
+        mode_tab.set_cursor(crate::buffer::Cursor::new(2, 0));
+        mode_tab.render(&mut screen, Position::new(0, 0), Size::new(5, 20));
 
         for (expected, row) in expected_rows {
             assert_eq!(screen.get_cell_mut(row, 2).unwrap().text, expected);
@@ -3569,11 +3527,11 @@ fn test_window_render_supports_relative_line_numbers_in_all_modes() {
 }
 
 #[test]
-fn test_window_render_applies_active_gutter_style_to_full_row() {
+fn test_tab_render_applies_active_gutter_style_to_full_row() {
     let path = temp_path_with_ext("active-gutter", "txt");
     let buffer = Buffer::from_str_with_path("a\nb\nc", path);
-    let mut window = Window::new(buffer);
-    let mut theme = syntax_themed_window();
+    let mut tab = EditorTab::new(buffer);
+    let mut theme = syntax_themed_tab();
     theme.highlights.insert(
         Tag::parse("ui.window.gutter.active_line").expect("valid tag"),
         Style::new().fg(Color::ansi(99)),
@@ -3586,10 +3544,10 @@ fn test_window_render_applies_active_gutter_style_to_full_row() {
         ..Default::default()
     });
 
-    window.set_cursor(crate::buffer::Cursor::new(1, 0));
+    tab.set_cursor(crate::buffer::Cursor::new(1, 0));
 
     let mut screen = crate::screen::Screen::new(3, 20);
-    window.render(&mut screen, Position::new(0, 0), Size::new(3, 20));
+    tab.render(&mut screen, Position::new(0, 0), Size::new(3, 20));
 
     let expected_active_style = theme
         .resolve_name_with_default("ui.window.gutter")
@@ -3618,18 +3576,18 @@ fn test_window_render_applies_active_gutter_style_to_full_row() {
 }
 
 #[test]
-fn test_window_render_applies_diagnostic_undercurl_to_buffer_ranges() {
+fn test_tab_render_applies_diagnostic_undercurl_to_buffer_ranges() {
     let path = temp_path_with_ext("diagnostic-undercurl", "txt");
     let buffer = Buffer::from_str_with_path("abcd", path);
-    let mut window = Window::new(buffer);
-    let theme = syntax_themed_window();
+    let mut tab = EditorTab::new(buffer);
+    let theme = syntax_themed_tab();
     let _theme_guard = globals::set_test_active_theme(theme.clone());
     let _config_guard = globals::set_test_config(Config {
         syntax: false,
         ..Default::default()
     });
 
-    let buffer_id = window.buffer_view().buffer_id();
+    let buffer_id = tab.buffer_view().buffer_id();
     globals::with_diagnostics_store(|store| {
         store.set(
             buffer_id,
@@ -3652,7 +3610,7 @@ fn test_window_render_applies_diagnostic_undercurl_to_buffer_ranges() {
     });
 
     let mut screen = crate::screen::Screen::new(1, 20);
-    window.render(&mut screen, Position::new(0, 0), Size::new(1, 20));
+    tab.render(&mut screen, Position::new(0, 0), Size::new(1, 20));
 
     let expected_base_style = theme.default_style();
     let expected_diagnostic_style = expected_base_style.overlay(diagnostic_undercurl_style_for(
@@ -3789,20 +3747,20 @@ fn test_gutter_scroll_offset() {
 }
 
 #[test]
-fn test_window_visual_cursor_with_gutter() {
+fn test_tab_visual_cursor_with_gutter() {
     let buffer = Buffer::from_str("line1\nline2\nline3");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
     // Set cursor to line 0, column 2 (within "line1")
-    window.buffer_view_mut().set_cursor(Cursor::new(0, 2));
+    tab.buffer_view_mut().set_cursor(Cursor::new(0, 2));
 
     // Need to call render to build render_data first
     let size = Size::new(3, 80);
     let mut screen = crate::screen::Screen::new(3, 80);
-    window.render(&mut screen, Position::new(0, 0), size);
+    tab.render(&mut screen, Position::new(0, 0), size);
 
     // Get visual cursor position
-    let cursor_pos = window.visual_cursor();
+    let cursor_pos = tab.visual_cursor();
 
     assert!(cursor_pos.is_some());
     let pos = cursor_pos.unwrap();
@@ -3814,30 +3772,30 @@ fn test_window_visual_cursor_with_gutter() {
 }
 
 #[test]
-fn test_window_visual_cursor_ignores_ghost_text() {
+fn test_tab_visual_cursor_ignores_ghost_text() {
     let mut buffer = Buffer::from_str("abcd");
     buffer.insert_ghost_text(Cursor::new(0, 2), crate::buffer::Gravity::Right, "ghost");
-    let mut window = Window::new(buffer);
-    window.buffer_view_mut().set_cursor(Cursor::new(0, 3));
+    let mut tab = EditorTab::new(buffer);
+    tab.buffer_view_mut().set_cursor(Cursor::new(0, 3));
 
     let mut screen = crate::screen::Screen::new(1, 20);
-    window.render(&mut screen, Position::new(0, 0), Size::new(1, 20));
+    tab.render(&mut screen, Position::new(0, 0), Size::new(1, 20));
 
-    let pos = window.visual_cursor().expect("cursor should be visible");
+    let pos = tab.visual_cursor().expect("cursor should be visible");
     assert_eq!(pos.col, 13);
 }
 
 #[test]
-fn test_window_visual_cursor_does_not_count_ghost_text_at_cursor() {
+fn test_tab_visual_cursor_does_not_count_ghost_text_at_cursor() {
     let mut buffer = Buffer::from_str("abcd");
     buffer.insert_ghost_text(Cursor::new(0, 2), crate::buffer::Gravity::Right, "ghost");
-    let mut window = Window::new(buffer);
-    window.buffer_view_mut().set_cursor(Cursor::new(0, 2));
+    let mut tab = EditorTab::new(buffer);
+    tab.buffer_view_mut().set_cursor(Cursor::new(0, 2));
 
     let mut screen = crate::screen::Screen::new(1, 20);
-    window.render(&mut screen, Position::new(0, 0), Size::new(1, 20));
+    tab.render(&mut screen, Position::new(0, 0), Size::new(1, 20));
 
-    let pos = window.visual_cursor().expect("cursor should be visible");
+    let pos = tab.visual_cursor().expect("cursor should be visible");
     assert_eq!(pos.col, 12);
 }
 
@@ -3922,7 +3880,7 @@ fn test_render_data_accent_range_ignores_ghost_text_when_counting_bytes() {
 }
 
 #[test]
-fn test_window_visual_cursor_drops_deleted_inlay_hint_after_di_paren() {
+fn test_tab_visual_cursor_drops_deleted_inlay_hint_after_di_paren() {
     let mut buffer = Buffer::from_str("    let _guard = urvim::logger::init(\"debug.log\");");
     buffer.insert_inlay_hint(
         Cursor::new(0, 14),
@@ -3934,11 +3892,11 @@ fn test_window_visual_cursor_drops_deleted_inlay_hint_after_di_paren() {
         crate::buffer::Gravity::Right,
         "log_file: ",
     );
-    let mut window = Window::new(buffer);
-    window.set_cursor(Cursor::new(0, 36));
+    let mut tab = EditorTab::new(buffer);
+    tab.set_cursor(Cursor::new(0, 36));
 
     assert_eq!(
-        window.dispatch_action(&EditorAction::operation(
+        tab.dispatch_action(&EditorAction::operation(
             Operator::Delete,
             OperatorTarget::TextObject(TextObject::InnerBracket(BracketKind::Paren)),
         )),
@@ -3946,9 +3904,9 @@ fn test_window_visual_cursor_drops_deleted_inlay_hint_after_di_paren() {
     );
 
     let mut screen = crate::screen::Screen::new(3, 136);
-    window.render(&mut screen, Position::new(0, 0), Size::new(3, 136));
-    let pos = window.visual_cursor().expect("cursor should be visible");
-    let rendered_text = window
+    tab.render(&mut screen, Position::new(0, 0), Size::new(3, 136));
+    let pos = tab.visual_cursor().expect("cursor should be visible");
+    let rendered_text = tab
         .render_data()
         .get_line(0)
         .expect("line should render")
@@ -3957,25 +3915,25 @@ fn test_window_visual_cursor_drops_deleted_inlay_hint_after_di_paren() {
         .collect::<String>();
 
     assert_eq!(
-        buffer_text(window.buffer_view()),
+        buffer_text(tab.buffer_view()),
         "    let _guard = urvim::logger::init();"
     );
     assert!(rendered_text.contains(": WorkerGuard"));
     assert!(!rendered_text.contains("log_file"));
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 37));
+    assert_eq!(tab.buffer_view().cursor(), Cursor::new(0, 37));
     assert_eq!(pos.col, 55);
 }
 
 #[test]
-fn test_toggle_wrap_action_toggles_window_state() {
-    let mut window = Window::new(Buffer::from_str("line"));
-    assert!(!window.wrap_enabled());
+fn test_toggle_wrap_action_toggles_tab_state() {
+    let mut tab = EditorTab::new(Buffer::from_str("line"));
+    assert!(!tab.wrap_enabled());
 
-    window.toggle_wrap();
-    assert!(window.wrap_enabled());
+    tab.toggle_wrap();
+    assert!(tab.wrap_enabled());
 
-    window.toggle_wrap();
-    assert!(!window.wrap_enabled());
+    tab.toggle_wrap();
+    assert!(!tab.wrap_enabled());
 }
 
 #[test]
@@ -4026,35 +3984,35 @@ fn test_build_render_data_soft_wrap_falls_back_to_hard_break() {
 }
 
 #[test]
-fn test_window_render_hides_gutter_line_number_on_wrapped_continuation() {
+fn test_tab_render_hides_gutter_line_number_on_wrapped_continuation() {
     let _config_guard = globals::set_test_config(Config {
         wrap_mode: WrapMode::Hard,
         ..Default::default()
     });
-    let mut window = Window::new(Buffer::from_str("abcdefghij"));
-    window.set_wrap_enabled(true);
+    let mut tab = EditorTab::new(Buffer::from_str("abcdefghij"));
+    tab.set_wrap_enabled(true);
     let mut screen = crate::screen::Screen::new(2, 9);
 
-    window.render(&mut screen, Position::new(0, 0), Size::new(2, 9));
+    tab.render(&mut screen, Position::new(0, 0), Size::new(2, 9));
 
     assert_eq!(screen.get_cell_mut(0, 1).unwrap().text, "1");
     assert_eq!(screen.get_cell_mut(1, 1).unwrap().text, " ");
 }
 
 #[test]
-fn test_window_visual_cursor_maps_to_wrapped_continuation_row() {
+fn test_tab_visual_cursor_maps_to_wrapped_continuation_row() {
     let _config_guard = globals::set_test_config(Config {
         wrap_mode: WrapMode::Hard,
         ..Default::default()
     });
-    let mut window = Window::new(Buffer::from_str("abcdefghi"));
-    window.set_wrap_enabled(true);
-    window.set_cursor(Cursor::new(0, 5));
+    let mut tab = EditorTab::new(Buffer::from_str("abcdefghi"));
+    tab.set_wrap_enabled(true);
+    tab.set_cursor(Cursor::new(0, 5));
     let mut screen = crate::screen::Screen::new(3, 7);
 
-    window.render(&mut screen, Position::new(0, 0), Size::new(3, 7));
+    tab.render(&mut screen, Position::new(0, 0), Size::new(3, 7));
 
-    let cursor = window.visual_cursor().expect("cursor should be visible");
+    let cursor = tab.visual_cursor().expect("cursor should be visible");
     assert_eq!(cursor.row, 1);
     assert_eq!(cursor.col, 6);
 }
@@ -4065,27 +4023,27 @@ fn test_vertical_motions_remain_logical_lines_when_wrapping_is_enabled() {
         wrap_mode: WrapMode::Hard,
         ..Default::default()
     });
-    let mut window = Window::new(Buffer::from_str("abcdefghij\nxy\nklmnop"));
-    window.set_wrap_enabled(true);
-    window.set_cursor(Cursor::new(0, 6));
+    let mut tab = EditorTab::new(Buffer::from_str("abcdefghij\nxy\nklmnop"));
+    tab.set_wrap_enabled(true);
+    tab.set_cursor(Cursor::new(0, 6));
 
     assert_eq!(
-        window.dispatch_action(&EditorAction::new(EditorOperation::MoveDown)),
+        tab.dispatch_action(&EditorAction::new(EditorOperation::MoveDown)),
         ActionResult::Handled
     );
-    assert_eq!(window.buffer_view().cursor().line, 1);
+    assert_eq!(tab.buffer_view().cursor().line, 1);
 
     assert_eq!(
-        window.dispatch_action(&EditorAction::new(EditorOperation::MoveDown)),
+        tab.dispatch_action(&EditorAction::new(EditorOperation::MoveDown)),
         ActionResult::Handled
     );
-    assert_eq!(window.buffer_view().cursor().line, 2);
+    assert_eq!(tab.buffer_view().cursor().line, 2);
 
     assert_eq!(
-        window.dispatch_action(&EditorAction::new(EditorOperation::MoveUp)),
+        tab.dispatch_action(&EditorAction::new(EditorOperation::MoveUp)),
         ActionResult::Handled
     );
-    assert_eq!(window.buffer_view().cursor().line, 1);
+    assert_eq!(tab.buffer_view().cursor().line, 1);
 }
 
 #[test]
@@ -4097,16 +4055,14 @@ fn test_wrapped_eof_cursor_stays_in_viewport_and_reveals_overflow_rows() {
     // With content width 4:
     // - line 1 wraps into 2 rows (1 overflow)
     // - line 2 wraps into 4 rows (3 overflow)
-    let mut window = Window::new(Buffer::from_str("abcdefgh\nabcdefghijklmnop"));
-    window.set_wrap_enabled(true);
-    window.set_cursor(Cursor::new(1, 15));
+    let mut tab = EditorTab::new(Buffer::from_str("abcdefgh\nabcdefghijklmnop"));
+    tab.set_wrap_enabled(true);
+    tab.set_cursor(Cursor::new(1, 15));
     let mut screen = crate::screen::Screen::new(3, 7);
 
-    window.render(&mut screen, Position::new(0, 0), Size::new(3, 7));
+    tab.render(&mut screen, Position::new(0, 0), Size::new(3, 7));
 
-    let cursor = window
-        .visual_cursor()
-        .expect("cursor should remain visible");
+    let cursor = tab.visual_cursor().expect("cursor should remain visible");
     assert!(cursor.row < 3);
     // Reaching EOF in wrapped mode should scroll into line-2 continuations.
     assert_eq!(screen.get_cell_mut(0, 1).unwrap().text, " ");
@@ -4114,7 +4070,7 @@ fn test_wrapped_eof_cursor_stays_in_viewport_and_reveals_overflow_rows() {
 
 #[test]
 fn test_visual_selection_is_rendered() {
-    let mut theme = themed_window();
+    let mut theme = themed_tab();
     theme.highlights.insert(
         Tag::parse("ui.selection").expect("valid tag"),
         Style::new().bg(Color::ansi(99)),
@@ -4131,16 +4087,15 @@ fn test_visual_selection_is_rendered() {
     });
 
     let buffer = Buffer::from_str("abc");
-    let mut window = Window::new(buffer);
-    window
-        .buffer_view_mut()
+    let mut tab = EditorTab::new(buffer);
+    tab.buffer_view_mut()
         .begin_visual_selection(VisualSelectionKind::Character);
-    window.buffer_view_mut().set_cursor(Cursor::new(0, 1));
+    tab.buffer_view_mut().set_cursor(Cursor::new(0, 1));
 
     let mut screen = crate::screen::Screen::new(1, 20);
-    window.render(&mut screen, Position::new(0, 0), Size::new(1, 20));
+    tab.render(&mut screen, Position::new(0, 0), Size::new(1, 20));
 
-    let line = rendered_line(&window, 0);
+    let line = rendered_line(&tab, 0);
     assert!(
         line.iter()
             .any(|chunk| chunk.text == "ab" && chunk.style == expected_style)
@@ -4149,7 +4104,7 @@ fn test_visual_selection_is_rendered() {
 
 #[test]
 fn test_visual_line_selection_is_rendered() {
-    let mut theme = themed_window();
+    let mut theme = themed_tab();
     theme.highlights.insert(
         Tag::parse("ui.selection").expect("valid tag"),
         Style::new().bg(Color::ansi(99)),
@@ -4166,22 +4121,21 @@ fn test_visual_line_selection_is_rendered() {
     });
 
     let buffer = Buffer::from_str("abc\ndef");
-    let mut window = Window::new(buffer);
-    window
-        .buffer_view_mut()
+    let mut tab = EditorTab::new(buffer);
+    tab.buffer_view_mut()
         .begin_visual_selection(VisualSelectionKind::Line);
-    window.buffer_view_mut().set_cursor(Cursor::new(1, 1));
+    tab.buffer_view_mut().set_cursor(Cursor::new(1, 1));
 
     let mut screen = crate::screen::Screen::new(2, 20);
-    window.render(&mut screen, Position::new(0, 0), Size::new(2, 20));
+    tab.render(&mut screen, Position::new(0, 0), Size::new(2, 20));
 
-    let first = rendered_line(&window, 0);
+    let first = rendered_line(&tab, 0);
     assert!(
         first
             .iter()
             .any(|chunk| chunk.text == "abc" && chunk.style == expected_style)
     );
-    let second = rendered_line(&window, 1);
+    let second = rendered_line(&tab, 1);
     assert!(
         second
             .iter()
@@ -4192,22 +4146,22 @@ fn test_visual_line_selection_is_rendered() {
 #[test]
 fn test_normal_yank_characterwise_flashes_selection() {
     let (_t, _c) = visual_test_setup();
-    let expected_style = themed_window().highlight_style_for_name("ui.selection");
+    let expected_style = themed_tab().highlight_style_for_name("ui.selection");
 
     let buffer = Buffer::from_str("hello world");
-    let mut window = Window::new(buffer);
-    window.buffer_view_mut().set_cursor(Cursor::new(0, 0));
+    let mut tab = EditorTab::new(buffer);
+    tab.buffer_view_mut().set_cursor(Cursor::new(0, 0));
 
     let action = EditorAction::operation(
         Operator::Yank,
         OperatorTarget::TextObject(TextObject::InnerWord),
     );
-    assert_eq!(window.dispatch_action(&action), ActionResult::Handled);
+    assert_eq!(tab.dispatch_action(&action), ActionResult::Handled);
 
     let mut screen = crate::screen::Screen::new(1, 20);
-    window.render(&mut screen, Position::new(0, 0), Size::new(1, 20));
+    tab.render(&mut screen, Position::new(0, 0), Size::new(1, 20));
 
-    let line = rendered_line(&window, 0);
+    let line = rendered_line(&tab, 0);
     assert!(
         line.iter()
             .any(|chunk| chunk.text == "hello" && chunk.style == expected_style)
@@ -4217,38 +4171,38 @@ fn test_normal_yank_characterwise_flashes_selection() {
 #[test]
 fn test_normal_yank_line_flashes_selection() {
     let (_t, _c) = visual_test_setup();
-    let expected_style = themed_window().highlight_style_for_name("ui.selection");
+    let expected_style = themed_tab().highlight_style_for_name("ui.selection");
 
     let buffer = Buffer::from_str("alpha\nbeta");
-    let mut window = Window::new(buffer);
-    window.buffer_view_mut().set_cursor(Cursor::new(0, 0));
+    let mut tab = EditorTab::new(buffer);
+    tab.buffer_view_mut().set_cursor(Cursor::new(0, 0));
 
     assert_eq!(
-        window.dispatch_action(&EditorAction::new(EditorOperation::YankLine)),
+        tab.dispatch_action(&EditorAction::new(EditorOperation::YankLine)),
         ActionResult::Handled
     );
 
     let mut screen = crate::screen::Screen::new(2, 20);
-    window.render(&mut screen, Position::new(0, 0), Size::new(2, 20));
+    tab.render(&mut screen, Position::new(0, 0), Size::new(2, 20));
 
-    let first = rendered_line(&window, 0);
+    let first = rendered_line(&tab, 0);
     assert!(
         first
             .iter()
             .any(|chunk| chunk.text == "alpha" && chunk.style == expected_style)
     );
-    let second = rendered_line(&window, 1);
+    let second = rendered_line(&tab, 1);
     assert!(!second.iter().any(|chunk| chunk.style == expected_style));
 }
 
 #[test]
 fn test_normal_counted_linewise_yank_motion_flashes_selection() {
     let (_t, _c) = visual_test_setup();
-    let expected_style = themed_window().highlight_style_for_name("ui.selection");
+    let expected_style = themed_tab().highlight_style_for_name("ui.selection");
 
     let buffer = Buffer::from_str("one\ntwo\nthree\nfour");
-    let mut window = Window::new(buffer);
-    window.buffer_view_mut().set_cursor(Cursor::new(3, 0));
+    let mut tab = EditorTab::new(buffer);
+    tab.buffer_view_mut().set_cursor(Cursor::new(3, 0));
 
     // Equivalent to y2gg in Vim: yank from the current line to line 2.
     let action = EditorAction::count(
@@ -4258,14 +4212,14 @@ fn test_normal_counted_linewise_yank_motion_flashes_selection() {
             OperatorTarget::LinewiseMotion(LinewiseMotion::FirstLine),
         )),
     );
-    assert_eq!(window.dispatch_action(&action), ActionResult::Handled);
+    assert_eq!(tab.dispatch_action(&action), ActionResult::Handled);
 
     let mut screen = crate::screen::Screen::new(4, 20);
-    window.render(&mut screen, Position::new(0, 0), Size::new(4, 20));
+    tab.render(&mut screen, Position::new(0, 0), Size::new(4, 20));
 
     // Yank should include lines 2-4 (0-based lines 1..=3).
     for line_idx in 1..=3 {
-        let line = rendered_line(&window, line_idx);
+        let line = rendered_line(&tab, line_idx);
         assert!(
             line.iter().any(|chunk| chunk.style == expected_style),
             "expected yank flash on line {}",
@@ -4273,34 +4227,34 @@ fn test_normal_counted_linewise_yank_motion_flashes_selection() {
         );
     }
 
-    let first = rendered_line(&window, 0);
+    let first = rendered_line(&tab, 0);
     assert!(!first.iter().any(|chunk| chunk.style == expected_style));
 }
 
 #[test]
 fn test_normal_yank_restarts_flash_on_subsequent_yank() {
     let (_t, _c) = visual_test_setup();
-    let expected_style = themed_window().highlight_style_for_name("ui.selection");
+    let expected_style = themed_tab().highlight_style_for_name("ui.selection");
 
     let buffer = Buffer::from_str("alpha\nbeta");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
     assert_eq!(
-        window.dispatch_action(&EditorAction::new(EditorOperation::YankLine)),
+        tab.dispatch_action(&EditorAction::new(EditorOperation::YankLine)),
         ActionResult::Handled
     );
-    window.buffer_view_mut().set_cursor(Cursor::new(1, 0));
+    tab.buffer_view_mut().set_cursor(Cursor::new(1, 0));
     assert_eq!(
-        window.dispatch_action(&EditorAction::new(EditorOperation::YankLine)),
+        tab.dispatch_action(&EditorAction::new(EditorOperation::YankLine)),
         ActionResult::Handled
     );
 
     let mut screen = crate::screen::Screen::new(2, 20);
-    window.render(&mut screen, Position::new(0, 0), Size::new(2, 20));
+    tab.render(&mut screen, Position::new(0, 0), Size::new(2, 20));
 
-    let first = rendered_line(&window, 0);
+    let first = rendered_line(&tab, 0);
     assert!(!first.iter().any(|chunk| chunk.style == expected_style));
-    let second = rendered_line(&window, 1);
+    let second = rendered_line(&tab, 1);
     assert!(
         second
             .iter()
@@ -4311,21 +4265,21 @@ fn test_normal_yank_restarts_flash_on_subsequent_yank() {
 #[test]
 fn test_normal_yank_flash_expires_and_is_cleared_on_render() {
     let (_t, _c) = visual_test_setup();
-    let expected_style = themed_window().highlight_style_for_name("ui.selection");
+    let expected_style = themed_tab().highlight_style_for_name("ui.selection");
 
     let buffer = Buffer::from_str("alpha");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
     assert_eq!(
-        window.dispatch_action(&EditorAction::new(EditorOperation::YankLine)),
+        tab.dispatch_action(&EditorAction::new(EditorOperation::YankLine)),
         ActionResult::Handled
     );
 
     thread::sleep(Duration::from_millis(220));
 
     let mut screen = crate::screen::Screen::new(1, 20);
-    window.render(&mut screen, Position::new(0, 0), Size::new(1, 20));
+    tab.render(&mut screen, Position::new(0, 0), Size::new(1, 20));
 
-    let line = rendered_line(&window, 0);
+    let line = rendered_line(&tab, 0);
     assert!(!line.iter().any(|chunk| chunk.style == expected_style));
 }
 
@@ -4334,7 +4288,7 @@ fn test_visual_repeated_motion_matches_counted_motion() {
     let (_t, _c) = visual_test_setup();
 
     let buffer = Buffer::from_str("abcdef");
-    let mut counted = Window::new(buffer.clone());
+    let mut counted = EditorTab::new(buffer.clone());
     counted
         .buffer_view_mut()
         .begin_visual_selection(VisualSelectionKind::Character);
@@ -4347,7 +4301,7 @@ fn test_visual_repeated_motion_matches_counted_motion() {
         ActionResult::Handled
     );
 
-    let mut repeated = Window::new(buffer);
+    let mut repeated = EditorTab::new(buffer);
     repeated
         .buffer_view_mut()
         .begin_visual_selection(VisualSelectionKind::Character);
@@ -4371,18 +4325,17 @@ fn test_visual_delete_leaves_cursor_at_selection_start() {
     let (_t, _c) = visual_test_setup();
 
     let buffer = Buffer::from_str("abc");
-    let mut window = Window::new(buffer);
-    window
-        .buffer_view_mut()
+    let mut tab = EditorTab::new(buffer);
+    tab.buffer_view_mut()
         .begin_visual_selection(VisualSelectionKind::Character);
-    window.buffer_view_mut().set_cursor(Cursor::new(0, 1));
+    tab.buffer_view_mut().set_cursor(Cursor::new(0, 1));
 
     let action = EditorAction::new(EditorOperation::DeleteSelection)
         .with_from_mode(ModeKind::Visual)
         .with_to_mode(ModeKind::Normal);
-    assert_eq!(window.dispatch_action(&action), ActionResult::Handled);
-    assert_eq!(buffer_text(window.buffer_view()), "c");
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 0));
+    assert_eq!(tab.dispatch_action(&action), ActionResult::Handled);
+    assert_eq!(buffer_text(tab.buffer_view()), "c");
+    assert_eq!(tab.buffer_view().cursor(), Cursor::new(0, 0));
 }
 
 #[test]
@@ -4390,18 +4343,17 @@ fn test_visual_change_leaves_cursor_at_selection_start() {
     let (_t, _c) = visual_test_setup();
 
     let buffer = Buffer::from_str("abc");
-    let mut window = Window::new(buffer);
-    window
-        .buffer_view_mut()
+    let mut tab = EditorTab::new(buffer);
+    tab.buffer_view_mut()
         .begin_visual_selection(VisualSelectionKind::Character);
-    window.buffer_view_mut().set_cursor(Cursor::new(0, 1));
+    tab.buffer_view_mut().set_cursor(Cursor::new(0, 1));
 
     let action = EditorAction::new(EditorOperation::ChangeSelection)
         .with_from_mode(ModeKind::Visual)
         .with_to_mode(ModeKind::Insert);
-    assert_eq!(window.dispatch_action(&action), ActionResult::Handled);
-    assert_eq!(buffer_text(window.buffer_view()), "c");
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 0));
+    assert_eq!(tab.dispatch_action(&action), ActionResult::Handled);
+    assert_eq!(buffer_text(tab.buffer_view()), "c");
+    assert_eq!(tab.buffer_view().cursor(), Cursor::new(0, 0));
 }
 
 #[test]
@@ -4409,103 +4361,99 @@ fn test_visual_change_undo_restores_original_text() {
     let (_t, _c) = visual_test_setup();
 
     let buffer = Buffer::from_str("abc");
-    let mut window = Window::new(buffer);
-    window
-        .buffer_view_mut()
+    let mut tab = EditorTab::new(buffer);
+    tab.buffer_view_mut()
         .begin_visual_selection(VisualSelectionKind::Character);
-    window.buffer_view_mut().set_cursor(Cursor::new(0, 1));
+    tab.buffer_view_mut().set_cursor(Cursor::new(0, 1));
 
     let action = EditorAction::new(EditorOperation::ChangeSelection)
         .with_from_mode(ModeKind::Visual)
         .with_to_mode(ModeKind::Insert);
-    assert_eq!(window.dispatch_action(&action), ActionResult::Handled);
-    assert_eq!(buffer_text(window.buffer_view()), "c");
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 0));
+    assert_eq!(tab.dispatch_action(&action), ActionResult::Handled);
+    assert_eq!(buffer_text(tab.buffer_view()), "c");
+    assert_eq!(tab.buffer_view().cursor(), Cursor::new(0, 0));
 
     assert_eq!(
-        window.dispatch_action(
+        tab.dispatch_action(
             &EditorAction::insert_text("x".to_string()).with_from_mode(ModeKind::Insert)
         ),
         ActionResult::Handled
     );
-    assert_eq!(buffer_text(window.buffer_view()), "xc");
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 1));
+    assert_eq!(buffer_text(tab.buffer_view()), "xc");
+    assert_eq!(tab.buffer_view().cursor(), Cursor::new(0, 1));
 
-    commit_insert_exit_snapshot(&mut window);
+    commit_insert_exit_snapshot(&mut tab);
 
-    apply_undo(&mut window);
+    apply_undo(&mut tab);
 
-    assert_eq!(buffer_text(window.buffer_view()), "abc");
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 0));
+    assert_eq!(buffer_text(tab.buffer_view()), "abc");
+    assert_eq!(tab.buffer_view().cursor(), Cursor::new(0, 0));
 }
 
 #[test]
 fn test_visual_text_object_repeats_are_idempotent() {
     let buffer = Buffer::from_str("hello world");
-    let mut window = Window::new(buffer);
-    window.buffer_view_mut().set_cursor(Cursor::new(0, 1));
-    window
-        .buffer_view_mut()
+    let mut tab = EditorTab::new(buffer);
+    tab.buffer_view_mut().set_cursor(Cursor::new(0, 1));
+    tab.buffer_view_mut()
         .begin_visual_selection(VisualSelectionKind::Character);
 
     let action = EditorAction::new(EditorOperation::VisualTextObject(TextObject::InnerWord))
         .with_from_mode(ModeKind::Visual);
-    assert_eq!(window.dispatch_action(&action), ActionResult::Handled);
+    assert_eq!(tab.dispatch_action(&action), ActionResult::Handled);
     let expected = Some(crate::buffer::TextObjectRange {
         start: Cursor::new(0, 0),
         end: Cursor::new(0, 5),
     });
-    assert_eq!(window.buffer_view().visual_selection_range(), expected);
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 4));
+    assert_eq!(tab.buffer_view().visual_selection_range(), expected);
+    assert_eq!(tab.buffer_view().cursor(), Cursor::new(0, 4));
 
-    assert_eq!(window.dispatch_action(&action), ActionResult::Handled);
-    assert_eq!(window.buffer_view().visual_selection_range(), expected);
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 4));
+    assert_eq!(tab.dispatch_action(&action), ActionResult::Handled);
+    assert_eq!(tab.buffer_view().visual_selection_range(), expected);
+    assert_eq!(tab.buffer_view().cursor(), Cursor::new(0, 4));
 }
 
 #[test]
 fn test_visual_text_object_can_retarget_selection() {
     let buffer = Buffer::from_str("hello world");
-    let mut window = Window::new(buffer);
-    window.buffer_view_mut().set_cursor(Cursor::new(0, 1));
-    window
-        .buffer_view_mut()
+    let mut tab = EditorTab::new(buffer);
+    tab.buffer_view_mut().set_cursor(Cursor::new(0, 1));
+    tab.buffer_view_mut()
         .begin_visual_selection(VisualSelectionKind::Character);
 
     let inner_word = EditorAction::new(EditorOperation::VisualTextObject(TextObject::InnerWord))
         .with_from_mode(ModeKind::Visual);
-    assert_eq!(window.dispatch_action(&inner_word), ActionResult::Handled);
+    assert_eq!(tab.dispatch_action(&inner_word), ActionResult::Handled);
 
     let around_word = EditorAction::new(EditorOperation::VisualTextObject(TextObject::AroundWord))
         .with_from_mode(ModeKind::Visual);
-    assert_eq!(window.dispatch_action(&around_word), ActionResult::Handled);
+    assert_eq!(tab.dispatch_action(&around_word), ActionResult::Handled);
     assert_eq!(
-        window.buffer_view().visual_selection_range(),
+        tab.buffer_view().visual_selection_range(),
         Some(crate::buffer::TextObjectRange {
             start: Cursor::new(0, 0),
             end: Cursor::new(0, 6),
         })
     );
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 5));
+    assert_eq!(tab.buffer_view().cursor(), Cursor::new(0, 5));
 }
 
 #[test]
 fn test_visual_text_object_invalid_location_leaves_selection_unchanged() {
     let buffer = Buffer::from_str("hello");
-    let mut window = Window::new(buffer);
-    window.buffer_view_mut().set_cursor(Cursor::new(0, 0));
-    window
-        .buffer_view_mut()
+    let mut tab = EditorTab::new(buffer);
+    tab.buffer_view_mut().set_cursor(Cursor::new(0, 0));
+    tab.buffer_view_mut()
         .begin_visual_selection(VisualSelectionKind::Character);
 
-    let before = window.buffer_view().visual_selection_range();
+    let before = tab.buffer_view().visual_selection_range();
     let action = EditorAction::new(EditorOperation::VisualTextObject(TextObject::InnerBracket(
         BracketKind::Paren,
     )))
     .with_from_mode(ModeKind::Visual);
 
-    assert_eq!(window.dispatch_action(&action), ActionResult::Handled);
-    assert_eq!(window.buffer_view().visual_selection_range(), before);
+    assert_eq!(tab.dispatch_action(&action), ActionResult::Handled);
+    assert_eq!(tab.buffer_view().visual_selection_range(), before);
 }
 
 #[test]
@@ -4513,35 +4461,34 @@ fn test_visual_case_lowercases_selection_and_exits_to_normal() {
     let (_t, _c) = visual_test_setup();
 
     let buffer = Buffer::from_str("AbC");
-    let mut window = Window::new(buffer);
-    window
-        .buffer_view_mut()
+    let mut tab = EditorTab::new(buffer);
+    tab.buffer_view_mut()
         .begin_visual_selection(VisualSelectionKind::Character);
-    window.buffer_view_mut().set_cursor(Cursor::new(0, 3));
+    tab.buffer_view_mut().set_cursor(Cursor::new(0, 3));
 
     let action = EditorAction::operation(Operator::Lowercase, OperatorTarget::Selection)
         .with_from_mode(ModeKind::Visual)
         .with_to_mode(ModeKind::Normal);
-    assert_eq!(window.dispatch_action(&action), ActionResult::Handled);
-    assert_eq!(buffer_text(window.buffer_view()), "abc");
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 0));
-    assert_eq!(window.mode_kind(), ModeKind::Normal);
+    assert_eq!(tab.dispatch_action(&action), ActionResult::Handled);
+    assert_eq!(buffer_text(tab.buffer_view()), "abc");
+    assert_eq!(tab.buffer_view().cursor(), Cursor::new(0, 0));
+    assert_eq!(tab.mode_kind(), ModeKind::Normal);
 }
 
 #[test]
 fn test_case_uppercase_operator_handles_unicode_expansion() {
     let buffer = Buffer::from_str("straße");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
-    window.buffer_view_mut().set_cursor(Cursor::new(0, 0));
-    let result = window.dispatch_action(&EditorAction::operation(
+    tab.buffer_view_mut().set_cursor(Cursor::new(0, 0));
+    let result = tab.dispatch_action(&EditorAction::operation(
         Operator::Uppercase,
         OperatorTarget::TextObject(TextObject::InnerBigWord),
     ));
 
     assert_eq!(result, ActionResult::Handled);
-    assert_eq!(buffer_text(window.buffer_view()), "STRASSE");
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 0));
+    assert_eq!(buffer_text(tab.buffer_view()), "STRASSE");
+    assert_eq!(tab.buffer_view().cursor(), Cursor::new(0, 0));
 }
 
 #[test]
@@ -4549,37 +4496,35 @@ fn test_visual_line_toggle_case_handles_unicode_and_exits_to_normal() {
     let (_t, _c) = visual_test_setup();
 
     let buffer = Buffer::from_str("foo\nßa");
-    let mut window = Window::new(buffer);
-    window.buffer_view_mut().set_cursor(Cursor::new(0, 0));
-    window
-        .buffer_view_mut()
+    let mut tab = EditorTab::new(buffer);
+    tab.buffer_view_mut().set_cursor(Cursor::new(0, 0));
+    tab.buffer_view_mut()
         .begin_visual_selection(VisualSelectionKind::Line);
-    window.buffer_view_mut().set_cursor(Cursor::new(1, 0));
+    tab.buffer_view_mut().set_cursor(Cursor::new(1, 0));
 
     let action = EditorAction::operation(Operator::ToggleCase, OperatorTarget::Selection)
         .with_from_mode(ModeKind::VisualLine)
         .with_to_mode(ModeKind::Normal);
-    assert_eq!(window.dispatch_action(&action), ActionResult::Handled);
-    assert_eq!(buffer_text(window.buffer_view()), "FOO\nSSA");
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 0));
-    assert_eq!(window.mode_kind(), ModeKind::Normal);
+    assert_eq!(tab.dispatch_action(&action), ActionResult::Handled);
+    assert_eq!(buffer_text(tab.buffer_view()), "FOO\nSSA");
+    assert_eq!(tab.buffer_view().cursor(), Cursor::new(0, 0));
+    assert_eq!(tab.mode_kind(), ModeKind::Normal);
 }
 
 #[test]
 fn test_visual_yank_copies_selection_without_mutating_buffer() {
     let _register_guard = globals::set_test_register_store(RegisterStore::new());
     let buffer = Buffer::from_str("abc");
-    let mut window = Window::new(buffer);
-    window
-        .buffer_view_mut()
+    let mut tab = EditorTab::new(buffer);
+    tab.buffer_view_mut()
         .begin_visual_selection(VisualSelectionKind::Character);
-    window.buffer_view_mut().set_cursor(Cursor::new(0, 0));
+    tab.buffer_view_mut().set_cursor(Cursor::new(0, 0));
 
     let action = EditorAction::new(EditorOperation::YankSelection)
         .with_from_mode(ModeKind::Visual)
         .with_to_mode(ModeKind::Normal);
-    assert_eq!(window.dispatch_action(&action), ActionResult::Handled);
-    assert_eq!(buffer_text(window.buffer_view()), "abc");
+    assert_eq!(tab.dispatch_action(&action), ActionResult::Handled);
+    assert_eq!(buffer_text(tab.buffer_view()), "abc");
 
     let content = globals::with_register_store(|store| store.get(RegisterName('y')))
         .expect("register store should be available");
@@ -4592,19 +4537,18 @@ fn test_visual_line_delete_removes_entire_lines() {
     let (_t, _c) = visual_test_setup();
 
     let buffer = Buffer::from_str("one\ntwo\nthree\nfour");
-    let mut window = Window::new(buffer);
-    window.buffer_view_mut().set_cursor(Cursor::new(1, 1));
-    window
-        .buffer_view_mut()
+    let mut tab = EditorTab::new(buffer);
+    tab.buffer_view_mut().set_cursor(Cursor::new(1, 1));
+    tab.buffer_view_mut()
         .begin_visual_selection(VisualSelectionKind::Line);
-    window.buffer_view_mut().set_cursor(Cursor::new(2, 1));
+    tab.buffer_view_mut().set_cursor(Cursor::new(2, 1));
 
     let action = EditorAction::new(EditorOperation::DeleteSelection)
         .with_from_mode(ModeKind::VisualLine)
         .with_to_mode(ModeKind::Normal);
-    assert_eq!(window.dispatch_action(&action), ActionResult::Handled);
-    assert_eq!(buffer_text(window.buffer_view()), "one\nfour");
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(1, 0));
+    assert_eq!(tab.dispatch_action(&action), ActionResult::Handled);
+    assert_eq!(buffer_text(tab.buffer_view()), "one\nfour");
+    assert_eq!(tab.buffer_view().cursor(), Cursor::new(1, 0));
 }
 
 #[test]
@@ -4612,37 +4556,35 @@ fn test_visual_line_change_leaves_blank_line() {
     let (_t, _c) = visual_test_setup();
 
     let buffer = Buffer::from_str("one\ntwo\nthree\nfour");
-    let mut window = Window::new(buffer);
-    window.buffer_view_mut().set_cursor(Cursor::new(1, 1));
-    window
-        .buffer_view_mut()
+    let mut tab = EditorTab::new(buffer);
+    tab.buffer_view_mut().set_cursor(Cursor::new(1, 1));
+    tab.buffer_view_mut()
         .begin_visual_selection(VisualSelectionKind::Line);
-    window.buffer_view_mut().set_cursor(Cursor::new(2, 1));
+    tab.buffer_view_mut().set_cursor(Cursor::new(2, 1));
 
     let action = EditorAction::new(EditorOperation::ChangeSelection)
         .with_from_mode(ModeKind::VisualLine)
         .with_to_mode(ModeKind::Insert);
-    assert_eq!(window.dispatch_action(&action), ActionResult::Handled);
-    assert_eq!(buffer_text(window.buffer_view()), "one\n\nfour");
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(1, 0));
+    assert_eq!(tab.dispatch_action(&action), ActionResult::Handled);
+    assert_eq!(buffer_text(tab.buffer_view()), "one\n\nfour");
+    assert_eq!(tab.buffer_view().cursor(), Cursor::new(1, 0));
 }
 
 #[test]
 fn test_visual_line_yank_copies_lines_without_mutating_buffer() {
     let _register_guard = globals::set_test_register_store(RegisterStore::new());
     let buffer = Buffer::from_str("one\ntwo\nthree\nfour");
-    let mut window = Window::new(buffer);
-    window.buffer_view_mut().set_cursor(Cursor::new(1, 1));
-    window
-        .buffer_view_mut()
+    let mut tab = EditorTab::new(buffer);
+    tab.buffer_view_mut().set_cursor(Cursor::new(1, 1));
+    tab.buffer_view_mut()
         .begin_visual_selection(VisualSelectionKind::Line);
-    window.buffer_view_mut().set_cursor(Cursor::new(2, 1));
+    tab.buffer_view_mut().set_cursor(Cursor::new(2, 1));
 
     let action = EditorAction::new(EditorOperation::YankSelection)
         .with_from_mode(ModeKind::VisualLine)
         .with_to_mode(ModeKind::Normal);
-    assert_eq!(window.dispatch_action(&action), ActionResult::Handled);
-    assert_eq!(buffer_text(window.buffer_view()), "one\ntwo\nthree\nfour");
+    assert_eq!(tab.dispatch_action(&action), ActionResult::Handled);
+    assert_eq!(buffer_text(tab.buffer_view()), "one\ntwo\nthree\nfour");
 
     let content = globals::with_register_store(|store| store.get(RegisterName('y')))
         .expect("register store should be available");
@@ -4685,7 +4627,7 @@ fn test_gutter_scroll_and_rerender() {
 #[test]
 fn test_gutter_then_buffer_render() {
     // Test that buffer content doesn't overwrite gutter
-    // This simulates what happens in Window::render
+    // This simulates what happens in EditorTab::render
     let gutter_width = 4; // digits(20) + 2 = 4
 
     // First render gutter
@@ -4770,38 +4712,38 @@ fn test_gutter_width_change() {
 fn test_column_preservation_first_vertical_move() {
     // First vertical move should use current column and remember it
     let buffer = Buffer::from_str("abcdefgh\nij");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
     // Position at column 5 on first line
-    window.buffer_view.set_cursor(Cursor::new(0, 5));
+    tab.buffer_view.set_cursor(Cursor::new(0, 5));
 
-    // First move down via Window - should use current column (5), remember it
-    window.dispatch_action(&EditorAction::new(EditorOperation::MoveDown));
-    assert_eq!(window.buffer_view.cursor().line, 1);
+    // First move down via EditorTab - should use current column (5), remember it
+    tab.dispatch_action(&EditorAction::new(EditorOperation::MoveDown));
+    assert_eq!(tab.buffer_view.cursor().line, 1);
     // Line 2 is "ij", so normal mode should clamp to its last character.
-    assert_eq!(window.buffer_view.cursor().col, 1);
+    assert_eq!(tab.buffer_view.cursor().col, 1);
 }
 
 #[test]
 fn test_column_preservation_consecutive_vertical_moves() {
     // Consecutive vertical moves should preserve remembered column
     let buffer = Buffer::from_str("abcdefgh\nabcdefgh\nabcdefgh");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
     // Position at column 5 on first line
-    window.buffer_view.set_cursor(Cursor::new(0, 5));
+    tab.buffer_view.set_cursor(Cursor::new(0, 5));
 
     // Move down - remembers column 5
-    window.dispatch_action(&EditorAction::new(EditorOperation::MoveDown));
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(1, 5));
+    tab.dispatch_action(&EditorAction::new(EditorOperation::MoveDown));
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(1, 5));
 
     // Move down again - should use remembered column 5
-    window.dispatch_action(&EditorAction::new(EditorOperation::MoveDown));
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(2, 5));
+    tab.dispatch_action(&EditorAction::new(EditorOperation::MoveDown));
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(2, 5));
 
     // Move up - should use remembered column 5
-    window.dispatch_action(&EditorAction::new(EditorOperation::MoveUp));
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(1, 5));
+    tab.dispatch_action(&EditorAction::new(EditorOperation::MoveUp));
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(1, 5));
 }
 
 #[test]
@@ -4810,167 +4752,167 @@ fn test_column_preservation_horizontal_resets() {
     use crate::editor::EditorAction;
 
     let buffer = Buffer::from_str("abcdefgh\nabcdefgh\nabcdefgh");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
     // Position at column 5 on first line
-    window.buffer_view.set_cursor(Cursor::new(0, 5));
+    tab.buffer_view.set_cursor(Cursor::new(0, 5));
 
     // Move down - remembers column 5
-    window.dispatch_action(&EditorAction::new(EditorOperation::MoveDown));
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(1, 5));
+    tab.dispatch_action(&EditorAction::new(EditorOperation::MoveDown));
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(1, 5));
 
     // Move right - should reset remembered column to current (now at column 6)
-    window.dispatch_action(&EditorAction::new(EditorOperation::MoveRight));
+    tab.dispatch_action(&EditorAction::new(EditorOperation::MoveRight));
     // Now at column 6 on line 1
 
     // Move down again - should use new column 6 and go to line 2
-    window.dispatch_action(&EditorAction::new(EditorOperation::MoveDown));
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(2, 6));
+    tab.dispatch_action(&EditorAction::new(EditorOperation::MoveDown));
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(2, 6));
 }
 
 #[test]
 fn test_column_preservation_clamp_on_short_line() {
     // Moving to shorter line should clamp to end of line
     let buffer = Buffer::from_str("abcdefgh\nij\nabcdefgh");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
     // Position at column 5 on first line
-    window.buffer_view.set_cursor(Cursor::new(0, 5));
+    tab.buffer_view.set_cursor(Cursor::new(0, 5));
 
     // Move down to shorter line "ij" (length 2)
-    window.dispatch_action(&EditorAction::new(EditorOperation::MoveDown));
+    tab.dispatch_action(&EditorAction::new(EditorOperation::MoveDown));
     // Should clamp to column 1 (last character of "ij")
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(1, 1));
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(1, 1));
 
     // Move down to longer line - should use remembered column 5
-    window.dispatch_action(&EditorAction::new(EditorOperation::MoveDown));
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(2, 5));
+    tab.dispatch_action(&EditorAction::new(EditorOperation::MoveDown));
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(2, 5));
 }
 
 #[test]
 fn test_normal_cursor_does_not_move_past_last_character() {
     let buffer = Buffer::from_str("abc");
-    let mut window = Window::new(buffer);
-    window.set_cursor(Cursor::new(0, 1));
+    let mut tab = EditorTab::new(buffer);
+    tab.set_cursor(Cursor::new(0, 1));
 
     assert_eq!(
-        window.dispatch_action(&EditorAction::new(EditorOperation::MoveRight)),
+        tab.dispatch_action(&EditorAction::new(EditorOperation::MoveRight)),
         ActionResult::Handled
     );
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 2));
+    assert_eq!(tab.buffer_view().cursor(), Cursor::new(0, 2));
     assert_eq!(
-        window.dispatch_action(&EditorAction::new(EditorOperation::MoveRight)),
+        tab.dispatch_action(&EditorAction::new(EditorOperation::MoveRight)),
         ActionResult::Handled
     );
 
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 2));
+    assert_eq!(tab.buffer_view().cursor(), Cursor::new(0, 2));
 }
 
 #[test]
 fn test_visual_cursor_does_not_move_past_last_character() {
     let (_t, _c) = visual_test_setup();
     let buffer = Buffer::from_str("abc");
-    let mut window = Window::new(buffer);
-    window.switch_mode(ModeKind::Visual);
-    window.set_cursor(Cursor::new(0, 1));
+    let mut tab = EditorTab::new(buffer);
+    tab.switch_mode(ModeKind::Visual);
+    tab.set_cursor(Cursor::new(0, 1));
 
     let action = EditorAction::new(EditorOperation::MoveRight).with_from_mode(ModeKind::Visual);
-    assert_eq!(window.dispatch_action(&action), ActionResult::Handled);
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 2));
-    assert_eq!(window.dispatch_action(&action), ActionResult::Handled);
+    assert_eq!(tab.dispatch_action(&action), ActionResult::Handled);
+    assert_eq!(tab.buffer_view().cursor(), Cursor::new(0, 2));
+    assert_eq!(tab.dispatch_action(&action), ActionResult::Handled);
 
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 2));
+    assert_eq!(tab.buffer_view().cursor(), Cursor::new(0, 2));
 }
 
 #[test]
 fn test_normal_cursor_does_not_move_before_line_start() {
     let buffer = Buffer::from_str("abc\ndef");
-    let mut window = Window::new(buffer);
-    window.set_cursor(Cursor::new(1, 0));
+    let mut tab = EditorTab::new(buffer);
+    tab.set_cursor(Cursor::new(1, 0));
 
     assert_eq!(
-        window.dispatch_action(&EditorAction::new(EditorOperation::MoveLeft)),
+        tab.dispatch_action(&EditorAction::new(EditorOperation::MoveLeft)),
         ActionResult::Handled
     );
 
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(1, 0));
+    assert_eq!(tab.buffer_view().cursor(), Cursor::new(1, 0));
 }
 
 #[test]
 fn test_visual_cursor_does_not_move_before_line_start() {
     let (_t, _c) = visual_test_setup();
     let buffer = Buffer::from_str("abc\ndef");
-    let mut window = Window::new(buffer);
-    window.switch_mode(ModeKind::Visual);
-    window.set_cursor(Cursor::new(1, 0));
+    let mut tab = EditorTab::new(buffer);
+    tab.switch_mode(ModeKind::Visual);
+    tab.set_cursor(Cursor::new(1, 0));
 
     let action = EditorAction::new(EditorOperation::MoveLeft).with_from_mode(ModeKind::Visual);
-    assert_eq!(window.dispatch_action(&action), ActionResult::Handled);
+    assert_eq!(tab.dispatch_action(&action), ActionResult::Handled);
 
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(1, 0));
+    assert_eq!(tab.buffer_view().cursor(), Cursor::new(1, 0));
 }
 
 #[test]
 fn test_replace_cursor_does_not_move_before_line_start() {
     let buffer = Buffer::from_str("abc\ndef");
-    let mut window = Window::new(buffer);
-    window.switch_mode(ModeKind::Replace);
-    window.set_cursor(Cursor::new(1, 0));
+    let mut tab = EditorTab::new(buffer);
+    tab.switch_mode(ModeKind::Replace);
+    tab.set_cursor(Cursor::new(1, 0));
 
     let action = EditorAction::new(EditorOperation::MoveLeft).with_from_mode(ModeKind::Replace);
-    assert_eq!(window.dispatch_action(&action), ActionResult::Handled);
+    assert_eq!(tab.dispatch_action(&action), ActionResult::Handled);
 
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(1, 0));
+    assert_eq!(tab.buffer_view().cursor(), Cursor::new(1, 0));
 }
 
 #[test]
 fn test_insert_cursor_can_move_to_previous_line_end() {
     let buffer = Buffer::from_str("abc\ndef");
-    let mut window = Window::new(buffer);
-    window.switch_mode(ModeKind::Insert);
-    window.set_cursor(Cursor::new(1, 0));
+    let mut tab = EditorTab::new(buffer);
+    tab.switch_mode(ModeKind::Insert);
+    tab.set_cursor(Cursor::new(1, 0));
 
     let action = EditorAction::new(EditorOperation::MoveLeft).with_from_mode(ModeKind::Insert);
-    assert_eq!(window.dispatch_action(&action), ActionResult::Handled);
+    assert_eq!(tab.dispatch_action(&action), ActionResult::Handled);
 
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 3));
+    assert_eq!(tab.buffer_view().cursor(), Cursor::new(0, 3));
 }
 
 #[test]
 fn test_leaving_insert_clamps_cursor_to_last_character() {
     let buffer = Buffer::from_str("abc");
-    let mut window = Window::new(buffer);
-    window.switch_mode(ModeKind::Insert);
-    window.set_cursor(Cursor::new(0, 3));
+    let mut tab = EditorTab::new(buffer);
+    tab.switch_mode(ModeKind::Insert);
+    tab.set_cursor(Cursor::new(0, 3));
 
-    window.switch_mode(ModeKind::Normal);
+    tab.switch_mode(ModeKind::Normal);
 
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 2));
+    assert_eq!(tab.buffer_view().cursor(), Cursor::new(0, 2));
 }
 
 #[test]
 fn test_non_insert_cursor_can_remain_on_empty_line() {
     let buffer = Buffer::from_str("");
-    let mut window = Window::new(buffer);
-    window.set_cursor(Cursor::new(0, 0));
+    let mut tab = EditorTab::new(buffer);
+    tab.set_cursor(Cursor::new(0, 0));
 
     assert_eq!(
-        window.dispatch_action(&EditorAction::new(EditorOperation::MoveRight)),
+        tab.dispatch_action(&EditorAction::new(EditorOperation::MoveRight)),
         ActionResult::Handled
     );
 
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 0));
+    assert_eq!(tab.buffer_view().cursor(), Cursor::new(0, 0));
 }
 
 #[test]
 fn test_insert_mode_cursor_can_stay_at_line_end() {
     let buffer = Buffer::from_str("abc");
-    let mut window = Window::new(buffer);
-    window.switch_mode(ModeKind::Insert);
-    window.set_cursor(Cursor::new(0, 3));
+    let mut tab = EditorTab::new(buffer);
+    tab.switch_mode(ModeKind::Insert);
+    tab.set_cursor(Cursor::new(0, 3));
 
     assert_eq!(
-        window.dispatch_action(
+        tab.dispatch_action(
             &EditorAction::insert_char('d')
                 .with_from_mode(ModeKind::Insert)
                 .with_to_mode(ModeKind::Insert)
@@ -4978,7 +4920,7 @@ fn test_insert_mode_cursor_can_stay_at_line_end() {
         ActionResult::Handled
     );
 
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 4));
+    assert_eq!(tab.buffer_view().cursor(), Cursor::new(0, 4));
 }
 
 #[test]
@@ -5042,40 +4984,40 @@ fn test_action_page_motions_update_snapshot_cursor() {
 #[test]
 fn test_page_motions_move_by_viewport_height() {
     let buffer = Buffer::from_str("0123456789\nabcdefghij\nklmnopqrst\nuvwxyz0123");
-    let mut window = Window::new(buffer);
-    window.buffer_view.set_cursor(Cursor::new(0, 8));
+    let mut tab = EditorTab::new(buffer);
+    tab.buffer_view.set_cursor(Cursor::new(0, 8));
 
     let mut screen = crate::screen::Screen::new(3, 40);
-    window.render(&mut screen, Position::new(0, 0), Size::new(3, 40));
+    tab.render(&mut screen, Position::new(0, 0), Size::new(3, 40));
 
-    window.dispatch_action(&EditorAction::new(EditorOperation::MovePageDown));
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(3, 8));
+    tab.dispatch_action(&EditorAction::new(EditorOperation::MovePageDown));
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(3, 8));
 
-    window.dispatch_action(&EditorAction::new(EditorOperation::MovePageUp));
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 8));
+    tab.dispatch_action(&EditorAction::new(EditorOperation::MovePageUp));
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(0, 8));
 }
 
 #[test]
 fn test_page_motions_render_updated_gutter_line_numbers() {
     let buffer = Buffer::from_str("line 1\nline 2\nline 3\nline 4\nline 5\nline 6");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
     let size = Size::new(3, 40);
     let gutter_col = 1;
 
     let mut screen = crate::screen::Screen::new(3, 40);
-    window.render(&mut screen, Position::new(0, 0), size);
+    tab.render(&mut screen, Position::new(0, 0), size);
     assert_eq!(screen.get_cell_mut(0, gutter_col).unwrap().text, "1");
 
-    window.dispatch_action(&EditorAction::new(EditorOperation::MovePageDown));
-    window.render(&mut screen, Position::new(0, 0), size);
-    assert_eq!(window.buffer_view.scroll_offset(), Position::new(2, 0));
+    tab.dispatch_action(&EditorAction::new(EditorOperation::MovePageDown));
+    tab.render(&mut screen, Position::new(0, 0), size);
+    assert_eq!(tab.buffer_view.scroll_offset(), Position::new(2, 0));
     assert_eq!(screen.get_cell_mut(0, gutter_col).unwrap().text, "3");
     assert_eq!(screen.get_cell_mut(1, gutter_col).unwrap().text, "4");
     assert_eq!(screen.get_cell_mut(2, gutter_col).unwrap().text, "5");
 
-    window.dispatch_action(&EditorAction::new(EditorOperation::MovePageUp));
-    window.render(&mut screen, Position::new(0, 0), size);
-    assert_eq!(window.buffer_view.scroll_offset(), Position::new(0, 0));
+    tab.dispatch_action(&EditorAction::new(EditorOperation::MovePageUp));
+    tab.render(&mut screen, Position::new(0, 0), size);
+    assert_eq!(tab.buffer_view.scroll_offset(), Position::new(0, 0));
     assert_eq!(screen.get_cell_mut(0, gutter_col).unwrap().text, "1");
     assert_eq!(screen.get_cell_mut(1, gutter_col).unwrap().text, "2");
     assert_eq!(screen.get_cell_mut(2, gutter_col).unwrap().text, "3");
@@ -5084,30 +5026,30 @@ fn test_page_motions_render_updated_gutter_line_numbers() {
 #[test]
 fn test_page_motions_clamp_on_short_line() {
     let buffer = Buffer::from_str("0123456789\nabcdefghij\nklmnopqrst\nuv");
-    let mut window = Window::new(buffer);
-    window.buffer_view.set_cursor(Cursor::new(0, 8));
+    let mut tab = EditorTab::new(buffer);
+    tab.buffer_view.set_cursor(Cursor::new(0, 8));
 
     let mut screen = crate::screen::Screen::new(3, 40);
-    window.render(&mut screen, Position::new(0, 0), Size::new(3, 40));
+    tab.render(&mut screen, Position::new(0, 0), Size::new(3, 40));
 
-    window.dispatch_action(&EditorAction::new(EditorOperation::MovePageDown));
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(3, 1));
+    tab.dispatch_action(&EditorAction::new(EditorOperation::MovePageDown));
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(3, 1));
 }
 
 #[test]
 fn test_half_page_motions_move_by_half_viewport_height() {
     let buffer = Buffer::from_str("0123456789\nabcdefghij\nklmnopqrst\nuvwxyz0123");
-    let mut window = Window::new(buffer);
-    window.buffer_view.set_cursor(Cursor::new(0, 8));
+    let mut tab = EditorTab::new(buffer);
+    tab.buffer_view.set_cursor(Cursor::new(0, 8));
 
     let mut screen = crate::screen::Screen::new(3, 40);
-    window.render(&mut screen, Position::new(0, 0), Size::new(3, 40));
+    tab.render(&mut screen, Position::new(0, 0), Size::new(3, 40));
 
-    window.dispatch_action(&EditorAction::new(EditorOperation::MoveHalfPageDown));
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(1, 8));
+    tab.dispatch_action(&EditorAction::new(EditorOperation::MoveHalfPageDown));
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(1, 8));
 
-    window.dispatch_action(&EditorAction::new(EditorOperation::MoveHalfPageUp));
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 8));
+    tab.dispatch_action(&EditorAction::new(EditorOperation::MoveHalfPageUp));
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(0, 8));
 }
 
 // Character Scan Motion Tests
@@ -5116,188 +5058,188 @@ fn test_half_page_motions_move_by_half_viewport_height() {
 fn test_find_forward_moves_to_char() {
     // "hello world" - cursor at 'h', find 'o'
     let buffer = Buffer::from_str("hello world");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
-    window.buffer_view.set_cursor(Cursor::new(0, 0)); // at 'h'
-    window.dispatch_action(&EditorAction::find_forward('o'));
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 4)); // 'o' is at column 4
+    tab.buffer_view.set_cursor(Cursor::new(0, 0)); // at 'h'
+    tab.dispatch_action(&EditorAction::find_forward('o'));
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(0, 4)); // 'o' is at column 4
 }
 
 #[test]
 fn test_find_forward_finds_third_occurrence() {
     // "x x x" - find 3rd 'x'
     let buffer = Buffer::from_str("x x x");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
-    window.buffer_view.set_cursor(Cursor::new(0, 0));
-    window.dispatch_action(&EditorAction::count(
+    tab.buffer_view.set_cursor(Cursor::new(0, 0));
+    tab.dispatch_action(&EditorAction::count(
         3,
         Box::new(EditorAction::find_forward('x')),
     ));
     // Third 'x' is at column 4
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 4));
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(0, 4));
 }
 
 #[test]
 fn test_find_forward_not_found_stays_in_place() {
     // "hello" - find 'z' (doesn't exist)
     let buffer = Buffer::from_str("hello");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
-    window.buffer_view.set_cursor(Cursor::new(0, 2)); // at 'l'
-    window.dispatch_action(&EditorAction::find_forward('z'));
+    tab.buffer_view.set_cursor(Cursor::new(0, 2)); // at 'l'
+    tab.dispatch_action(&EditorAction::find_forward('z'));
     // Cursor should stay at column 2
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 2));
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(0, 2));
 }
 
 #[test]
 fn test_find_backward_moves_to_char() {
     // "hello world" - cursor at 'd', find 'o' (first when going backward from cursor)
     let buffer = Buffer::from_str("hello world");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
-    window.buffer_view.set_cursor(Cursor::new(0, 10)); // at 'd'
-    window.dispatch_action(&EditorAction::find_backward('o'));
+    tab.buffer_view.set_cursor(Cursor::new(0, 10)); // at 'd'
+    tab.dispatch_action(&EditorAction::find_backward('o'));
     // First 'o' when going backward from position 10 is at column 7
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 7));
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(0, 7));
 }
 
 #[test]
 fn test_find_backward_not_found_stays_in_place() {
     // "hello" - cursor at 'h', find 'x' (doesn't exist before)
     let buffer = Buffer::from_str("hello");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
-    window.buffer_view.set_cursor(Cursor::new(0, 0)); // at 'h'
-    window.dispatch_action(&EditorAction::find_backward('x'));
+    tab.buffer_view.set_cursor(Cursor::new(0, 0)); // at 'h'
+    tab.dispatch_action(&EditorAction::find_backward('x'));
     // Cursor should stay at column 0
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(0, 0));
 }
 
 #[test]
 fn test_till_forward_lands_before_char() {
     // "hello" - cursor at 'h', till 'o' should land on 'l' (column 3)
     let buffer = Buffer::from_str("hello");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
-    window.buffer_view.set_cursor(Cursor::new(0, 0)); // at 'h'
-    window.dispatch_action(&EditorAction::till_forward('o'));
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 3)); // 'l' is at column 3
+    tab.buffer_view.set_cursor(Cursor::new(0, 0)); // at 'h'
+    tab.dispatch_action(&EditorAction::till_forward('o'));
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(0, 3)); // 'l' is at column 3
 }
 
 #[test]
 fn test_till_forward_clamp_at_line_start() {
     // "hello" - cursor at 'h', till 'h' should clamp to column 0
     let buffer = Buffer::from_str("hello");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
-    window.buffer_view.set_cursor(Cursor::new(0, 0)); // at 'h'
-    window.dispatch_action(&EditorAction::till_forward('h'));
+    tab.buffer_view.set_cursor(Cursor::new(0, 0)); // at 'h'
+    tab.dispatch_action(&EditorAction::till_forward('h'));
     // Till lands one before 'h', which would be column -1, clamped to 0
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(0, 0));
 }
 
 #[test]
 fn test_till_backward_lands_after_char() {
     // "hello" - cursor at 'l', till 'e' should land on 'e' (column 1)
     let buffer = Buffer::from_str("hello");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
-    window.buffer_view.set_cursor(Cursor::new(0, 4)); // at 'o'
-    window.dispatch_action(&EditorAction::till_backward('h'));
+    tab.buffer_view.set_cursor(Cursor::new(0, 4)); // at 'o'
+    tab.dispatch_action(&EditorAction::till_backward('h'));
     // Till backward 'h' from 'o': 'h' is at 0, +1 = column 1
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 1));
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(0, 1));
 }
 
 #[test]
 fn test_till_backward_clamp_at_line_end() {
     // "hello" - cursor at 'o', till 'o' - no previous 'o' to find, so stays
     let buffer = Buffer::from_str("hello");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
-    window.buffer_view.set_cursor(Cursor::new(0, 4)); // at 'o'
-    window.dispatch_action(&EditorAction::till_backward('o'));
+    tab.buffer_view.set_cursor(Cursor::new(0, 4)); // at 'o'
+    tab.dispatch_action(&EditorAction::till_backward('o'));
     // Till backward 'o' from 'o': there's no 'o' before position 4, so cursor stays
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 4));
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(0, 4));
 }
 
 #[test]
 fn test_find_forward_with_count() {
     // "hello world" - 2fx finds 2nd 'o'
     let buffer = Buffer::from_str("hello world");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
-    window.buffer_view.set_cursor(Cursor::new(0, 0));
+    tab.buffer_view.set_cursor(Cursor::new(0, 0));
     // Use Count wrapper for the action
-    window.dispatch_action(&EditorAction::count(
+    tab.dispatch_action(&EditorAction::count(
         2,
         Box::new(EditorAction::find_forward('o')),
     ));
     // 'o' appears at column 4 and 7
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 7)); // second 'o'
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(0, 7)); // second 'o'
 }
 
 #[test]
 fn test_find_backward_with_count() {
     // "hello world" - 2Fl finds 2nd 'l' when going backward from 'd'
     let buffer = Buffer::from_str("hello world");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
-    window.buffer_view.set_cursor(Cursor::new(0, 10)); // at 'd'
-    window.dispatch_action(&EditorAction::count(
+    tab.buffer_view.set_cursor(Cursor::new(0, 10)); // at 'd'
+    tab.dispatch_action(&EditorAction::count(
         2,
         Box::new(EditorAction::find_backward('l')),
     ));
     // 'l' appears at columns 2, 3, and 9
     // Going backward from 'd' at 10: 1st 'l' is at 9, 2nd 'l' is at 3
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 3));
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(0, 3));
 }
 
 #[test]
 fn test_find_backward_skips_current_char_on_duplicate() {
     // "helllo" - cursor on 3rd 'l', Fl should find 2nd 'l'
     let buffer = Buffer::from_str("helllo");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
-    window.buffer_view.set_cursor(Cursor::new(0, 3)); // at 3rd 'l'
-    window.dispatch_action(&EditorAction::find_backward('l'));
+    tab.buffer_view.set_cursor(Cursor::new(0, 3)); // at 3rd 'l'
+    tab.dispatch_action(&EditorAction::find_backward('l'));
     // Should find 2nd 'l' at column 2, not 3rd 'l' at column 3
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 2));
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(0, 2));
 }
 
 #[test]
 fn test_delete_character_scan_operator_updates_repeat_state() {
     let buffer = Buffer::from_str("foo:bar");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
     let expected = FindState {
         target_char: ':',
         kind: FindKind::Find,
         direction: Direction::Forward,
     };
 
-    window.buffer_view.set_cursor(Cursor::new(0, 0));
-    window.dispatch_action(&EditorAction::operation(
+    tab.buffer_view.set_cursor(Cursor::new(0, 0));
+    tab.dispatch_action(&EditorAction::operation(
         Operator::Delete,
         OperatorTarget::CharacterScan(expected),
     ));
 
-    assert_eq!(buffer_text(window.buffer_view()), "bar");
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
+    assert_eq!(buffer_text(tab.buffer_view()), "bar");
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(0, 0));
     assert_eq!(globals::get_last_find(), Some(expected));
 }
 
 #[test]
 fn test_counted_character_scan_operator_uses_motion_count() {
     let buffer = Buffer::from_str("foo:bar:baz");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
     let expected = FindState {
         target_char: ':',
         kind: FindKind::Find,
         direction: Direction::Forward,
     };
 
-    window.buffer_view.set_cursor(Cursor::new(0, 0));
-    window.dispatch_action(&EditorAction::count(
+    tab.buffer_view.set_cursor(Cursor::new(0, 0));
+    tab.dispatch_action(&EditorAction::count(
         2,
         Box::new(EditorAction::operation(
             Operator::Delete,
@@ -5305,18 +5247,18 @@ fn test_counted_character_scan_operator_uses_motion_count() {
         )),
     ));
 
-    assert_eq!(buffer_text(window.buffer_view()), "baz");
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
+    assert_eq!(buffer_text(tab.buffer_view()), "baz");
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(0, 0));
     assert_eq!(globals::get_last_find(), Some(expected));
 }
 
 #[test]
 fn test_count_diw_deletes_multiple_words() {
     let buffer = Buffer::from_str("one two three four");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
-    window.buffer_view.set_cursor(Cursor::new(0, 0));
-    window.dispatch_action(&EditorAction::count(
+    tab.buffer_view.set_cursor(Cursor::new(0, 0));
+    tab.dispatch_action(&EditorAction::count(
         3,
         Box::new(EditorAction::operation(
             Operator::Delete,
@@ -5325,44 +5267,43 @@ fn test_count_diw_deletes_multiple_words() {
     ));
 
     assert_eq!(
-        window
-            .buffer_view
+        tab.buffer_view
             .with_buffer(|buffer| buffer.line_at(0).map(|line| line.to_string()))
             .flatten(),
         Some(" four".to_string())
     );
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(0, 0));
 }
 
 #[test]
 fn test_dw_deletes_through_next_word_start() {
     let buffer = Buffer::from_str("hello world");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
-    window.buffer_view.set_cursor(Cursor::new(0, 0));
-    window.dispatch_action(&EditorAction::operation(
+    tab.buffer_view.set_cursor(Cursor::new(0, 0));
+    tab.dispatch_action(&EditorAction::operation(
         Operator::Delete,
         OperatorTarget::BoundaryMotion(BoundaryMotion::WordForward),
     ));
 
-    assert_eq!(buffer_text(window.buffer_view()), "world");
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
+    assert_eq!(buffer_text(tab.buffer_view()), "world");
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(0, 0));
 }
 
 #[test]
 fn test_cw_changes_through_next_word_start() {
     let buffer = Buffer::from_str("hello world");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
-    window.buffer_view.set_cursor(Cursor::new(0, 0));
-    let result = window.dispatch_action(&EditorAction::operation(
+    tab.buffer_view.set_cursor(Cursor::new(0, 0));
+    let result = tab.dispatch_action(&EditorAction::operation(
         Operator::Change,
         OperatorTarget::BoundaryMotion(BoundaryMotion::WordForward),
     ));
 
     assert_eq!(result, ActionResult::Handled);
-    assert_eq!(buffer_text(window.buffer_view()), "world");
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
+    assert_eq!(buffer_text(tab.buffer_view()), "world");
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(0, 0));
     assert!(
         EditorAction::operation(
             Operator::Change,
@@ -5376,7 +5317,7 @@ fn test_cw_changes_through_next_word_start() {
 #[test]
 fn test_ciw_keeps_syntax_styled_above_changed_line() {
     let _lock = syntax_worker_lock();
-    let _theme_guard = globals::set_test_active_theme(syntax_themed_window());
+    let _theme_guard = globals::set_test_active_theme(syntax_themed_tab());
     let _config_guard = globals::set_test_config(Config {
         theme: "demo-syntax".to_string(),
         syntax: true,
@@ -5393,16 +5334,15 @@ fn test_ciw_keeps_syntax_styled_above_changed_line() {
     let source = format!("fn main() {{\n    let value = String::new();\n}}\n{body}");
     let path = temp_path_with_ext("cw-render-fallback", "rs");
     let buffer = Buffer::from_str_with_path(&source, path);
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
-    window
-        .buffer_view_mut()
+    tab.buffer_view_mut()
         .with_buffer_mut(|buffer| {
             buffer.ensure_syntax_through(buffer.line_count().saturating_sub(1))
         })
         .unwrap();
 
-    let edit_line = window
+    let edit_line = tab
         .buffer_view()
         .with_buffer(|buffer| {
             (0..buffer.line_count())
@@ -5414,42 +5354,40 @@ fn test_ciw_keeps_syntax_styled_above_changed_line() {
                 .expect("value line should exist")
         })
         .unwrap();
-    let line_text = window
+    let line_text = tab
         .buffer_view()
         .with_buffer(|buffer| buffer.line_at(edit_line).map(|line| line.to_string()))
         .flatten()
         .expect("value line should exist");
     let value_start = line_text.find("value").expect("line should contain value");
 
-    window
-        .buffer_view_mut()
+    tab.buffer_view_mut()
         .set_cursor(Cursor::new(edit_line, value_start));
     assert_eq!(
-        window.dispatch_action(&EditorAction::operation(
+        tab.dispatch_action(&EditorAction::operation(
             Operator::Change,
             OperatorTarget::TextObject(TextObject::InnerWord),
         )),
         ActionResult::Handled
     );
     assert_eq!(
-        window.dispatch_action(
+        tab.dispatch_action(
             &EditorAction::insert_text("foo".to_string()).with_from_mode(ModeKind::Insert)
         ),
         ActionResult::Handled
     );
 
-    window
-        .buffer_view_mut()
+    tab.buffer_view_mut()
         .set_scroll_offset(Position::new(edit_line.saturating_sub(1) as u16, 0));
 
     let mut screen = crate::screen::Screen::new(4, 120);
-    window.render(&mut screen, Position::new(0, 0), Size::new(4, 120));
+    tab.render(&mut screen, Position::new(0, 0), Size::new(4, 120));
 
     let expected_keyword_style = Style::new().fg(Color::ansi(23));
-    let line_above = rendered_line(&window, 0);
+    let line_above = rendered_line(&tab, 0);
     assert!(line_above.iter().any(|chunk| chunk.text == "fn"));
 
-    let edited_line = rendered_line(&window, 1);
+    let edited_line = rendered_line(&tab, 1);
     assert!(
         edited_line
             .iter()
@@ -5470,7 +5408,7 @@ fn test_ciw_keeps_syntax_styled_above_changed_line() {
 #[test]
 fn test_open_line_after_ciw_keeps_prefix_styled() {
     let _lock = syntax_worker_lock();
-    let _theme_guard = globals::set_test_active_theme(syntax_themed_window());
+    let _theme_guard = globals::set_test_active_theme(syntax_themed_tab());
     let _config_guard = globals::set_test_config(Config {
         theme: "demo-syntax".to_string(),
         syntax: true,
@@ -5483,449 +5421,439 @@ fn test_open_line_after_ciw_keeps_prefix_styled() {
     let source = "fn main() {\n    let value = String::new();\n}\nfn helper() {}";
     let path = temp_path_with_ext("open-line-after-ciw", "rs");
     let buffer = Buffer::from_str_with_path(source, path);
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
-    window
-        .buffer_view_mut()
+    tab.buffer_view_mut()
         .with_buffer_mut(|buffer| {
             buffer.ensure_syntax_through(buffer.line_count().saturating_sub(1))
         })
         .unwrap();
 
     let edit_line = 1;
-    let line_text = window
+    let line_text = tab
         .buffer_view()
         .with_buffer(|buffer| buffer.line_at(edit_line).map(|line| line.to_string()))
         .flatten()
         .expect("value line should exist");
     let value_start = line_text.find("value").expect("line should contain value");
 
-    window
-        .buffer_view_mut()
+    tab.buffer_view_mut()
         .set_cursor(Cursor::new(edit_line, value_start));
     assert_eq!(
-        window.dispatch_action(&EditorAction::operation(
+        tab.dispatch_action(&EditorAction::operation(
             Operator::Change,
             OperatorTarget::TextObject(TextObject::InnerWord),
         )),
         ActionResult::Handled
     );
     assert_eq!(
-        window.dispatch_action(
+        tab.dispatch_action(
             &EditorAction::insert_text("foo".to_string()).with_from_mode(ModeKind::Insert)
         ),
         ActionResult::Handled
     );
     assert_eq!(
-        window.dispatch_action(
+        tab.dispatch_action(
             &EditorAction::new(EditorOperation::OpenLineBelow).with_to_mode(ModeKind::Insert)
         ),
         ActionResult::Handled
     );
 
-    window
-        .buffer_view_mut()
-        .set_scroll_offset(Position::new(0, 0));
+    tab.buffer_view_mut().set_scroll_offset(Position::new(0, 0));
     let mut screen = crate::screen::Screen::new(4, 120);
-    window.render(&mut screen, Position::new(0, 0), Size::new(4, 120));
+    tab.render(&mut screen, Position::new(0, 0), Size::new(4, 120));
 
-    let first = rendered_line(&window, 0);
+    let first = rendered_line(&tab, 0);
     assert!(first.iter().any(|chunk| chunk.text == "fn"));
-    let second = rendered_line(&window, 1);
+    let second = rendered_line(&tab, 1);
     assert!(second.iter().any(|chunk| chunk.text == "let"));
 }
 
 #[test]
 fn test_cw_undo_restores_original_text() {
     let buffer = Buffer::from_str("hello world");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
-    window.buffer_view.set_cursor(Cursor::new(0, 0));
+    tab.buffer_view.set_cursor(Cursor::new(0, 0));
     process_action_and_snapshot(
-        &mut window,
+        &mut tab,
         &EditorAction::operation(
             Operator::Change,
             OperatorTarget::BoundaryMotion(BoundaryMotion::WordForward),
         ),
     );
 
-    assert_eq!(buffer_text(window.buffer_view()), "world");
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
+    assert_eq!(buffer_text(tab.buffer_view()), "world");
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(0, 0));
 
     assert_eq!(
-        window.dispatch_action(
+        tab.dispatch_action(
             &EditorAction::insert_text("hi".to_string()).with_from_mode(ModeKind::Insert)
         ),
         ActionResult::Handled
     );
-    assert_eq!(buffer_text(window.buffer_view()), "hiworld");
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 2));
+    assert_eq!(buffer_text(tab.buffer_view()), "hiworld");
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(0, 2));
 
-    commit_insert_exit_snapshot(&mut window);
+    commit_insert_exit_snapshot(&mut tab);
 
-    apply_undo(&mut window);
-    assert_eq!(buffer_text(window.buffer_view()), "hello world");
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
+    apply_undo(&mut tab);
+    assert_eq!(buffer_text(tab.buffer_view()), "hello world");
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(0, 0));
 }
 
 #[test]
 fn test_cw_at_end_of_line_is_noop() {
     let buffer = Buffer::from_str("hello");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
-    window.buffer_view.set_cursor(Cursor::new(0, 5));
-    let result = window.dispatch_action(&EditorAction::operation(
+    tab.buffer_view.set_cursor(Cursor::new(0, 5));
+    let result = tab.dispatch_action(&EditorAction::operation(
         Operator::Change,
         OperatorTarget::BoundaryMotion(BoundaryMotion::WordForward),
     ));
 
     assert_eq!(result, ActionResult::NotHandled);
-    assert_eq!(buffer_text(window.buffer_view()), "hello");
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 5));
+    assert_eq!(buffer_text(tab.buffer_view()), "hello");
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(0, 5));
 }
 
 #[test]
 fn test_da_paren_deletes_around_bracket_pair() {
     let buffer = Buffer::from_str("foo(bar)baz");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
-    window.buffer_view.set_cursor(Cursor::new(0, 4));
-    let result = window.dispatch_action(&EditorAction::operation(
+    tab.buffer_view.set_cursor(Cursor::new(0, 4));
+    let result = tab.dispatch_action(&EditorAction::operation(
         Operator::Delete,
         OperatorTarget::TextObject(TextObject::AroundBracket(BracketKind::Paren)),
     ));
 
     assert_eq!(result, ActionResult::Handled);
-    assert_eq!(buffer_text(window.buffer_view()), "foobaz");
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 3));
+    assert_eq!(buffer_text(tab.buffer_view()), "foobaz");
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(0, 3));
 }
 
 #[test]
 fn test_di_quote_deletes_inner_quote_pair() {
     let buffer = Buffer::from_str("foo \"bar\" baz");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
-    window.buffer_view.set_cursor(Cursor::new(0, 6));
-    let result = window.dispatch_action(&EditorAction::operation(
+    tab.buffer_view.set_cursor(Cursor::new(0, 6));
+    let result = tab.dispatch_action(&EditorAction::operation(
         Operator::Delete,
         OperatorTarget::TextObject(TextObject::InnerQuote(QuoteKind::Double)),
     ));
 
     assert_eq!(result, ActionResult::Handled);
-    assert_eq!(buffer_text(window.buffer_view()), "foo \"\" baz");
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 5));
+    assert_eq!(buffer_text(tab.buffer_view()), "foo \"\" baz");
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(0, 5));
 }
 
 #[test]
 fn test_di_quote_with_no_matching_pair_is_noop() {
     let buffer = Buffer::from_str("foo bar");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
-    window.buffer_view.set_cursor(Cursor::new(0, 0));
-    let result = window.dispatch_action(&EditorAction::operation(
+    tab.buffer_view.set_cursor(Cursor::new(0, 0));
+    let result = tab.dispatch_action(&EditorAction::operation(
         Operator::Delete,
         OperatorTarget::TextObject(TextObject::InnerQuote(QuoteKind::Single)),
     ));
 
     assert_eq!(result, ActionResult::Handled);
-    assert_eq!(buffer_text(window.buffer_view()), "foo bar");
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
+    assert_eq!(buffer_text(tab.buffer_view()), "foo bar");
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(0, 0));
 }
 
 #[test]
 fn test_di_paren_with_no_matching_pair_is_noop() {
     let buffer = Buffer::from_str("foo bar");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
-    window.buffer_view.set_cursor(Cursor::new(0, 0));
-    let result = window.dispatch_action(&EditorAction::operation(
+    tab.buffer_view.set_cursor(Cursor::new(0, 0));
+    let result = tab.dispatch_action(&EditorAction::operation(
         Operator::Delete,
         OperatorTarget::TextObject(TextObject::InnerBracket(BracketKind::Paren)),
     ));
 
     assert_eq!(result, ActionResult::Handled);
-    assert_eq!(buffer_text(window.buffer_view()), "foo bar");
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
+    assert_eq!(buffer_text(tab.buffer_view()), "foo bar");
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(0, 0));
 }
 
 #[test]
 fn test_di_paren_on_empty_pair_is_noop() {
     let buffer = Buffer::from_str("()");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
-    window.buffer_view.set_cursor(Cursor::new(0, 0));
-    let result = window.dispatch_action(&EditorAction::operation(
+    tab.buffer_view.set_cursor(Cursor::new(0, 0));
+    let result = tab.dispatch_action(&EditorAction::operation(
         Operator::Delete,
         OperatorTarget::TextObject(TextObject::InnerBracket(BracketKind::Paren)),
     ));
 
     assert_eq!(result, ActionResult::Handled);
-    assert_eq!(buffer_text(window.buffer_view()), "()");
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
+    assert_eq!(buffer_text(tab.buffer_view()), "()");
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(0, 0));
 }
 
 #[test]
 fn test_ci_paren_on_empty_pair_enters_insert_point() {
     let buffer = Buffer::from_str("()");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
-    window.buffer_view.set_cursor(Cursor::new(0, 0));
-    let result = window.dispatch_action(&EditorAction::operation(
+    tab.buffer_view.set_cursor(Cursor::new(0, 0));
+    let result = tab.dispatch_action(&EditorAction::operation(
         Operator::Change,
         OperatorTarget::TextObject(TextObject::InnerBracket(BracketKind::Paren)),
     ));
 
     assert_eq!(result, ActionResult::Handled);
-    assert_eq!(buffer_text(window.buffer_view()), "()");
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 1));
+    assert_eq!(buffer_text(tab.buffer_view()), "()");
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(0, 1));
 }
 
 #[test]
 fn test_ci_quote_on_empty_pair_enters_insert_point() {
     let buffer = Buffer::from_str("\"\"");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
-    window.buffer_view.set_cursor(Cursor::new(0, 0));
-    let result = window.dispatch_action(&EditorAction::operation(
+    tab.buffer_view.set_cursor(Cursor::new(0, 0));
+    let result = tab.dispatch_action(&EditorAction::operation(
         Operator::Change,
         OperatorTarget::TextObject(TextObject::InnerQuote(QuoteKind::Double)),
     ));
 
     assert_eq!(result, ActionResult::Handled);
-    assert_eq!(buffer_text(window.buffer_view()), "\"\"");
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 1));
+    assert_eq!(buffer_text(tab.buffer_view()), "\"\"");
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(0, 1));
 }
 
 #[test]
 fn test_insert_text_auto_closes_supported_pair_in_insert_mode() {
     let buffer = Buffer::from_str("");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
     let _config_guard = globals::set_test_config(pairing_test_config(true));
 
-    window.buffer_view.set_cursor(Cursor::new(0, 0));
+    tab.buffer_view.set_cursor(Cursor::new(0, 0));
     let result =
-        window.dispatch_action(&EditorAction::insert_char('(').with_from_mode(ModeKind::Insert));
+        tab.dispatch_action(&EditorAction::insert_char('(').with_from_mode(ModeKind::Insert));
 
     assert_eq!(result, ActionResult::Handled);
-    assert_eq!(buffer_text(window.buffer_view()), "()");
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 1));
+    assert_eq!(buffer_text(tab.buffer_view()), "()");
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(0, 1));
 }
 
 #[test]
 fn test_insert_char_skips_supported_closer_in_insert_mode() {
     let buffer = Buffer::from_str("()");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
     let _config_guard = globals::set_test_config(pairing_test_config(true));
 
-    window.buffer_view.set_cursor(Cursor::new(0, 1));
+    tab.buffer_view.set_cursor(Cursor::new(0, 1));
     let result =
-        window.dispatch_action(&EditorAction::insert_char(')').with_from_mode(ModeKind::Insert));
+        tab.dispatch_action(&EditorAction::insert_char(')').with_from_mode(ModeKind::Insert));
 
     assert_eq!(result, ActionResult::Handled);
-    assert_eq!(buffer_text(window.buffer_view()), "()");
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 2));
+    assert_eq!(buffer_text(tab.buffer_view()), "()");
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(0, 2));
 }
 
 #[test]
 fn test_insert_char_skips_quote_closer_in_insert_mode() {
     let buffer = Buffer::from_str("\"\"");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
     let _config_guard = globals::set_test_config(pairing_test_config(true));
 
-    window.buffer_view.set_cursor(Cursor::new(0, 1));
+    tab.buffer_view.set_cursor(Cursor::new(0, 1));
     let result =
-        window.dispatch_action(&EditorAction::insert_char('"').with_from_mode(ModeKind::Insert));
+        tab.dispatch_action(&EditorAction::insert_char('"').with_from_mode(ModeKind::Insert));
 
     assert_eq!(result, ActionResult::Handled);
-    assert_eq!(buffer_text(window.buffer_view()), "\"\"");
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 2));
+    assert_eq!(buffer_text(tab.buffer_view()), "\"\"");
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(0, 2));
 }
 
 #[test]
 fn test_delete_backward_removes_supported_pair_in_insert_mode() {
     let buffer = Buffer::from_str("()");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
     let _config_guard = globals::set_test_config(pairing_test_config(true));
 
-    window.buffer_view.set_cursor(Cursor::new(0, 1));
-    let result = window.dispatch_action(
+    tab.buffer_view.set_cursor(Cursor::new(0, 1));
+    let result = tab.dispatch_action(
         &EditorAction::new(EditorOperation::DeleteBackward).with_from_mode(ModeKind::Insert),
     );
 
     assert_eq!(result, ActionResult::Handled);
-    assert_eq!(buffer_text(window.buffer_view()), "");
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
+    assert_eq!(buffer_text(tab.buffer_view()), "");
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(0, 0));
 }
 
 #[test]
 fn test_pairing_disabled_keeps_plain_insert_and_delete_behavior() {
     let buffer = Buffer::from_str("()");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
     let _config_guard = globals::set_test_config(pairing_test_config(false));
 
-    window.buffer_view.set_cursor(Cursor::new(0, 1));
+    tab.buffer_view.set_cursor(Cursor::new(0, 1));
     let insert_result =
-        window.dispatch_action(&EditorAction::insert_char(')').with_from_mode(ModeKind::Insert));
+        tab.dispatch_action(&EditorAction::insert_char(')').with_from_mode(ModeKind::Insert));
     assert_eq!(insert_result, ActionResult::Handled);
-    assert_eq!(buffer_text(window.buffer_view()), "())");
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 2));
+    assert_eq!(buffer_text(tab.buffer_view()), "())");
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(0, 2));
 
-    window.buffer_view.set_cursor(Cursor::new(0, 1));
-    let delete_result = window.dispatch_action(
+    tab.buffer_view.set_cursor(Cursor::new(0, 1));
+    let delete_result = tab.dispatch_action(
         &EditorAction::new(EditorOperation::DeleteBackward).with_from_mode(ModeKind::Insert),
     );
 
     assert_eq!(delete_result, ActionResult::Handled);
-    assert_eq!(buffer_text(window.buffer_view()), "))");
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
+    assert_eq!(buffer_text(tab.buffer_view()), "))");
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(0, 0));
 }
 
 #[test]
 fn test_insert_pair_undo_and_redo_restore_exact_states() {
     let buffer = Buffer::from_str("");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
     let _config_guard = globals::set_test_config(pairing_test_config(true));
 
-    window.buffer_view.set_cursor(Cursor::new(0, 0));
+    tab.buffer_view.set_cursor(Cursor::new(0, 0));
     let result =
-        window.dispatch_action(&EditorAction::insert_char('(').with_from_mode(ModeKind::Insert));
+        tab.dispatch_action(&EditorAction::insert_char('(').with_from_mode(ModeKind::Insert));
     assert_eq!(result, ActionResult::Handled);
-    let cursor = window.buffer_view.cursor();
-    window
-        .buffer_view
+    let cursor = tab.buffer_view.cursor();
+    tab.buffer_view
         .with_buffer_mut(|buffer| buffer.push_snapshot(cursor))
         .unwrap_or(());
 
-    assert_eq!(buffer_text(window.buffer_view()), "()");
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 1));
+    assert_eq!(buffer_text(tab.buffer_view()), "()");
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(0, 1));
 
-    apply_undo(&mut window);
-    assert_eq!(buffer_text(window.buffer_view()), "");
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
+    apply_undo(&mut tab);
+    assert_eq!(buffer_text(tab.buffer_view()), "");
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(0, 0));
 
-    apply_redo(&mut window);
-    assert_eq!(buffer_text(window.buffer_view()), "()");
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 1));
+    apply_redo(&mut tab);
+    assert_eq!(buffer_text(tab.buffer_view()), "()");
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(0, 1));
 }
 
 #[test]
 fn test_pair_delete_undo_and_redo_restore_exact_states() {
     let buffer = Buffer::from_str("()");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
     let _config_guard = globals::set_test_config(pairing_test_config(true));
 
-    window.buffer_view.set_cursor(Cursor::new(0, 1));
-    let result = window.dispatch_action(
+    tab.buffer_view.set_cursor(Cursor::new(0, 1));
+    let result = tab.dispatch_action(
         &EditorAction::new(EditorOperation::DeleteBackward).with_from_mode(ModeKind::Insert),
     );
     assert_eq!(result, ActionResult::Handled);
-    let cursor = window.buffer_view.cursor();
-    window
-        .buffer_view
+    let cursor = tab.buffer_view.cursor();
+    tab.buffer_view
         .with_buffer_mut(|buffer| buffer.push_snapshot(cursor))
         .unwrap_or(());
 
-    assert_eq!(buffer_text(window.buffer_view()), "");
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
+    assert_eq!(buffer_text(tab.buffer_view()), "");
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(0, 0));
 
-    apply_undo(&mut window);
-    assert_eq!(buffer_text(window.buffer_view()), "()");
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
+    apply_undo(&mut tab);
+    assert_eq!(buffer_text(tab.buffer_view()), "()");
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(0, 0));
 
-    apply_redo(&mut window);
-    assert_eq!(buffer_text(window.buffer_view()), "");
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
+    apply_redo(&mut tab);
+    assert_eq!(buffer_text(tab.buffer_view()), "");
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(0, 0));
 }
 
 #[test]
 fn test_set_cursor_synced_normalizes_stored_cursor_after_buffer_change() {
     let buffer = Buffer::from_str("a😀b");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
-    window
-        .buffer_view
+    tab.buffer_view
         .with_buffer_mut(|buffer| buffer.remove(Cursor::new(0, 0), Cursor::new(0, 1)))
         .unwrap_or(());
 
-    window.set_cursor_synced(Cursor::new(0, 3));
+    tab.set_cursor_synced(Cursor::new(0, 3));
 
-    assert_eq!(buffer_text(window.buffer_view()), "😀b");
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 4));
+    assert_eq!(buffer_text(tab.buffer_view()), "😀b");
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(0, 4));
 }
 
 #[test]
 fn test_delete_forward_undo_and_redo() {
     let buffer = Buffer::from_str("hello");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
-    window.buffer_view.set_cursor(Cursor::new(0, 0));
-    process_action_and_snapshot(
-        &mut window,
-        &EditorAction::new(EditorOperation::DeleteForward),
-    );
+    tab.buffer_view.set_cursor(Cursor::new(0, 0));
+    process_action_and_snapshot(&mut tab, &EditorAction::new(EditorOperation::DeleteForward));
 
-    assert_eq!(buffer_text(window.buffer_view()), "ello");
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
+    assert_eq!(buffer_text(tab.buffer_view()), "ello");
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(0, 0));
 
-    apply_undo(&mut window);
-    assert_eq!(buffer_text(window.buffer_view()), "hello");
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
+    apply_undo(&mut tab);
+    assert_eq!(buffer_text(tab.buffer_view()), "hello");
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(0, 0));
 
-    apply_redo(&mut window);
-    assert_eq!(buffer_text(window.buffer_view()), "ello");
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
+    apply_redo(&mut tab);
+    assert_eq!(buffer_text(tab.buffer_view()), "ello");
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(0, 0));
 }
 
 #[test]
 fn test_dw_undo_and_redo() {
     let buffer = Buffer::from_str("hello world");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
-    window.buffer_view.set_cursor(Cursor::new(0, 0));
+    tab.buffer_view.set_cursor(Cursor::new(0, 0));
     process_action_and_snapshot(
-        &mut window,
+        &mut tab,
         &EditorAction::operation(
             Operator::Delete,
             OperatorTarget::BoundaryMotion(BoundaryMotion::WordForward),
         ),
     );
 
-    assert_eq!(buffer_text(window.buffer_view()), "world");
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
+    assert_eq!(buffer_text(tab.buffer_view()), "world");
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(0, 0));
 
-    apply_undo(&mut window);
-    assert_eq!(buffer_text(window.buffer_view()), "hello world");
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
+    apply_undo(&mut tab);
+    assert_eq!(buffer_text(tab.buffer_view()), "hello world");
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(0, 0));
 
-    apply_redo(&mut window);
-    assert_eq!(buffer_text(window.buffer_view()), "world");
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
+    apply_redo(&mut tab);
+    assert_eq!(buffer_text(tab.buffer_view()), "world");
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(0, 0));
 }
 
 #[test]
 fn test_cg_changes_to_first_line() {
     let buffer = Buffer::from_str("one\ntwo\nthree");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
-    window.buffer_view.set_cursor(Cursor::new(1, 0));
-    let result = window.dispatch_action(&EditorAction::operation(
+    tab.buffer_view.set_cursor(Cursor::new(1, 0));
+    let result = tab.dispatch_action(&EditorAction::operation(
         Operator::Change,
         OperatorTarget::LinewiseMotion(LinewiseMotion::LastLine),
     ));
 
     assert_eq!(result, ActionResult::Handled);
-    assert_eq!(buffer_text(window.buffer_view()), "one");
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
+    assert_eq!(buffer_text(tab.buffer_view()), "one");
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(0, 0));
 }
 
 #[test]
 fn test_counted_dw_undo_restores_original_text() {
     let buffer = Buffer::from_str("one two three four");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
-    window.buffer_view.set_cursor(Cursor::new(0, 0));
+    tab.buffer_view.set_cursor(Cursor::new(0, 0));
     process_action_and_snapshot(
-        &mut window,
+        &mut tab,
         &EditorAction::count(
             2,
             Box::new(EditorAction::operation(
@@ -5935,110 +5863,110 @@ fn test_counted_dw_undo_restores_original_text() {
         ),
     );
 
-    assert_eq!(buffer_text(window.buffer_view()), "three four");
+    assert_eq!(buffer_text(tab.buffer_view()), "three four");
 
-    apply_undo(&mut window);
-    assert_eq!(buffer_text(window.buffer_view()), "one two three four");
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
+    apply_undo(&mut tab);
+    assert_eq!(buffer_text(tab.buffer_view()), "one two three four");
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(0, 0));
 }
 
 #[test]
 fn test_dollar_deletes_to_line_end() {
     let buffer = Buffer::from_str("hello world");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
-    window.buffer_view.set_cursor(Cursor::new(0, 6));
-    window.dispatch_action(&EditorAction::operation(
+    tab.buffer_view.set_cursor(Cursor::new(0, 6));
+    tab.dispatch_action(&EditorAction::operation(
         Operator::Delete,
         OperatorTarget::BoundaryMotion(BoundaryMotion::LineEnd),
     ));
 
-    assert_eq!(buffer_text(window.buffer_view()), "hello ");
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 6));
+    assert_eq!(buffer_text(tab.buffer_view()), "hello ");
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(0, 6));
 }
 
 #[test]
 fn test_d0_deletes_to_line_start() {
     let buffer = Buffer::from_str("hello world");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
-    window.buffer_view.set_cursor(Cursor::new(0, 6));
-    window.dispatch_action(&EditorAction::operation(
+    tab.buffer_view.set_cursor(Cursor::new(0, 6));
+    tab.dispatch_action(&EditorAction::operation(
         Operator::Delete,
         OperatorTarget::BoundaryMotion(BoundaryMotion::LineStart),
     ));
 
-    assert_eq!(buffer_text(window.buffer_view()), "world");
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
+    assert_eq!(buffer_text(tab.buffer_view()), "world");
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(0, 0));
 }
 
 #[test]
 fn test_dcaret_deletes_to_line_content_start() {
     let buffer = Buffer::from_str("    hello world");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
-    window.buffer_view.set_cursor(Cursor::new(0, 10));
-    window.dispatch_action(&EditorAction::operation(
+    tab.buffer_view.set_cursor(Cursor::new(0, 10));
+    tab.dispatch_action(&EditorAction::operation(
         Operator::Delete,
         OperatorTarget::BoundaryMotion(BoundaryMotion::LineContentStart),
     ));
 
-    assert_eq!(buffer_text(window.buffer_view()), "    world");
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 4));
+    assert_eq!(buffer_text(tab.buffer_view()), "    world");
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(0, 4));
 }
 
 #[test]
 fn test_db_deletes_back_to_previous_word_start() {
     let buffer = Buffer::from_str("hello world");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
-    window.buffer_view.set_cursor(Cursor::new(0, 6));
-    window.dispatch_action(&EditorAction::operation(
+    tab.buffer_view.set_cursor(Cursor::new(0, 6));
+    tab.dispatch_action(&EditorAction::operation(
         Operator::Delete,
         OperatorTarget::BoundaryMotion(BoundaryMotion::WordBackward),
     ));
 
-    assert_eq!(buffer_text(window.buffer_view()), "world");
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
+    assert_eq!(buffer_text(tab.buffer_view()), "world");
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(0, 0));
 }
 
 #[test]
 fn test_dgg_deletes_to_first_line_linewise() {
     let buffer = Buffer::from_str("one\ntwo\nthree\nfour\nfive");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
-    window.buffer_view.set_cursor(Cursor::new(3, 1));
-    window.dispatch_action(&EditorAction::operation(
+    tab.buffer_view.set_cursor(Cursor::new(3, 1));
+    tab.dispatch_action(&EditorAction::operation(
         Operator::Delete,
         OperatorTarget::LinewiseMotion(LinewiseMotion::FirstLine),
     ));
 
-    assert_eq!(buffer_text(window.buffer_view()), "five");
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
+    assert_eq!(buffer_text(tab.buffer_view()), "five");
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(0, 0));
 }
 
 #[test]
 fn test_d_g_deletes_to_last_line_linewise() {
     let buffer = Buffer::from_str("one\ntwo\nthree\nfour\nfive");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
-    window.buffer_view.set_cursor(Cursor::new(2, 0));
-    window.dispatch_action(&EditorAction::operation(
+    tab.buffer_view.set_cursor(Cursor::new(2, 0));
+    tab.dispatch_action(&EditorAction::operation(
         Operator::Delete,
         OperatorTarget::LinewiseMotion(LinewiseMotion::LastLine),
     ));
 
-    assert_eq!(buffer_text(window.buffer_view()), "one\ntwo");
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(1, 0));
+    assert_eq!(buffer_text(tab.buffer_view()), "one\ntwo");
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(1, 0));
 }
 
 #[test]
 fn test_counted_d_g_deletes_to_destination_line() {
     let buffer = Buffer::from_str("one\ntwo\nthree\nfour\nfive\nsix");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
-    window.buffer_view.set_cursor(Cursor::new(2, 0));
-    window.dispatch_action(&EditorAction::count(
+    tab.buffer_view.set_cursor(Cursor::new(2, 0));
+    tab.dispatch_action(&EditorAction::count(
         5,
         Box::new(EditorAction::operation(
             Operator::Delete,
@@ -6046,17 +5974,17 @@ fn test_counted_d_g_deletes_to_destination_line() {
         )),
     ));
 
-    assert_eq!(buffer_text(window.buffer_view()), "one\ntwo\nsix");
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(2, 0));
+    assert_eq!(buffer_text(tab.buffer_view()), "one\ntwo\nsix");
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(2, 0));
 }
 
 #[test]
 fn test_dw_with_count_deletes_multiple_words() {
     let buffer = Buffer::from_str("one two three four");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
-    window.buffer_view.set_cursor(Cursor::new(0, 0));
-    window.dispatch_action(&EditorAction::count(
+    tab.buffer_view.set_cursor(Cursor::new(0, 0));
+    tab.dispatch_action(&EditorAction::count(
         2,
         Box::new(EditorAction::operation(
             Operator::Delete,
@@ -6064,186 +5992,185 @@ fn test_dw_with_count_deletes_multiple_words() {
         )),
     ));
 
-    assert_eq!(buffer_text(window.buffer_view()), "three four");
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
+    assert_eq!(buffer_text(tab.buffer_view()), "three four");
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(0, 0));
 }
 
 #[test]
 fn test_dbigword_forward_and_backward() {
     let buffer = Buffer::from_str("alpha --- beta");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
-    window.buffer_view.set_cursor(Cursor::new(0, 0));
-    window.dispatch_action(&EditorAction::operation(
+    tab.buffer_view.set_cursor(Cursor::new(0, 0));
+    tab.dispatch_action(&EditorAction::operation(
         Operator::Delete,
         OperatorTarget::BoundaryMotion(BoundaryMotion::BigWordForward),
     ));
-    assert_eq!(buffer_text(window.buffer_view()), "--- beta");
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 0));
+    assert_eq!(buffer_text(tab.buffer_view()), "--- beta");
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(0, 0));
 
     let buffer = Buffer::from_str("alpha --- beta");
-    let mut window = Window::new(buffer);
-    window.buffer_view.set_cursor(Cursor::new(0, 10));
-    window.dispatch_action(&EditorAction::operation(
+    let mut tab = EditorTab::new(buffer);
+    tab.buffer_view.set_cursor(Cursor::new(0, 10));
+    tab.dispatch_action(&EditorAction::operation(
         Operator::Delete,
         OperatorTarget::BoundaryMotion(BoundaryMotion::BigWordBackward),
     ));
-    assert_eq!(buffer_text(window.buffer_view()), "alpha beta");
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 6));
+    assert_eq!(buffer_text(tab.buffer_view()), "alpha beta");
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(0, 6));
 }
 
 #[test]
 fn test_till_forward_repeated_finds_next_occurrence() {
     // "hello" - tl repeated should find subsequent 'l's
     let buffer = Buffer::from_str("hello");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
-    window.buffer_view.set_cursor(Cursor::new(0, 0)); // at 'h'
-    window.dispatch_action(&EditorAction::till_forward('l'));
+    tab.buffer_view.set_cursor(Cursor::new(0, 0)); // at 'h'
+    tab.dispatch_action(&EditorAction::till_forward('l'));
     // First 'l' at column 2, land before it at column 1
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 1));
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(0, 1));
 
-    window.dispatch_action(&EditorAction::till_forward('l'));
+    tab.dispatch_action(&EditorAction::till_forward('l'));
     // Second 'l' at column 3, land before it at column 2
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 2));
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(0, 2));
 }
 
 #[test]
 fn test_till_backward_repeated_finds_previous_occurrence() {
     // "hhello" - Th repeated should find previous 'h's
     let buffer = Buffer::from_str("hhello");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
-    window.buffer_view.set_cursor(Cursor::new(0, 5)); // at 'o'
-    window.dispatch_action(&EditorAction::till_backward('h'));
+    tab.buffer_view.set_cursor(Cursor::new(0, 5)); // at 'o'
+    tab.dispatch_action(&EditorAction::till_backward('h'));
     // First 'h' at column 1, land after it at column 2
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 2));
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(0, 2));
 
-    window.dispatch_action(&EditorAction::till_backward('h'));
+    tab.dispatch_action(&EditorAction::till_backward('h'));
     // Second 'h' at column 0, land after it at column 1
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 1));
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(0, 1));
 
-    window.dispatch_action(&EditorAction::till_backward('h'));
+    tab.dispatch_action(&EditorAction::till_backward('h'));
     // No more 'h' before column 0, cursor stays at column 1
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 1));
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(0, 1));
 }
 
 #[test]
 fn test_till_forward_preserves_grapheme_boundaries() {
     let buffer = Buffer::from_str("a😀b");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
-    window.buffer_view.set_cursor(Cursor::new(0, 0));
-    window.dispatch_action(&EditorAction::till_forward('b'));
+    tab.buffer_view.set_cursor(Cursor::new(0, 0));
+    tab.dispatch_action(&EditorAction::till_forward('b'));
 
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 1));
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(0, 1));
 }
 
 #[test]
 fn test_till_backward_preserves_grapheme_boundaries() {
     let buffer = Buffer::from_str("a😀b");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
-    window.buffer_view.set_cursor(Cursor::new(0, 5));
-    window.dispatch_action(&EditorAction::till_backward('a'));
+    tab.buffer_view.set_cursor(Cursor::new(0, 5));
+    tab.dispatch_action(&EditorAction::till_backward('a'));
 
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(0, 1));
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(0, 1));
 }
 
 #[test]
 fn test_move_to_last_line_preserves_visual_column() {
     let buffer = Buffer::from_str("ab\na😀b");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
-    window.buffer_view.set_cursor(Cursor::new(0, 2));
-    window.dispatch_action(&EditorAction::new(EditorOperation::MoveToLastLine));
+    tab.buffer_view.set_cursor(Cursor::new(0, 2));
+    tab.dispatch_action(&EditorAction::new(EditorOperation::MoveToLastLine));
 
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(1, 1));
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(1, 1));
 }
 
 #[test]
 fn test_count_screen_top_preserves_visual_column() {
     let buffer = Buffer::from_str("ab\na😀b\ncd");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
-    window.size = Size::new(2, 10);
-    window.buffer_view.set_scroll_offset(Position::new(1, 0));
-    window.buffer_view.set_cursor(Cursor::new(0, 2));
-    window.dispatch_action(&EditorAction::count(
+    tab.size = Size::new(2, 10);
+    tab.buffer_view.set_scroll_offset(Position::new(1, 0));
+    tab.buffer_view.set_cursor(Cursor::new(0, 2));
+    tab.dispatch_action(&EditorAction::count(
         1,
         Box::new(EditorAction::new(EditorOperation::MoveToScreenTop)),
     ));
 
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(1, 1));
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(1, 1));
 }
 
 #[test]
 fn test_viewport_cursor_alignment_repositions_without_moving_cursor() {
     let buffer = Buffer::from_str("0\n1\n2\n3\n4\n5\n6\n7\n8\n9");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
-    window.size = Size::new(5, 20);
-    window.buffer_view.set_cursor(Cursor::new(6, 0));
-    window.buffer_view.set_scroll_offset(Position::new(0, 3));
+    tab.size = Size::new(5, 20);
+    tab.buffer_view.set_cursor(Cursor::new(6, 0));
+    tab.buffer_view.set_scroll_offset(Position::new(0, 3));
 
-    window.dispatch_action(&EditorAction::new(EditorOperation::ViewportCursorTop));
-    assert_eq!(window.buffer_view.scroll_offset(), Position::new(5, 3));
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(6, 0));
+    tab.dispatch_action(&EditorAction::new(EditorOperation::ViewportCursorTop));
+    assert_eq!(tab.buffer_view.scroll_offset(), Position::new(5, 3));
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(6, 0));
 
-    window.dispatch_action(&EditorAction::new(EditorOperation::ViewportCursorCenter));
-    assert_eq!(window.buffer_view.scroll_offset(), Position::new(4, 3));
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(6, 0));
+    tab.dispatch_action(&EditorAction::new(EditorOperation::ViewportCursorCenter));
+    assert_eq!(tab.buffer_view.scroll_offset(), Position::new(4, 3));
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(6, 0));
 
-    window.dispatch_action(&EditorAction::new(EditorOperation::ViewportCursorBottom));
-    assert_eq!(window.buffer_view.scroll_offset(), Position::new(2, 3));
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(6, 0));
+    tab.dispatch_action(&EditorAction::new(EditorOperation::ViewportCursorBottom));
+    assert_eq!(tab.buffer_view.scroll_offset(), Position::new(2, 3));
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(6, 0));
 }
 
 #[test]
 fn test_viewport_cursor_alignment_clamps_near_buffer_end() {
     let buffer = Buffer::from_str("0\n1\n2\n3\n4\n5\n6\n7");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
-    window.size = Size::new(5, 20);
-    window.buffer_view.set_cursor(Cursor::new(7, 0));
+    tab.size = Size::new(5, 20);
+    tab.buffer_view.set_cursor(Cursor::new(7, 0));
 
-    window.dispatch_action(&EditorAction::new(EditorOperation::ViewportCursorTop));
-    assert_eq!(window.buffer_view.scroll_offset(), Position::new(3, 0));
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(7, 0));
+    tab.dispatch_action(&EditorAction::new(EditorOperation::ViewportCursorTop));
+    assert_eq!(tab.buffer_view.scroll_offset(), Position::new(3, 0));
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(7, 0));
 
-    window.dispatch_action(&EditorAction::new(EditorOperation::ViewportCursorCenter));
-    assert_eq!(window.buffer_view.scroll_offset(), Position::new(3, 0));
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(7, 0));
+    tab.dispatch_action(&EditorAction::new(EditorOperation::ViewportCursorCenter));
+    assert_eq!(tab.buffer_view.scroll_offset(), Position::new(3, 0));
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(7, 0));
 
-    window.dispatch_action(&EditorAction::new(EditorOperation::ViewportCursorBottom));
-    assert_eq!(window.buffer_view.scroll_offset(), Position::new(3, 0));
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(7, 0));
+    tab.dispatch_action(&EditorAction::new(EditorOperation::ViewportCursorBottom));
+    assert_eq!(tab.buffer_view.scroll_offset(), Position::new(3, 0));
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(7, 0));
 }
 
 #[test]
 fn test_next_paragraph_clamps_visual_column_on_blank_line() {
     let buffer = Buffer::from_str("ab\n\ncd");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
-    window.buffer_view.set_cursor(Cursor::new(0, 2));
-    window.dispatch_action(&EditorAction::new(EditorOperation::MoveToNextParagraph));
+    tab.buffer_view.set_cursor(Cursor::new(0, 2));
+    tab.dispatch_action(&EditorAction::new(EditorOperation::MoveToNextParagraph));
 
-    assert_eq!(window.buffer_view.cursor(), Cursor::new(1, 0));
+    assert_eq!(tab.buffer_view.cursor(), Cursor::new(1, 0));
 }
 
 #[test]
 fn test_toggle_line_comment_uses_active_syntax_prefix() {
-    let path = AbsolutePath::from_path(temp_path_with_ext("toggle-comment-window", "rs").as_path())
-        .unwrap();
+    let path =
+        AbsolutePath::from_path(temp_path_with_ext("toggle-comment-tab", "rs").as_path()).unwrap();
     let buffer = Buffer::from_str_with_path("fn main() {}", path);
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
-    let result = window.dispatch_action(&EditorAction::toggle_line_comment());
+    let result = tab.dispatch_action(&EditorAction::toggle_line_comment());
 
     assert_eq!(result, ActionResult::Handled);
     assert_eq!(
-        window
-            .buffer_view()
+        tab.buffer_view()
             .with_buffer(|buffer| buffer.line_at(0).map(|line| line.to_string()))
             .unwrap(),
         Some("// fn main() {}".to_string())
@@ -6255,17 +6182,16 @@ fn test_toggle_line_comment_count_applies_to_multiple_lines() {
     let path = AbsolutePath::from_path(temp_path_with_ext("toggle-comment-count", "rs").as_path())
         .unwrap();
     let buffer = Buffer::from_str_with_path("fn a() {}\nfn b() {}\nfn c() {}", path);
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
-    let result = window.dispatch_action(&EditorAction::count(
+    let result = tab.dispatch_action(&EditorAction::count(
         3,
         Box::new(EditorAction::toggle_line_comment()),
     ));
 
     assert_eq!(result, ActionResult::Handled);
     assert_eq!(
-        window
-            .buffer_view()
+        tab.buffer_view()
             .with_buffer(|buffer| buffer.as_str().to_string())
             .unwrap(),
         "// fn a() {}\n// fn b() {}\n// fn c() {}".to_string()
@@ -6277,17 +6203,16 @@ fn test_toggle_line_comment_aligns_to_minimum_column_across_range() {
     let path = AbsolutePath::from_path(temp_path_with_ext("toggle-comment-align", "rs").as_path())
         .unwrap();
     let buffer = Buffer::from_str_with_path("  fn a() {}\n    fn b() {}", path);
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
-    let result = window.dispatch_action(&EditorAction::count(
+    let result = tab.dispatch_action(&EditorAction::count(
         2,
         Box::new(EditorAction::toggle_line_comment()),
     ));
 
     assert_eq!(result, ActionResult::Handled);
     assert_eq!(
-        window
-            .buffer_view()
+        tab.buffer_view()
             .with_buffer(|buffer| buffer.as_str().to_string())
             .unwrap(),
         "  // fn a() {}\n  //   fn b() {}".to_string()
@@ -6299,17 +6224,16 @@ fn test_toggle_line_comment_skips_blank_lines() {
     let path = AbsolutePath::from_path(temp_path_with_ext("toggle-comment-blank", "py").as_path())
         .unwrap();
     let buffer = Buffer::from_str_with_path("\n    print('hello')", path);
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
-    let result = window.dispatch_action(&EditorAction::count(
+    let result = tab.dispatch_action(&EditorAction::count(
         2,
         Box::new(EditorAction::toggle_line_comment()),
     ));
 
     assert_eq!(result, ActionResult::Handled);
     assert_eq!(
-        window
-            .buffer_view()
+        tab.buffer_view()
             .with_buffer(|buffer| buffer.as_str().to_string())
             .unwrap(),
         "\n    # print('hello')".to_string()
@@ -6319,14 +6243,13 @@ fn test_toggle_line_comment_skips_blank_lines() {
 #[test]
 fn test_toggle_line_comment_returns_not_handled_without_prefix() {
     let buffer = Buffer::from_str("plain text");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
-    let result = window.dispatch_action(&EditorAction::toggle_line_comment());
+    let result = tab.dispatch_action(&EditorAction::toggle_line_comment());
 
     assert_eq!(result, ActionResult::NotHandled);
     assert_eq!(
-        window
-            .buffer_view()
+        tab.buffer_view()
             .with_buffer(|buffer| buffer.as_str().to_string())
             .unwrap(),
         "plain text".to_string()
@@ -6337,10 +6260,10 @@ fn test_toggle_line_comment_returns_not_handled_without_prefix() {
 fn test_yank_line_populates_yank_register_and_paste_after_uses_it() {
     let _register_guard = globals::set_test_register_store(RegisterStore::new());
     let buffer = Buffer::from_str("alpha\nbeta");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
     assert_eq!(
-        window.dispatch_action(&EditorAction::new(EditorOperation::YankLine)),
+        tab.dispatch_action(&EditorAction::new(EditorOperation::YankLine)),
         ActionResult::Handled
     );
 
@@ -6350,11 +6273,11 @@ fn test_yank_line_populates_yank_register_and_paste_after_uses_it() {
     assert_eq!(content.kind, RegisterContentKind::Linewise);
 
     assert_eq!(
-        window.dispatch_action(&EditorAction::paste_after()),
+        tab.dispatch_action(&EditorAction::paste_after()),
         ActionResult::Handled
     );
     assert_eq!(
-        buffer_text(window.buffer_view()),
+        buffer_text(tab.buffer_view()),
         "alpha\nalpha\nbeta".to_string()
     );
 }
@@ -6363,17 +6286,16 @@ fn test_yank_line_populates_yank_register_and_paste_after_uses_it() {
 fn test_visual_yank_uses_explicit_named_register() {
     let _register_guard = globals::set_test_register_store(RegisterStore::new());
     let buffer = Buffer::from_str("abc");
-    let mut window = Window::new(buffer);
-    window
-        .buffer_view_mut()
+    let mut tab = EditorTab::new(buffer);
+    tab.buffer_view_mut()
         .begin_visual_selection(VisualSelectionKind::Character);
-    window.buffer_view_mut().set_cursor(Cursor::new(0, 0));
+    tab.buffer_view_mut().set_cursor(Cursor::new(0, 0));
 
     let action = EditorAction::new(EditorOperation::YankSelection)
         .with_from_mode(ModeKind::Visual)
         .with_to_mode(ModeKind::Normal)
         .with_register(RegisterName('z'));
-    assert_eq!(window.dispatch_action(&action), ActionResult::Handled);
+    assert_eq!(tab.dispatch_action(&action), ActionResult::Handled);
 
     let content = globals::with_register_store(|store| store.get(RegisterName('z')))
         .expect("register store should be available");
@@ -6393,10 +6315,10 @@ fn test_delete_line_uses_configured_default_register() {
         ..pairing_test_config(true)
     });
     let buffer = Buffer::from_str("alpha\nbeta");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
     assert_eq!(
-        window.dispatch_action(&EditorAction::new(EditorOperation::DeleteLine)),
+        tab.dispatch_action(&EditorAction::new(EditorOperation::DeleteLine)),
         ActionResult::Handled
     );
 
@@ -6404,7 +6326,7 @@ fn test_delete_line_uses_configured_default_register() {
         .expect("register store should be available");
     assert_eq!(content.text, "alpha");
     assert_eq!(content.kind, RegisterContentKind::Linewise);
-    assert_eq!(buffer_text(window.buffer_view()), "beta".to_string());
+    assert_eq!(buffer_text(tab.buffer_view()), "beta".to_string());
 }
 
 #[test]
@@ -6418,13 +6340,13 @@ fn test_paste_after_uses_explicit_named_register() {
     });
 
     let buffer = Buffer::from_str("ab");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
     assert_eq!(
-        window.dispatch_action(&EditorAction::paste_after().with_register(RegisterName('z'))),
+        tab.dispatch_action(&EditorAction::paste_after().with_register(RegisterName('z'))),
         ActionResult::Handled
     );
-    assert_eq!(buffer_text(window.buffer_view()), "hiab".to_string());
+    assert_eq!(buffer_text(tab.buffer_view()), "hiab".to_string());
 }
 
 // ── Unnamed register tests ──────────────────────────────────────────────
@@ -6433,9 +6355,9 @@ fn test_paste_after_uses_explicit_named_register() {
 fn test_yank_line_writes_to_unnamed_register() {
     let _register_guard = globals::set_test_register_store(RegisterStore::new());
     let buffer = Buffer::from_str("hello\nworld");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
-    window.dispatch_action(&EditorAction::new(EditorOperation::YankLine));
+    tab.dispatch_action(&EditorAction::new(EditorOperation::YankLine));
 
     let content = globals::with_register_store(|store| store.get(RegisterName::UNNAMED))
         .expect("unnamed register should have content");
@@ -6447,9 +6369,9 @@ fn test_yank_line_writes_to_unnamed_register() {
 fn test_delete_line_writes_to_unnamed_register() {
     let _register_guard = globals::set_test_register_store(RegisterStore::new());
     let buffer = Buffer::from_str("hello\nworld");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
-    window.dispatch_action(&EditorAction::new(EditorOperation::DeleteLine));
+    tab.dispatch_action(&EditorAction::new(EditorOperation::DeleteLine));
 
     let content = globals::with_register_store(|store| store.get(RegisterName::UNNAMED))
         .expect("unnamed register should have content");
@@ -6461,16 +6383,15 @@ fn test_delete_line_writes_to_unnamed_register() {
 fn test_yank_selection_writes_to_unnamed_register() {
     let _register_guard = globals::set_test_register_store(RegisterStore::new());
     let buffer = Buffer::from_str("hello");
-    let mut window = Window::new(buffer);
-    window
-        .buffer_view_mut()
+    let mut tab = EditorTab::new(buffer);
+    tab.buffer_view_mut()
         .begin_visual_selection(VisualSelectionKind::Character);
-    window.buffer_view_mut().set_cursor(Cursor::new(0, 0));
+    tab.buffer_view_mut().set_cursor(Cursor::new(0, 0));
 
     let action = EditorAction::new(EditorOperation::YankSelection)
         .with_from_mode(ModeKind::Visual)
         .with_to_mode(ModeKind::Normal);
-    window.dispatch_action(&action);
+    tab.dispatch_action(&action);
 
     let content = globals::with_register_store(|store| store.get(RegisterName::UNNAMED))
         .expect("unnamed register should have content");
@@ -6481,10 +6402,10 @@ fn test_yank_selection_writes_to_unnamed_register() {
 fn test_explicit_named_register_also_writes_to_unnamed() {
     let _register_guard = globals::set_test_register_store(RegisterStore::new());
     let buffer = Buffer::from_str("hello\nworld");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
     let action = EditorAction::new(EditorOperation::YankLine).with_register(RegisterName('a'));
-    window.dispatch_action(&action);
+    tab.dispatch_action(&action);
 
     let named = globals::with_register_store(|store| store.get(RegisterName('a')))
         .expect("register 'a' should have content");
@@ -6508,11 +6429,11 @@ fn test_paste_after_reads_from_unnamed_register() {
     });
 
     let buffer = Buffer::from_str("ab");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
-    window.dispatch_action(&EditorAction::paste_after());
+    tab.dispatch_action(&EditorAction::paste_after());
 
-    assert_eq!(buffer_text(window.buffer_view()), "pastedab");
+    assert_eq!(buffer_text(tab.buffer_view()), "pastedab");
 }
 
 #[test]
@@ -6526,11 +6447,11 @@ fn test_paste_before_reads_from_unnamed_register() {
     });
 
     let buffer = Buffer::from_str("ab");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
-    window.dispatch_action(&EditorAction::paste_before());
+    tab.dispatch_action(&EditorAction::paste_before());
 
-    assert_eq!(buffer_text(window.buffer_view()), "pastedab");
+    assert_eq!(buffer_text(tab.buffer_view()), "pastedab");
 }
 
 #[test]
@@ -6551,55 +6472,55 @@ fn test_paste_with_explicit_register_bypasses_unnamed() {
     });
 
     let buffer = Buffer::from_str("ab");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
-    window.dispatch_action(&EditorAction::paste_after().with_register(RegisterName('z')));
+    tab.dispatch_action(&EditorAction::paste_after().with_register(RegisterName('z')));
 
-    assert_eq!(buffer_text(window.buffer_view()), "from-zab");
+    assert_eq!(buffer_text(tab.buffer_view()), "from-zab");
 }
 
 #[test]
 fn test_yank_then_paste_uses_unnamed_register() {
     let _register_guard = globals::set_test_register_store(RegisterStore::new());
     let buffer = Buffer::from_str("hello\nworld");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
-    window.dispatch_action(&EditorAction::new(EditorOperation::YankLine));
+    tab.dispatch_action(&EditorAction::new(EditorOperation::YankLine));
 
-    window.dispatch_action(&EditorAction::paste_after());
+    tab.dispatch_action(&EditorAction::paste_after());
 
-    assert_eq!(buffer_text(window.buffer_view()), "hello\nhello\nworld");
+    assert_eq!(buffer_text(tab.buffer_view()), "hello\nhello\nworld");
 }
 
 #[test]
 fn test_delete_then_paste_uses_unnamed_register() {
     let _register_guard = globals::set_test_register_store(RegisterStore::new());
     let buffer = Buffer::from_str("hello\nworld");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
-    window.dispatch_action(&EditorAction::new(EditorOperation::DeleteLine));
+    tab.dispatch_action(&EditorAction::new(EditorOperation::DeleteLine));
 
-    window.dispatch_action(&EditorAction::paste_before());
+    tab.dispatch_action(&EditorAction::paste_before());
 
-    assert_eq!(buffer_text(window.buffer_view()), "hello\nworld");
+    assert_eq!(buffer_text(tab.buffer_view()), "hello\nworld");
 }
 
 #[test]
 fn test_unnamed_register_overwritten_by_subsequent_operation() {
     let _register_guard = globals::set_test_register_store(RegisterStore::new());
     let buffer = Buffer::from_str("first\nsecond\nthird");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
-    window.dispatch_action(&EditorAction::new(EditorOperation::YankLine));
+    tab.dispatch_action(&EditorAction::new(EditorOperation::YankLine));
 
-    window.buffer_view_mut().set_cursor(Cursor::new(1, 0));
-    window.dispatch_action(&EditorAction::new(EditorOperation::DeleteLine));
+    tab.buffer_view_mut().set_cursor(Cursor::new(1, 0));
+    tab.dispatch_action(&EditorAction::new(EditorOperation::DeleteLine));
 
-    window.dispatch_action(&EditorAction::paste_before());
+    tab.dispatch_action(&EditorAction::paste_before());
 
     // Unnamed register was overwritten from "first" to "second" by DeleteLine,
     // so paste_before inserts "second" before the current line ("third").
-    assert_eq!(buffer_text(window.buffer_view()), "first\nsecond\nthird");
+    assert_eq!(buffer_text(tab.buffer_view()), "first\nsecond\nthird");
 }
 
 // ── Paste cursor-position regression tests ───────────────────────────────
@@ -6615,14 +6536,14 @@ fn paste_after_characterwise_puts_cursor_at_end_of_pasted_text() {
     });
 
     let buffer = Buffer::from_str("ab");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
     assert_eq!(
-        window.dispatch_action(&EditorAction::paste_after()),
+        tab.dispatch_action(&EditorAction::paste_after()),
         ActionResult::Handled
     );
-    assert_eq!(buffer_text(window.buffer_view()), "helloab");
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 5));
+    assert_eq!(buffer_text(tab.buffer_view()), "helloab");
+    assert_eq!(tab.buffer_view().cursor(), Cursor::new(0, 5));
 }
 
 #[test]
@@ -6636,14 +6557,14 @@ fn paste_before_characterwise_puts_cursor_at_start_of_pasted_text() {
     });
 
     let buffer = Buffer::from_str("ab");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
     assert_eq!(
-        window.dispatch_action(&EditorAction::paste_before()),
+        tab.dispatch_action(&EditorAction::paste_before()),
         ActionResult::Handled
     );
-    assert_eq!(buffer_text(window.buffer_view()), "helloab");
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 0));
+    assert_eq!(buffer_text(tab.buffer_view()), "helloab");
+    assert_eq!(tab.buffer_view().cursor(), Cursor::new(0, 0));
 }
 
 #[test]
@@ -6657,14 +6578,14 @@ fn paste_after_characterwise_multiline_puts_cursor_at_end() {
     });
 
     let buffer = Buffer::from_str("ab");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
     assert_eq!(
-        window.dispatch_action(&EditorAction::paste_after()),
+        tab.dispatch_action(&EditorAction::paste_after()),
         ActionResult::Handled
     );
-    assert_eq!(buffer_text(window.buffer_view()), "hi\nthereab");
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(1, 5));
+    assert_eq!(buffer_text(tab.buffer_view()), "hi\nthereab");
+    assert_eq!(tab.buffer_view().cursor(), Cursor::new(1, 5));
 }
 
 #[test]
@@ -6678,14 +6599,14 @@ fn paste_after_linewise_puts_cursor_at_end_of_last_pasted_line() {
     });
 
     let buffer = Buffer::from_str("ab");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
     assert_eq!(
-        window.dispatch_action(&EditorAction::paste_after()),
+        tab.dispatch_action(&EditorAction::paste_after()),
         ActionResult::Handled
     );
-    assert_eq!(buffer_text(window.buffer_view()), "ab\nhello");
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(1, 4));
+    assert_eq!(buffer_text(tab.buffer_view()), "ab\nhello");
+    assert_eq!(tab.buffer_view().cursor(), Cursor::new(1, 4));
 }
 
 #[test]
@@ -6699,14 +6620,14 @@ fn paste_before_linewise_puts_cursor_at_start_of_first_pasted_line() {
     });
 
     let buffer = Buffer::from_str("ab");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
     assert_eq!(
-        window.dispatch_action(&EditorAction::paste_before()),
+        tab.dispatch_action(&EditorAction::paste_before()),
         ActionResult::Handled
     );
-    assert_eq!(buffer_text(window.buffer_view()), "hello\nab");
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 0));
+    assert_eq!(buffer_text(tab.buffer_view()), "hello\nab");
+    assert_eq!(tab.buffer_view().cursor(), Cursor::new(0, 0));
 }
 
 #[test]
@@ -6720,14 +6641,14 @@ fn paste_after_linewise_multiline_puts_cursor_at_end_of_last_line() {
     });
 
     let buffer = Buffer::from_str("ab");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
     assert_eq!(
-        window.dispatch_action(&EditorAction::paste_after()),
+        tab.dispatch_action(&EditorAction::paste_after()),
         ActionResult::Handled
     );
-    assert_eq!(buffer_text(window.buffer_view()), "ab\none\ntwo");
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(2, 2));
+    assert_eq!(buffer_text(tab.buffer_view()), "ab\none\ntwo");
+    assert_eq!(tab.buffer_view().cursor(), Cursor::new(2, 2));
 }
 
 #[test]
@@ -6741,14 +6662,14 @@ fn paste_before_linewise_multiline_puts_cursor_at_start_of_first_line() {
     });
 
     let buffer = Buffer::from_str("ab");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
     assert_eq!(
-        window.dispatch_action(&EditorAction::paste_before()),
+        tab.dispatch_action(&EditorAction::paste_before()),
         ActionResult::Handled
     );
-    assert_eq!(buffer_text(window.buffer_view()), "one\ntwo\nab");
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 0));
+    assert_eq!(buffer_text(tab.buffer_view()), "one\ntwo\nab");
+    assert_eq!(tab.buffer_view().cursor(), Cursor::new(0, 0));
 }
 
 #[test]
@@ -6762,14 +6683,14 @@ fn paste_after_characterwise_inserts_at_cursor_not_after_character() {
     });
 
     let buffer = Buffer::from_str("hello world");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
     assert_eq!(
-        window.dispatch_action(&EditorAction::paste_after()),
+        tab.dispatch_action(&EditorAction::paste_after()),
         ActionResult::Handled
     );
-    assert_eq!(buffer_text(window.buffer_view()), "hellohello world");
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 5));
+    assert_eq!(buffer_text(tab.buffer_view()), "hellohello world");
+    assert_eq!(tab.buffer_view().cursor(), Cursor::new(0, 5));
 }
 
 #[test]
@@ -6786,17 +6707,17 @@ fn paste_after_linewise_multiple_lines_inserts_all_content() {
     });
 
     let buffer = Buffer::from_str("alpha\nbeta");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
     assert_eq!(
-        window.dispatch_action(&EditorAction::paste_after()),
+        tab.dispatch_action(&EditorAction::paste_after()),
         ActionResult::Handled
     );
     assert_eq!(
-        buffer_text(window.buffer_view()),
+        buffer_text(tab.buffer_view()),
         "alpha\none\ntwo\nthree\nfour\nbeta"
     );
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(4, 3));
+    assert_eq!(tab.buffer_view().cursor(), Cursor::new(4, 3));
 }
 
 #[test]
@@ -6813,17 +6734,17 @@ fn paste_before_linewise_multiple_lines_inserts_all_content() {
     });
 
     let buffer = Buffer::from_str("alpha\nbeta");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
     assert_eq!(
-        window.dispatch_action(&EditorAction::paste_before()),
+        tab.dispatch_action(&EditorAction::paste_before()),
         ActionResult::Handled
     );
     assert_eq!(
-        buffer_text(window.buffer_view()),
+        buffer_text(tab.buffer_view()),
         "one\ntwo\nthree\nfour\nalpha\nbeta"
     );
-    assert_eq!(window.buffer_view().cursor(), Cursor::new(0, 0));
+    assert_eq!(tab.buffer_view().cursor(), Cursor::new(0, 0));
 }
 
 #[test]
@@ -6831,7 +6752,7 @@ fn test_indent_guide_appears_with_step_by_step_editing_at_column_zero() {
     // Start with flat, non-nested content (all at indent 0).
     // This creates no valid scopes in the cache (all are invalidated single-line).
     let buffer = Buffer::from_str("a\nb");
-    let mut window = Window::new(buffer);
+    let mut tab = EditorTab::new(buffer);
 
     let _config_guard = globals::set_test_config(Config {
         indent_guides: true,
@@ -6843,44 +6764,37 @@ fn test_indent_guide_appears_with_step_by_step_editing_at_column_zero() {
 
     // Simulate typing character by character as the user would:
     // Press `o` on line 1 (cursor at end of "b") to open a new line
-    window
-        .buffer_view_mut()
+    tab.buffer_view_mut()
         .with_buffer_mut(|b| b.insert_char(Cursor::new(1, 1), '\n'))
         .unwrap();
     // Now buffer: ["a", "b", ""], cursor goes to line 2
 
     // Type `{` on the new empty line
-    window
-        .buffer_view_mut()
+    tab.buffer_view_mut()
         .with_buffer_mut(|b| b.insert_char(Cursor::new(2, 0), '{'))
         .unwrap();
     // Buffer: ["a", "b", "{"]
 
     // Press Enter to split the line
-    window
-        .buffer_view_mut()
+    tab.buffer_view_mut()
         .with_buffer_mut(|b| b.insert_char(Cursor::new(2, 1), '\n'))
         .unwrap();
     // Buffer: ["a", "b", "{", ""]
 
     // Type spaces (user presses space 3 times for indentation)
-    window
-        .buffer_view_mut()
+    tab.buffer_view_mut()
         .with_buffer_mut(|b| b.insert_char(Cursor::new(3, 0), ' '))
         .unwrap();
-    window
-        .buffer_view_mut()
+    tab.buffer_view_mut()
         .with_buffer_mut(|b| b.insert_char(Cursor::new(3, 1), ' '))
         .unwrap();
-    window
-        .buffer_view_mut()
+    tab.buffer_view_mut()
         .with_buffer_mut(|b| b.insert_char(Cursor::new(3, 2), ' '))
         .unwrap();
 
     // Type `"hello"`
     for ch in "\"hello\"".chars() {
-        window
-            .buffer_view_mut()
+        tab.buffer_view_mut()
             .with_buffer_mut(|b| {
                 b.insert_char(
                     Cursor::new(3, b.line_at(3).map(|l| l.len()).unwrap_or(0)),
@@ -6891,8 +6805,7 @@ fn test_indent_guide_appears_with_step_by_step_editing_at_column_zero() {
     }
 
     // Press Enter to split
-    window
-        .buffer_view_mut()
+    tab.buffer_view_mut()
         .with_buffer_mut(|b| {
             b.insert_char(
                 Cursor::new(3, b.line_at(3).map(|l| l.len()).unwrap_or(0)),
@@ -6902,17 +6815,16 @@ fn test_indent_guide_appears_with_step_by_step_editing_at_column_zero() {
         .unwrap();
 
     // Type `}`
-    window
-        .buffer_view_mut()
+    tab.buffer_view_mut()
         .with_buffer_mut(|b| b.insert_char(Cursor::new(4, 0), '}'))
         .unwrap();
     // Buffer: ["a", "b", "{", "   \"hello\"", "}"]
 
     // Cursor is on the indented line (line 3 = `   "hello"`)
-    window.set_cursor(Cursor::new(3, 3));
+    tab.set_cursor(Cursor::new(3, 3));
 
     let mut screen = crate::screen::Screen::new(5, 24);
-    window.render(&mut screen, Position::new(0, 0), Size::new(5, 24));
+    tab.render(&mut screen, Position::new(0, 0), Size::new(5, 24));
 
     // Check for the guide character on screen row for the `"hello"` line.
     // Screen layout: 5 rows (0-4), gutter width includes the reserved fold sign.
