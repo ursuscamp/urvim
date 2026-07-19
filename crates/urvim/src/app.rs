@@ -262,6 +262,10 @@ fn run_editor_loop<I: io::Read + rustix::fd::AsFd, O: io::Write + rustix::fd::As
             needs_redraw = true;
         }
 
+        if plugin_runtime.dispatch_api_requests() {
+            needs_redraw = true;
+        }
+
         if plugin_runtime.dispatch_picker_events() {
             needs_redraw = true;
         }
@@ -329,6 +333,9 @@ fn run_editor_loop<I: io::Read + rustix::fd::AsFd, O: io::Write + rustix::fd::As
                     needs_redraw = true;
                 }
                 if plugin_runtime.dispatch_fs_events() {
+                    needs_redraw = true;
+                }
+                if plugin_runtime.dispatch_api_requests() {
                     needs_redraw = true;
                 }
                 if plugin_runtime.dispatch_timer_events() {

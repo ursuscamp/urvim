@@ -7,8 +7,9 @@ pub mod registry;
 pub mod theme;
 
 pub use contributions::{
-    DynamicFiletype, DynamicPluginCommand, DynamicPluginTheme, DynamicPluginThemeSource,
-    DynamicSyntaxProvider, PluginContributionRegistry, PluginEventKind, validate_contribution_name,
+    DynamicFiletype, DynamicPluginApi, DynamicPluginCommand, DynamicPluginTheme,
+    DynamicPluginThemeSource, DynamicSyntaxProvider, PluginContributionRegistry, PluginEventKind,
+    validate_contribution_name,
 };
 pub use error::PluginLoadError;
 pub use manifest::{MANIFEST_FILE_NAME, PluginManifest, RawPluginManifest};

@@ -14,6 +14,13 @@ pub struct DynamicPluginCommand {
     pub description: Option<String>,
 }
 
+/// A BearScript API endpoint exposed by a plugin.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct DynamicPluginApi {
+    /// Endpoint name inside the plugin namespace.
+    pub name: String,
+}
+
 /// A theme dynamically registered by a plugin.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct DynamicPluginTheme {
@@ -260,6 +267,7 @@ impl FromStr for PluginEventKind {
 /// Runtime registry of plugin-provided contributions.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct PluginContributionRegistry {
+    apis: BTreeMap<String, BTreeMap<String, DynamicPluginApi>>,
     commands: BTreeMap<String, BTreeMap<String, DynamicPluginCommand>>,
     themes: BTreeMap<String, BTreeMap<String, DynamicPluginTheme>>,
     filetypes: BTreeMap<String, BTreeMap<String, DynamicFiletype>>,
@@ -269,6 +277,51 @@ pub struct PluginContributionRegistry {
 }
 
 impl PluginContributionRegistry {
+    /// Registers or replaces an API endpoint for `plugin`.
+    pub fn register_api(
+        &mut self,
+        plugin: impl Into<String>,
+        api: DynamicPluginApi,
+    ) -> Result<(), String> {
+        validate_contribution_name(&api.name, "plugin API name")?;
+        self.apis
+            .entry(plugin.into())
+            .or_default()
+            .insert(api.name.clone(), api);
+        Ok(())
+    }
+
+    /// Unregisters an API endpoint owned by `plugin`.
+    pub fn unregister_api(&mut self, plugin: &str, api: &str) -> bool {
+        self.apis
+            .get_mut(plugin)
+            .and_then(|apis| apis.remove(api))
+            .is_some()
+    }
+
+    /// Unregisters every API endpoint owned by `plugin`.
+    pub fn unregister_plugin_apis(&mut self, plugin: &str) -> bool {
+        self.apis.remove(plugin).is_some()
+    }
+
+    /// Looks up an API endpoint owned by `plugin`.
+    pub fn api(&self, plugin: &str, api: &str) -> Option<&DynamicPluginApi> {
+        self.apis.get(plugin).and_then(|apis| apis.get(api))
+    }
+
+    /// Returns API endpoints exposed by `plugin` in name order.
+    pub fn apis(&self, plugin: &str) -> impl Iterator<Item = &DynamicPluginApi> {
+        self.apis
+            .get(plugin)
+            .into_iter()
+            .flat_map(|apis| apis.values())
+    }
+
+    /// Returns whether `plugin` exposes `api`.
+    pub fn has_api(&self, plugin: &str, api: &str) -> bool {
+        self.api(plugin, api).is_some()
+    }
+
     /// Registers or replaces a command for `plugin`.
     pub fn register_command(
         &mut self,
@@ -497,6 +550,7 @@ impl PluginContributionRegistry {
             Some(name) => vec![name.to_string()],
             None => {
                 let mut names = BTreeSet::new();
+                names.extend(self.apis.keys().cloned());
                 names.extend(self.commands.keys().cloned());
                 names.extend(self.themes.keys().cloned());
                 names.extend(self.filetypes.keys().cloned());
@@ -507,6 +561,11 @@ impl PluginContributionRegistry {
         };
 
         for plugin in plugins {
+            let apis: Vec<DynamicPluginApi> = self
+                .apis
+                .get(&plugin)
+                .map(|apis| apis.values().cloned().collect())
+                .unwrap_or_default();
             let commands: Vec<DynamicPluginCommand> = self
                 .commands
                 .get(&plugin)
@@ -540,7 +599,8 @@ impl PluginContributionRegistry {
                 .map(|filetypes| filetypes.values().cloned().collect())
                 .unwrap_or_default();
 
-            if !commands.is_empty()
+            if !apis.is_empty()
+                || !commands.is_empty()
                 || !themes.is_empty()
                 || !filetypes.is_empty()
                 || !syntax_providers.is_empty()
@@ -548,6 +608,7 @@ impl PluginContributionRegistry {
             {
                 snapshots.push(PluginContributionSnapshot {
                     plugin,
+                    apis,
                     commands,
                     themes,
                     filetypes,
@@ -566,6 +627,8 @@ impl PluginContributionRegistry {
 pub struct PluginContributionSnapshot {
     /// Plugin name.
     pub plugin: String,
+    /// Exposed API endpoints.
+    pub apis: Vec<DynamicPluginApi>,
     /// Registered dynamic commands.
     pub commands: Vec<DynamicPluginCommand>,
     /// Registered dynamic themes.
@@ -621,6 +684,30 @@ mod tests {
         assert_eq!(registry.command("demo", "hello").unwrap().name, "hello");
         assert!(registry.unregister_command("demo", "hello"));
         assert!(registry.command("demo", "hello").is_none());
+    }
+
+    #[test]
+    fn registers_lists_and_unregisters_apis() {
+        let mut registry = PluginContributionRegistry::default();
+        registry
+            .register_api(
+                "demo",
+                DynamicPluginApi {
+                    name: "lookup.v1".to_string(),
+                },
+            )
+            .expect("API should register");
+
+        assert!(registry.has_api("demo", "lookup.v1"));
+        assert_eq!(
+            registry
+                .apis("demo")
+                .map(|api| api.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["lookup.v1"]
+        );
+        assert!(registry.unregister_plugin_apis("demo"));
+        assert!(!registry.has_api("demo", "lookup.v1"));
     }
 
     #[test]

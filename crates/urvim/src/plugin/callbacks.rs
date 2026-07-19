@@ -16,6 +16,8 @@ pub(in crate::plugin) struct BearscriptPlugin {
 
 #[derive(Default)]
 pub(in crate::plugin) struct BearscriptPluginCallbacks {
+    pub(in crate::plugin) apis: HashMap<String, Value>,
+    pub(in crate::plugin) api_responses: HashMap<u64, Value>,
     pub(in crate::plugin) commands: HashMap<String, Value>,
     pub(in crate::plugin) event_hooks: HashMap<u64, Value>,
     pub(in crate::plugin) fs: HashMap<u64, Value>,

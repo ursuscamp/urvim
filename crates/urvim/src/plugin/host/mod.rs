@@ -20,6 +20,7 @@ mod syntax;
 mod themes;
 mod ui;
 
+use super::api::PluginApiQueue;
 use super::callbacks::BearscriptPluginCallbacks;
 use super::fs::PluginFsRegistry;
 use super::jobs::{PluginJobRegistry, job_id_from_number};
@@ -44,6 +45,7 @@ use syntax::syntax_module;
 use themes::themes_module;
 use ui::ui_module;
 
+#[cfg(test)]
 pub(in crate::plugin) fn urvim_module(
     plugin: String,
     contributions: Rc<RefCell<urvim_plugin::PluginContributionRegistry>>,
@@ -53,10 +55,33 @@ pub(in crate::plugin) fn urvim_module(
     jobs: Rc<PluginJobRegistry>,
     timers: Rc<PluginTimerRegistry>,
 ) -> Value {
+    urvim_module_with_api_queue(
+        plugin,
+        contributions,
+        callbacks,
+        Rc::new(PluginApiQueue::default()),
+        layout,
+        fs,
+        jobs,
+        timers,
+    )
+}
+
+pub(in crate::plugin) fn urvim_module_with_api_queue(
+    plugin: String,
+    contributions: Rc<RefCell<urvim_plugin::PluginContributionRegistry>>,
+    callbacks: Rc<RefCell<BearscriptPluginCallbacks>>,
+    api_queue: Rc<PluginApiQueue>,
+    layout: SharedLayout,
+    fs: Rc<PluginFsRegistry>,
+    jobs: Rc<PluginJobRegistry>,
+    timers: Rc<PluginTimerRegistry>,
+) -> Value {
     UrvimModuleBuilder {
         plugin,
         contributions,
         callbacks,
+        api_queue,
         layout,
         fs,
         jobs,
@@ -69,6 +94,7 @@ struct UrvimModuleBuilder {
     plugin: String,
     contributions: Rc<RefCell<urvim_plugin::PluginContributionRegistry>>,
     callbacks: Rc<RefCell<BearscriptPluginCallbacks>>,
+    api_queue: Rc<PluginApiQueue>,
     layout: SharedLayout,
     fs: Rc<PluginFsRegistry>,
     jobs: Rc<PluginJobRegistry>,
@@ -94,6 +120,7 @@ impl UrvimModuleBuilder {
         );
         module.insert("registers".to_string(), registers_module());
         module.insert("commands".to_string(), self.commands_module());
+        module.insert("plugins".to_string(), self.plugins_module());
         module.insert("keymaps".to_string(), keymaps_module());
         module.insert("diagnostics".to_string(), diagnostics_module());
         module.insert(
@@ -200,6 +227,86 @@ impl UrvimModuleBuilder {
                 (
                     "execute".to_string(),
                     command_execute_fn("commands.execute", execute_layout),
+                ),
+            ])
+            .into(),
+        )
+    }
+
+    fn plugins_module(&self) -> Value {
+        let expose_plugin = self.plugin.clone();
+        let expose_contributions = Rc::clone(&self.contributions);
+        let expose_callbacks = Rc::clone(&self.callbacks);
+        let unexpose_plugin = self.plugin.clone();
+        let unexpose_contributions = Rc::clone(&self.contributions);
+        let unexpose_callbacks = Rc::clone(&self.callbacks);
+        let call_plugin = self.plugin.clone();
+        let call_queue = Rc::clone(&self.api_queue);
+        let call_callbacks = Rc::clone(&self.callbacks);
+        let has_contributions = Rc::clone(&self.contributions);
+        let list_plugin = self.plugin.clone();
+        let list_contributions = Rc::clone(&self.contributions);
+
+        Value::Module(
+            HashMap::from([
+                (
+                    "expose".to_string(),
+                    super::native_fn("plugins.expose", move |name: String, callback: Value| {
+                        super::register_plugin_api(
+                            &expose_plugin,
+                            Rc::clone(&expose_contributions),
+                            Rc::clone(&expose_callbacks),
+                            name,
+                            callback,
+                        )
+                    }),
+                ),
+                (
+                    "unexpose".to_string(),
+                    super::native_fn("plugins.unexpose", move |name: String| {
+                        super::unregister_plugin_api(
+                            &unexpose_plugin,
+                            Rc::clone(&unexpose_contributions),
+                            Rc::clone(&unexpose_callbacks),
+                            &name,
+                        );
+                        Ok(())
+                    }),
+                ),
+                (
+                    "call".to_string(),
+                    super::native_fn(
+                        "plugins.call",
+                        move |plugin: String, api: String, request: Value, callback: Value| {
+                            super::validate_callback(&callback, "plugin API response callback")?;
+                            urvim_plugin::validate_contribution_name(&plugin, "plugin name")?;
+                            urvim_plugin::validate_contribution_name(&api, "plugin API name")?;
+                            let id = call_queue.enqueue(&call_plugin, plugin, api, request)?;
+                            call_callbacks
+                                .borrow_mut()
+                                .api_responses
+                                .insert(id, callback);
+                            Ok(id as f64)
+                        },
+                    ),
+                ),
+                (
+                    "has".to_string(),
+                    super::native_fn("plugins.has", move |plugin: String, api: String| {
+                        Ok(has_contributions.borrow().has_api(&plugin, &api))
+                    }),
+                ),
+                (
+                    "list".to_string(),
+                    super::native_fn("plugins.list", move |plugin: Option<String>| {
+                        let plugin = plugin.as_deref().unwrap_or(&list_plugin);
+                        let apis = list_contributions
+                            .borrow()
+                            .apis(plugin)
+                            .map(|api| super::api_to_value(plugin, api))
+                            .collect::<Vec<_>>();
+                        Ok(Value::List(apis.into()))
+                    }),
                 ),
             ])
             .into(),

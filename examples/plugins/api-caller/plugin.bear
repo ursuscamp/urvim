@@ -1,0 +1,58 @@
+fn init() {
+    urvim.commands.register("demo", run_demo, "Call both api-host endpoints")
+    urvim.commands.register("discover", discover, "List api-host endpoints")
+    urvim.commands.register("error", call_missing, "Demonstrate an API error response")
+}
+
+fn run_demo(args) {
+    if !urvim.plugins.has("api-host", "greet.v1") or !urvim.plugins.has("api-host", "add.v1") {
+        urvim.ui.show_message("api-host is not available", { "level": "warn" })
+        return
+    }
+
+    urvim.plugins.call("api-host", "greet.v1", { "name": "urvim" }, on_greeting)
+    urvim.plugins.call("api-host", "add.v1", { "left": 20, "right": 22 }, on_sum)
+}
+
+fn discover(args) {
+    let endpoints = urvim.plugins.list("api-host")
+    urvim.ui.show_message("api-host endpoints: " + urvim.json.stringify(endpoints), { "level": "info" })
+}
+
+fn call_missing(args) {
+    urvim.plugins.call("api-host", "missing.v1", null, on_missing)
+}
+
+fn on_greeting(response) {
+    if !response["ok"] {
+        show_error(response)
+        return
+    }
+
+    let value = response["value"]
+    urvim.ui.show_message(value["message"] + " Requested by " + value["requested_by"] + ".", { "level": "info" })
+}
+
+fn on_sum(response) {
+    if !response["ok"] {
+        show_error(response)
+        return
+    }
+
+    let value = response["value"]
+    let sum = urvim.inspect(value["sum"])
+    urvim.ui.show_message("20 + 22 = " + sum + " (requested by " + value["requested_by"] + ")", { "level": "info" })
+}
+
+fn on_missing(response) {
+    if response["ok"] {
+        urvim.ui.show_message("unexpected API success", { "level": "warn" })
+        return
+    }
+
+    urvim.ui.show_message("Expected API error: " + response["error"], { "level": "info" })
+}
+
+fn show_error(response) {
+    urvim.ui.show_message(response["api"] + " failed: " + response["error"], { "level": "error" })
+}

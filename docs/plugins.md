@@ -88,6 +88,7 @@ BearScript plugins run in-process on the main editor thread. The current synchro
 - `init()`, called during plugin loading.
 - Registered commands, called when `plugin <plugin-id> <command>` is executed.
 - Registered event hooks, called when editor events are drained.
+- Exposed plugin API endpoints, called when deferred cross-plugin requests are drained.
 - Timer callbacks, called when scheduled timer events are drained.
 
 Synchronous callbacks may call editor APIs directly, but they should stay quick. Avoid blocking I/O, long external commands, and expensive CPU work inside `init()`, commands, event hooks, or timer callbacks. Future plugin phases will add provider APIs for expensive structured work.
@@ -167,6 +168,11 @@ The global `urvim` module exposes the APIs below. All arguments and return value
 - `urvim.commands.list() -> [command]`
 - `urvim.commands.execute(command_line) -> bool`
 - `urvim.command(command_line) -> bool`
+- `urvim.plugins.expose(name, function)`
+- `urvim.plugins.unexpose(name)`
+- `urvim.plugins.call(plugin, name, request, callback) -> request_id`
+- `urvim.plugins.has(plugin, name) -> bool`
+- `urvim.plugins.list(plugin?) -> [api]`
 - `urvim.keymaps.set(mode, lhs, rhs, opts?)`
 - `urvim.keymaps.delete(mode, lhs)`
 - `urvim.keymaps.list(mode?) -> [keymap]`
@@ -184,6 +190,49 @@ urvim.command("buffer filetype rust buffer={buffer_id}")
 ```
 
 `urvim.command` and `urvim.commands.execute` return whether the command was handled, not whether the requested operation succeeded. Runtime failures such as an unknown buffer id are reported through editor notifications.
+
+### Cross-Plugin APIs
+
+Plugins can expose named API endpoints to other plugins. Calls are deferred until the current plugin callback returns, so an endpoint never re-enters another running BearScript engine.
+
+Provider:
+
+```text
+fn init() {
+    urvim.plugins.expose("lookup.v1", lookup)
+}
+
+fn lookup(request, caller) {
+    return {
+        "query": request["query"],
+        "requested_by": caller
+    }
+}
+```
+
+Consumer:
+
+```text
+fn request_lookup() {
+    urvim.plugins.call("search-provider", "lookup.v1", { "query": "needle" }, on_lookup)
+}
+
+fn on_lookup(response) {
+    if response["ok"] {
+        let result = response["value"]
+    } else {
+        urvim.ui.show_message(response["error"], { "level": "error" })
+    }
+}
+```
+
+The provider receives the request value and the caller's plugin id. The response callback receives `id`, `plugin`, `api`, and `ok`. Successful responses also contain `value`; failed responses contain `error`. Missing plugins and endpoints, provider errors, and invalid response values are delivered as failed responses.
+
+Requests and responses may contain only `null`, booleans, finite numbers, strings, lists, and maps. Functions, modules, ranges, generators, and non-finite numbers cannot cross plugin boundaries.
+
+Calls made during `init()` are queued and resolved after loading, so a consumer may load before its provider. Discovery through `has` or `list` reflects only endpoints registered so far; perform optional-provider discovery from `EditorStarted` rather than relying on plugin load order. When making an incompatible endpoint change, expose a new versioned name such as `lookup.v2`.
+
+See `examples/plugins/api-host` and `examples/plugins/api-caller` for a complete provider and consumer pair with discovery, successful calls, and error handling.
 
 ### Registers and Themes
 

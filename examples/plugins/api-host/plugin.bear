@@ -1,0 +1,18 @@
+fn init() {
+    urvim.plugins.expose("greet.v1", greet)
+    urvim.plugins.expose("add.v1", add)
+}
+
+fn greet(request, caller) {
+    return {
+        "message": "Hello, " + request["name"] + "!",
+        "requested_by": caller
+    }
+}
+
+fn add(request, caller) {
+    return {
+        "sum": request["left"] + request["right"],
+        "requested_by": caller
+    }
+}

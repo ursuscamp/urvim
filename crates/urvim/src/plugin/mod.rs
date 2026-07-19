@@ -4,6 +4,7 @@ use std::io;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
+mod api;
 mod callbacks;
 mod confirmations;
 mod conversion;
@@ -28,13 +29,16 @@ use urvim_core::ui::input_box::PluginInputCancelled;
 use urvim_core::ui::picker::plugin::PluginPickerCancelled;
 use urvim_core::ui::{Command, Intent};
 
+use api::{PluginApiQueue, PluginApiRequest, validate_api_value};
 use callbacks::{BearscriptPlugin, BearscriptPluginCallbacks};
 use confirmations::PluginConfirmationEvents;
 use conversion::{BearNumber, BearValueRef, FromBearValue};
 use event::{bear_args, event_constants, event_payload};
 use fs::{PluginFsEvent, PluginFsRegistry, fs_event_id, fs_event_to_value};
 use health::{PluginHealth, PluginHealthSummary, slow_threshold};
-use host::{native_fn, urvim_module};
+#[cfg(test)]
+use host::urvim_module;
+use host::{native_fn, urvim_module_with_api_queue};
 use inputs::PluginInputEvents;
 use jobs::{PluginJobEvent, PluginJobRegistry, job_event_to_value};
 use pickers::PluginPickerEvents;
@@ -62,6 +66,7 @@ pub(super) struct BearscriptPluginRuntime {
     layout: SharedLayout,
     plugins: HashMap<String, BearscriptPlugin>,
     health: HashMap<String, PluginHealth>,
+    api_queue: Rc<PluginApiQueue>,
     contributions: Rc<RefCell<urvim_plugin::PluginContributionRegistry>>,
     fs: Rc<PluginFsRegistry>,
     jobs: Rc<PluginJobRegistry>,
@@ -79,6 +84,7 @@ impl BearscriptPluginRuntime {
             layout,
             plugins: HashMap::new(),
             health: HashMap::new(),
+            api_queue: Rc::new(PluginApiQueue::default()),
             contributions: Rc::new(RefCell::new(
                 urvim_plugin::PluginContributionRegistry::default(),
             )),
@@ -103,6 +109,7 @@ impl BearscriptPluginRuntime {
             layout,
             plugins: HashMap::new(),
             health: HashMap::new(),
+            api_queue: Rc::new(PluginApiQueue::default()),
             contributions,
             fs: Rc::new(PluginFsRegistry::default()),
             jobs: Rc::new(PluginJobRegistry::default()),
@@ -295,6 +302,112 @@ impl BearscriptPluginRuntime {
             }
         }
         dispatched
+    }
+
+    /// Dispatches one batch of deferred cross-plugin API calls.
+    pub(super) fn dispatch_api_requests(&mut self) -> bool {
+        let requests = self.api_queue.take_batch();
+        let dispatched = !requests.is_empty();
+        for request in requests {
+            let result = self.call_plugin_api(&request);
+            self.deliver_plugin_api_response(request, result);
+        }
+        dispatched
+    }
+
+    fn call_plugin_api(&mut self, request: &PluginApiRequest) -> Result<Value, String> {
+        self.contributions
+            .borrow()
+            .api(&request.plugin, &request.api)
+            .ok_or_else(|| {
+                format!(
+                    "plugin {:?} does not expose API {:?}",
+                    request.plugin, request.api
+                )
+            })?;
+        let plugin_runtime = self
+            .plugins
+            .get_mut(&request.plugin)
+            .ok_or_else(|| format!("plugin {:?} is not loaded", request.plugin))?;
+        let callback = plugin_runtime
+            .callbacks
+            .borrow()
+            .apis
+            .get(&request.api)
+            .cloned()
+            .ok_or_else(|| {
+                format!(
+                    "plugin {:?} API {:?} has no callback",
+                    request.plugin, request.api
+                )
+            })?;
+        let started = Instant::now();
+        let transaction = begin_plugin_callback(&self.layout, &request.plugin);
+        let result = plugin_runtime
+            .engine
+            .call_value(
+                callback,
+                vec![
+                    request.value.clone(),
+                    Value::String(request.caller.clone().into_boxed_str().into()),
+                ],
+            )
+            .map_err(|error| error.to_string())
+            .and_then(|value| {
+                validate_api_value(&value, "plugin API response")?;
+                Ok(value)
+            });
+        finish_plugin_callback(&self.layout, transaction);
+        self.record_callback(
+            &request.plugin,
+            format!("API {}", request.api),
+            started.elapsed(),
+        );
+        if let Err(error) = &result {
+            self.record_error(&request.plugin, error.clone());
+        }
+        result
+    }
+
+    fn deliver_plugin_api_response(
+        &mut self,
+        request: PluginApiRequest,
+        result: Result<Value, String>,
+    ) {
+        let Some(plugin_runtime) = self.plugins.get_mut(&request.caller) else {
+            return;
+        };
+        let Some(callback) = plugin_runtime
+            .callbacks
+            .borrow_mut()
+            .api_responses
+            .remove(&request.id)
+        else {
+            return;
+        };
+        let payload = plugin_api_response_value(&request, result);
+        let started = Instant::now();
+        let transaction = begin_plugin_callback(&self.layout, &request.caller);
+        let result = plugin_runtime
+            .engine
+            .call_value(callback, vec![payload])
+            .map(|_| ())
+            .map_err(|error| error.to_string());
+        finish_plugin_callback(&self.layout, transaction);
+        self.record_callback(
+            &request.caller,
+            format!("API {} response", request.api),
+            started.elapsed(),
+        );
+        if let Err(error) = result {
+            self.record_error(&request.caller, error.clone());
+            tracing::warn!(
+                plugin = request.caller,
+                api = request.api,
+                error = %error,
+                "BearScript plugin API response callback failed"
+            );
+        }
     }
 
     /// Runs synchronous syntax providers for buffers with matching plugin providers.
@@ -869,10 +982,11 @@ impl BearscriptPluginRuntime {
         callbacks.borrow_mut().input_cancellation_sender = Some(self.input_events.sender());
         engine.set_global(
             "urvim",
-            urvim_module(
+            urvim_module_with_api_queue(
                 plugin_name.to_string(),
                 Rc::clone(&self.contributions),
                 Rc::clone(&callbacks),
+                Rc::clone(&self.api_queue),
                 Rc::clone(&self.layout),
                 Rc::clone(&self.fs),
                 Rc::clone(&self.jobs),
@@ -882,6 +996,10 @@ impl BearscriptPluginRuntime {
 
         let entry = plugin.root().join(plugin.entry());
         if let Err(error) = engine.eval_file(entry.to_string_lossy().as_ref()) {
+            self.contributions
+                .borrow_mut()
+                .unregister_plugin_apis(plugin_name);
+            self.api_queue.remove_caller(plugin_name);
             self.layout
                 .borrow_mut()
                 .overlays_mut()
@@ -904,6 +1022,10 @@ impl BearscriptPluginRuntime {
         let init_result = engine.eval("init();").map_err(|error| error.to_string());
         self.record_callback(plugin_name, "init", started.elapsed());
         if let Err(error) = init_result {
+            self.contributions
+                .borrow_mut()
+                .unregister_plugin_apis(plugin_name);
+            self.api_queue.remove_caller(plugin_name);
             self.layout
                 .borrow_mut()
                 .overlays_mut()
@@ -1458,6 +1580,76 @@ fn register_plugin_command(
     )?;
     callbacks.borrow_mut().commands.insert(name, callback);
     Ok(())
+}
+
+fn register_plugin_api(
+    plugin: &str,
+    contributions: Rc<RefCell<urvim_plugin::PluginContributionRegistry>>,
+    callbacks: Rc<RefCell<BearscriptPluginCallbacks>>,
+    name: String,
+    callback: Value,
+) -> Result<(), String> {
+    validate_callback(&callback, "plugin API callback")?;
+    contributions.borrow_mut().register_api(
+        plugin.to_string(),
+        urvim_plugin::DynamicPluginApi { name: name.clone() },
+    )?;
+    callbacks.borrow_mut().apis.insert(name, callback);
+    Ok(())
+}
+
+fn unregister_plugin_api(
+    plugin: &str,
+    contributions: Rc<RefCell<urvim_plugin::PluginContributionRegistry>>,
+    callbacks: Rc<RefCell<BearscriptPluginCallbacks>>,
+    name: &str,
+) {
+    contributions.borrow_mut().unregister_api(plugin, name);
+    callbacks.borrow_mut().apis.remove(name);
+}
+
+fn api_to_value(plugin: &str, api: &urvim_plugin::DynamicPluginApi) -> Value {
+    Value::Map(
+        HashMap::from([
+            (
+                "plugin".to_string(),
+                Value::String(plugin.to_string().into_boxed_str().into()),
+            ),
+            (
+                "name".to_string(),
+                Value::String(api.name.clone().into_boxed_str().into()),
+            ),
+        ])
+        .into(),
+    )
+}
+
+fn plugin_api_response_value(request: &PluginApiRequest, result: Result<Value, String>) -> Value {
+    let mut payload = HashMap::from([
+        ("id".to_string(), Value::Number(request.id as f64)),
+        (
+            "plugin".to_string(),
+            Value::String(request.plugin.clone().into_boxed_str().into()),
+        ),
+        (
+            "api".to_string(),
+            Value::String(request.api.clone().into_boxed_str().into()),
+        ),
+    ]);
+    match result {
+        Ok(value) => {
+            payload.insert("ok".to_string(), Value::Bool(true));
+            payload.insert("value".to_string(), value);
+        }
+        Err(error) => {
+            payload.insert("ok".to_string(), Value::Bool(false));
+            payload.insert(
+                "error".to_string(),
+                Value::String(error.into_boxed_str().into()),
+            );
+        }
+    }
+    Value::Map(payload.into())
 }
 
 fn unregister_plugin_command(
@@ -2047,6 +2239,29 @@ entry = "plugin.bear"
         runtime
     }
 
+    fn add_runtime_plugin(runtime: &mut BearscriptPluginRuntime, name: &str, script: &str) {
+        let callbacks = Rc::new(RefCell::new(BearscriptPluginCallbacks::default()));
+        let mut engine = Engine::new();
+        engine.set_global(
+            "urvim",
+            urvim_module_with_api_queue(
+                name.to_string(),
+                Rc::clone(&runtime.contributions),
+                Rc::clone(&callbacks),
+                Rc::clone(&runtime.api_queue),
+                Rc::clone(&runtime.layout),
+                Rc::clone(&runtime.fs),
+                Rc::clone(&runtime.jobs),
+                Rc::clone(&runtime.timers),
+            ),
+        );
+        engine.eval(script).expect("plugin script should evaluate");
+        engine.eval("init();").expect("plugin init should run");
+        runtime
+            .plugins
+            .insert(name.to_string(), BearscriptPlugin { engine, callbacks });
+    }
+
     #[test]
     fn health_summary_counts_loaded_failed_and_callbacks() {
         let mut runtime = BearscriptPluginRuntime::empty(shared_test_layout());
@@ -2118,6 +2333,7 @@ entry = "plugin.bear"
             "selection",
             "registers",
             "commands",
+            "plugins",
             "keymaps",
             "diagnostics",
             "ui",
@@ -2147,6 +2363,229 @@ entry = "plugin.bear"
             assert!(
                 !module.contains_key(removed),
                 "legacy urvim.{removed} should not be exposed"
+            );
+        }
+    }
+
+    #[test]
+    fn plugin_api_calls_are_deferred_and_support_reverse_load_order() {
+        let mut runtime = BearscriptPluginRuntime::empty(shared_test_layout());
+        add_runtime_plugin(
+            &mut runtime,
+            "consumer",
+            r#"
+            let api_result = null
+
+            fn on_lookup(response) {
+                api_result = response
+            }
+
+            fn init() {
+                urvim.plugins.call("provider", "lookup.v1", { "query": "needle" }, on_lookup)
+            }
+            "#,
+        );
+        assert_eq!(
+            runtime
+                .plugins
+                .get_mut("consumer")
+                .expect("consumer should be loaded")
+                .engine
+                .eval("api_result")
+                .expect("result should evaluate"),
+            Value::Null
+        );
+        add_runtime_plugin(
+            &mut runtime,
+            "provider",
+            r#"
+            fn lookup(request, caller) {
+                return [request["query"], caller]
+            }
+
+            fn init() {
+                urvim.plugins.expose("lookup.v1", lookup)
+            }
+            "#,
+        );
+
+        assert!(runtime.dispatch_api_requests());
+        let consumer = runtime
+            .plugins
+            .get_mut("consumer")
+            .expect("consumer should be loaded");
+        assert_eq!(
+            consumer
+                .engine
+                .eval("api_result[\"ok\"]")
+                .expect("status should evaluate"),
+            Value::Bool(true)
+        );
+        assert_eq!(
+            consumer
+                .engine
+                .eval("api_result[\"value\"]")
+                .expect("value should evaluate"),
+            Value::List(
+                vec![
+                    Value::String("needle".into()),
+                    Value::String("consumer".into())
+                ]
+                .into()
+            )
+        );
+        let provider = runtime
+            .plugins
+            .get_mut("provider")
+            .expect("provider should be loaded");
+        assert_eq!(
+            provider
+                .engine
+                .eval("urvim.plugins.has(\"provider\", \"lookup.v1\")")
+                .expect("API presence should evaluate"),
+            Value::Bool(true)
+        );
+        assert_eq!(
+            provider
+                .engine
+                .eval("urvim.plugins.list()[0][\"name\"]")
+                .expect("API list should evaluate"),
+            Value::String("lookup.v1".into())
+        );
+        provider
+            .engine
+            .eval("urvim.plugins.unexpose(\"lookup.v1\")")
+            .expect("API should unexpose");
+        assert!(
+            !runtime
+                .contributions
+                .borrow()
+                .has_api("provider", "lookup.v1")
+        );
+        assert!(!runtime.dispatch_api_requests());
+    }
+
+    #[test]
+    fn plugin_api_missing_endpoint_delivers_error_response() {
+        let mut runtime = BearscriptPluginRuntime::empty(shared_test_layout());
+        add_runtime_plugin(
+            &mut runtime,
+            "consumer",
+            r#"
+            let api_result = null
+            fn on_result(response) { api_result = response }
+            fn init() {
+                urvim.plugins.call("missing", "lookup.v1", null, on_result)
+            }
+            "#,
+        );
+
+        assert!(runtime.dispatch_api_requests());
+        let consumer = runtime
+            .plugins
+            .get_mut("consumer")
+            .expect("consumer should be loaded");
+        assert_eq!(
+            consumer
+                .engine
+                .eval("api_result[\"ok\"]")
+                .expect("status should evaluate"),
+            Value::Bool(false)
+        );
+        let error = consumer
+            .engine
+            .eval("api_result[\"error\"]")
+            .expect("error should evaluate")
+            .to_string();
+        assert!(error.contains("does not expose API"));
+    }
+
+    #[test]
+    fn failed_plugin_init_removes_exposed_apis() {
+        let root = unique_temp_dir("plugin-api-failed-init");
+        std::fs::create_dir_all(&root).expect("plugin dir should be created");
+        std::fs::write(
+            root.join("urvim-plugin.toml"),
+            r#"
+            name = "broken"
+            version = "0.1.0"
+            entry = "plugin.bear"
+            "#,
+        )
+        .expect("manifest should be written");
+        std::fs::write(
+            root.join("plugin.bear"),
+            r#"
+            fn endpoint(request, caller) { return request }
+            fn init() {
+                urvim.plugins.expose("temporary.v1", endpoint)
+                missing_function()
+            }
+            "#,
+        )
+        .expect("plugin script should be written");
+        let plugins = std::collections::BTreeMap::from([(
+            "broken".to_string(),
+            urvim_plugin::PluginConfigEntry {
+                enabled: true,
+                path: root.clone(),
+            },
+        )]);
+        let registry = urvim_plugin::PluginRegistry::load_from_config(&plugins)
+            .expect("test plugin registry should load");
+        let plugin = registry.get("broken").expect("broken plugin should load");
+        let mut runtime = BearscriptPluginRuntime::empty(shared_test_layout());
+
+        assert!(runtime.load_plugin("broken", &plugin).is_err());
+        assert!(
+            !runtime
+                .contributions
+                .borrow()
+                .has_api("broken", "temporary.v1")
+        );
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn example_api_plugins_load_and_complete_demo_calls() {
+        globals::clear_notifications();
+        let examples = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .join("examples/plugins");
+        let plugins = std::collections::BTreeMap::from([
+            (
+                "api-caller".to_string(),
+                urvim_plugin::PluginConfigEntry {
+                    enabled: true,
+                    path: examples.join("api-caller"),
+                },
+            ),
+            (
+                "api-host".to_string(),
+                urvim_plugin::PluginConfigEntry {
+                    enabled: true,
+                    path: examples.join("api-host"),
+                },
+            ),
+        ]);
+        let registry = urvim_plugin::PluginRegistry::load_from_config(&plugins)
+            .expect("example plugin manifests should load");
+        let mut runtime =
+            BearscriptPluginRuntime::load_from_registry(&registry, shared_test_layout());
+
+        runtime
+            .run_command("api-caller", "demo", &[])
+            .expect("demo command should run");
+        assert!(runtime.dispatch_api_requests());
+        for plugin in ["api-host", "api-caller"] {
+            let health = runtime
+                .health
+                .get(plugin)
+                .expect("plugin health should exist");
+            assert!(health.loaded, "{plugin} should load");
+            assert_eq!(
+                health.last_error, None,
+                "{plugin} should not report an error"
             );
         }
     }
