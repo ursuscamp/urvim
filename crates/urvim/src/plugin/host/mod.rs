@@ -24,6 +24,7 @@ use super::api::PluginApiQueue;
 use super::callbacks::BearscriptPluginCallbacks;
 use super::fs::PluginFsRegistry;
 use super::jobs::{PluginJobRegistry, job_id_from_number};
+use super::plugin_events::PluginEventBus;
 use super::timers::{PluginTimerRegistry, timer_id_from_number, timer_ms_from_number};
 use super::{
     SharedLayout, buffers_module, command_execute_fn, diagnostics_module, event_constants,
@@ -60,6 +61,7 @@ pub(in crate::plugin) fn urvim_module(
         contributions,
         callbacks,
         Rc::new(PluginApiQueue::default()),
+        Rc::new(PluginEventBus::default()),
         layout,
         fs,
         jobs,
@@ -72,6 +74,7 @@ pub(in crate::plugin) fn urvim_module_with_api_queue(
     contributions: Rc<RefCell<urvim_plugin::PluginContributionRegistry>>,
     callbacks: Rc<RefCell<BearscriptPluginCallbacks>>,
     api_queue: Rc<PluginApiQueue>,
+    plugin_events: Rc<PluginEventBus>,
     layout: SharedLayout,
     fs: Rc<PluginFsRegistry>,
     jobs: Rc<PluginJobRegistry>,
@@ -82,6 +85,7 @@ pub(in crate::plugin) fn urvim_module_with_api_queue(
         contributions,
         callbacks,
         api_queue,
+        plugin_events,
         layout,
         fs,
         jobs,
@@ -95,6 +99,7 @@ struct UrvimModuleBuilder {
     contributions: Rc<RefCell<urvim_plugin::PluginContributionRegistry>>,
     callbacks: Rc<RefCell<BearscriptPluginCallbacks>>,
     api_queue: Rc<PluginApiQueue>,
+    plugin_events: Rc<PluginEventBus>,
     layout: SharedLayout,
     fs: Rc<PluginFsRegistry>,
     jobs: Rc<PluginJobRegistry>,
@@ -243,6 +248,14 @@ impl UrvimModuleBuilder {
         let call_plugin = self.plugin.clone();
         let call_queue = Rc::clone(&self.api_queue);
         let call_callbacks = Rc::clone(&self.callbacks);
+        let subscribe_plugin = self.plugin.clone();
+        let subscribe_events = Rc::clone(&self.plugin_events);
+        let subscribe_callbacks = Rc::clone(&self.callbacks);
+        let unsubscribe_plugin = self.plugin.clone();
+        let unsubscribe_events = Rc::clone(&self.plugin_events);
+        let unsubscribe_callbacks = Rc::clone(&self.callbacks);
+        let emit_plugin = self.plugin.clone();
+        let emit_events = Rc::clone(&self.plugin_events);
         let has_contributions = Rc::clone(&self.contributions);
         let list_plugin = self.plugin.clone();
         let list_contributions = Rc::clone(&self.contributions);
@@ -306,6 +319,53 @@ impl UrvimModuleBuilder {
                             .map(|api| super::api_to_value(plugin, api))
                             .collect::<Vec<_>>();
                         Ok(Value::List(apis.into()))
+                    }),
+                ),
+                (
+                    "subscribe".to_string(),
+                    super::native_fn(
+                        "plugins.subscribe",
+                        move |publisher: String, event: String, callback: Value| {
+                            super::validate_callback(
+                                &callback,
+                                "plugin event subscription callback",
+                            )?;
+                            let subscription_id = {
+                                let mut callbacks = subscribe_callbacks.borrow_mut();
+                                let subscription_id = callbacks.next_subscription_id;
+                                callbacks.next_subscription_id += 1;
+                                subscription_id
+                            };
+                            subscribe_events.subscribe(
+                                &subscribe_plugin,
+                                publisher,
+                                event,
+                                subscription_id,
+                            )?;
+                            subscribe_callbacks
+                                .borrow_mut()
+                                .plugin_event_subscriptions
+                                .insert(subscription_id, callback);
+                            Ok(subscription_id as f64)
+                        },
+                    ),
+                ),
+                (
+                    "unsubscribe".to_string(),
+                    super::native_fn("plugins.unsubscribe", move |subscription_id: f64| {
+                        let subscription_id = super::subscription_id_from_number(subscription_id)?;
+                        unsubscribe_events.unsubscribe(&unsubscribe_plugin, subscription_id);
+                        unsubscribe_callbacks
+                            .borrow_mut()
+                            .plugin_event_subscriptions
+                            .remove(&subscription_id);
+                        Ok(())
+                    }),
+                ),
+                (
+                    "emit".to_string(),
+                    super::native_fn("plugins.emit", move |event: String, value: Value| {
+                        emit_events.emit(&emit_plugin, event, value)
                     }),
                 ),
             ])

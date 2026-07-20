@@ -2,6 +2,7 @@ fn init() {
     urvim.commands.register("demo", run_demo, "Call both api-host endpoints")
     urvim.commands.register("discover", discover, "List api-host endpoints")
     urvim.commands.register("error", call_missing, "Demonstrate an API error response")
+    urvim.plugins.subscribe("api-host", "request.completed.v1", on_request_completed)
 }
 
 fn run_demo(args) {
@@ -51,6 +52,15 @@ fn on_missing(response) {
     }
 
     urvim.ui.show_message("Expected API error: " + response["error"], { "level": "info" })
+}
+
+fn on_request_completed(message) {
+    let value = message["value"]
+    let publisher = message["publisher"]
+    let event = message["event"]
+    let api = value["api"]
+    let caller = value["caller"]
+    urvim.ui.show_message("Custom event {publisher}:{event} reported {api} for {caller}", { "level": "info" })
 }
 
 fn show_error(response) {

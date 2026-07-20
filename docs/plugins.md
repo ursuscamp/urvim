@@ -173,6 +173,9 @@ The global `urvim` module exposes the APIs below. All arguments and return value
 - `urvim.plugins.call(plugin, name, request, callback) -> request_id`
 - `urvim.plugins.has(plugin, name) -> bool`
 - `urvim.plugins.list(plugin?) -> [api]`
+- `urvim.plugins.subscribe(publisher, event, callback) -> subscription_id`
+- `urvim.plugins.unsubscribe(subscription_id)`
+- `urvim.plugins.emit(event, value)`
 - `urvim.keymaps.set(mode, lhs, rhs, opts?)`
 - `urvim.keymaps.delete(mode, lhs)`
 - `urvim.keymaps.list(mode?) -> [keymap]`
@@ -232,7 +235,50 @@ Requests and responses may contain only `null`, booleans, finite numbers, string
 
 Calls made during `init()` are queued and resolved after loading, so a consumer may load before its provider. Discovery through `has` or `list` reflects only endpoints registered so far; perform optional-provider discovery from `EditorStarted` rather than relying on plugin load order. When making an incompatible endpoint change, expose a new versioned name such as `lookup.v2`.
 
-See `examples/plugins/api-host` and `examples/plugins/api-caller` for a complete provider and consumer pair with discovery, successful calls, and error handling.
+See `examples/plugins/api-host` and `examples/plugins/api-caller` for a complete provider and consumer pair with discovery, successful calls, error handling, and custom event broadcasts.
+
+### Custom Plugin Events
+
+Plugins can broadcast ad hoc events to other plugins. Event names are scoped to
+the publisher's plugin id, so emitters provide only their local event name while
+subscribers identify both the publisher and event:
+
+```text
+fn init() {
+    urvim.plugins.subscribe("git-status", "status.changed.v1", on_status_changed)
+}
+
+fn on_status_changed(message) {
+    let publisher = message["publisher"]
+    let event = message["event"]
+    let status = message["value"]
+}
+```
+
+The publisher emits in its own namespace:
+
+```text
+urvim.plugins.emit("status.changed.v1", {
+    "branch": "main",
+    "dirty": true
+})
+```
+
+`subscribe` succeeds even when the publisher is not loaded and returns a numeric
+id accepted by `unsubscribe`. Emission requires no prior event registration. A
+publisher never receives its own events, even if it subscribes to its own
+namespace.
+
+Callbacks receive `{ publisher, event, value }`. Values may contain only `null`,
+booleans, finite numbers, strings, lists, and maps. Event delivery is deferred
+until the current plugin callback returns. Events use FIFO waves and stable
+subscriber/subscription order; events emitted by a callback wait for the next
+wave. Subscriber failures are reported without preventing other subscribers
+from running.
+
+Events emitted during `init()` wait until all plugins finish loading, removing
+plugin load-order dependence. Custom events share the editor event system's
+32-wave causal-chain limit and are fully drained during editor shutdown.
 
 ### Registers and Themes
 

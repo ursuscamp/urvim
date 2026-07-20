@@ -17,6 +17,4 @@ This is a list, in no particular order, of things that need to be addressed whic
 
 # Plugins
 
-- can plugins expose APIs to each other?
 - ghost text access from plugins
-- plugin events, too?

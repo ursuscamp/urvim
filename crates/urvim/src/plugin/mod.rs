@@ -15,6 +15,7 @@ mod host;
 mod inputs;
 mod jobs;
 mod pickers;
+mod plugin_events;
 mod timers;
 
 use crate::actions::{execute_action_intent, execute_command_intent};
@@ -29,7 +30,7 @@ use urvim_core::ui::input_box::PluginInputCancelled;
 use urvim_core::ui::picker::plugin::PluginPickerCancelled;
 use urvim_core::ui::{Command, Intent};
 
-use api::{PluginApiQueue, PluginApiRequest, validate_api_value};
+use api::{PluginApiQueue, PluginApiRequest, validate_cross_plugin_value};
 use callbacks::{BearscriptPlugin, BearscriptPluginCallbacks};
 use confirmations::PluginConfirmationEvents;
 use conversion::{BearNumber, BearValueRef, FromBearValue};
@@ -42,6 +43,7 @@ use host::{native_fn, urvim_module_with_api_queue};
 use inputs::PluginInputEvents;
 use jobs::{PluginJobEvent, PluginJobRegistry, job_event_to_value};
 use pickers::PluginPickerEvents;
+use plugin_events::{PluginEvent, PluginEventBus};
 use timers::{PluginTimerEvent, PluginTimerKind, PluginTimerRegistry};
 
 pub(super) type SharedLayout = Rc<RefCell<Layout>>;
@@ -67,6 +69,7 @@ pub(super) struct BearscriptPluginRuntime {
     plugins: HashMap<String, BearscriptPlugin>,
     health: HashMap<String, PluginHealth>,
     api_queue: Rc<PluginApiQueue>,
+    plugin_events: Rc<PluginEventBus>,
     contributions: Rc<RefCell<urvim_plugin::PluginContributionRegistry>>,
     fs: Rc<PluginFsRegistry>,
     jobs: Rc<PluginJobRegistry>,
@@ -85,6 +88,7 @@ impl BearscriptPluginRuntime {
             plugins: HashMap::new(),
             health: HashMap::new(),
             api_queue: Rc::new(PluginApiQueue::default()),
+            plugin_events: Rc::new(PluginEventBus::default()),
             contributions: Rc::new(RefCell::new(
                 urvim_plugin::PluginContributionRegistry::default(),
             )),
@@ -110,6 +114,7 @@ impl BearscriptPluginRuntime {
             plugins: HashMap::new(),
             health: HashMap::new(),
             api_queue: Rc::new(PluginApiQueue::default()),
+            plugin_events: Rc::new(PluginEventBus::default()),
             contributions,
             fs: Rc::new(PluginFsRegistry::default()),
             jobs: Rc::new(PluginJobRegistry::default()),
@@ -282,6 +287,84 @@ impl BearscriptPluginRuntime {
         dispatched
     }
 
+    /// Takes one FIFO wave of queued custom plugin events.
+    pub(super) fn take_plugin_event_batch(&self) -> Vec<PluginEvent> {
+        self.plugin_events.take_batch()
+    }
+
+    /// Returns whether custom plugin events are waiting for dispatch.
+    pub(super) fn has_pending_plugin_events(&self) -> bool {
+        self.plugin_events.has_pending()
+    }
+
+    /// Dispatches a custom plugin event to matching subscribers.
+    pub(super) fn dispatch_plugin_event(&mut self, event: PluginEvent) -> bool {
+        let targets = self.plugin_events.targets(&event);
+        let payload = Value::Map(
+            HashMap::from([
+                (
+                    "publisher".to_string(),
+                    Value::String(event.publisher.clone().into()),
+                ),
+                (
+                    "event".to_string(),
+                    Value::String(event.event.clone().into()),
+                ),
+                ("value".to_string(), event.value),
+            ])
+            .into(),
+        );
+
+        let mut dispatched = false;
+        for (subscriber, subscription_id) in targets {
+            let Some(plugin_runtime) = self.plugins.get_mut(&subscriber) else {
+                continue;
+            };
+            let Some(callback) = plugin_runtime
+                .callbacks
+                .borrow()
+                .plugin_event_subscriptions
+                .get(&subscription_id)
+                .cloned()
+            else {
+                continue;
+            };
+            let started = Instant::now();
+            let transaction = begin_plugin_callback(&self.layout, &subscriber);
+            let result = plugin_runtime
+                .engine
+                .call_value(callback, vec![payload.clone()])
+                .map(|_| ())
+                .map_err(|error| error.to_string());
+            finish_plugin_callback(&self.layout, transaction);
+            self.record_callback(
+                &subscriber,
+                format!(
+                    "plugin event {}:{} subscription {subscription_id}",
+                    event.publisher, event.event
+                ),
+                started.elapsed(),
+            );
+            if let Err(error) = result {
+                self.record_error(&subscriber, error.clone());
+                tracing::warn!(
+                    plugin = subscriber,
+                    publisher = event.publisher,
+                    event = event.event,
+                    subscription_id,
+                    error = %error,
+                    "BearScript plugin event subscription failed"
+                );
+                urvim_core::notify_warn!(
+                    "Plugin {subscriber} event subscription {subscription_id} failed: {error}"
+                );
+            }
+            dispatched = true;
+        }
+
+        dispatched
+    }
+
     /// Dispatches queued external job events to BearScript callbacks on the main thread.
     pub(super) fn dispatch_job_events(&mut self) -> bool {
         let mut dispatched = false;
@@ -354,7 +437,7 @@ impl BearscriptPluginRuntime {
             )
             .map_err(|error| error.to_string())
             .and_then(|value| {
-                validate_api_value(&value, "plugin API response")?;
+                validate_cross_plugin_value(&value, "plugin API response")?;
                 Ok(value)
             });
         finish_plugin_callback(&self.layout, transaction);
@@ -987,6 +1070,7 @@ impl BearscriptPluginRuntime {
                 Rc::clone(&self.contributions),
                 Rc::clone(&callbacks),
                 Rc::clone(&self.api_queue),
+                Rc::clone(&self.plugin_events),
                 Rc::clone(&self.layout),
                 Rc::clone(&self.fs),
                 Rc::clone(&self.jobs),
@@ -1000,6 +1084,7 @@ impl BearscriptPluginRuntime {
                 .borrow_mut()
                 .unregister_plugin_apis(plugin_name);
             self.api_queue.remove_caller(plugin_name);
+            self.plugin_events.remove_plugin(plugin_name);
             self.layout
                 .borrow_mut()
                 .overlays_mut()
@@ -1026,6 +1111,7 @@ impl BearscriptPluginRuntime {
                 .borrow_mut()
                 .unregister_plugin_apis(plugin_name);
             self.api_queue.remove_caller(plugin_name);
+            self.plugin_events.remove_plugin(plugin_name);
             self.layout
                 .borrow_mut()
                 .overlays_mut()
@@ -2044,6 +2130,14 @@ fn hook_id_from_number(value: f64) -> Result<u64, String> {
         .map_err(|_| format!("event hook id must be a non-negative integer, got {value}"))
 }
 
+fn subscription_id_from_number(value: f64) -> Result<u64, String> {
+    BearNumber::new(value, "plugin event subscription id")
+        .non_negative_u64()
+        .map_err(|_| {
+            format!("plugin event subscription id must be a non-negative integer, got {value}")
+        })
+}
+
 pub(in crate::plugin) fn provider_id_from_number(value: f64) -> Result<u64, String> {
     BearNumber::new(value, "syntax provider id")
         .non_negative_u64()
@@ -2249,6 +2343,7 @@ entry = "plugin.bear"
                 Rc::clone(&runtime.contributions),
                 Rc::clone(&callbacks),
                 Rc::clone(&runtime.api_queue),
+                Rc::clone(&runtime.plugin_events),
                 Rc::clone(&runtime.layout),
                 Rc::clone(&runtime.fs),
                 Rc::clone(&runtime.jobs),
@@ -2501,6 +2596,124 @@ entry = "plugin.bear"
     }
 
     #[test]
+    fn custom_plugin_events_are_deferred_namespaced_and_exclude_the_publisher() {
+        let mut runtime = BearscriptPluginRuntime::empty(shared_test_layout());
+        add_runtime_plugin(
+            &mut runtime,
+            "consumer",
+            r#"
+            let received = null
+
+            fn on_changed(message) {
+                received = message
+            }
+
+            fn init() {
+                urvim.plugins.subscribe("provider", "changed.v1", on_changed)
+            }
+            "#,
+        );
+        add_runtime_plugin(
+            &mut runtime,
+            "provider",
+            r#"
+            let received_own_event = false
+
+            fn on_changed(message) {
+                received_own_event = true
+            }
+
+            fn init() {
+                urvim.plugins.subscribe("provider", "changed.v1", on_changed)
+                urvim.plugins.emit("changed.v1", { "count": 3 })
+            }
+            "#,
+        );
+
+        assert_eq!(
+            runtime
+                .plugins
+                .get_mut("consumer")
+                .unwrap()
+                .engine
+                .eval("received")
+                .unwrap(),
+            Value::Null
+        );
+        let events = runtime.take_plugin_event_batch();
+        assert_eq!(events.len(), 1);
+        assert!(runtime.dispatch_plugin_event(events.into_iter().next().unwrap()));
+
+        let consumer = runtime.plugins.get_mut("consumer").unwrap();
+        assert_eq!(
+            consumer.engine.eval("received[\"publisher\"]").unwrap(),
+            Value::String("provider".into())
+        );
+        assert_eq!(
+            consumer.engine.eval("received[\"event\"]").unwrap(),
+            Value::String("changed.v1".into())
+        );
+        assert_eq!(
+            consumer
+                .engine
+                .eval("received[\"value\"][\"count\"]")
+                .unwrap(),
+            Value::Number(3.0)
+        );
+        assert_eq!(
+            runtime
+                .plugins
+                .get_mut("provider")
+                .unwrap()
+                .engine
+                .eval("received_own_event")
+                .unwrap(),
+            Value::Bool(false)
+        );
+    }
+
+    #[test]
+    fn custom_plugin_event_unsubscribe_prevents_queued_delivery() {
+        let mut runtime = BearscriptPluginRuntime::empty(shared_test_layout());
+        add_runtime_plugin(
+            &mut runtime,
+            "consumer",
+            r#"
+            let received = false
+            fn on_changed(message) { received = true }
+            fn init() {
+                let id = urvim.plugins.subscribe("provider", "changed", on_changed)
+                urvim.plugins.unsubscribe(id)
+            }
+            "#,
+        );
+        add_runtime_plugin(
+            &mut runtime,
+            "provider",
+            r#"
+            fn init() { urvim.plugins.emit("changed", null) }
+            "#,
+        );
+
+        let event = runtime
+            .take_plugin_event_batch()
+            .into_iter()
+            .next()
+            .unwrap();
+        assert!(!runtime.dispatch_plugin_event(event));
+        assert_eq!(
+            runtime
+                .plugins
+                .get_mut("consumer")
+                .unwrap()
+                .engine
+                .eval("received")
+                .unwrap(),
+            Value::Bool(false)
+        );
+    }
+
+    #[test]
     fn failed_plugin_init_removes_exposed_apis() {
         let root = unique_temp_dir("plugin-api-failed-init");
         std::fs::create_dir_all(&root).expect("plugin dir should be created");
@@ -2519,6 +2732,7 @@ entry = "plugin.bear"
             fn endpoint(request, caller) { return request }
             fn init() {
                 urvim.plugins.expose("temporary.v1", endpoint)
+                urvim.plugins.emit("temporary", null)
                 missing_function()
             }
             "#,
@@ -2543,11 +2757,13 @@ entry = "plugin.bear"
                 .borrow()
                 .has_api("broken", "temporary.v1")
         );
+        assert!(!runtime.has_pending_plugin_events());
         std::fs::remove_dir_all(root).ok();
     }
 
     #[test]
     fn example_api_plugins_load_and_complete_demo_calls() {
+        let _guard = buffer_pool_lock();
         globals::clear_notifications();
         let examples = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../..")
@@ -2577,6 +2793,15 @@ entry = "plugin.bear"
             .run_command("api-caller", "demo", &[])
             .expect("demo command should run");
         assert!(runtime.dispatch_api_requests());
+        let events = runtime.take_plugin_event_batch();
+        assert_eq!(events.len(), 2);
+        assert!(events.iter().all(|event| {
+            runtime
+                .plugin_events
+                .targets(event)
+                .iter()
+                .any(|(plugin, _)| plugin == "api-caller")
+        }));
         for plugin in ["api-host", "api-caller"] {
             let health = runtime
                 .health
@@ -2588,6 +2813,7 @@ entry = "plugin.bear"
                 "{plugin} should not report an error"
             );
         }
+        globals::clear_notifications();
     }
 
     #[test]

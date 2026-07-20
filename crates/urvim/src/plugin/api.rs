@@ -28,7 +28,7 @@ impl PluginApiQueue {
         api: String,
         value: Value,
     ) -> Result<u64, String> {
-        validate_api_value(&value, "plugin API request")?;
+        validate_cross_plugin_value(&value, "plugin API request")?;
         let id = self.next_id.get().max(1);
         self.next_id.set(id.saturating_add(1));
         self.requests.borrow_mut().push_back(PluginApiRequest {
@@ -52,20 +52,23 @@ impl PluginApiQueue {
     }
 }
 
-pub(in crate::plugin) fn validate_api_value(value: &Value, label: &str) -> Result<(), String> {
+pub(in crate::plugin) fn validate_cross_plugin_value(
+    value: &Value,
+    label: &str,
+) -> Result<(), String> {
     match value {
         Value::Null | Value::Bool(_) | Value::String(_) => Ok(()),
         Value::Number(number) if number.is_finite() => Ok(()),
         Value::Number(_) => Err(format!("{label} numbers must be finite")),
         Value::List(values) => {
             for value in values.iter() {
-                validate_api_value(value, label)?;
+                validate_cross_plugin_value(value, label)?;
             }
             Ok(())
         }
         Value::Map(values) => {
             for value in values.values() {
-                validate_api_value(value, label)?;
+                validate_cross_plugin_value(value, label)?;
             }
             Ok(())
         }
@@ -122,6 +125,6 @@ mod tests {
     fn rejects_non_portable_nested_values() {
         let value = Value::Map(HashMap::from([("bad".to_string(), Value::Range(1.0, 2.0))]).into());
 
-        assert!(validate_api_value(&value, "request").is_err());
+        assert!(validate_cross_plugin_value(&value, "request").is_err());
     }
 }

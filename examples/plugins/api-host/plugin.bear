@@ -4,6 +4,7 @@ fn init() {
 }
 
 fn greet(request, caller) {
+    emit_request_completed("greet.v1", caller)
     return {
         "message": "Hello, " + request["name"] + "!",
         "requested_by": caller
@@ -11,8 +12,16 @@ fn greet(request, caller) {
 }
 
 fn add(request, caller) {
+    emit_request_completed("add.v1", caller)
     return {
         "sum": request["left"] + request["right"],
         "requested_by": caller
     }
+}
+
+fn emit_request_completed(api, caller) {
+    urvim.plugins.emit("request.completed.v1", {
+        "api": api,
+        "caller": caller
+    })
 }

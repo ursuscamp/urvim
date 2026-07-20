@@ -18,54 +18,62 @@ use urvim_terminal::{Terminal, size::get_terminal_size};
 
 use super::Cli;
 
-/// Drains queued editor events and dispatches them to plugin event hooks in
-/// FIFO order. Returns `true` when at least one event was dispatched.
-/// Maximum consecutive hook-generated event waves before the causal chain is dropped.
-const MAX_EDITOR_EVENT_WAVES: usize = 32;
+/// Drains queued editor and custom plugin events in FIFO waves. Returns `true`
+/// when at least one event was dispatched.
+/// Maximum consecutive callback-generated event waves before the causal chain is dropped.
+const MAX_PLUGIN_EVENT_WAVES: usize = 32;
 
 thread_local! {
-    static EDITOR_EVENT_WAVE_DEPTH: RefCell<usize> = const { RefCell::new(0) };
+    static PLUGIN_EVENT_WAVE_DEPTH: RefCell<usize> = const { RefCell::new(0) };
 }
 
-fn drain_editor_events(plugin_runtime: &mut BearscriptPluginRuntime) -> bool {
-    let events = globals::take_editor_event_batch();
-    if events.is_empty() {
-        EDITOR_EVENT_WAVE_DEPTH.with(|depth| *depth.borrow_mut() = 0);
+fn drain_plugin_events(plugin_runtime: &mut BearscriptPluginRuntime) -> bool {
+    let editor_events = globals::take_editor_event_batch();
+    let plugin_events = plugin_runtime.take_plugin_event_batch();
+    if editor_events.is_empty() && plugin_events.is_empty() {
+        PLUGIN_EVENT_WAVE_DEPTH.with(|depth| *depth.borrow_mut() = 0);
         return false;
     }
-    let over_limit = EDITOR_EVENT_WAVE_DEPTH.with(|depth| {
+    let over_limit = PLUGIN_EVENT_WAVE_DEPTH.with(|depth| {
         let mut depth = depth.borrow_mut();
         *depth += 1;
-        *depth > MAX_EDITOR_EVENT_WAVES
+        *depth > MAX_PLUGIN_EVENT_WAVES
     });
     if over_limit {
         tracing::warn!(
-            limit = MAX_EDITOR_EVENT_WAVES,
-            dropped = events.len(),
+            limit = MAX_PLUGIN_EVENT_WAVES,
+            dropped_editor_events = editor_events.len(),
+            dropped_plugin_events = plugin_events.len(),
             "dropping over-limit plugin event causal chain"
         );
         urvim_core::notify_warn!(
-            "Plugin event chain exceeded {MAX_EDITOR_EVENT_WAVES} waves; generated events were dropped"
+            "Plugin event chain exceeded {MAX_PLUGIN_EVENT_WAVES} waves; generated events were dropped"
         );
         while !globals::take_editor_event_batch().is_empty() {}
-        EDITOR_EVENT_WAVE_DEPTH.with(|depth| *depth.borrow_mut() = 0);
+        while !plugin_runtime.take_plugin_event_batch().is_empty() {}
+        PLUGIN_EVENT_WAVE_DEPTH.with(|depth| *depth.borrow_mut() = 0);
         return false;
     }
     let mut dispatched = false;
-    for event in events {
+    for event in editor_events {
         if plugin_runtime.dispatch_editor_event(event) {
             dispatched = true;
         }
     }
-    if !globals::has_pending_editor_events() {
-        EDITOR_EVENT_WAVE_DEPTH.with(|depth| *depth.borrow_mut() = 0);
+    for event in plugin_events {
+        if plugin_runtime.dispatch_plugin_event(event) {
+            dispatched = true;
+        }
+    }
+    if !globals::has_pending_editor_events() && !plugin_runtime.has_pending_plugin_events() {
+        PLUGIN_EVENT_WAVE_DEPTH.with(|depth| *depth.borrow_mut() = 0);
     }
     dispatched
 }
 
-fn drain_all_editor_events(plugin_runtime: &mut BearscriptPluginRuntime) {
-    while globals::has_pending_editor_events() {
-        drain_editor_events(plugin_runtime);
+fn drain_all_plugin_events(plugin_runtime: &mut BearscriptPluginRuntime) {
+    while globals::has_pending_editor_events() || plugin_runtime.has_pending_plugin_events() {
+        drain_plugin_events(plugin_runtime);
     }
 }
 
@@ -213,7 +221,7 @@ pub(super) fn run(cli: Cli) -> io::Result<()> {
             if let Some(event) = event {
                 globals::enqueue_editor_event(event);
             }
-            drain_all_editor_events(&mut plugin_runtime);
+            drain_all_plugin_events(&mut plugin_runtime);
         },
         globals::shutdown_lsp_runtime,
         || urvim_core::session::save_now(&layout.borrow()),
@@ -250,7 +258,7 @@ fn run_editor_loop<I: io::Read + rustix::fd::AsFd, O: io::Write + rustix::fd::As
             globals::with_buffer_pool(|pool| pool.process_external_file_changes());
         globals::try_with_lsp_runtime_mut(|runtime| runtime.sync());
 
-        if drain_editor_events(&mut plugin_runtime) {
+        if drain_plugin_events(&mut plugin_runtime) {
             needs_redraw = true;
         }
 
@@ -326,7 +334,7 @@ fn run_editor_loop<I: io::Read + rustix::fd::AsFd, O: io::Write + rustix::fd::As
                     }
                 }
                 urvim_core::session::maybe_autosave(&layout.borrow());
-                if drain_editor_events(&mut plugin_runtime) {
+                if drain_plugin_events(&mut plugin_runtime) {
                     needs_redraw = true;
                 }
                 if plugin_runtime.dispatch_job_events() {
@@ -373,7 +381,7 @@ fn run_editor_loop<I: io::Read + rustix::fd::AsFd, O: io::Write + rustix::fd::As
                             ShutdownReason::LastPaneClosed
                         });
                     }
-                    if drain_editor_events(&mut plugin_runtime) {
+                    if drain_plugin_events(&mut plugin_runtime) {
                         needs_redraw = true;
                     }
                     continue;
@@ -384,7 +392,7 @@ fn run_editor_loop<I: io::Read + rustix::fd::AsFd, O: io::Write + rustix::fd::As
                     text,
                 ) else {
                     tracing::debug!("ignoring raw paste event in unsupported mode");
-                    if drain_editor_events(&mut plugin_runtime) {
+                    if drain_plugin_events(&mut plugin_runtime) {
                         needs_redraw = true;
                     }
                     continue;
@@ -435,7 +443,7 @@ fn run_editor_loop<I: io::Read + rustix::fd::AsFd, O: io::Write + rustix::fd::As
                     return Ok(ShutdownReason::LastPaneClosed);
                 }
 
-                if drain_editor_events(&mut plugin_runtime) {
+                if drain_plugin_events(&mut plugin_runtime) {
                     needs_redraw = true;
                 }
 
@@ -464,7 +472,7 @@ fn run_editor_loop<I: io::Read + rustix::fd::AsFd, O: io::Write + rustix::fd::As
                         });
                     }
                     terminal.set_cursor_style(layout.borrow().active_tab_cursor_style())?;
-                    if drain_editor_events(&mut plugin_runtime) {
+                    if drain_plugin_events(&mut plugin_runtime) {
                         needs_redraw = true;
                     }
                     continue;
@@ -512,7 +520,7 @@ fn run_editor_loop<I: io::Read + rustix::fd::AsFd, O: io::Write + rustix::fd::As
 
                                 terminal
                                     .set_cursor_style(layout.borrow().active_tab_cursor_style())?;
-                                if drain_editor_events(&mut plugin_runtime) {
+                                if drain_plugin_events(&mut plugin_runtime) {
                                     needs_redraw = true;
                                 }
                                 continue;
@@ -535,7 +543,7 @@ fn run_editor_loop<I: io::Read + rustix::fd::AsFd, O: io::Write + rustix::fd::As
                             }
 
                             terminal.set_cursor_style(layout.borrow().active_tab_cursor_style())?;
-                            if drain_editor_events(&mut plugin_runtime) {
+                            if drain_plugin_events(&mut plugin_runtime) {
                                 needs_redraw = true;
                             }
                         }
