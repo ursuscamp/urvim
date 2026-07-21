@@ -4,6 +4,7 @@ use std::rc::Rc;
 
 use bearscript::{IntoFunction, Value};
 
+pub(in crate::plugin) mod buffer_ghost_text;
 mod env;
 mod filetypes;
 mod fs;
@@ -110,7 +111,7 @@ impl UrvimModuleBuilder {
     fn build(self) -> Value {
         let mut module = HashMap::new();
         module.insert("events".to_string(), event_constants());
-        module.insert("buffers".to_string(), buffers_module());
+        module.insert("buffers".to_string(), buffers_module(self.plugin.clone()));
         module.insert(
             "panes".to_string(),
             panes_module(

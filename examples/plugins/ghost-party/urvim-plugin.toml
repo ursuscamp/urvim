@@ -1,0 +1,3 @@
+name = "ghost-party"
+version = "0.1.0"
+entry = "plugin.bear"

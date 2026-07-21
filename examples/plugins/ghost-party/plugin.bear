@@ -1,0 +1,133 @@
+let dance_timer = null
+let phase = 0
+let messages = [
+    " 👻 boo!",
+    " 👻 this line is haunted",
+    " ✨ paranormal refactor",
+    " 🎃 ship it... if you dare"
+]
+let colors = ["#ff79c6", "#bd93f9", "#8be9fd", "#f1fa8c"]
+
+fn init() {
+    urvim.commands.register("summon", summon, "Summon colorful ghosts in the active buffer")
+    urvim.commands.register("dance", dance, "Start the ghost dance")
+    urvim.commands.register("freeze", freeze, "Stop the ghost dance")
+    urvim.commands.register("inspect", inspect_ghosts, "List the summoned ghosts")
+    urvim.commands.register("banish", banish, "Banish a ghost by marker id")
+    urvim.commands.register("exorcise", exorcise, "Banish every summoned ghost")
+}
+
+fn summon(args) {
+    let buffer = urvim.buffers.active()
+    if buffer == null {
+        urvim.ui.show_message("No active buffer to haunt", { "level": "warn" })
+        return
+    }
+
+    urvim.buffers.ghost_text.clear(buffer)
+    let summoned = 0
+    let count = urvim.buffers.line_count(buffer)
+    for row in 0..count {
+        if summoned >= len(messages) {
+            break
+        }
+        let line = urvim.buffers.line(buffer, row)
+        if urvim.strings.byte_len(line) == 0 {
+            continue
+        }
+        let message = messages[summoned]
+        let color = colors[summoned]
+        urvim.buffers.ghost_text.add(buffer, {
+            "position": { "row": row, "col": urvim.strings.byte_len(line) },
+            "text": message,
+            "gravity": "right",
+            "style": { "fg": color, "bold": true }
+        })
+        summoned = summoned + 1
+    }
+    urvim.ui.show_message("Summoned {summoned} friendly ghosts", { "level": "info" })
+}
+
+fn dance(args) {
+    if dance_timer != null {
+        urvim.ui.show_message("The ghosts are already dancing", { "level": "info" })
+        return
+    }
+    dance_timer = urvim.timers.set_interval(700, dance_step)
+    urvim.ui.show_message("The ghost party has started!", { "level": "info" })
+}
+
+fn dance_step() {
+    let buffer = urvim.buffers.active()
+    if buffer == null {
+        return
+    }
+    let ghosts = urvim.buffers.ghost_text.list(buffer)
+    let index = 0
+    for ghost in ghosts {
+        let row = ghost["position"]["row"] + 1
+        if row >= urvim.buffers.line_count(buffer) {
+            row = 0
+        }
+        let line = urvim.buffers.line(buffer, row)
+        let look = (phase + index) % len(messages)
+        urvim.buffers.ghost_text.update(buffer, ghost["id"], {
+            "position": { "row": row, "col": urvim.strings.byte_len(line) },
+            "text": messages[look],
+            "style": {
+                "fg": colors[look],
+                "bold": phase == 0 or phase == 2,
+                "italic": phase == 1 or phase == 3
+            }
+        })
+        index = index + 1
+    }
+    phase = phase + 1
+    if phase >= len(messages) {
+        phase = 0
+    }
+}
+
+fn freeze(args) {
+    if dance_timer != null {
+        urvim.timers.clear(dance_timer)
+        dance_timer = null
+    }
+    urvim.ui.show_message("The ghosts are holding very still", { "level": "info" })
+}
+
+fn inspect_ghosts(args) {
+    let buffer = urvim.buffers.active()
+    if buffer == null {
+        urvim.ui.show_message("No active buffer to inspect", { "level": "warn" })
+        return
+    }
+    let ghosts = urvim.buffers.ghost_text.list(buffer)
+    urvim.ui.show_message("Ghost party: {urvim.inspect(ghosts)}", { "level": "info" })
+}
+
+fn banish(args) {
+    let buffer = urvim.buffers.active()
+    if buffer == null or len(args) == 0 {
+        urvim.ui.show_message("Usage: plugin ghost-party banish <marker-id>", { "level": "warn" })
+        return
+    }
+    let ghosts = urvim.buffers.ghost_text.list(buffer)
+    for ghost in ghosts {
+        if urvim.inspect(ghost["id"]) == args[0] {
+            urvim.buffers.ghost_text.remove(buffer, ghost["id"])
+            urvim.ui.show_message("Ghost {args[0]} was politely banished", { "level": "info" })
+            return
+        }
+    }
+    urvim.ui.show_message("No owned ghost has id {args[0]}", { "level": "warn" })
+}
+
+fn exorcise(args) {
+    freeze([])
+    let buffer = urvim.buffers.active()
+    if buffer != null {
+        let removed = urvim.buffers.ghost_text.clear(buffer)
+        urvim.ui.show_message("Exorcised {removed} ghosts", { "level": "info" })
+    }
+}

@@ -1,11 +1,13 @@
 use super::{Buffer, Cursor, MarkersStore};
 use smol_str::SmolStr;
+use std::collections::BTreeSet;
 use std::sync::Arc;
 use urvim_terminal::Style;
 use urvim_theme::StyleOverlay;
 
 const CHUNK_SIZE: usize = 128;
 const ID_CHUNK_SIZE: usize = 512;
+const NAMESPACE_CHUNK_SIZE: usize = 256;
 
 /// Marker payload kind.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -200,11 +202,73 @@ impl<T> LineBucket<T> {
     }
 }
 
+/// Location of a marker inside the forward namespace index.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct NamespaceLocation {
+    namespace_index: usize,
+    slot_index: usize,
+}
+
+#[derive(Debug, Clone)]
+struct NamespaceIndex {
+    name: SmolStr,
+    id_chunks: Vec<Arc<Vec<Option<MarkerId>>>>,
+    next_slot: usize,
+    len: usize,
+}
+
+impl NamespaceIndex {
+    fn new(name: &str) -> Self {
+        Self {
+            name: SmolStr::new(name),
+            id_chunks: Vec::new(),
+            next_slot: 0,
+            len: 0,
+        }
+    }
+
+    fn insert(&mut self, id: MarkerId) -> usize {
+        let slot = self.next_slot;
+        let chunk_idx = slot / NAMESPACE_CHUNK_SIZE;
+        let slot_idx = slot % NAMESPACE_CHUNK_SIZE;
+        while self.id_chunks.len() <= chunk_idx {
+            self.id_chunks
+                .push(Arc::new(vec![None; NAMESPACE_CHUNK_SIZE]));
+        }
+        Arc::make_mut(&mut self.id_chunks[chunk_idx])[slot_idx] = Some(id);
+        self.next_slot += 1;
+        self.len += 1;
+        slot
+    }
+
+    fn remove(&mut self, slot: usize) {
+        let chunk_idx = slot / NAMESPACE_CHUNK_SIZE;
+        let slot_idx = slot % NAMESPACE_CHUNK_SIZE;
+        if let Some(chunk) = self.id_chunks.get_mut(chunk_idx)
+            && Arc::make_mut(chunk)[slot_idx].take().is_some()
+        {
+            self.len = self.len.saturating_sub(1);
+        }
+        if self.len == 0 {
+            self.id_chunks.clear();
+            self.next_slot = 0;
+        }
+    }
+
+    fn ids(&self) -> impl Iterator<Item = MarkerId> + '_ {
+        self.id_chunks
+            .iter()
+            .flat_map(|chunk| chunk.iter().copied().flatten())
+    }
+}
+
 /// Generic marker store organized by line buckets.
 #[derive(Debug, Clone)]
 pub struct MarkerStore<T> {
     chunks: Vec<Arc<Vec<LineBucket<T>>>>,
     id_line_chunks: Vec<Arc<Vec<Option<usize>>>>,
+    namespace_locations_by_id: Vec<Arc<Vec<Option<NamespaceLocation>>>>,
+    namespaces: Vec<Arc<NamespaceIndex>>,
     line_count: usize,
     next_id: MarkerId,
 }
@@ -227,6 +291,8 @@ impl<T: Clone> MarkerStore<T> {
         Self {
             chunks: chunk_vec_lines(line_count),
             id_line_chunks: Vec::new(),
+            namespace_locations_by_id: Vec::new(),
+            namespaces: Vec::new(),
             line_count,
             next_id: 0,
         }
@@ -249,6 +315,8 @@ impl<T: Clone> MarkerStore<T> {
     pub fn clear(&mut self) {
         self.chunks = chunk_vec_lines(1);
         self.id_line_chunks.clear();
+        self.namespace_locations_by_id.clear();
+        self.namespaces.clear();
         self.line_count = 1;
         self.next_id = 0;
     }
@@ -258,6 +326,8 @@ impl<T: Clone> MarkerStore<T> {
         self.line_count = line_count.max(1);
         self.chunks = chunk_vec_lines(self.line_count);
         self.id_line_chunks.clear();
+        self.namespace_locations_by_id.clear();
+        self.namespaces.clear();
         self.next_id = 0;
     }
 
@@ -283,6 +353,21 @@ impl<T: Clone> MarkerStore<T> {
         removed
     }
 
+    /// Returns whether a marker belongs to `namespace`.
+    pub fn marker_is_in_namespace(&self, id: MarkerId, namespace: &str) -> bool {
+        self.namespace_for_id(id)
+            .is_some_and(|stored| stored == namespace)
+    }
+
+    /// Returns the live marker ids belonging to `namespace`.
+    pub fn marker_ids_in_namespace(&self, namespace: &str) -> Vec<MarkerId> {
+        self.namespaces
+            .iter()
+            .find(|index| index.name == namespace)
+            .map(|index| index.ids().collect())
+            .unwrap_or_default()
+    }
+
     /// Returns all markers in line and position order.
     pub fn iter(&self) -> impl Iterator<Item = &Marker<T>> {
         (0..self.line_count)
@@ -299,6 +384,17 @@ impl<T: Clone> MarkerStore<T> {
 
     /// Inserts a point marker.
     pub fn insert_point(&mut self, pos: Cursor, gravity: Gravity, payload: T) -> MarkerId {
+        self.insert_point_in_namespace(pos, gravity, payload, None)
+    }
+
+    /// Inserts a point marker belonging to an optional namespace.
+    pub fn insert_point_in_namespace(
+        &mut self,
+        pos: Cursor,
+        gravity: Gravity,
+        payload: T,
+        namespace: Option<&str>,
+    ) -> MarkerId {
         let id = self.next_marker_id();
         let marker = Marker {
             id,
@@ -307,7 +403,38 @@ impl<T: Clone> MarkerStore<T> {
         };
         self.insert_marker(marker);
         self.set_index(id, pos.line);
+        if let Some(namespace) = namespace {
+            self.set_namespace_index(id, namespace);
+        }
         id
+    }
+
+    /// Replaces a point marker while preserving its id and namespace.
+    pub fn update_point(
+        &mut self,
+        id: MarkerId,
+        pos: Cursor,
+        gravity: Gravity,
+        payload: T,
+    ) -> bool {
+        if !self
+            .get(id)
+            .is_some_and(|marker| matches!(marker.kind, MarkerShape::Point(_)))
+        {
+            return false;
+        }
+        let Some(line) = self.index_line(id) else {
+            return false;
+        };
+        let Some(mut marker) = self.bucket_mut(line).and_then(|bucket| bucket.remove(id)) else {
+            return false;
+        };
+        self.clear_line_index(id);
+        marker.kind = MarkerShape::Point(PointMarker { pos, gravity });
+        marker.payload = payload;
+        self.insert_marker(marker);
+        self.set_index(id, pos.line);
+        true
     }
 
     /// Inserts a range marker.
@@ -580,6 +707,8 @@ impl<T: Clone> MarkerStore<T> {
         if start_line == 0 && deleted_end >= total_lines {
             self.chunks = chunk_vec_lines(1);
             self.id_line_chunks.clear();
+            self.namespace_locations_by_id.clear();
+            self.namespaces.clear();
             self.line_count = 1;
             return;
         }
@@ -604,6 +733,7 @@ impl<T: Clone> MarkerStore<T> {
 
         self.replace_suffix(start_line, new_after);
         self.rebuild_index();
+        self.prune_namespace_index();
     }
 
     fn next_marker_id(&mut self) -> MarkerId {
@@ -632,12 +762,68 @@ impl<T: Clone> MarkerStore<T> {
     }
 
     fn clear_index(&mut self, id: MarkerId) {
+        self.clear_line_index(id);
+        self.clear_namespace_index(id);
+    }
+
+    fn clear_line_index(&mut self, id: MarkerId) {
         let idx = id as usize;
         let chunk_idx = idx / ID_CHUNK_SIZE;
         let slot_idx = idx % ID_CHUNK_SIZE;
         if let Some(chunk) = self.id_line_chunks.get_mut(chunk_idx) {
             Arc::make_mut(chunk)[slot_idx] = None;
         }
+    }
+
+    fn set_namespace_index(&mut self, id: MarkerId, namespace: &str) {
+        let namespace_idx = self
+            .namespaces
+            .iter()
+            .position(|index| index.name == namespace)
+            .unwrap_or_else(|| {
+                self.namespaces
+                    .push(Arc::new(NamespaceIndex::new(namespace)));
+                self.namespaces.len() - 1
+            });
+        let slot = Arc::make_mut(&mut self.namespaces[namespace_idx]).insert(id);
+        let idx = id as usize;
+        let chunk_idx = idx / ID_CHUNK_SIZE;
+        let slot_idx = idx % ID_CHUNK_SIZE;
+        while self.namespace_locations_by_id.len() <= chunk_idx {
+            self.namespace_locations_by_id
+                .push(Arc::new(vec![None; ID_CHUNK_SIZE]));
+        }
+        Arc::make_mut(&mut self.namespace_locations_by_id[chunk_idx])[slot_idx] =
+            Some(NamespaceLocation {
+                namespace_index: namespace_idx,
+                slot_index: slot,
+            });
+    }
+
+    fn clear_namespace_index(&mut self, id: MarkerId) {
+        let idx = id as usize;
+        let chunk_idx = idx / ID_CHUNK_SIZE;
+        let slot_idx = idx % ID_CHUNK_SIZE;
+        let Some(chunk) = self.namespace_locations_by_id.get_mut(chunk_idx) else {
+            return;
+        };
+        let Some(location) = Arc::make_mut(chunk)[slot_idx].take() else {
+            return;
+        };
+        if let Some(index) = self.namespaces.get_mut(location.namespace_index) {
+            Arc::make_mut(index).remove(location.slot_index);
+        }
+    }
+
+    fn namespace_for_id(&self, id: MarkerId) -> Option<&str> {
+        let idx = id as usize;
+        let location = self
+            .namespace_locations_by_id
+            .get(idx / ID_CHUNK_SIZE)?
+            .get(idx % ID_CHUNK_SIZE)
+            .copied()
+            .flatten()?;
+        Some(self.namespaces.get(location.namespace_index)?.name.as_str())
     }
 
     fn index_line(&self, id: MarkerId) -> Option<usize> {
@@ -659,6 +845,19 @@ impl<T: Clone> MarkerStore<T> {
         }
         for (id, line) in entries {
             self.set_index(id, line);
+        }
+    }
+
+    fn prune_namespace_index(&mut self) {
+        let live_ids: BTreeSet<_> = self.iter().map(|marker| marker.id).collect();
+        let stale_ids: Vec<_> = self
+            .namespaces
+            .iter()
+            .flat_map(|index| index.ids())
+            .filter(|id| !live_ids.contains(id))
+            .collect();
+        for id in stale_ids {
+            self.clear_namespace_index(id);
         }
     }
 
@@ -789,6 +988,103 @@ impl Buffer {
         label: impl Into<SmolStr>,
     ) -> MarkerId {
         self.insert_marker(pos, gravity, MarkerPayload::new(label))
+    }
+
+    /// Inserts plugin-owned ghost text anchored to a point.
+    pub fn insert_namespaced_ghost_text(
+        &mut self,
+        namespace: &str,
+        pos: Cursor,
+        gravity: Gravity,
+        label: impl Into<SmolStr>,
+        style: Option<StyleOverlay>,
+    ) -> MarkerId {
+        let mut payload = MarkerPayload::new(label);
+        payload.style = style;
+        let id = self
+            .markers
+            .insert_point_in_namespace(pos, gravity, payload, Some(namespace));
+        self.bump_visual_generation();
+        self.update_markers();
+        id
+    }
+
+    /// Returns plugin-owned ghost text by id.
+    pub fn namespaced_ghost_text(
+        &self,
+        namespace: &str,
+        id: MarkerId,
+    ) -> Option<&Marker<MarkerPayload>> {
+        self.markers
+            .marker_is_in_namespace(id, namespace)
+            .then(|| self.ghost_text(id))
+            .flatten()
+    }
+
+    /// Returns plugin-owned ghost text in line and position order.
+    pub fn namespaced_ghost_texts(&self, namespace: &str) -> Vec<Marker<MarkerPayload>> {
+        let mut markers: Vec<_> = self
+            .markers
+            .marker_ids_in_namespace(namespace)
+            .into_iter()
+            .filter_map(|id| self.ghost_text(id).cloned())
+            .collect();
+        markers.sort_by_key(Marker::anchor);
+        markers
+    }
+
+    /// Updates plugin-owned ghost text while preserving its id.
+    pub fn update_namespaced_ghost_text(
+        &mut self,
+        namespace: &str,
+        id: MarkerId,
+        pos: Cursor,
+        gravity: Gravity,
+        label: impl Into<SmolStr>,
+        style: Option<StyleOverlay>,
+    ) -> bool {
+        if self.namespaced_ghost_text(namespace, id).is_none() {
+            return false;
+        }
+        let mut payload = MarkerPayload::new(label);
+        payload.style = style;
+        if !self.markers.update_point(id, pos, gravity, payload) {
+            return false;
+        }
+        self.bump_visual_generation();
+        self.update_markers();
+        true
+    }
+
+    /// Removes plugin-owned ghost text by id.
+    pub fn remove_namespaced_ghost_text(
+        &mut self,
+        namespace: &str,
+        id: MarkerId,
+    ) -> Option<Marker<MarkerPayload>> {
+        self.namespaced_ghost_text(namespace, id)?;
+        self.remove_marker(id)
+    }
+
+    /// Clears and returns the number of plugin-owned ghost-text markers.
+    pub fn clear_namespaced_ghost_texts(&mut self, namespace: &str) -> usize {
+        let ids = self.markers.marker_ids_in_namespace(namespace);
+        let mut removed = 0;
+        for id in ids {
+            if self
+                .markers
+                .get(id)
+                .is_some_and(|marker| marker.payload.kind.is_none())
+                && self.markers.remove(id).is_some()
+            {
+                removed += 1;
+            }
+        }
+        if removed > 0 {
+            self.bump_visual_generation();
+            self.update_markers();
+        }
+        removed
     }
 
     /// Inserts an inlay hint anchored to a point.

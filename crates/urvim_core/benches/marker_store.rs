@@ -94,6 +94,7 @@ fn bench_marker_store(c: &mut Criterion) {
     bench_insert_lines(c);
     bench_delete_lines(c);
     bench_clear_inlay_hints_for_lines(c);
+    bench_namespaced_markers(c);
 }
 
 fn bench_construct(c: &mut Criterion) {
@@ -339,6 +340,52 @@ fn bench_clear_inlay_hints_for_lines(c: &mut Criterion) {
             )
         });
     }
+    group.finish();
+}
+
+fn bench_namespaced_markers(c: &mut Criterion) {
+    let mut group = c.benchmark_group("marker_store_namespaced");
+    let scenario = SCENARIOS[4];
+    let mut store = MarkerStore::with_line_count(scenario.line_count);
+    let mut ids = Vec::with_capacity(scenario.marker_count);
+    for idx in 0..scenario.marker_count {
+        ids.push(store.insert_point_in_namespace(
+            Cursor::new(marker_line(idx, scenario), idx % 80),
+            Gravity::Right,
+            PayloadKind::Ghost,
+            Some(if idx % 2 == 0 { "first" } else { "second" }),
+        ));
+    }
+
+    group.bench_function("list_5k_of_10k", |b| {
+        b.iter(|| black_box(store.marker_ids_in_namespace("first")))
+    });
+    group.bench_function("clone", |b| b.iter(|| black_box(store.clone())));
+    group.bench_function("clone_then_update", |b| {
+        b.iter_batched(
+            || store.clone(),
+            |mut store| {
+                black_box(store.update_point(
+                    ids[0],
+                    Cursor::new(1, 1),
+                    Gravity::Left,
+                    PayloadKind::Ghost,
+                ))
+            },
+            BatchSize::SmallInput,
+        )
+    });
+    group.bench_function("clear_namespace", |b| {
+        b.iter_batched(
+            || store.clone(),
+            |mut store| {
+                for id in store.marker_ids_in_namespace("first") {
+                    black_box(store.remove(id));
+                }
+            },
+            BatchSize::LargeInput,
+        )
+    });
     group.finish();
 }
 

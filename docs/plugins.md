@@ -153,6 +153,11 @@ The global `urvim` module exposes the APIs below. All arguments and return value
 - `urvim.buffers.delete_line(buffer_id, row)`
 - `urvim.buffers.replace_range(buffer_id, range, text)`
 - `urvim.buffers.save(buffer_id)`
+- `urvim.buffers.ghost_text.add(buffer_id, options) -> marker_id`
+- `urvim.buffers.ghost_text.update(buffer_id, marker_id, changes)`
+- `urvim.buffers.ghost_text.remove(buffer_id, marker_id) -> bool`
+- `urvim.buffers.ghost_text.clear(buffer_id) -> removed_count`
+- `urvim.buffers.ghost_text.list(buffer_id) -> [ghost_text]`
 - `urvim.panes.active() -> { id, kind } | null`
 - `urvim.panes.list() -> [{ id, kind }]`
 - `urvim.panes.buffer(pane_id) -> buffer_id`
@@ -372,6 +377,29 @@ Buffer rows and columns are 0-based. `urvim.buffers.lines(buffer_id, start_row, 
 ```
 
 Invalid buffer ids, rows, columns, and argument shapes raise errors. `urvim.buffers.save(buffer_id)` saves through the normal buffer save path and emits the same `BufferSaved` or `BufferSaveFailed` editor event.
+
+### Ghost text
+
+Plugins can attach virtual text to buffer positions without changing buffer text or modified state:
+
+```text
+let marker = urvim.buffers.ghost_text.add(buffer_id, {
+    "position": { "row": 4, "col": 12 },
+    "text": " 👻 spooky!",
+    "gravity": "right",
+    "style": { "fg": "#ff88dd", "bold": true }
+})
+```
+
+`position` is required and uses zero-based rows and UTF-8 byte columns. `text` is required. Optional `gravity` is `left` or `right` and defaults to `right`; it controls which side of text inserted exactly at the anchor retains the marker.
+
+The optional `style` map is a partial overlay on the theme's normal ghost-text style. Colors in `fg`, `bg`, and `underline_color` may be ANSI indices from 0 through 255 or `#RRGGBB` strings. Boolean fields are `bold`, `italic`, `underline`, `double_underline`, `dim`, `reverse`, `blink`, `strikethrough`, and `overline`.
+
+`update` accepts any combination of `position`, `text`, `gravity`, and `style`, validates the complete change before applying it, and preserves the marker id. Omitted fields remain unchanged; `style: null` restores the theme default. `list` returns owned markers in buffer order with `id`, `position`, `text`, `gravity`, and `style` fields. `remove` returns whether an owned marker was removed, while `clear` returns the number removed.
+
+Ghost text is isolated by plugin. A plugin cannot list, update, remove, or clear another plugin's markers. Marker positions follow buffer edits and undo or redo state. These visual operations request a redraw but do not emit `BufferChanged`.
+
+See `examples/plugins/ghost-party` for an animated demonstration of the complete API.
 
 Pane rows and columns are 0-based. Pane ids are stable for each split-tree leaf and become invalid after close. Editor-only methods reject plugin panes. `urvim.panes.open_buffer(buffer_id)` activates an existing visible editor tab or opens a loaded hidden buffer in the active or last-focused editor pane, including while a plugin pane or overlay has focus. The last editor pane cannot be closed.
 

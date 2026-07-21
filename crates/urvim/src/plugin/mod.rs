@@ -1187,9 +1187,13 @@ impl BearscriptPluginRuntime {
     }
 }
 
-fn buffers_module() -> Value {
+fn buffers_module(plugin: String) -> Value {
     Value::Module(HashMap::from([
         ("active".to_string(), buffers_module_active_fn()),
+        (
+            "ghost_text".to_string(),
+            host::buffer_ghost_text::ghost_text_module(plugin),
+        ),
         ("list".to_string(), buffers_module_list_fn()),
         (
             "exists".to_string(),
@@ -2887,6 +2891,112 @@ entry = "plugin.bear"
                 .into()
             )
         );
+    }
+
+    #[test]
+    fn buffers_ghost_text_api_manages_owned_styled_markers() {
+        let _guard = buffer_pool_lock();
+        let layout = Layout::new(EditorPane::from_buffers(vec![Buffer::from_str(
+            "hello\nworld",
+        )]));
+        let buffer_id = layout.active_buffer_view().buffer_id();
+        globals::set_active_buffer_id(buffer_id);
+
+        let mut engine = Engine::new();
+        engine.set_global(
+            "urvim",
+            urvim_module(
+                "demo".to_string(),
+                Rc::new(RefCell::new(
+                    urvim_plugin::PluginContributionRegistry::default(),
+                )),
+                Rc::new(RefCell::new(BearscriptPluginCallbacks::default())),
+                shared_test_layout(),
+                Rc::new(PluginFsRegistry::default()),
+                Rc::new(PluginJobRegistry::default()),
+                Rc::new(PluginTimerRegistry::default()),
+            ),
+        );
+
+        let values = engine
+            .eval(
+                r##"
+                let buffer = urvim.buffers.active()
+                let marker = urvim.buffers.ghost_text.add(buffer, {
+                    "position": { "row": 0, "col": 5 },
+                    "text": " boo",
+                    "style": { "fg": "#ff0088", "bold": true }
+                })
+                urvim.buffers.ghost_text.update(buffer, marker, {
+                    "position": { "row": 1, "col": 5 },
+                    "text": " spooky",
+                    "gravity": "left",
+                    "style": { "fg": 213, "italic": true }
+                })
+                [marker, urvim.buffers.ghost_text.list(buffer)]
+                "##,
+            )
+            .expect("ghost text API should manage markers");
+
+        let Value::List(values) = values else {
+            panic!("API should return marker id and list");
+        };
+        let marker_id = values[0].clone();
+        let Value::List(markers) = &values[1] else {
+            panic!("list should return markers");
+        };
+        assert_eq!(markers.len(), 1);
+        let Value::Map(marker) = &markers[0] else {
+            panic!("marker should be a map");
+        };
+        assert_eq!(marker.get("id"), Some(&marker_id));
+        assert_eq!(marker.get("text"), Some(&Value::String(" spooky".into())));
+        assert_eq!(marker.get("gravity"), Some(&Value::String("left".into())));
+
+        let id = match marker_id {
+            Value::Number(id) => id as u64,
+            _ => panic!("marker id should be numeric"),
+        };
+        globals::with_buffer_mut(buffer_id, |buffer| {
+            buffer.insert_namespaced_ghost_text(
+                "other",
+                Cursor::new(0, 0),
+                urvim_core::buffer::Gravity::Right,
+                "foreign",
+                None,
+            );
+        });
+        assert!(
+            globals::with_buffer(buffer_id, |buffer| {
+                buffer.namespaced_ghost_text("demo", id).is_some()
+            })
+            .unwrap()
+        );
+
+        assert_eq!(
+            engine
+                .eval("urvim.buffers.ghost_text.clear(urvim.buffers.active())")
+                .expect("clear should succeed"),
+            Value::Number(1.0)
+        );
+        assert_eq!(
+            globals::with_buffer(buffer_id, |buffer| {
+                buffer.namespaced_ghost_texts("other").len()
+            }),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn ghost_party_example_loads() {
+        let mut runtime = BearscriptPluginRuntime::empty(shared_test_layout());
+        add_runtime_plugin(
+            &mut runtime,
+            "ghost-party",
+            include_str!("../../../../examples/plugins/ghost-party/plugin.bear"),
+        );
+
+        assert!(runtime.plugins.contains_key("ghost-party"));
     }
 
     #[test]

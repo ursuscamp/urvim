@@ -140,6 +140,58 @@ fn test_marker_store_multiline_insert_shifts_later_lines() {
 }
 
 #[test]
+fn test_namespaced_ghost_texts_are_indexed_and_isolated() {
+    let mut buf = Buffer::from_str("abcd\nefgh");
+    let style = urvim_theme::StyleOverlay {
+        bold: Some(true),
+        ..urvim_theme::StyleOverlay::default()
+    };
+
+    let first = buf.insert_namespaced_ghost_text(
+        "first",
+        Cursor::new(0, 2),
+        Gravity::Right,
+        "boo",
+        Some(style),
+    );
+    let second =
+        buf.insert_namespaced_ghost_text("second", Cursor::new(1, 1), Gravity::Left, "other", None);
+
+    assert_eq!(buf.namespaced_ghost_texts("first").len(), 1);
+    assert_eq!(buf.namespaced_ghost_texts("second").len(), 1);
+    assert!(buf.namespaced_ghost_text("first", second).is_none());
+    assert_eq!(
+        buf.namespaced_ghost_text("first", first)
+            .unwrap()
+            .payload
+            .style,
+        Some(style)
+    );
+
+    assert!(buf.update_namespaced_ghost_text(
+        "first",
+        first,
+        Cursor::new(1, 3),
+        Gravity::Left,
+        "moved",
+        None,
+    ));
+    let marker = buf.namespaced_ghost_text("first", first).unwrap();
+    assert_eq!(marker.payload.label, "moved");
+    assert_eq!(
+        marker.kind,
+        MarkerShape::Point(PointMarker {
+            pos: Cursor::new(1, 3),
+            gravity: Gravity::Left,
+        })
+    );
+
+    assert_eq!(buf.clear_namespaced_ghost_texts("first"), 1);
+    assert!(buf.namespaced_ghost_text("first", first).is_none());
+    assert!(buf.namespaced_ghost_text("second", second).is_some());
+}
+
+#[test]
 fn test_ghost_texts_shift_and_clear() {
     let mut buf = Buffer::from_str("abcd\nefgh");
 
