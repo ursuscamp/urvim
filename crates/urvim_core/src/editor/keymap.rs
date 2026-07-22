@@ -35,6 +35,7 @@ impl<T> TrieNode<T> {
 #[derive(Debug)]
 pub struct TrieKeymap<T = Intent> {
     root: TrieNode<T>,
+    descriptions: BTreeMap<Vec<String>, String>,
 }
 
 impl<T> TrieKeymap<T> {
@@ -42,6 +43,7 @@ impl<T> TrieKeymap<T> {
     pub fn new() -> Self {
         Self {
             root: TrieNode::new(),
+            descriptions: BTreeMap::new(),
         }
     }
 
@@ -59,8 +61,23 @@ impl<T> TrieKeymap<T> {
         self.insert_sequence(parsed, value);
     }
 
+    /// Inserts a binding and its optional key-guide description.
+    pub fn insert_str_described<V: Into<T>>(
+        &mut self,
+        keys: &str,
+        value: V,
+        description: Option<String>,
+    ) {
+        let parsed = validate_key_string(keys).expect("invalid canonical key string");
+        self.insert_sequence(parsed.clone(), value);
+        if let Some(description) = description {
+            self.descriptions.insert(parsed, description);
+        }
+    }
+
     /// Inserts a multi-key binding from an already parsed sequence.
     pub fn insert_sequence<V: Into<T>>(&mut self, keys: Vec<String>, value: V) {
+        self.descriptions.remove(&keys);
         let mut current = &mut self.root;
         for key in &keys {
             current = current
@@ -103,6 +120,7 @@ impl<T> TrieKeymap<T> {
             value
         }
 
+        self.descriptions.remove(keys);
         remove(&mut self.root, keys)
     }
 
@@ -176,13 +194,20 @@ impl<T> TrieKeymap<T> {
 
 impl TrieKeymap<Intent> {
     /// Inserts configured mappings from canonical key strings to command strings.
-    pub fn insert_configured(&mut self, mappings: &BTreeMap<String, String>) {
+    pub fn insert_configured(
+        &mut self,
+        mappings: &BTreeMap<String, String>,
+        descriptions: Option<&BTreeMap<String, String>>,
+    ) {
         for (keys, command) in mappings {
             let parsed_keys =
                 validate_key_string(keys).expect("validated configured keymap key should parse");
             let intent = crate::command::parse(command)
                 .expect("validated configured keymap command should parse");
-            self.insert_sequence(parsed_keys, intent);
+            self.insert_sequence(parsed_keys.clone(), intent);
+            if let Some(description) = descriptions.and_then(|values| values.get(keys)) {
+                self.descriptions.insert(parsed_keys, description.clone());
+            }
         }
     }
 
@@ -195,9 +220,104 @@ impl TrieKeymap<Intent> {
         }
     }
 
+    /// Adds descriptions for bindings that have already been inserted.
+    pub fn insert_descriptions(&mut self, descriptions: &BTreeMap<String, String>) {
+        for (keys, description) in descriptions {
+            let parsed_keys =
+                validate_key_string(keys).expect("validated runtime keymap key should parse");
+            if self.get(&parsed_keys).is_some() {
+                self.descriptions.insert(parsed_keys, description.clone());
+            }
+        }
+    }
+
     /// Returns the intent bound to an exact key sequence.
     pub fn get_action(&self, keys: &[String]) -> Option<Intent> {
         self.get(keys).cloned()
+    }
+
+    /// Returns the immediate keys available after a sequence.
+    pub fn continuations(&self, keys: &[String]) -> Vec<KeyGuideEntry> {
+        let Some(node) = self.node(keys) else {
+            return Vec::new();
+        };
+        node.children
+            .iter()
+            .map(|(key, child)| {
+                let mut full = keys.to_vec();
+                full.push(key.clone());
+                let description = self
+                    .descriptions
+                    .get(&full)
+                    .cloned()
+                    .or_else(|| child.value.as_ref().map(describe_intent))
+                    .unwrap_or_else(|| "Prefix".to_string());
+                KeyGuideEntry {
+                    key: key.clone(),
+                    description,
+                    is_prefix: !child.children.is_empty(),
+                }
+            })
+            .collect()
+    }
+}
+
+/// One entry displayed by the pending-key guide.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KeyGuideEntry {
+    /// Canonical next key.
+    pub key: String,
+    /// User-facing action description.
+    pub description: String,
+    /// Whether additional bindings exist below this key.
+    pub is_prefix: bool,
+}
+
+/// Current pending editor sequence and its available continuations.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KeyGuideSnapshot {
+    /// Canonical keys entered so far.
+    pub prefix: Vec<String>,
+    /// Available immediate continuations.
+    pub entries: Vec<KeyGuideEntry>,
+}
+
+fn describe_intent(intent: &Intent) -> String {
+    let identifier = match intent {
+        Intent::Command(command) => command.event_name().into_owned(),
+        Intent::Editor(action) => match action.kind.as_ref() {
+            Some(super::EditorOperation::Operation(_, target)) => {
+                return target.description().to_string();
+            }
+            Some(super::EditorOperation::VisualTextObject(text_object)) => {
+                return text_object.description().to_string();
+            }
+            Some(operation) => format!("{operation:?}"),
+            None => "Action".to_string(),
+        },
+    };
+    let identifier = identifier
+        .split(['(', '{'])
+        .next()
+        .unwrap_or(identifier.as_str());
+    let mut words = String::new();
+    let mut previous_lowercase = false;
+    for character in identifier.chars() {
+        if matches!(character, '.' | '-' | '_') {
+            words.push(' ');
+            previous_lowercase = false;
+        } else {
+            if character.is_uppercase() && previous_lowercase {
+                words.push(' ');
+            }
+            words.push(character);
+            previous_lowercase = character.is_lowercase();
+        }
+    }
+    let mut characters = words.chars();
+    match characters.next() {
+        Some(first) => first.to_uppercase().chain(characters).collect(),
+        None => "Action".to_string(),
     }
 }
 
@@ -505,6 +625,33 @@ mod tests {
                     intent.keymap_inheritance() == KeymapInheritance::Focus
                 })
                 .is_none()
+        );
+    }
+
+    #[test]
+    fn continuations_include_descriptions_and_prefixes() {
+        let mut keymap = TrieKeymap::<Intent>::new();
+        keymap.insert_str_described(
+            "gd",
+            Command::LspDefinition,
+            Some("Go to definition".to_string()),
+        );
+        keymap.insert_str("grr", Command::LspReferences);
+
+        assert_eq!(
+            keymap.continuations(&["g".to_string()]),
+            vec![
+                KeyGuideEntry {
+                    key: "d".to_string(),
+                    description: "Go to definition".to_string(),
+                    is_prefix: false,
+                },
+                KeyGuideEntry {
+                    key: "r".to_string(),
+                    description: "Prefix".to_string(),
+                    is_prefix: true,
+                },
+            ]
         );
     }
 

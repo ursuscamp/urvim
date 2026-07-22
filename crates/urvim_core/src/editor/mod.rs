@@ -23,7 +23,8 @@ pub use action::{
 };
 pub use insert::InsertMode;
 pub use keymap::{
-    CountParser, InheritedKeymap, KeyStringParseError, Keymap, TrieKeymap, validate_key_string,
+    CountParser, InheritedKeymap, KeyGuideEntry, KeyGuideSnapshot, KeyStringParseError, Keymap,
+    TrieKeymap, validate_key_string,
 };
 pub use mode::{Mode, ModeKind};
 pub use normal::NormalMode;

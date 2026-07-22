@@ -23,7 +23,7 @@ Command-line flags override config file values.
 
 ## Current Schema
 
-The canonical config values are `theme`, `keymaps`, `default_registers`, `syntax`, `todo_markers`, `aliases`, `scripts`, `plugins`, `auto_close_pairs`, `active_line`, `relative_number`, `indent_guides`, `auto_indent`, `completion_trigger`, `completion_sources`, `advanced_glyphs`, `inlay_hints`, `tab_insertion`, `tab_behavior`, `tab_width`, `scroll_margin`, `wrap_mode`, and `lsp`.
+The canonical config values are `theme`, `keymaps`, `key_guide`, `default_registers`, `syntax`, `todo_markers`, `aliases`, `scripts`, `plugins`, `auto_close_pairs`, `active_line`, `relative_number`, `indent_guides`, `auto_indent`, `completion_trigger`, `completion_sources`, `advanced_glyphs`, `inlay_hints`, `tab_insertion`, `tab_behavior`, `tab_width`, `scroll_margin`, `wrap_mode`, and `lsp`.
 
 ```toml
 theme = "Friday Night"
@@ -59,8 +59,12 @@ enabled = true
 [plugins.local-tools]
 path = "~/src/urvim-local-tools"
 
+[key_guide]
+enabled = true
+delay_ms = 300
+
 [keymaps.normal]
-"<Space>f" = "pick file"
+"<Space>f" = { command = "pick file", desc = "Find file" }
 "<Space>w" = "write"
 "<Space>q" = "quit"
 
@@ -104,11 +108,22 @@ Defines custom key bindings for supported editor modes.
 - Inheritance: focused plugin panes and overlays inherit normal-mode focus and application mappings after their local mappings; picker, input, rename, and confirmation dialogs inherit application mappings only after their local controls and text input
 - Dialog input: printable normal-mode mappings are shadowed by picker, input, and rename text entry; unrecognized keys may start an inherited application mapping, and a failed inherited sequence is consumed
 - Keys: use urvim's canonical key string format, such as `jk`, `<Space>f`, `<C-s>`, or `<Esc>`
-- Values: command strings parsed the same way as command-line input, such as `write`, `pick file`, `mode normal`, or `action cursor right`
+- Values: either command strings parsed like command-line input, or `{ command = "...", desc = "..." }` tables with an optional key-guide description
 - Multi-command mappings: map to a configured script name; direct multi-command keymap values are not supported
 - Supported modes: `normal`, `insert`, `visual`, `visual_line`, `resizing`
 - Validation: malformed key strings, invalid commands, and unknown keymap mode tables are rejected at startup
 - Example: `jk = "mode normal"` under `[keymaps.insert]` adds a custom insert-mode exit binding while keeping built-in `<Esc>`
+
+### `key_guide`
+
+Controls the passive guide shown for pending editor-mode key sequences.
+
+- Type: TOML table with `enabled` and `delay_ms`
+- Default: `{ enabled = true, delay_ms = 300 }`
+- `enabled`: turns the guide on or off
+- `delay_ms`: delay before opening; `0` opens immediately
+- Scope: editor modes and their effective built-in, configured, and plugin keymaps
+- Behavior: counts and register selection do not open the guide; character-target commands display a `<char>` continuation
 
 ### `default_registers`
 

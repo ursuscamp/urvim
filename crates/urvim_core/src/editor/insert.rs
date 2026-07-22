@@ -1,4 +1,6 @@
-use super::{EditorAction, EditorOperation, HandleKeyResult, Mode, ModeKind, TrieKeymap};
+use super::{
+    EditorAction, EditorOperation, HandleKeyResult, KeyGuideSnapshot, Mode, ModeKind, TrieKeymap,
+};
 use crate::buffer::{Buffer, Cursor, IndentDirection};
 use crate::config::{DEFAULT_TAB_WIDTH, TabBehavior, TabInsertion};
 use crate::editor::pairs;
@@ -62,10 +64,16 @@ impl InsertMode {
         );
         globals::with_opt_config(|config| {
             if let Some(config) = config {
-                keymap.insert_configured(&config.keymaps.insert);
+                keymap.insert_configured(
+                    &config.keymaps.insert,
+                    config.keymaps.descriptions.get("insert"),
+                );
             }
         });
         keymap.insert_intents(&globals::plugin_keymap_intents_for_mode(ModeKind::Insert));
+        keymap.insert_descriptions(&globals::plugin_keymap_descriptions_for_mode(
+            ModeKind::Insert,
+        ));
         let auto_close_pairs =
             globals::with_config(|config| config.auto_close_pairs).unwrap_or(true);
         let tab_insertion = globals::with_config(|config| config.tab_insertion).unwrap_or_default();
@@ -364,6 +372,13 @@ impl Mode for InsertMode {
     fn clear_buffer(&mut self) {
         self.buffer.clear();
         self.waiting = false;
+    }
+
+    fn key_guide(&self) -> Option<KeyGuideSnapshot> {
+        self.waiting.then(|| KeyGuideSnapshot {
+            prefix: self.buffer.clone(),
+            entries: self.keymap.continuations(&self.buffer),
+        })
     }
 
     fn append_repeat_text(&mut self, text: &str) {

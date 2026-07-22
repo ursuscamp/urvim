@@ -1,6 +1,6 @@
 //! Key resolution helpers for text-object state machines.
 
-use super::{BracketKind, QuoteKind, TextObject};
+use super::{BracketKind, KeyGuideEntry, KeyGuideSnapshot, QuoteKind, TextObject};
 
 /// Whether a text-object key sequence targets the inner or around region.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -19,6 +19,30 @@ impl TextObjectScope {
             "a" => Some(Self::Around),
             _ => None,
         }
+    }
+}
+
+/// Builds the pending-key guide for a text-object scope.
+pub(super) fn key_guide(scope: TextObjectScope) -> KeyGuideSnapshot {
+    const SELECTORS: [&str; 9] = ["w", "W", "(", "[", "{", "<LessThan>", "'", "\"", "`"];
+    let scope_key = match scope {
+        TextObjectScope::Inner => "i",
+        TextObjectScope::Around => "a",
+    };
+    let entries = SELECTORS
+        .into_iter()
+        .map(|key| {
+            let text_object = resolve(scope, key).expect("guide selector should resolve");
+            KeyGuideEntry {
+                key: key.to_string(),
+                description: text_object.description().to_string(),
+                is_prefix: false,
+            }
+        })
+        .collect();
+    KeyGuideSnapshot {
+        prefix: vec![scope_key.to_string()],
+        entries,
     }
 }
 

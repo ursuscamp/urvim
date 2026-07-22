@@ -297,6 +297,11 @@ impl EditorTab {
         self.mode.handle_key(key)
     }
 
+    /// Returns the active mode's meaningful pending-key guide.
+    pub fn key_guide(&self) -> Option<crate::editor::KeyGuideSnapshot> {
+        self.mode.key_guide()
+    }
+
     /// Appends committed insert text to the current mode's repeat capture, if supported.
     pub fn append_repeat_text(&mut self, text: &str) {
         self.mode.append_repeat_text(text);

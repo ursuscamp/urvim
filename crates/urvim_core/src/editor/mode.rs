@@ -1,4 +1,4 @@
-use super::HandleKeyResult;
+use super::{HandleKeyResult, KeyGuideSnapshot};
 use urvim_terminal::{CursorStyle, Key};
 
 /// Lightweight mode classification used for user-facing labels.
@@ -47,6 +47,10 @@ pub trait Mode {
     fn is_waiting(&self) -> bool;
     /// Clears any buffered partial key sequence.
     fn clear_buffer(&mut self);
+    /// Returns the guide for the current meaningful pending sequence.
+    fn key_guide(&self) -> Option<KeyGuideSnapshot> {
+        None
+    }
     /// Appends additional committed insert text to the repeat capture, if supported.
     fn append_repeat_text(&mut self, _text: &str) {}
     /// Returns committed insert text for the current mode, if it captured any.

@@ -1,5 +1,5 @@
 use super::visual_common::VisualModeState;
-use super::{HandleKeyResult, Mode, ModeKind};
+use super::{HandleKeyResult, KeyGuideSnapshot, Mode, ModeKind};
 use urvim_terminal::{CursorStyle, Key};
 
 /// Linewise visual mode for whole-line selection.
@@ -38,6 +38,10 @@ impl Mode for VisualLineMode {
 
     fn clear_buffer(&mut self) {
         self.0.clear_buffer();
+    }
+
+    fn key_guide(&self) -> Option<KeyGuideSnapshot> {
+        self.0.key_guide()
     }
 
     fn kind(&self) -> ModeKind {

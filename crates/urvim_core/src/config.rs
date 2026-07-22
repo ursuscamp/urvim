@@ -198,6 +198,44 @@ pub struct PartialPluginConfig {
     pub path: Option<String>,
 }
 
+/// One configured editor keymap.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[serde(untagged)]
+pub enum KeymapConfigValue {
+    /// Backwards-compatible command-only mapping.
+    Command(String),
+    /// Mapping with user-facing metadata.
+    Detailed {
+        /// Command line invoked by the mapping.
+        command: String,
+        /// Optional key-guide description.
+        desc: Option<String>,
+    },
+}
+
+impl From<String> for KeymapConfigValue {
+    fn from(command: String) -> Self {
+        Self::Command(command)
+    }
+}
+
+impl KeymapConfigValue {
+    /// Returns the configured command line.
+    pub fn command(&self) -> &str {
+        match self {
+            Self::Command(command) | Self::Detailed { command, .. } => command,
+        }
+    }
+
+    /// Returns the optional key-guide description.
+    pub fn description(&self) -> Option<&str> {
+        match self {
+            Self::Command(_) => None,
+            Self::Detailed { desc, .. } => desc.as_deref(),
+        }
+    }
+}
+
 /// Resolved custom keymaps loaded from startup config.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct KeymapsConfig {
@@ -211,6 +249,8 @@ pub struct KeymapsConfig {
     pub visual_line: BTreeMap<String, String>,
     /// Resize-mode mappings from canonical key strings to command strings.
     pub resizing: BTreeMap<String, String>,
+    /// Optional descriptions, keyed first by mode and then canonical key string.
+    pub descriptions: BTreeMap<String, BTreeMap<String, String>>,
 }
 
 /// TOML-backed custom keymap tables stored in the config file.
@@ -218,15 +258,43 @@ pub struct KeymapsConfig {
 #[serde(deny_unknown_fields)]
 pub struct PartialKeymapsConfig {
     /// Normal-mode mappings from canonical key strings to command strings.
-    pub normal: Option<BTreeMap<String, String>>,
-    /// Insert-mode mappings from canonical key strings to command strings.
-    pub insert: Option<BTreeMap<String, String>>,
-    /// Visual-mode mappings from canonical key strings to command strings.
-    pub visual: Option<BTreeMap<String, String>>,
-    /// Linewise visual-mode mappings from canonical key strings to command strings.
-    pub visual_line: Option<BTreeMap<String, String>>,
-    /// Resize-mode mappings from canonical key strings to command strings.
-    pub resizing: Option<BTreeMap<String, String>>,
+    pub normal: Option<BTreeMap<String, KeymapConfigValue>>,
+    /// Insert-mode mappings from canonical key strings to commands and metadata.
+    pub insert: Option<BTreeMap<String, KeymapConfigValue>>,
+    /// Visual-mode mappings from canonical key strings to commands and metadata.
+    pub visual: Option<BTreeMap<String, KeymapConfigValue>>,
+    /// Linewise visual-mode mappings from canonical key strings to commands and metadata.
+    pub visual_line: Option<BTreeMap<String, KeymapConfigValue>>,
+    /// Resize-mode mappings from canonical key strings to commands and metadata.
+    pub resizing: Option<BTreeMap<String, KeymapConfigValue>>,
+}
+
+/// Key-guide behavior.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct KeyGuideConfig {
+    /// Whether pending editor mappings display the guide.
+    pub enabled: bool,
+    /// Delay before displaying the guide, in milliseconds.
+    pub delay_ms: u64,
+}
+
+impl Default for KeyGuideConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            delay_ms: 300,
+        }
+    }
+}
+
+/// TOML-backed key-guide behavior.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct PartialKeyGuideConfig {
+    /// Whether pending editor mappings display the guide.
+    pub enabled: Option<bool>,
+    /// Delay before displaying the guide, in milliseconds.
+    pub delay_ms: Option<u64>,
 }
 
 /// The TOML-backed config table for a single LSP server.
@@ -256,6 +324,8 @@ pub struct Config {
     pub theme: String,
     /// Custom editor mode keymaps loaded from config.
     pub keymaps: KeymapsConfig,
+    /// Pending-key guide behavior.
+    pub key_guide: KeyGuideConfig,
     /// The resolved default register selectors for yank, delete, and change.
     pub default_registers: DefaultRegisters,
     /// Whether syntax highlighting is enabled for rendered buffers.
@@ -308,6 +378,8 @@ pub struct PartialConfig {
     pub theme: Option<String>,
     /// Custom editor mode keymaps stored in the config file.
     pub keymaps: Option<PartialKeymapsConfig>,
+    /// Pending-key guide behavior stored in the config file.
+    pub key_guide: Option<PartialKeyGuideConfig>,
     /// The default register table stored in the config file.
     pub default_registers: Option<PartialDefaultRegisters>,
     /// Whether syntax highlighting is enabled in the config file.
@@ -423,6 +495,13 @@ impl Config {
             .and_then(|config| config.keymaps.as_ref())
             .map(resolve_keymaps)
             .unwrap_or_default();
+        let key_guide = file
+            .and_then(|config| config.key_guide.as_ref())
+            .map(|guide| KeyGuideConfig {
+                enabled: guide.enabled.unwrap_or(true),
+                delay_ms: guide.delay_ms.unwrap_or(300),
+            })
+            .unwrap_or_default();
         let default_registers = file
             .and_then(|config| config.default_registers.as_ref())
             .map(resolve_default_registers)
@@ -484,6 +563,7 @@ impl Config {
         Self {
             theme,
             keymaps,
+            key_guide,
             default_registers,
             syntax,
             auto_close_pairs,
@@ -562,6 +642,7 @@ impl Default for Config {
         Self {
             theme: DEFAULT_THEME.to_string(),
             keymaps: KeymapsConfig::default(),
+            key_guide: KeyGuideConfig::default(),
             default_registers: DefaultRegisters::default(),
             syntax: true,
             auto_close_pairs: true,
@@ -757,15 +838,15 @@ fn validate_keymaps(keymaps: &PartialKeymapsConfig) -> Result<(), ConfigLoadErro
 
 fn validate_keymap_table(
     mode: &str,
-    mappings: &BTreeMap<String, String>,
+    mappings: &BTreeMap<String, KeymapConfigValue>,
 ) -> Result<(), ConfigLoadError> {
-    for (keys, command) in mappings {
+    for (keys, mapping) in mappings {
         validate_key_string(keys).map_err(|error| {
             ConfigLoadError::invalid(format!(
                 "config keymaps.{mode} key {keys:?} must be a valid canonical key string: {error}"
             ))
         })?;
-        crate::command::parse(command).map_err(|error| {
+        crate::command::parse(mapping.command()).map_err(|error| {
             ConfigLoadError::invalid(format!(
                 "config keymaps.{mode} mapping {keys:?} must target a valid command: {error}"
             ))
@@ -864,12 +945,39 @@ fn resolve_aliases(aliases: &BTreeMap<String, String>) -> BTreeMap<String, Vec<S
 }
 
 fn resolve_keymaps(keymaps: &PartialKeymapsConfig) -> KeymapsConfig {
+    fn resolve_table(
+        mode: &str,
+        mappings: Option<&BTreeMap<String, KeymapConfigValue>>,
+        descriptions: &mut BTreeMap<String, BTreeMap<String, String>>,
+    ) -> BTreeMap<String, String> {
+        let Some(mappings) = mappings else {
+            return BTreeMap::new();
+        };
+        let mut commands = BTreeMap::new();
+        for (keys, mapping) in mappings {
+            commands.insert(keys.clone(), mapping.command().to_string());
+            if let Some(description) = mapping.description() {
+                descriptions
+                    .entry(mode.to_string())
+                    .or_default()
+                    .insert(keys.clone(), description.to_string());
+            }
+        }
+        commands
+    }
+
+    let mut descriptions = BTreeMap::new();
     KeymapsConfig {
-        normal: keymaps.normal.clone().unwrap_or_default(),
-        insert: keymaps.insert.clone().unwrap_or_default(),
-        visual: keymaps.visual.clone().unwrap_or_default(),
-        visual_line: keymaps.visual_line.clone().unwrap_or_default(),
-        resizing: keymaps.resizing.clone().unwrap_or_default(),
+        normal: resolve_table("normal", keymaps.normal.as_ref(), &mut descriptions),
+        insert: resolve_table("insert", keymaps.insert.as_ref(), &mut descriptions),
+        visual: resolve_table("visual", keymaps.visual.as_ref(), &mut descriptions),
+        visual_line: resolve_table(
+            "visual_line",
+            keymaps.visual_line.as_ref(),
+            &mut descriptions,
+        ),
+        resizing: resolve_table("resizing", keymaps.resizing.as_ref(), &mut descriptions),
+        descriptions,
     }
 }
 
@@ -1394,23 +1502,23 @@ mod tests {
             keymaps: Some(PartialKeymapsConfig {
                 normal: Some(BTreeMap::from([(
                     "<Space>w".to_string(),
-                    "write".to_string(),
+                    "write".to_string().into(),
                 )])),
                 insert: Some(BTreeMap::from([(
                     "jk".to_string(),
-                    "mode normal".to_string(),
+                    "mode normal".to_string().into(),
                 )])),
                 visual: Some(BTreeMap::from([(
                     "x".to_string(),
-                    "mode normal".to_string(),
+                    "mode normal".to_string().into(),
                 )])),
                 visual_line: Some(BTreeMap::from([(
                     "x".to_string(),
-                    "mode normal".to_string(),
+                    "mode normal".to_string().into(),
                 )])),
                 resizing: Some(BTreeMap::from([(
                     "x".to_string(),
-                    "pane equalize".to_string(),
+                    "pane equalize".to_string().into(),
                 )])),
             }),
             default_registers: Some(default_register_strings(Some("a"), Some("b"), Some("c"))),
@@ -2289,6 +2397,38 @@ enabled = true
         assert_eq!(
             config.keymaps.resizing.get("x").map(String::as_str),
             Some("pane equalize")
+        );
+    }
+
+    #[test]
+    fn load_from_locations_loads_key_guide_and_detailed_keymap() {
+        let home = unique_temp_dir("key-guide-home");
+        write_config(
+            &home,
+            "[key_guide]\nenabled = false\ndelay_ms = 125\n[keymaps.normal]\ngw = { command = \"write\", desc = \"Write buffer\" }",
+        );
+
+        let config = Config::load_from_locations(home, vec![], None, None).expect("should load");
+
+        assert_eq!(
+            config.key_guide,
+            KeyGuideConfig {
+                enabled: false,
+                delay_ms: 125,
+            }
+        );
+        assert_eq!(
+            config.keymaps.normal.get("gw").map(String::as_str),
+            Some("write")
+        );
+        assert_eq!(
+            config
+                .keymaps
+                .descriptions
+                .get("normal")
+                .and_then(|values| values.get("gw"))
+                .map(String::as_str),
+            Some("Write buffer")
         );
     }
 

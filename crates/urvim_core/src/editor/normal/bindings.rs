@@ -34,7 +34,7 @@ fn insert_operator_sequence(
         Some(mode) => EditorAction::operation(operator, target).with_to_mode(mode),
         None => EditorAction::operation(operator, target),
     };
-    trie_keymap.insert_str(&sequence, action);
+    trie_keymap.insert_str_described(&sequence, action, Some(target.description().to_string()));
 }
 
 fn insert_operator_sequences(

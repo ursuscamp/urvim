@@ -1,7 +1,10 @@
 use super::keymap::MAX_COUNT;
 use super::surround;
 use super::text_object::{self, TextObjectScope};
-use super::{EditorAction, EditorOperation, HandleKeyResult, ModeKind, TrieKeymap};
+use super::{
+    EditorAction, EditorOperation, HandleKeyResult, KeyGuideEntry, KeyGuideSnapshot, ModeKind,
+    TrieKeymap,
+};
 use crate::buffer::Boundary;
 use crate::editor::{Operator, OperatorTarget};
 use crate::globals;
@@ -49,10 +52,16 @@ impl VisualModeState {
                     ModeKind::VisualLine => &config.keymaps.visual_line,
                     _ => unreachable!("visual mode state should only build visual modes"),
                 };
-                keymap.insert_configured(mappings);
+                let mode_name = match mode_kind {
+                    ModeKind::Visual => "visual",
+                    ModeKind::VisualLine => "visual_line",
+                    _ => unreachable!("visual mode state should only build visual modes"),
+                };
+                keymap.insert_configured(mappings, config.keymaps.descriptions.get(mode_name));
             }
         });
         keymap.insert_intents(&globals::plugin_keymap_intents_for_mode(mode_kind));
+        keymap.insert_descriptions(&globals::plugin_keymap_descriptions_for_mode(mode_kind));
 
         Self {
             keymap,
@@ -254,8 +263,36 @@ impl VisualModeState {
         self.reset();
     }
 
+    pub(super) fn key_guide(&self) -> Option<KeyGuideSnapshot> {
+        match self.state {
+            VisualState::Idle if !self.trie_keys.is_empty() => Some(KeyGuideSnapshot {
+                prefix: self.trie_keys.clone(),
+                entries: self.keymap.continuations(&self.trie_keys),
+            }),
+            VisualState::CharScanPending(data) => Some(KeyGuideSnapshot {
+                prefix: vec![char_scan_key(data.kind, data.direction).to_string()],
+                entries: vec![KeyGuideEntry {
+                    key: "<char>".to_string(),
+                    description: "Character target".to_string(),
+                    is_prefix: false,
+                }],
+            }),
+            VisualState::TextObjectPending(scope) => Some(text_object::key_guide(scope)),
+            VisualState::Idle => None,
+        }
+    }
+
     pub(super) fn kind(&self) -> ModeKind {
         self.mode_kind
+    }
+}
+
+fn char_scan_key(kind: FindKind, direction: Direction) -> &'static str {
+    match (kind, direction) {
+        (FindKind::Find, Direction::Forward) => "f",
+        (FindKind::Find, Direction::Backward) => "F",
+        (FindKind::Till, Direction::Forward) => "t",
+        (FindKind::Till, Direction::Backward) => "T",
     }
 }
 

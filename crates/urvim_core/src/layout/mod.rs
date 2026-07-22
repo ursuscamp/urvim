@@ -113,6 +113,15 @@ enum PluginPaneKeySequence {
     Inherited,
 }
 
+/// Result of routing a key through the active editor mode.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EditorKeyHandlingResult {
+    /// Mode-level key handling outcome.
+    pub result: crate::editor::HandleKeyResult,
+    /// Whether the visible key-guide presentation changed.
+    pub key_guide_changed: bool,
+}
+
 /// Root layout container for urvim.
 ///
 /// The layout owns a binary split tree of panes, tracks the focused pane,
@@ -131,6 +140,7 @@ pub struct Layout {
     jobs: Arc<JobManager>,
     inlay_hints: InlayHintState,
     autocomplete: AutocompleteState,
+    key_guide: KeyGuideState,
     overlays: OverlayManager,
     plugin_pane_inherited_keymap: InheritedKeymap,
     plugin_pane_key_sequence: PluginPaneKeySequence,
@@ -184,6 +194,39 @@ pub(super) enum InlayHintState {
     Idle,
     Pending,
     InFlight(InFlightInlayHintRequest),
+}
+
+#[derive(Debug, Default)]
+struct KeyGuideState {
+    snapshot: Option<crate::editor::KeyGuideSnapshot>,
+    pending_since: Option<Instant>,
+    visible: bool,
+}
+
+impl KeyGuideState {
+    fn rendered_snapshot(&self) -> Option<&crate::editor::KeyGuideSnapshot> {
+        self.visible.then_some(self.snapshot.as_ref()).flatten()
+    }
+
+    fn update(&mut self, snapshot: Option<crate::editor::KeyGuideSnapshot>, now: Instant) {
+        let Some(snapshot) = snapshot else {
+            self.clear();
+            return;
+        };
+        if self.snapshot.as_ref() == Some(&snapshot) {
+            return;
+        }
+        self.snapshot = Some(snapshot);
+        if !self.visible {
+            self.pending_since = Some(now);
+        }
+    }
+
+    fn clear(&mut self) {
+        self.snapshot = None;
+        self.pending_since = None;
+        self.visible = false;
+    }
 }
 
 #[derive(Debug)]
@@ -241,6 +284,7 @@ impl Layout {
             jobs: Arc::new(JobManager::new()),
             inlay_hints: InlayHintState::Idle,
             autocomplete: AutocompleteState::default(),
+            key_guide: KeyGuideState::default(),
             overlays: OverlayManager::new(),
             plugin_pane_inherited_keymap: InheritedKeymap::new(NormalMode::keymap()),
             plugin_pane_key_sequence: PluginPaneKeySequence::None,
@@ -250,6 +294,33 @@ impl Layout {
         };
         layout.emit_initial_lifecycle_events();
         layout
+    }
+
+    /// Routes a key through the active editor mode and updates the pending-key guide.
+    pub fn handle_active_editor_key(
+        &mut self,
+        key: &urvim_terminal::Key,
+    ) -> EditorKeyHandlingResult {
+        let previous_key_guide = self.key_guide.rendered_snapshot().cloned();
+        let result = self
+            .active_editor_pane_mut()
+            .active_tab_mut()
+            .handle_key(key);
+        let snapshot = self.active_editor_pane().active_tab().key_guide();
+        let config = globals::with_config(|config| config.key_guide.clone()).unwrap_or_default();
+        if config.enabled {
+            self.key_guide.update(snapshot, Instant::now());
+            if config.delay_ms == 0 && self.key_guide.snapshot.is_some() {
+                self.key_guide.visible = true;
+            }
+        } else {
+            self.key_guide.clear();
+        }
+        let key_guide_changed = previous_key_guide != self.key_guide.rendered_snapshot().cloned();
+        EditorKeyHandlingResult {
+            result,
+            key_guide_changed,
+        }
     }
 
     /// Captures mode, cursor, and selection state for every visible editor pane.
@@ -1757,10 +1828,12 @@ impl Layout {
     fn route_base_ui_event(&mut self, event: &UiEvent) -> UiEventResult {
         match event {
             UiEvent::Tick => {
-                let autocomplete = self.maybe_fire_autocomplete(Instant::now());
+                let now = Instant::now();
+                let autocomplete = self.maybe_fire_autocomplete(now);
+                let key_guide = self.maybe_show_key_guide(now);
                 if self.prune_expired_yank_flashes() {
                     UiEventResult::Handled(Vec::new())
-                } else if autocomplete {
+                } else if autocomplete || key_guide {
                     UiEventResult::Handled(Vec::new())
                 } else {
                     UiEventResult::NotHandled
@@ -1770,6 +1843,27 @@ impl Layout {
                 UiEventResult::NotHandled
             }
         }
+    }
+
+    fn maybe_show_key_guide(&mut self, now: Instant) -> bool {
+        let config = globals::with_config(|config| config.key_guide.clone()).unwrap_or_default();
+        let was_visible = self.key_guide.visible;
+        if !config.enabled || self.focused_plugin_pane().is_some() || self.modal_dialog_is_open() {
+            self.key_guide.clear();
+            return was_visible;
+        }
+        let snapshot = self.active_editor_pane().active_tab().key_guide();
+        self.key_guide.update(snapshot, now);
+        if !self.key_guide.visible
+            && self.key_guide.snapshot.is_some()
+            && self.key_guide.pending_since.is_some_and(|started| {
+                now.saturating_duration_since(started)
+                    >= std::time::Duration::from_millis(config.delay_ms)
+            })
+        {
+            self.key_guide.visible = true;
+        }
+        was_visible != self.key_guide.visible
     }
 
     fn resize_counted_pane(

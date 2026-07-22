@@ -1,4 +1,6 @@
-use super::{EditorAction, EditorOperation, HandleKeyResult, Mode, ModeKind, TrieKeymap};
+use super::{
+    EditorAction, EditorOperation, HandleKeyResult, KeyGuideSnapshot, Mode, ModeKind, TrieKeymap,
+};
 use crate::ui::Intent;
 use urvim_terminal::{CursorStyle, Key, KeyCode};
 
@@ -115,6 +117,13 @@ impl Mode for ReplaceMode {
     fn clear_buffer(&mut self) {
         self.buffer.clear();
         self.waiting = false;
+    }
+
+    fn key_guide(&self) -> Option<KeyGuideSnapshot> {
+        self.waiting.then(|| KeyGuideSnapshot {
+            prefix: self.buffer.clone(),
+            entries: self.keymap.continuations(&self.buffer),
+        })
     }
 
     fn kind(&self) -> ModeKind {

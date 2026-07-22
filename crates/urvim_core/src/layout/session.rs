@@ -33,6 +33,7 @@ impl Layout {
             jobs: std::sync::Arc::new(crate::background::JobManager::new()),
             inlay_hints: InlayHintState::Idle,
             autocomplete: super::AutocompleteState::default(),
+            key_guide: super::KeyGuideState::default(),
             overlays: super::OverlayManager::new(),
             plugin_pane_inherited_keymap: crate::editor::InheritedKeymap::new(
                 crate::editor::NormalMode::keymap(),

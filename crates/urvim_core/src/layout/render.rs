@@ -154,6 +154,7 @@ impl Layout {
         self.render_completion_overlay(screen, origin, size);
         self.render_diagnostic_hover_overlay(screen, origin, size);
         self.render_hover_overlay(screen, origin, size);
+        self.render_key_guide_overlay(screen, origin, size);
         self.overlays.render(screen, UiRect::new(origin, size));
         self.render_buffer_picker_overlay(screen, origin, size);
         self.render_colorscheme_picker_overlay(screen, origin, size);
@@ -174,6 +175,17 @@ impl Layout {
         if self.inlay_hint_request_pending() {
             self.request_active_buffer_inlay_hints();
         }
+    }
+
+    fn render_key_guide_overlay(&mut self, screen: &mut Screen, origin: Position, size: Size) {
+        if !self.key_guide.visible {
+            return;
+        }
+        let Some(snapshot) = self.key_guide.snapshot.clone() else {
+            return;
+        };
+        let mut widget = crate::ui::key_guide::KeyGuideWidget::new(snapshot);
+        widget.render_widget(screen, UiRect::new(origin, size), &UiContext);
     }
 
     fn render_buffer_picker_overlay(&mut self, screen: &mut Screen, origin: Position, size: Size) {

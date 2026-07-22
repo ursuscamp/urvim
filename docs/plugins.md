@@ -192,7 +192,11 @@ The global `urvim` module exposes the APIs below. All arguments and return value
 - `urvim.register_event_hook(event, function) -> hook_id`
 - `urvim.unregister_event_hook(hook_id)`
 
-Keymap modes are `normal`, `insert`, `visual`, `visual_line` (or `visual-line`), and `resizing` (or `resize`). Keymap right-hand sides are urvim command lines. The optional keymap options map is currently reserved and must be empty.
+Keymap modes are `normal`, `insert`, `visual`, `visual_line` (or `visual-line`), and `resizing` (or `resize`). Keymap right-hand sides are urvim command lines. The optional options map accepts `desc`, a string displayed by the pending-key guide. `urvim.keymaps.list()` includes `desc` as a string or `null`.
+
+```text
+urvim.keymaps.set("normal", "<Space>w", "write", { "desc": "Write buffer" })
+```
 
 Buffer commands accept a named `buffer=<buffer-id>` argument, allowing ids returned by the buffer and pane APIs to target non-active buffers. BearScript string interpolation can construct the command line:
 

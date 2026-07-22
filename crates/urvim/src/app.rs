@@ -478,13 +478,12 @@ fn run_editor_loop<I: io::Read + rustix::fd::AsFd, O: io::Write + rustix::fd::As
                     continue;
                 }
 
-                let result = layout
-                    .borrow_mut()
-                    .active_editor_pane_mut()
-                    .active_tab_mut()
-                    .handle_key(&key);
+                let handling = layout.borrow_mut().handle_active_editor_key(&key);
+                if handling.key_guide_changed {
+                    needs_redraw = true;
+                }
 
-                match result {
+                match handling.result {
                     HandleKeyResult::Complete(intent) => match intent {
                         Intent::Editor(action) => {
                             if execute_action_intent_with_plugin_runtime(
@@ -548,8 +547,11 @@ fn run_editor_loop<I: io::Read + rustix::fd::AsFd, O: io::Write + rustix::fd::As
                             }
                         }
                     },
-                    HandleKeyResult::WaitForMore => {}
-                    HandleKeyResult::InvalidSequence => {}
+                    HandleKeyResult::WaitForMore | HandleKeyResult::InvalidSequence => {
+                        // Pending-key UI may have opened, advanced, or closed even
+                        // though no executable intent was produced.
+                        needs_redraw = true;
+                    }
                 }
             }
         }

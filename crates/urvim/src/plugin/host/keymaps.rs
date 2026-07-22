@@ -14,11 +14,17 @@ pub(in crate::plugin) fn keymaps_module() -> Value {
                 native_fn(
                     "keymaps.set",
                     |mode: String, lhs: String, rhs: String, opts: Option<Value>| {
-                        validate_keymap_opts(opts.as_ref())?;
+                        let description = keymap_description_from_opts(opts.as_ref())?;
                         let mode = mode_kind_from_keymap_string(&mode)?;
                         validate_keymap_lhs_and_rhs(&lhs, &rhs)?;
                         globals::with_plugin_keymaps_mut(|keymaps| {
-                            keymap_table_mut(keymaps, mode).insert(lhs, rhs);
+                            keymap_table_mut(keymaps, mode).insert(
+                                lhs,
+                                globals::PluginKeymapEntry {
+                                    command: rhs,
+                                    description,
+                                },
+                            );
                         });
                         Ok(())
                     },
@@ -69,24 +75,30 @@ fn keymap_entries(
     });
     let mut entries = Vec::new();
     for mode in modes {
-        for (lhs, rhs) in keymap_table(keymaps, mode) {
-            entries.push(Value::Map(
-                HashMap::from([
-                    (
-                        "mode".to_string(),
-                        Value::String(keymap_mode_name(mode).into()),
-                    ),
-                    (
-                        "lhs".to_string(),
-                        Value::String(lhs.clone().into_boxed_str().into()),
-                    ),
-                    (
-                        "rhs".to_string(),
-                        Value::String(rhs.clone().into_boxed_str().into()),
-                    ),
-                ])
-                .into(),
-            ));
+        for (lhs, mapping) in keymap_table(keymaps, mode) {
+            let mut entry = HashMap::from([
+                (
+                    "mode".to_string(),
+                    Value::String(keymap_mode_name(mode).into()),
+                ),
+                (
+                    "lhs".to_string(),
+                    Value::String(lhs.clone().into_boxed_str().into()),
+                ),
+                (
+                    "rhs".to_string(),
+                    Value::String(mapping.command.clone().into_boxed_str().into()),
+                ),
+            ]);
+            entry.insert(
+                "desc".to_string(),
+                mapping
+                    .description
+                    .clone()
+                    .map(|value| Value::String(value.into_boxed_str().into()))
+                    .unwrap_or(Value::Null),
+            );
+            entries.push(Value::Map(entry.into()));
         }
     }
     entries
@@ -120,22 +132,32 @@ fn validate_keymap_lhs_and_rhs(lhs: &str, rhs: &str) -> Result<(), String> {
     super::super::validate_plugin_command_execution_intent(&intent)
 }
 
-fn validate_keymap_opts(opts: Option<&Value>) -> Result<(), String> {
+fn keymap_description_from_opts(opts: Option<&Value>) -> Result<Option<String>, String> {
+    let Some(opts) = opts else {
+        return Ok(None);
+    };
     match opts {
-        None | Some(Value::Null) => Ok(()),
-        Some(Value::Map(map)) if map.is_empty() => Ok(()),
-        Some(Value::Map(map)) => {
-            let key = map.keys().next().expect("non-empty map should have a key");
-            Err(format!("unknown keymap option {key}"))
+        Value::Null => Ok(None),
+        Value::Map(map) => {
+            for key in map.keys() {
+                if key != "desc" {
+                    return Err(format!("unknown keymap option {key}"));
+                }
+            }
+            match map.get("desc") {
+                None | Some(Value::Null) => Ok(None),
+                Some(Value::String(description)) => Ok(Some(description.to_string())),
+                Some(_) => Err("keymap option desc must be a string".to_string()),
+            }
         }
-        Some(_) => Err("keymap opts must be a map or null".to_string()),
+        _ => Err("keymap opts must be a map or null".to_string()),
     }
 }
 
 fn keymap_table(
     keymaps: &urvim_core::globals::PluginKeymaps,
     mode: ModeKind,
-) -> &BTreeMap<String, String> {
+) -> &BTreeMap<String, globals::PluginKeymapEntry> {
     match mode {
         ModeKind::Normal => &keymaps.normal,
         ModeKind::Insert => &keymaps.insert,
@@ -149,7 +171,7 @@ fn keymap_table(
 fn keymap_table_mut(
     keymaps: &mut urvim_core::globals::PluginKeymaps,
     mode: ModeKind,
-) -> &mut BTreeMap<String, String> {
+) -> &mut BTreeMap<String, globals::PluginKeymapEntry> {
     match mode {
         ModeKind::Normal => &mut keymaps.normal,
         ModeKind::Insert => &mut keymaps.insert,

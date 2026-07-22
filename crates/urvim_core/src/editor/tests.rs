@@ -94,6 +94,40 @@ fn set_active_buffer(text: &str) {
 }
 
 #[test]
+fn normal_mode_key_guide_describes_operator_and_character_states() {
+    let mut mode = NormalMode::new();
+
+    assert_eq!(mode.handle_key(&key('d')), HandleKeyResult::WaitForMore);
+    let operator = mode.key_guide().expect("operator should have a guide");
+    assert_eq!(operator.prefix, vec!["d"]);
+    assert!(operator.entries.iter().any(|entry| entry.key == "i"));
+    assert!(operator.entries.iter().any(|entry| entry.key == "w"));
+
+    mode.clear_buffer();
+    assert_eq!(mode.handle_key(&key('c')), HandleKeyResult::WaitForMore);
+    let change = mode.key_guide().expect("change should have a guide");
+    assert_eq!(
+        change
+            .entries
+            .iter()
+            .find(|entry| entry.key == "$")
+            .map(|entry| entry.description.as_str()),
+        Some("To line end")
+    );
+
+    mode.clear_buffer();
+    assert_eq!(mode.handle_key(&key('f')), HandleKeyResult::WaitForMore);
+    let scan = mode
+        .key_guide()
+        .expect("character scan should have a guide");
+    assert_eq!(scan.entries[0].key, "<char>");
+
+    mode.clear_buffer();
+    assert_eq!(mode.handle_key(&key('3')), HandleKeyResult::WaitForMore);
+    assert!(mode.key_guide().is_none());
+}
+
+#[test]
 fn test_normal_mode_move_left() {
     let mut mode = NormalMode::new();
     assert_eq!(

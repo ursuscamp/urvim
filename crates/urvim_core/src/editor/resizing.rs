@@ -1,4 +1,4 @@
-use super::{EditorAction, HandleKeyResult, Mode, ModeKind, TrieKeymap};
+use super::{EditorAction, HandleKeyResult, KeyGuideSnapshot, Mode, ModeKind, TrieKeymap};
 use crate::globals;
 use crate::ui::{Command, Intent};
 use urvim_terminal::{CursorStyle, Key};
@@ -32,10 +32,16 @@ impl ResizingMode {
         keymap.insert_str("<Esc>", EditorAction::mode_transition(ModeKind::Normal));
         globals::with_opt_config(|config| {
             if let Some(config) = config {
-                keymap.insert_configured(&config.keymaps.resizing);
+                keymap.insert_configured(
+                    &config.keymaps.resizing,
+                    config.keymaps.descriptions.get("resizing"),
+                );
             }
         });
         keymap.insert_intents(&globals::plugin_keymap_intents_for_mode(ModeKind::Resizing));
+        keymap.insert_descriptions(&globals::plugin_keymap_descriptions_for_mode(
+            ModeKind::Resizing,
+        ));
 
         Self {
             keymap,
@@ -80,6 +86,13 @@ impl Mode for ResizingMode {
 
     fn clear_buffer(&mut self) {
         self.reset();
+    }
+
+    fn key_guide(&self) -> Option<KeyGuideSnapshot> {
+        self.waiting.then(|| KeyGuideSnapshot {
+            prefix: self.buffer.clone(),
+            entries: self.keymap.continuations(&self.buffer),
+        })
     }
 
     fn kind(&self) -> ModeKind {

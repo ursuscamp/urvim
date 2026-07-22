@@ -26,6 +26,96 @@ fn layout_with_buffers(buffers: Vec<Buffer>) -> Layout {
     Layout::new(EditorPane::from_buffers(buffers))
 }
 
+#[test]
+fn key_guide_opens_immediately_at_zero_delay_and_closes_on_completion() {
+    let _config = globals::set_test_config(Config {
+        key_guide: crate::config::KeyGuideConfig {
+            enabled: true,
+            delay_ms: 0,
+        },
+        ..Config::default()
+    });
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("hello")]);
+
+    assert_eq!(
+        layout
+            .handle_active_editor_key(&Key::new(KeyCode::Char('g')))
+            .result,
+        crate::editor::HandleKeyResult::WaitForMore
+    );
+    assert!(layout.key_guide.visible);
+
+    let completion = layout.handle_active_editor_key(&Key::new(KeyCode::Char('g')));
+    assert!(completion.key_guide_changed);
+    assert!(!layout.key_guide.visible);
+    assert!(layout.key_guide.snapshot.is_none());
+}
+
+#[test]
+fn canceled_sequence_requests_key_guide_redraw() {
+    let _config = globals::set_test_config(Config {
+        key_guide: crate::config::KeyGuideConfig {
+            enabled: true,
+            delay_ms: 0,
+        },
+        ..Config::default()
+    });
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("hello")]);
+
+    layout.handle_active_editor_key(&Key::new(KeyCode::Char('g')));
+    let cancellation = layout.handle_active_editor_key(&Key::new(KeyCode::Esc));
+
+    assert_eq!(
+        cancellation.result,
+        crate::editor::HandleKeyResult::InvalidSequence
+    );
+    assert!(cancellation.key_guide_changed);
+    assert!(!layout.key_guide.visible);
+}
+
+#[test]
+fn completed_noop_text_object_requests_key_guide_redraw() {
+    let _config = globals::set_test_config(Config {
+        key_guide: crate::config::KeyGuideConfig {
+            enabled: true,
+            delay_ms: 0,
+        },
+        ..Config::default()
+    });
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("plain text")]);
+
+    layout.handle_active_editor_key(&Key::new(KeyCode::Char('c')));
+    layout.handle_active_editor_key(&Key::new(KeyCode::Char('i')));
+    assert!(layout.key_guide.visible);
+
+    let handling = layout.handle_active_editor_key(&Key::new(KeyCode::Char('[')));
+    assert!(handling.key_guide_changed);
+    assert!(!layout.key_guide.visible);
+    let crate::editor::HandleKeyResult::Complete(intent) = handling.result else {
+        panic!("text object should complete the pending sequence");
+    };
+    assert!(!layout.dispatch_intent(&intent));
+}
+
+#[test]
+fn key_guide_waits_for_configured_delay() {
+    let _config = globals::set_test_config(Config {
+        key_guide: crate::config::KeyGuideConfig {
+            enabled: true,
+            delay_ms: 300,
+        },
+        ..Config::default()
+    });
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("hello")]);
+
+    layout.handle_active_editor_key(&Key::new(KeyCode::Char('g')));
+    assert!(!layout.key_guide.visible);
+    layout.key_guide.pending_since = Some(Instant::now() - Duration::from_millis(301));
+    layout.route_ui_event(&UiEvent::Tick);
+
+    assert!(layout.key_guide.visible);
+}
+
 fn abs_path(path: &std::path::Path) -> crate::AbsolutePath {
     crate::AbsolutePath::from_path(path).unwrap()
 }

@@ -43,6 +43,23 @@ pub enum BoundaryMotion {
     BigWordBackward,
 }
 
+impl BoundaryMotion {
+    /// Returns the user-facing description used for keymap discovery.
+    pub fn description(self) -> &'static str {
+        match self {
+            Self::LineEnd => "To line end",
+            Self::LineStart => "To line start",
+            Self::LineContentStart => "To first non-blank",
+            Self::WordForward => "Next word",
+            Self::WordEnd => "Word end",
+            Self::WordBackward => "Previous word",
+            Self::BigWordForward => "Next big word",
+            Self::BigWordEnd => "Big word end",
+            Self::BigWordBackward => "Previous big word",
+        }
+    }
+}
+
 /// Text objects that define a selection region for use with operators.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TextObject {
@@ -60,6 +77,32 @@ pub enum TextObject {
     InnerQuote(QuoteKind),
     /// Text between matching quotes, including the quote delimiters.
     AroundQuote(QuoteKind),
+}
+
+impl TextObject {
+    /// Returns the user-facing description used for keymap discovery.
+    pub fn description(self) -> &'static str {
+        match self {
+            Self::InnerWord => "Inner word",
+            Self::AroundWord => "Around word",
+            Self::InnerBigWord => "Inner big word",
+            Self::AroundBigWord => "Around big word",
+            Self::InnerBracket(BracketKind::Paren) => "Inside parentheses",
+            Self::AroundBracket(BracketKind::Paren) => "Around parentheses",
+            Self::InnerBracket(BracketKind::Square) => "Inside square brackets",
+            Self::AroundBracket(BracketKind::Square) => "Around square brackets",
+            Self::InnerBracket(BracketKind::Curly) => "Inside curly braces",
+            Self::AroundBracket(BracketKind::Curly) => "Around curly braces",
+            Self::InnerBracket(BracketKind::Angle) => "Inside angle brackets",
+            Self::AroundBracket(BracketKind::Angle) => "Around angle brackets",
+            Self::InnerQuote(QuoteKind::Single) => "Inside single quotes",
+            Self::AroundQuote(QuoteKind::Single) => "Around single quotes",
+            Self::InnerQuote(QuoteKind::Double) => "Inside double quotes",
+            Self::AroundQuote(QuoteKind::Double) => "Around double quotes",
+            Self::InnerQuote(QuoteKind::Backtick) => "Inside backticks",
+            Self::AroundQuote(QuoteKind::Backtick) => "Around backticks",
+        }
+    }
 }
 
 /// Supported delimiter families for bracket text objects.
@@ -204,6 +247,28 @@ pub enum OperatorTarget {
     Selection,
 }
 
+impl OperatorTarget {
+    /// Returns the user-facing description used for keymap discovery.
+    pub fn description(self) -> &'static str {
+        match self {
+            Self::TextObject(text_object) => text_object.description(),
+            Self::BoundaryMotion(motion) => motion.description(),
+            Self::LinewiseMotion(motion) => motion.description(),
+            Self::CharacterScan(find) => match (find.kind, find.direction) {
+                (globals::FindKind::Find, globals::Direction::Forward) => "Find character",
+                (globals::FindKind::Find, globals::Direction::Backward) => {
+                    "Find character backward"
+                }
+                (globals::FindKind::Till, globals::Direction::Forward) => "Till character",
+                (globals::FindKind::Till, globals::Direction::Backward) => {
+                    "Till character backward"
+                }
+            },
+            Self::Selection => "Selection",
+        }
+    }
+}
+
 /// Linewise operator targets for whole-line deletion.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LinewiseMotion {
@@ -211,6 +276,16 @@ pub enum LinewiseMotion {
     FirstLine,
     /// Move to the last line of the file.
     LastLine,
+}
+
+impl LinewiseMotion {
+    /// Returns the user-facing description used for keymap discovery.
+    pub fn description(self) -> &'static str {
+        match self {
+            Self::FirstLine => "To first line",
+            Self::LastLine => "To last line",
+        }
+    }
 }
 
 /// Editor-specific operation with modal metadata.

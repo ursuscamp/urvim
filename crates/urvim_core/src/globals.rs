@@ -107,14 +107,23 @@ thread_local! {
     static TEST_PLUGIN_FILETYPES: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
 }
 
+/// One runtime keymap installed by a plugin.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PluginKeymapEntry {
+    /// Command line invoked by the mapping.
+    pub command: String,
+    /// Optional key-guide description.
+    pub description: Option<String>,
+}
+
 /// Runtime keymaps installed by plugins.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct PluginKeymaps {
-    pub normal: BTreeMap<String, String>,
-    pub insert: BTreeMap<String, String>,
-    pub visual: BTreeMap<String, String>,
-    pub visual_line: BTreeMap<String, String>,
-    pub resizing: BTreeMap<String, String>,
+    pub normal: BTreeMap<String, PluginKeymapEntry>,
+    pub insert: BTreeMap<String, PluginKeymapEntry>,
+    pub visual: BTreeMap<String, PluginKeymapEntry>,
+    pub visual_line: BTreeMap<String, PluginKeymapEntry>,
+    pub resizing: BTreeMap<String, PluginKeymapEntry>,
 }
 
 fn plugin_keymaps_slot() -> &'static RwLock<PluginKeymaps> {
@@ -584,10 +593,35 @@ pub fn plugin_keymap_intents_for_mode(mode: crate::editor::ModeKind) -> BTreeMap
         };
         mappings
             .iter()
-            .filter_map(|(lhs, rhs)| {
-                crate::command::parse(rhs)
+            .filter_map(|(lhs, mapping)| {
+                crate::command::parse(&mapping.command)
                     .ok()
                     .map(|intent| (lhs.clone(), intent))
+            })
+            .collect()
+    })
+}
+
+/// Returns plugin keymap descriptions for a mode.
+pub fn plugin_keymap_descriptions_for_mode(
+    mode: crate::editor::ModeKind,
+) -> BTreeMap<String, String> {
+    with_plugin_keymaps(|keymaps| {
+        let mappings = match mode {
+            crate::editor::ModeKind::Normal => &keymaps.normal,
+            crate::editor::ModeKind::Insert => &keymaps.insert,
+            crate::editor::ModeKind::Visual => &keymaps.visual,
+            crate::editor::ModeKind::VisualLine => &keymaps.visual_line,
+            crate::editor::ModeKind::Resizing => &keymaps.resizing,
+            crate::editor::ModeKind::Replace => return BTreeMap::new(),
+        };
+        mappings
+            .iter()
+            .filter_map(|(lhs, mapping)| {
+                mapping
+                    .description
+                    .as_ref()
+                    .map(|description| (lhs.clone(), description.clone()))
             })
             .collect()
     })

@@ -1,8 +1,8 @@
 use super::keymap::MAX_COUNT;
 use super::text_object::{self, TextObjectScope};
 use super::{
-    DelimiterFamily, EditorAction, EditorOperation, HandleKeyResult, Mode, ModeKind, Operator,
-    OperatorTarget, TextObject, TrieKeymap,
+    DelimiterFamily, EditorAction, EditorOperation, HandleKeyResult, KeyGuideEntry,
+    KeyGuideSnapshot, Mode, ModeKind, Operator, OperatorTarget, TextObject, TrieKeymap,
 };
 use crate::globals;
 use crate::globals::{Direction, FindKind};
@@ -96,10 +96,16 @@ impl NormalMode {
         bindings::register(&mut keymap);
         globals::with_opt_config(|config| {
             if let Some(config) = config {
-                keymap.insert_configured(&config.keymaps.normal);
+                keymap.insert_configured(
+                    &config.keymaps.normal,
+                    config.keymaps.descriptions.get("normal"),
+                );
             }
         });
         keymap.insert_intents(&globals::plugin_keymap_intents_for_mode(ModeKind::Normal));
+        keymap.insert_descriptions(&globals::plugin_keymap_descriptions_for_mode(
+            ModeKind::Normal,
+        ));
         keymap
     }
 
@@ -456,8 +462,102 @@ impl Mode for NormalMode {
         self.reset();
     }
 
+    fn key_guide(&self) -> Option<KeyGuideSnapshot> {
+        let wildcard = |prefix: Vec<String>, description: &str| KeyGuideSnapshot {
+            prefix,
+            entries: vec![KeyGuideEntry {
+                key: "<char>".to_string(),
+                description: description.to_string(),
+                is_prefix: false,
+            }],
+        };
+        match &self.state {
+            State::Idle if !self.trie_keys.is_empty() => Some(KeyGuideSnapshot {
+                prefix: self.trie_keys.clone(),
+                entries: self.keymap.continuations(&self.trie_keys),
+            }),
+            State::OperatorPending(data) => {
+                let mut prefix = Self::operator_trie_keys(data.operator);
+                prefix.extend(data.motion_keys.iter().cloned());
+                let mut entries = self.keymap.continuations(&prefix);
+                if data.motion_keys.is_empty() && !Self::is_case_operator(data.operator) {
+                    entries.push(KeyGuideEntry {
+                        key: "i".to_string(),
+                        description: "Inner text object".to_string(),
+                        is_prefix: true,
+                    });
+                    entries.push(KeyGuideEntry {
+                        key: "a".to_string(),
+                        description: "Around text object".to_string(),
+                        is_prefix: true,
+                    });
+                }
+                entries.sort_by(|left, right| left.key.cmp(&right.key));
+                Some(KeyGuideSnapshot { prefix, entries })
+            }
+            State::OperatorTextObjectPending(data) => Some(text_object::key_guide(data.scope)),
+            State::ReplacePending => Some(wildcard(vec!["r".to_string()], "Replace character")),
+            State::CharScanPending(data) => Some(wildcard(
+                vec![char_scan_key(data.kind, data.direction).to_string()],
+                "Character target",
+            )),
+            State::OpCharScanPending(data) => {
+                let mut prefix = Self::operator_trie_keys(data.operator);
+                prefix.push(char_scan_key(data.kind, data.direction).to_string());
+                Some(wildcard(prefix, "Character target"))
+            }
+            State::SurroundCommandPending => Some(fixed_guide(
+                &["g", "s"],
+                &[
+                    ("a", "Add surround", true),
+                    ("d", "Delete surround", false),
+                    ("r", "Replace surround", false),
+                ],
+            )),
+            State::SurroundAddTextObjectPending => Some(fixed_guide(
+                &["g", "s", "a"],
+                &[
+                    ("i", "Inner text object", true),
+                    ("a", "Around text object", true),
+                ],
+            )),
+            State::SurroundAddTargetPending(scope) => Some(text_object::key_guide(*scope)),
+            State::SurroundAddDelimiterPending(_)
+            | State::SurroundDeleteDelimiterPending
+            | State::SurroundReplaceTargetPending
+            | State::SurroundReplaceReplacementPending(_) => Some(wildcard(
+                vec!["g".to_string(), "s".to_string()],
+                "Delimiter",
+            )),
+            State::Idle => None,
+        }
+    }
+
     fn kind(&self) -> ModeKind {
         ModeKind::Normal
+    }
+}
+
+fn char_scan_key(kind: FindKind, direction: Direction) -> &'static str {
+    match (kind, direction) {
+        (FindKind::Find, Direction::Forward) => "f",
+        (FindKind::Find, Direction::Backward) => "F",
+        (FindKind::Till, Direction::Forward) => "t",
+        (FindKind::Till, Direction::Backward) => "T",
+    }
+}
+
+fn fixed_guide(prefix: &[&str], entries: &[(&str, &str, bool)]) -> KeyGuideSnapshot {
+    KeyGuideSnapshot {
+        prefix: prefix.iter().map(|key| (*key).to_string()).collect(),
+        entries: entries
+            .iter()
+            .map(|(key, description, is_prefix)| KeyGuideEntry {
+                key: (*key).to_string(),
+                description: (*description).to_string(),
+                is_prefix: *is_prefix,
+            })
+            .collect(),
     }
 }
 

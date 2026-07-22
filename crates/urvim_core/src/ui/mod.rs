@@ -10,6 +10,7 @@ pub mod geometry;
 pub mod hover;
 pub mod input_box;
 pub mod inputs;
+pub mod key_guide;
 pub mod line_format;
 pub mod lsp_rename;
 pub mod overlay;

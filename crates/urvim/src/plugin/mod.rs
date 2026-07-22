@@ -5214,6 +5214,7 @@ entry = "plugin.bear"
                                 ("mode".to_string(), Value::String("normal".into())),
                                 ("lhs".to_string(), Value::String("x".into())),
                                 ("rhs".to_string(), Value::String("pane wrap-toggle".into())),
+                                ("desc".to_string(), Value::Null),
                             ])
                             .into()
                         )]
@@ -5225,6 +5226,7 @@ entry = "plugin.bear"
                                 ("mode".to_string(), Value::String("normal".into())),
                                 ("lhs".to_string(), Value::String("x".into())),
                                 ("rhs".to_string(), Value::String("pane wrap-toggle".into())),
+                                ("desc".to_string(), Value::Null),
                             ])
                             .into()
                         )]
@@ -5327,11 +5329,15 @@ entry = "plugin.bear"
             .to_string();
         assert!(bad_opts.contains("keymap opts must be a map or null"));
 
-        let unsupported_opts = engine
+        engine
             .eval("urvim.keymaps.set(\"normal\", \"x\", \"pane wrap-toggle\", { \"desc\": \"Toggle wrap\" })")
-            .expect_err("unsupported opts should error")
+            .expect("description option should be accepted");
+
+        let bad_description = engine
+            .eval("urvim.keymaps.set(\"normal\", \"x\", \"pane wrap-toggle\", { \"desc\": 1 })")
+            .expect_err("non-string description should error")
             .to_string();
-        assert!(unsupported_opts.contains("unknown keymap option desc"));
+        assert!(bad_description.contains("keymap option desc must be a string"));
     }
 
     #[test]
