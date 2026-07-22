@@ -113,11 +113,15 @@ pub struct GutterRenderState {
     pub diff_modified_sign_style: Style,
 }
 
+/// A styled run of rendered text.
 #[derive(Debug, Clone)]
 pub struct RenderChunk {
+    /// Text displayed by this run.
     pub text: String,
+    /// Style layered over the rendered line's base style.
     pub style: Style,
-    pub is_ghost_text: bool,
+    /// Whether this run is virtual and consumes no buffer bytes.
+    pub is_virtual_text: bool,
 }
 
 #[derive(Debug, Clone)]

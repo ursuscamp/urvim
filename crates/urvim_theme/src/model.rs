@@ -408,7 +408,11 @@ mod tests {
             Style::new().fg(Color::ansi(9)),
         );
         highlights.insert(
-            tag("ui.inlay_hint"),
+            tag("ui.virtual_text"),
+            Style::new().fg(Color::ansi(24)).italic(),
+        );
+        highlights.insert(
+            tag("ui.virtual_text.inlay_hint"),
             Style::new().fg(Color::ansi(24)).italic(),
         );
         highlights.insert(
@@ -501,8 +505,25 @@ mod tests {
             Style::new().fg(Color::ansi(7))
         );
         assert_eq!(
-            theme.highlight_style_for_name("ui.inlay_hint"),
+            theme.highlight_style_for_name("ui.virtual_text"),
             Style::new().fg(Color::ansi(24)).italic()
+        );
+        assert_eq!(
+            theme.highlight_style_for_name("ui.virtual_text.inlay_hint"),
+            Style::new().fg(Color::ansi(24)).italic()
+        );
+    }
+
+    #[test]
+    fn inlay_hint_style_falls_back_to_virtual_text() {
+        let virtual_text_style = Style::new().fg(Color::ansi(24)).italic();
+        let mut highlights = HighlightStyles::default();
+        highlights.insert(tag("ui.virtual_text"), virtual_text_style);
+        let theme = Theme::new("fallback", ThemeKind::Ansi256, Style::default(), highlights);
+
+        assert_eq!(
+            theme.highlight_style_for_name("ui.virtual_text.inlay_hint"),
+            virtual_text_style
         );
     }
 

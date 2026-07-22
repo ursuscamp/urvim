@@ -6,7 +6,7 @@ This is a list, in no particular order, of things that need to be addressed whic
 
 - build-time compiled themes
 - show code action modification in preview window
-- code action hints for the current line (with ghost text)
+- code action hints for the current line (with virtual text)
 - quick jump
 - healthcheck
 - expand intents to have more scriptable actions

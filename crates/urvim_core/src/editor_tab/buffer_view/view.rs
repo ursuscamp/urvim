@@ -4,7 +4,7 @@ use super::{BufferView, VisualSelection, VisualSelectionKind, YankFlash, YankFla
 use crate::buffer::BufferId;
 use crate::buffer::{Buffer, Cursor};
 use crate::buffer::{
-    Marker, MarkerPayload, MarkerShape, TextRef, configured_tab_width, display_grapheme_width,
+    Highlight, Marker, TextRef, VirtualText, configured_tab_width, display_grapheme_width,
     display_width_at,
 };
 use crate::config::ScrollMargin;
@@ -522,11 +522,11 @@ impl BufferView {
                     .as_ref()
                     .map(|line| line.contiguous_text_with_scratch(&mut scratch))
                     .unwrap_or("");
-                let mut annotations = buffer.ghost_texts_for_line(line_idx).unwrap_or_default();
+                let mut annotations = buffer.virtual_texts_for_line(line_idx).unwrap_or_default();
                 if let Some(inlay_hints) = buffer.inlay_hints_for_line(line_idx) {
                     annotations.extend(inlay_hints);
                 }
-                let wrapped_text = Self::line_text_with_ghost_texts(line_text, &annotations);
+                let wrapped_text = Self::line_text_with_virtual_text(line_text, &annotations);
                 let segments = Self::wrap_segments_for_line(&wrapped_text, visible_cols, wrap_mode);
                 let segment_count = segments.len().max(1);
 
@@ -579,11 +579,11 @@ impl BufferView {
                     .as_ref()
                     .map(|line| line.contiguous_text_with_scratch(&mut scratch))
                     .unwrap_or("");
-                let mut annotations = buffer.ghost_texts_for_line(line_idx).unwrap_or_default();
+                let mut annotations = buffer.virtual_texts_for_line(line_idx).unwrap_or_default();
                 if let Some(inlay_hints) = buffer.inlay_hints_for_line(line_idx) {
                     annotations.extend(inlay_hints);
                 }
-                let wrapped_text = Self::line_text_with_ghost_texts(line_text, &annotations);
+                let wrapped_text = Self::line_text_with_virtual_text(line_text, &annotations);
                 let segment_count =
                     Self::wrap_segments_for_line(&wrapped_text, visible_cols, wrap_mode)
                         .len()
@@ -623,8 +623,11 @@ impl BufferView {
         let mut render_data = RenderData::new(size.rows);
         let syntax_styles =
             globals::with_active_theme(|theme| theme.map(|theme| theme.highlights.clone()));
+        let virtual_text_style = globals::with_active_theme(|theme| {
+            theme.map(|theme| theme.highlight_style_for_name("ui.virtual_text"))
+        });
         let inlay_hint_style = globals::with_active_theme(|theme| {
-            theme.map(|theme| theme.highlight_style_for_name("ui.inlay_hint"))
+            theme.map(|theme| theme.highlight_style_for_name("ui.virtual_text.inlay_hint"))
         });
         let selection_style = globals::with_active_theme(|theme| {
             theme.map(|theme| theme.highlight_style_for_name("ui.selection"))
@@ -682,7 +685,7 @@ impl BufferView {
                     let line_text = line_ref.contiguous_text_with_scratch(&mut line_scratch);
                     if wrap_enabled {
                         let mut annotations = buffer
-                            .ghost_texts_for_line(buffer_line_idx)
+                            .virtual_texts_for_line(buffer_line_idx)
                             .unwrap_or_default();
                         if let Some(inlay_hints) = buffer.inlay_hints_for_line(buffer_line_idx) {
                             annotations.extend(inlay_hints);
@@ -695,6 +698,7 @@ impl BufferView {
                             &todo_markers,
                             &annotations,
                             default_style,
+                            virtual_text_style,
                             inlay_hint_style,
                             syntax_styles.as_ref(),
                         );
@@ -726,7 +730,7 @@ impl BufferView {
                         rows_to_skip = 0;
                     } else {
                         let mut annotations = buffer
-                            .ghost_texts_for_line(buffer_line_idx)
+                            .virtual_texts_for_line(buffer_line_idx)
                             .unwrap_or_default();
                         if let Some(inlay_hints) = buffer.inlay_hints_for_line(buffer_line_idx) {
                             annotations.extend(inlay_hints);
@@ -742,6 +746,7 @@ impl BufferView {
                             &todo_markers,
                             &annotations,
                             default_style,
+                            virtual_text_style,
                             inlay_hint_style,
                             syntax_styles.as_ref(),
                         );
@@ -757,9 +762,9 @@ impl BufferView {
                             .or_else(|| starts_open_fold.then_some(FoldGutterGlyph::Open));
                         let mut chunks = chunks;
                         if let Some(count) = folded_line_count {
-                            chunks.push(RenderChunk::ghost_text(
+                            chunks.push(RenderChunk::virtual_text(
                                 &format!(" ... {count} lines folded"),
-                                Self::default_ghost_style(default_style),
+                                Self::default_virtual_text_style(default_style),
                             ));
                         }
                         let line_data = LineData {
@@ -796,6 +801,15 @@ impl BufferView {
 
         if request_cache_refresh && let Some(buffer_id) = self.buffer_id_opt() {
             globals::with_buffer_pool(|pool| pool.request_buffer_cache_refresh(buffer_id));
+        }
+
+        if let Some(highlights) = self.with_buffer(|buffer| buffer.highlights()) {
+            for marker in highlights {
+                let Some((range, highlight)) = marker.as_range() else {
+                    continue;
+                };
+                render_data.overlay_style_range(range.start, range.end, highlight.style);
+            }
         }
 
         if let Some(selection_style) = selection_style {
@@ -925,8 +939,9 @@ impl BufferView {
         visible_text: &str,
         syntax_spans: &[crate::buffer::SyntaxSpan],
         todo_markers: &[SmolStr],
-        markers: &[Marker<MarkerPayload>],
+        markers: &[Marker<VirtualText, Highlight>],
         default_style: Style,
+        virtual_text_style: Option<Style>,
         inlay_hint_style: Option<Style>,
         syntax_styles: Option<&urvim_theme::HighlightStyles>,
     ) -> Vec<RenderChunk> {
@@ -1001,14 +1016,14 @@ impl BufferView {
             visible_start,
             visible_end,
             markers,
-            Self::default_ghost_style(default_style),
-            inlay_hint_style.unwrap_or_else(|| Self::default_ghost_style(default_style)),
+            virtual_text_style.unwrap_or_else(|| Self::default_virtual_text_style(default_style)),
+            inlay_hint_style.unwrap_or_else(|| Self::default_virtual_text_style(default_style)),
         );
 
         chunks
     }
 
-    fn default_ghost_style(default_style: Style) -> Style {
+    fn default_virtual_text_style(default_style: Style) -> Style {
         Style::new()
             .set_foreground(default_style.foreground())
             .faint()
@@ -1019,19 +1034,16 @@ impl BufferView {
         chunks: &mut Vec<RenderChunk>,
         visible_start: usize,
         visible_end: usize,
-        markers: &[Marker<MarkerPayload>],
-        ghost_style: Style,
+        markers: &[Marker<VirtualText, Highlight>],
+        virtual_text_style: Style,
         inlay_hint_style: Style,
     ) {
-        let insertions: Vec<(usize, &MarkerPayload)> = markers
+        let insertions: Vec<(usize, &VirtualText)> = markers
             .iter()
-            .filter_map(|marker| match marker.kind {
-                MarkerShape::Point(point)
-                    if point.pos.col >= visible_start && point.pos.col <= visible_end =>
-                {
-                    Some((point.pos.col, &marker.payload))
-                }
-                _ => None,
+            .filter_map(|marker| {
+                let (point, payload) = marker.as_point()?;
+                (point.pos.col >= visible_start && point.pos.col <= visible_end)
+                    .then_some((point.pos.col, payload))
             })
             .collect();
 
@@ -1040,38 +1052,45 @@ impl BufferView {
         }
 
         let mut output = Vec::with_capacity(chunks.len() + insertions.len());
-        let mut ghost_idx = 0usize;
+        let mut virtual_text_idx = 0usize;
         let mut chunk_start = visible_start;
 
         for chunk in chunks.drain(..) {
             let mut remaining = chunk.text.as_str();
             let chunk_end = chunk_start + remaining.len();
 
-            while ghost_idx < insertions.len() && insertions[ghost_idx].0 <= chunk_start {
-                let payload = insertions[ghost_idx].1;
-                output.push(RenderChunk::ghost_text(
-                    payload.label.as_str(),
-                    payload.style(ghost_style, inlay_hint_style),
+            while virtual_text_idx < insertions.len()
+                && insertions[virtual_text_idx].0 <= chunk_start
+            {
+                let payload = insertions[virtual_text_idx].1;
+                output.push(RenderChunk::virtual_text(
+                    payload.text.as_str(),
+                    payload.resolved_style(virtual_text_style, inlay_hint_style),
                 ));
-                ghost_idx += 1;
+                virtual_text_idx += 1;
             }
 
-            while ghost_idx < insertions.len() && insertions[ghost_idx].0 < chunk_end {
-                let ghost_col = insertions[ghost_idx].0;
-                let split_at = ghost_col.saturating_sub(chunk_start).min(remaining.len());
+            while virtual_text_idx < insertions.len() && insertions[virtual_text_idx].0 < chunk_end
+            {
+                let virtual_text_col = insertions[virtual_text_idx].0;
+                let split_at = virtual_text_col
+                    .saturating_sub(chunk_start)
+                    .min(remaining.len());
                 if split_at > 0 {
                     output.push(RenderChunk::new(&remaining[..split_at], chunk.style));
                     remaining = &remaining[split_at..];
                     chunk_start += split_at;
                 }
 
-                while ghost_idx < insertions.len() && insertions[ghost_idx].0 == ghost_col {
-                    let payload = insertions[ghost_idx].1;
-                    output.push(RenderChunk::ghost_text(
-                        payload.label.as_str(),
-                        payload.style(ghost_style, inlay_hint_style),
+                while virtual_text_idx < insertions.len()
+                    && insertions[virtual_text_idx].0 == virtual_text_col
+                {
+                    let payload = insertions[virtual_text_idx].1;
+                    output.push(RenderChunk::virtual_text(
+                        payload.text.as_str(),
+                        payload.resolved_style(virtual_text_style, inlay_hint_style),
                     ));
-                    ghost_idx += 1;
+                    virtual_text_idx += 1;
                 }
             }
 
@@ -1081,14 +1100,14 @@ impl BufferView {
             chunk_start = chunk_end;
         }
 
-        while ghost_idx < insertions.len() {
-            let payload = insertions[ghost_idx].1;
+        while virtual_text_idx < insertions.len() {
+            let payload = insertions[virtual_text_idx].1;
 
-            output.push(RenderChunk::ghost_text(
-                payload.label.as_str(),
-                payload.style(ghost_style, inlay_hint_style),
+            output.push(RenderChunk::virtual_text(
+                payload.text.as_str(),
+                payload.resolved_style(virtual_text_style, inlay_hint_style),
             ));
-            ghost_idx += 1;
+            virtual_text_idx += 1;
         }
 
         *chunks = output;
@@ -1140,11 +1159,11 @@ impl BufferView {
                 row_chunks.push(RenderChunk {
                     text: remaining[..take].to_string(),
                     style: chunk.style,
-                    is_ghost_text: chunk.is_ghost_text,
+                    is_virtual_text: chunk.is_virtual_text,
                 });
 
                 virtual_pos += take;
-                if !chunk.is_ghost_text {
+                if !chunk.is_virtual_text {
                     original_pos += take;
                 }
 
@@ -1167,22 +1186,23 @@ impl BufferView {
         result
     }
 
-    fn line_text_with_ghost_texts(line_text: &str, markers: &[Marker<MarkerPayload>]) -> String {
+    fn line_text_with_virtual_text(
+        line_text: &str,
+        markers: &[Marker<VirtualText, Highlight>],
+    ) -> String {
         if markers.is_empty() {
             return line_text.to_string();
         }
 
-        let mut result = String::with_capacity(
-            line_text.len()
-                + markers
-                    .iter()
-                    .map(|marker| marker.payload.label.len())
-                    .sum::<usize>(),
-        );
+        let virtual_text_len = markers
+            .iter()
+            .filter_map(|marker| marker.as_point().map(|(_, text)| text.text.len()))
+            .sum::<usize>();
+        let mut result = String::with_capacity(line_text.len() + virtual_text_len);
         let mut cursor = 0usize;
 
         for marker in markers {
-            let MarkerShape::Point(point) = marker.kind else {
+            let Some((point, text)) = marker.as_point() else {
                 continue;
             };
 
@@ -1191,7 +1211,7 @@ impl BufferView {
                 result.push_str(&line_text[cursor..insert_at]);
                 cursor = insert_at;
             }
-            result.push_str(marker.payload.label.as_str());
+            result.push_str(text.text.as_str());
         }
 
         if cursor < line_text.len() {

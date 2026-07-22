@@ -1191,8 +1191,12 @@ fn buffers_module(plugin: String) -> Value {
     Value::Module(HashMap::from([
         ("active".to_string(), buffers_module_active_fn()),
         (
-            "ghost_text".to_string(),
-            host::buffer_ghost_text::ghost_text_module(plugin),
+            "virtual_text".to_string(),
+            host::buffer_virtual_text::virtual_text_module(plugin.clone()),
+        ),
+        (
+            "highlights".to_string(),
+            host::buffer_highlights::highlights_module(plugin),
         ),
         ("list".to_string(), buffers_module_list_fn()),
         (
@@ -2894,7 +2898,7 @@ entry = "plugin.bear"
     }
 
     #[test]
-    fn buffers_ghost_text_api_manages_owned_styled_markers() {
+    fn buffers_virtual_text_api_manages_owned_styled_markers() {
         let _guard = buffer_pool_lock();
         let layout = Layout::new(EditorPane::from_buffers(vec![Buffer::from_str(
             "hello\nworld",
@@ -2922,21 +2926,21 @@ entry = "plugin.bear"
             .eval(
                 r##"
                 let buffer = urvim.buffers.active()
-                let marker = urvim.buffers.ghost_text.add(buffer, {
+                let marker = urvim.buffers.virtual_text.add(buffer, {
                     "position": { "row": 0, "col": 5 },
                     "text": " boo",
                     "style": { "fg": "#ff0088", "bold": true }
                 })
-                urvim.buffers.ghost_text.update(buffer, marker, {
+                urvim.buffers.virtual_text.update(buffer, marker, {
                     "position": { "row": 1, "col": 5 },
                     "text": " spooky",
                     "gravity": "left",
                     "style": { "fg": 213, "italic": true }
                 })
-                [marker, urvim.buffers.ghost_text.list(buffer)]
+                [marker, urvim.buffers.virtual_text.list(buffer)]
                 "##,
             )
-            .expect("ghost text API should manage markers");
+            .expect("virtual text API should manage markers");
 
         let Value::List(values) = values else {
             panic!("API should return marker id and list");
@@ -2958,7 +2962,7 @@ entry = "plugin.bear"
             _ => panic!("marker id should be numeric"),
         };
         globals::with_buffer_mut(buffer_id, |buffer| {
-            buffer.insert_namespaced_ghost_text(
+            buffer.insert_namespaced_virtual_text(
                 "other",
                 Cursor::new(0, 0),
                 urvim_core::buffer::Gravity::Right,
@@ -2968,22 +2972,98 @@ entry = "plugin.bear"
         });
         assert!(
             globals::with_buffer(buffer_id, |buffer| {
-                buffer.namespaced_ghost_text("demo", id).is_some()
+                buffer.namespaced_virtual_text("demo", id).is_some()
             })
             .unwrap()
         );
 
         assert_eq!(
             engine
-                .eval("urvim.buffers.ghost_text.clear(urvim.buffers.active())")
+                .eval("urvim.buffers.virtual_text.clear(urvim.buffers.active())")
                 .expect("clear should succeed"),
             Value::Number(1.0)
         );
         assert_eq!(
             globals::with_buffer(buffer_id, |buffer| {
-                buffer.namespaced_ghost_texts("other").len()
+                buffer.namespaced_virtual_texts("other").len()
             }),
             Some(1)
+        );
+    }
+
+    #[test]
+    fn buffers_highlights_api_manages_owned_ranges() {
+        let _guard = buffer_pool_lock();
+        let layout = Layout::new(EditorPane::from_buffers(vec![Buffer::from_str(
+            "hello\nworld",
+        )]));
+        let buffer_id = layout.active_buffer_view().buffer_id();
+        globals::set_active_buffer_id(buffer_id);
+
+        let mut engine = Engine::new();
+        engine.set_global(
+            "urvim",
+            urvim_module(
+                "demo".to_string(),
+                Rc::new(RefCell::new(
+                    urvim_plugin::PluginContributionRegistry::default(),
+                )),
+                Rc::new(RefCell::new(BearscriptPluginCallbacks::default())),
+                shared_test_layout(),
+                Rc::new(PluginFsRegistry::default()),
+                Rc::new(PluginJobRegistry::default()),
+                Rc::new(PluginTimerRegistry::default()),
+            ),
+        );
+
+        let values = engine
+            .eval(
+                r##"
+                let buffer = urvim.buffers.active()
+                let marker = urvim.buffers.highlights.add(buffer, {
+                    "range": {
+                        "start": { "row": 0, "col": 1 },
+                        "end": { "row": 1, "col": 3 }
+                    },
+                    "style": { "bg": "#112233", "bold": true }
+                })
+                urvim.buffers.highlights.update(buffer, marker, {
+                    "range": {
+                        "start": { "row": 0, "col": 2 },
+                        "end": { "row": 1, "col": 4 }
+                    },
+                    "end_gravity": "right",
+                    "style": { "fg": 213, "italic": true }
+                })
+                [marker, urvim.buffers.highlights.list(buffer)]
+                "##,
+            )
+            .expect("highlights API should manage ranges");
+
+        let Value::List(values) = values else {
+            panic!("API should return marker id and list");
+        };
+        let marker_id = values[0].clone();
+        let Value::List(markers) = &values[1] else {
+            panic!("list should return highlights");
+        };
+        let Value::Map(marker) = &markers[0] else {
+            panic!("highlight should be a map");
+        };
+        assert_eq!(marker.get("id"), Some(&marker_id));
+        assert_eq!(
+            marker.get("start_gravity"),
+            Some(&Value::String("right".into()))
+        );
+        assert_eq!(
+            marker.get("end_gravity"),
+            Some(&Value::String("right".into()))
+        );
+        assert_eq!(
+            engine
+                .eval("urvim.buffers.highlights.clear(urvim.buffers.active())")
+                .expect("clear should succeed"),
+            Value::Number(1.0)
         );
     }
 
@@ -2997,6 +3077,43 @@ entry = "plugin.bear"
         );
 
         assert!(runtime.plugins.contains_key("ghost-party"));
+    }
+
+    #[test]
+    fn funky_text_example_loads_and_highlights_matches() {
+        let _guard = buffer_pool_lock();
+        let layout = Layout::new(EditorPane::from_buffers(vec![Buffer::from_str(
+            "FUNKY text\nanother FUNKY line",
+        )]));
+        let buffer_id = layout.active_buffer_view().buffer_id();
+        globals::set_active_buffer_id(buffer_id);
+        let mut runtime = BearscriptPluginRuntime::empty(shared_test_layout());
+        add_runtime_plugin(
+            &mut runtime,
+            "funky-text",
+            include_str!("../../../../examples/plugins/funky-text/plugin.bear"),
+        );
+
+        runtime
+            .plugins
+            .get_mut("funky-text")
+            .expect("plugin")
+            .engine
+            .eval("start([]);")
+            .expect("start should highlight matches");
+        assert_eq!(
+            globals::with_buffer(buffer_id, |buffer| {
+                buffer.namespaced_highlights("funky-text").len()
+            }),
+            Some(2)
+        );
+        runtime
+            .plugins
+            .get_mut("funky-text")
+            .expect("plugin")
+            .engine
+            .eval("clear_funky([]);")
+            .expect("clear should remove highlights");
     }
 
     #[test]

@@ -983,7 +983,7 @@ fn test_layout_lsp_inlay_hint_chunk_replaces_existing_hints() {
         .expect("inlay hints");
 
     assert_eq!(line.len(), 1);
-    assert_eq!(line[0].payload.label, SmolStr::new("second"));
+    assert_eq!(line[0].as_point().unwrap().1.text, SmolStr::new("second"));
 }
 
 #[test]
@@ -1058,8 +1058,8 @@ fn test_layout_lsp_inlay_hint_chunk_pads_labels_on_insert() {
         .expect("inlay hints");
 
     assert_eq!(line.len(), 2);
-    assert_eq!(line[0].payload.label, SmolStr::new("name: "));
-    assert_eq!(line[1].payload.label, SmolStr::new(" Type"));
+    assert_eq!(line[0].as_point().unwrap().1.text, SmolStr::new("name: "));
+    assert_eq!(line[1].as_point().unwrap().1.text, SmolStr::new(" Type"));
 }
 
 #[test]

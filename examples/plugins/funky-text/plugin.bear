@@ -1,0 +1,109 @@
+let animation_timer = null
+let target_buffer = null
+let phase = 0
+let styles = [
+    { "fg": "#ff1493", "bg": "#2b1038", "bold": true, "italic": false, "underline": false, "reverse": false },
+    { "fg": "#ff8c00", "bg": "#3a1f00", "bold": false, "italic": true, "underline": false, "reverse": false },
+    { "fg": "#ffff00", "bg": "#303000", "bold": true, "italic": true, "underline": false, "reverse": false },
+    { "fg": "#00ff7f", "bg": "#003322", "bold": false, "italic": false, "underline": true, "reverse": false },
+    { "fg": "#00bfff", "bg": "#002b45", "bold": true, "italic": false, "underline": true, "reverse": false },
+    { "fg": "#da70d6", "bg": "#351438", "bold": true, "italic": true, "underline": false, "reverse": true }
+]
+
+fn init() {
+    urvim.commands.register("start", start, "Highlight and animate every FUNKY match")
+    urvim.commands.register("stop", stop, "Stop the FUNKY animation")
+    urvim.commands.register("clear", clear_funky, "Stop and remove every FUNKY highlight")
+}
+
+fn start(args) {
+    let buffer = urvim.buffers.active()
+    if buffer == null {
+        urvim.ui.show_message("No active buffer to make funky", { "level": "warn" })
+        return
+    }
+
+    stop_timer()
+    if target_buffer != null and urvim.buffers.exists(target_buffer) {
+        urvim.buffers.highlights.clear(target_buffer)
+    }
+
+    target_buffer = buffer
+    phase = 0
+    let matches = add_funky_highlights(buffer)
+    if matches == 0 {
+        target_buffer = null
+        urvim.ui.show_message("No FUNKY text found", { "level": "info" })
+        return
+    }
+
+    animation_timer = urvim.timers.set_interval(220, animate)
+    urvim.ui.show_message("Made {matches} FUNKY match(es) move", { "level": "info" })
+}
+
+fn add_funky_highlights(buffer) {
+    let matches = 0
+    let row_count = urvim.buffers.line_count(buffer)
+    for row in 0..row_count {
+        let line = urvim.buffers.line(buffer, row)
+        let col = urvim.strings.find(line, "FUNKY", 0)
+        while col >= 0 {
+            urvim.buffers.highlights.add(buffer, {
+                "range": {
+                    "start": { "row": row, "col": col },
+                    "end": { "row": row, "col": col + 5 }
+                },
+                "style": styles[matches % len(styles)]
+            })
+            matches = matches + 1
+            col = urvim.strings.find(line, "FUNKY", col + 5)
+        }
+    }
+    return matches
+}
+
+fn animate() {
+    if target_buffer == null or !urvim.buffers.exists(target_buffer) {
+        stop_timer()
+        target_buffer = null
+        return
+    }
+
+    let highlights = urvim.buffers.highlights.list(target_buffer)
+    let index = 0
+    for highlight in highlights {
+        let look = (phase + index) % len(styles)
+        urvim.buffers.highlights.update(target_buffer, highlight["id"], {
+            "style": styles[look]
+        })
+        index = index + 1
+    }
+
+    phase = phase + 1
+    if phase >= len(styles) {
+        phase = 0
+    }
+}
+
+fn stop(args) {
+    stop_timer()
+    urvim.ui.show_message("The FUNKY text is frozen", { "level": "info" })
+}
+
+fn clear_funky(args) {
+    stop_timer()
+    let removed = 0
+    if target_buffer != null and urvim.buffers.exists(target_buffer) {
+        removed = urvim.buffers.highlights.clear(target_buffer)
+    }
+    target_buffer = null
+    phase = 0
+    urvim.ui.show_message("Cleared {removed} FUNKY highlight(s)", { "level": "info" })
+}
+
+fn stop_timer() {
+    if animation_timer != null {
+        urvim.timers.clear(animation_timer)
+        animation_timer = null
+    }
+}

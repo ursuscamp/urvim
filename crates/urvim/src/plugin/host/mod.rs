@@ -4,7 +4,8 @@ use std::rc::Rc;
 
 use bearscript::{IntoFunction, Value};
 
-pub(in crate::plugin) mod buffer_ghost_text;
+pub(in crate::plugin) mod buffer_highlights;
+pub(in crate::plugin) mod buffer_virtual_text;
 mod env;
 mod filetypes;
 mod fs;

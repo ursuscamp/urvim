@@ -9,54 +9,61 @@ const CHUNK_SIZE: usize = 128;
 const ID_CHUNK_SIZE: usize = 512;
 const NAMESPACE_CHUNK_SIZE: usize = 256;
 
-/// Marker payload kind.
+/// Determines the theme style used by virtual text.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MarkerKind {
-    /// LSP inlay hint inserted inline.
+pub enum VirtualTextKind {
+    /// Generic virtual text created by the editor or a plugin.
+    Generic,
+    /// An LSP inlay hint.
     InlayHint,
 }
 
-/// A marker payload shared by ghost text and inlay hints.
+/// Text displayed at a buffer position without changing the buffer contents.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MarkerPayload {
-    /// Marker label text.
-    pub label: SmolStr,
-    /// Marker kind, present only for inlay hints.
-    pub kind: Option<MarkerKind>,
-    /// Optional style override.
+pub struct VirtualText {
+    /// Text displayed by the marker.
+    pub text: SmolStr,
+    /// Semantic virtual-text kind.
+    pub kind: VirtualTextKind,
+    /// Optional style layered over the kind's theme style.
     pub style: Option<StyleOverlay>,
 }
 
-impl MarkerPayload {
-    /// Creates a new marker payload.
-    pub fn new(label: impl Into<SmolStr>) -> Self {
+impl VirtualText {
+    /// Creates generic virtual text.
+    pub fn new(text: impl Into<SmolStr>) -> Self {
         Self {
-            label: label.into(),
-            kind: None,
+            text: text.into(),
+            kind: VirtualTextKind::Generic,
             style: None,
         }
     }
 
-    /// Creates an inlay-hint payload.
-    pub fn inlay_hint(label: impl Into<SmolStr>) -> Self {
+    /// Creates virtual text for an LSP inlay hint.
+    pub fn inlay_hint(text: impl Into<SmolStr>) -> Self {
         Self {
-            label: label.into(),
-            kind: Some(MarkerKind::InlayHint),
+            text: text.into(),
+            kind: VirtualTextKind::InlayHint,
             style: None,
         }
     }
 
-    /// Resolves the display style for this marker.
-    pub fn style(&self, default_ghost_style: Style, inlay_hint_style: Style) -> Style {
-        let base_style = if self.kind.is_some() {
-            inlay_hint_style
-        } else {
-            default_ghost_style
+    /// Resolves this virtual text's display style.
+    pub fn resolved_style(&self, virtual_text_style: Style, inlay_hint_style: Style) -> Style {
+        let base_style = match self.kind {
+            VirtualTextKind::Generic => virtual_text_style,
+            VirtualTextKind::InlayHint => inlay_hint_style,
         };
-
         self.style
             .map_or(base_style, |style| style.apply_to(base_style))
     }
+}
+
+/// A style applied to a half-open range of real buffer text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Highlight {
+    /// Partial style composed with the text's existing style.
+    pub style: StyleOverlay,
 }
 
 /// Stable identifier for a marker stored in a [`MarkerStore`].
@@ -93,7 +100,7 @@ pub struct DeleteShape {
 
 /// A marker anchored to a single cursor.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct PointMarker {
+pub struct PointAnchor {
     /// Marker position.
     pub pos: Cursor,
     /// Exact-boundary insertion behavior.
@@ -102,7 +109,7 @@ pub struct PointMarker {
 
 /// A marker anchored to a half-open range.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct RangeMarker {
+pub struct RangeAnchor {
     /// Range start, inclusive.
     pub start: Cursor,
     /// Range end, exclusive.
@@ -113,45 +120,79 @@ pub struct RangeMarker {
     pub end_gravity: Gravity,
 }
 
-/// Marker geometry.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MarkerShape {
-    /// A single anchored point.
-    Point(PointMarker),
-    /// A half-open range.
-    Range(RangeMarker),
-}
-
-/// A marker with attached payload.
+/// An edit-tracking marker whose geometry determines its payload type.
 #[derive(Debug, Clone)]
-pub struct Marker<T> {
-    /// Stable marker identifier.
-    pub id: MarkerId,
-    /// Marker geometry.
-    pub kind: MarkerShape,
-    /// Attached external data.
-    pub payload: T,
+pub enum Marker<P, R> {
+    /// A point marker.
+    Point {
+        /// Stable marker identifier.
+        id: MarkerId,
+        /// Point geometry.
+        anchor: PointAnchor,
+        /// Point-specific payload.
+        payload: P,
+    },
+    /// A half-open range marker.
+    Range {
+        /// Stable marker identifier.
+        id: MarkerId,
+        /// Range geometry.
+        anchor: RangeAnchor,
+        /// Range-specific payload.
+        payload: R,
+    },
 }
 
-impl<T> Marker<T> {
-    fn anchor(&self) -> Cursor {
-        match self.kind {
-            MarkerShape::Point(point) => point.pos,
-            MarkerShape::Range(range) => range.start,
+impl<P, R> Marker<P, R> {
+    /// Returns the stable marker identifier.
+    pub fn id(&self) -> MarkerId {
+        match self {
+            Self::Point { id, .. } | Self::Range { id, .. } => *id,
         }
+    }
+
+    /// Returns point marker components.
+    pub fn as_point(&self) -> Option<(PointAnchor, &P)> {
+        match self {
+            Self::Point {
+                anchor, payload, ..
+            } => Some((*anchor, payload)),
+            Self::Range { .. } => None,
+        }
+    }
+
+    /// Returns range marker components.
+    pub fn as_range(&self) -> Option<(RangeAnchor, &R)> {
+        match self {
+            Self::Range {
+                anchor, payload, ..
+            } => Some((*anchor, payload)),
+            Self::Point { .. } => None,
+        }
+    }
+
+    fn anchor(&self) -> Cursor {
+        match self {
+            Self::Point { anchor, .. } => anchor.pos,
+            Self::Range { anchor, .. } => anchor.start,
+        }
+    }
+
+    fn is_empty_range(&self) -> bool {
+        matches!(self, Self::Range { anchor, .. } if anchor.start >= anchor.end)
     }
 }
 
 /// A line-local bucket of markers.
 #[derive(Debug, Clone)]
-pub struct LineBucket<T> {
-    markers: Arc<[Marker<T>]>,
+pub struct LineBucket<P, R> {
+    markers: Arc<[Marker<P, R>]>,
 }
 
-impl<T> LineBucket<T> {
+impl<P, R> LineBucket<P, R> {
     fn new() -> Self {
         Self {
-            markers: Arc::from(Vec::<Marker<T>>::new()),
+            markers: Arc::from(Vec::<Marker<P, R>>::new()),
         }
     }
 
@@ -159,40 +200,39 @@ impl<T> LineBucket<T> {
         self.markers.is_empty()
     }
 
-    fn len(&self) -> usize {
-        self.markers.len()
+    fn get(&self, id: MarkerId) -> Option<&Marker<P, R>> {
+        self.markers.iter().find(|marker| marker.id() == id)
     }
 
-    fn get(&self, id: MarkerId) -> Option<&Marker<T>> {
-        self.markers.iter().find(|marker| marker.id == id)
-    }
-
-    fn get_mut(&mut self, id: MarkerId) -> Option<&mut Marker<T>>
+    fn get_mut(&mut self, id: MarkerId) -> Option<&mut Marker<P, R>>
     where
-        T: Clone,
+        P: Clone,
+        R: Clone,
     {
         let markers = Arc::make_mut(&mut self.markers);
-        markers.iter_mut().find(|marker| marker.id == id)
+        markers.iter_mut().find(|marker| marker.id() == id)
     }
 
-    fn remove(&mut self, id: MarkerId) -> Option<Marker<T>>
+    fn remove(&mut self, id: MarkerId) -> Option<Marker<P, R>>
     where
-        T: Clone,
+        P: Clone,
+        R: Clone,
     {
         let mut markers = self.markers.as_ref().to_vec();
-        let index = markers.iter().position(|marker| marker.id == id)?;
+        let index = markers.iter().position(|marker| marker.id() == id)?;
         let removed = markers.remove(index);
         self.markers = Arc::from(markers.into_boxed_slice());
         Some(removed)
     }
 
-    fn iter(&self) -> impl Iterator<Item = &Marker<T>> {
+    fn iter(&self) -> impl Iterator<Item = &Marker<P, R>> {
         self.markers.iter()
     }
 
-    fn insert_sorted(&mut self, marker: Marker<T>)
+    fn insert_sorted(&mut self, marker: Marker<P, R>)
     where
-        T: Clone,
+        P: Clone,
+        R: Clone,
     {
         let anchor = marker.anchor();
         let mut markers = self.markers.as_ref().to_vec();
@@ -264,8 +304,8 @@ impl NamespaceIndex {
 
 /// Generic marker store organized by line buckets.
 #[derive(Debug, Clone)]
-pub struct MarkerStore<T> {
-    chunks: Vec<Arc<Vec<LineBucket<T>>>>,
+pub struct MarkerStore<P, R> {
+    chunks: Vec<Arc<Vec<LineBucket<P, R>>>>,
     id_line_chunks: Vec<Arc<Vec<Option<usize>>>>,
     namespace_locations_by_id: Vec<Arc<Vec<Option<NamespaceLocation>>>>,
     namespaces: Vec<Arc<NamespaceIndex>>,
@@ -273,13 +313,13 @@ pub struct MarkerStore<T> {
     next_id: MarkerId,
 }
 
-impl<T: Clone> Default for MarkerStore<T> {
+impl<P: Clone, R: Clone> Default for MarkerStore<P, R> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<T: Clone> MarkerStore<T> {
+impl<P: Clone, R: Clone> MarkerStore<P, R> {
     /// Creates an empty marker store with one empty line bucket.
     pub fn new() -> Self {
         Self::with_line_count(1)
@@ -332,19 +372,19 @@ impl<T: Clone> MarkerStore<T> {
     }
 
     /// Returns an immutable marker by id.
-    pub fn get(&self, id: MarkerId) -> Option<&Marker<T>> {
+    pub fn get(&self, id: MarkerId) -> Option<&Marker<P, R>> {
         let line = self.index_line(id)?;
         self.bucket(line)?.get(id)
     }
 
     /// Returns a mutable marker by id.
-    pub fn get_mut(&mut self, id: MarkerId) -> Option<&mut Marker<T>> {
+    pub fn get_mut(&mut self, id: MarkerId) -> Option<&mut Marker<P, R>> {
         let line = self.index_line(id)?;
         self.bucket_mut(line)?.get_mut(id)
     }
 
     /// Removes a marker by id.
-    pub fn remove(&mut self, id: MarkerId) -> Option<Marker<T>> {
+    pub fn remove(&mut self, id: MarkerId) -> Option<Marker<P, R>> {
         let line = self.index_line(id)?;
         let removed = self.bucket_mut(line)?.remove(id);
         if removed.is_some() {
@@ -369,13 +409,13 @@ impl<T: Clone> MarkerStore<T> {
     }
 
     /// Returns all markers in line and position order.
-    pub fn iter(&self) -> impl Iterator<Item = &Marker<T>> {
+    pub fn iter(&self) -> impl Iterator<Item = &Marker<P, R>> {
         (0..self.line_count)
             .flat_map(|line| self.bucket(line).into_iter().flat_map(LineBucket::iter))
     }
 
     /// Returns the markers stored on a specific line.
-    pub fn markers_for_line(&self, line: usize) -> Option<&[Marker<T>]> {
+    pub fn markers_for_line(&self, line: usize) -> Option<&[Marker<P, R>]> {
         if line >= self.line_count {
             return None;
         }
@@ -383,7 +423,7 @@ impl<T: Clone> MarkerStore<T> {
     }
 
     /// Inserts a point marker.
-    pub fn insert_point(&mut self, pos: Cursor, gravity: Gravity, payload: T) -> MarkerId {
+    pub fn insert_point(&mut self, pos: Cursor, gravity: Gravity, payload: P) -> MarkerId {
         self.insert_point_in_namespace(pos, gravity, payload, None)
     }
 
@@ -392,13 +432,13 @@ impl<T: Clone> MarkerStore<T> {
         &mut self,
         pos: Cursor,
         gravity: Gravity,
-        payload: T,
+        payload: P,
         namespace: Option<&str>,
     ) -> MarkerId {
         let id = self.next_marker_id();
-        let marker = Marker {
+        let marker = Marker::Point {
             id,
-            kind: MarkerShape::Point(PointMarker { pos, gravity }),
+            anchor: PointAnchor { pos, gravity },
             payload,
         };
         self.insert_marker(marker);
@@ -415,23 +455,30 @@ impl<T: Clone> MarkerStore<T> {
         id: MarkerId,
         pos: Cursor,
         gravity: Gravity,
-        payload: T,
+        payload: P,
     ) -> bool {
-        if !self
+        if self
             .get(id)
-            .is_some_and(|marker| matches!(marker.kind, MarkerShape::Point(_)))
+            .is_none_or(|marker| marker.as_point().is_none())
         {
             return false;
         }
         let Some(line) = self.index_line(id) else {
             return false;
         };
-        let Some(mut marker) = self.bucket_mut(line).and_then(|bucket| bucket.remove(id)) else {
+        if self
+            .bucket_mut(line)
+            .and_then(|bucket| bucket.remove(id))
+            .is_none()
+        {
             return false;
-        };
+        }
         self.clear_line_index(id);
-        marker.kind = MarkerShape::Point(PointMarker { pos, gravity });
-        marker.payload = payload;
+        let marker = Marker::Point {
+            id,
+            anchor: PointAnchor { pos, gravity },
+            payload,
+        };
         self.insert_marker(marker);
         self.set_index(id, pos.line);
         true
@@ -444,73 +491,88 @@ impl<T: Clone> MarkerStore<T> {
         end: Cursor,
         start_gravity: Gravity,
         end_gravity: Gravity,
-        payload: T,
+        payload: R,
+    ) -> MarkerId {
+        self.insert_range_in_namespace(start, end, start_gravity, end_gravity, payload, None)
+    }
+
+    /// Inserts a range marker belonging to an optional namespace.
+    pub fn insert_range_in_namespace(
+        &mut self,
+        start: Cursor,
+        end: Cursor,
+        start_gravity: Gravity,
+        end_gravity: Gravity,
+        payload: R,
+        namespace: Option<&str>,
     ) -> MarkerId {
         let (start, end, start_gravity, end_gravity) =
             normalize_range(start, end, start_gravity, end_gravity);
         let id = self.next_marker_id();
-        let marker = Marker {
+        let marker = Marker::Range {
             id,
-            kind: MarkerShape::Range(RangeMarker {
+            anchor: RangeAnchor {
                 start,
                 end,
                 start_gravity,
                 end_gravity,
-            }),
+            },
             payload,
         };
         self.insert_marker(marker);
         self.set_index(id, start.line);
+        if let Some(namespace) = namespace {
+            self.set_namespace_index(id, namespace);
+        }
         id
+    }
+
+    /// Replaces a range marker while preserving its id and namespace.
+    pub fn update_range(
+        &mut self,
+        id: MarkerId,
+        start: Cursor,
+        end: Cursor,
+        start_gravity: Gravity,
+        end_gravity: Gravity,
+        payload: R,
+    ) -> bool {
+        if self
+            .get(id)
+            .is_none_or(|marker| marker.as_range().is_none())
+        {
+            return false;
+        }
+        let Some(line) = self.index_line(id) else {
+            return false;
+        };
+        if self
+            .bucket_mut(line)
+            .and_then(|bucket| bucket.remove(id))
+            .is_none()
+        {
+            return false;
+        }
+        self.clear_line_index(id);
+        let marker = Marker::Range {
+            id,
+            anchor: RangeAnchor {
+                start,
+                end,
+                start_gravity,
+                end_gravity,
+            },
+            payload,
+        };
+        self.insert_marker(marker);
+        self.set_index(id, start.line);
+        true
     }
 
     /// Shifts markers for an insertion.
     pub fn shift_insert(&mut self, edit: InsertShape) {
-        if edit.line_delta == 0 {
-            self.shift_insert_single_line(edit);
-        } else {
-            self.shift_insert_multi_line(edit);
-        }
-    }
-
-    fn shift_insert_single_line(&mut self, edit: InsertShape) {
-        let line = edit.at.line;
-        let Some(bucket) = self.bucket(line) else {
-            return;
-        };
-        if bucket.is_empty() {
-            return;
-        }
-
-        let mut new_markers: Vec<Marker<T>> = Vec::with_capacity(bucket.len());
-        for marker in bucket.iter().cloned() {
-            new_markers.push(shift_marker_insert(marker, edit));
-        }
-        new_markers.sort_by_key(|m| m.anchor());
-        let index_updates: Vec<_> = new_markers
-            .iter()
-            .map(|marker| (marker.id, marker.anchor().line))
-            .collect();
-        if let Some(bucket) = self.bucket_mut(line) {
-            bucket.markers = Arc::from(new_markers.into_boxed_slice());
-        }
-        for (id, line) in index_updates {
-            self.set_index(id, line);
-        }
-    }
-
-    fn shift_insert_multi_line(&mut self, edit: InsertShape) {
-        let boundary = edit.at.line.min(self.line_count);
-        let after = self.suffix_from(boundary);
-        let mut new_after = blank_vec_lines(after.len().saturating_add(edit.line_delta));
-
-        for marker in after.iter().flat_map(LineBucket::iter).cloned() {
-            let marker = shift_marker_insert(marker, edit);
-            insert_marker_into_vec_lines_offset(&mut new_after, marker, boundary);
-        }
-
-        self.replace_suffix(boundary, new_after);
-        self.rebuild_index();
+        let line_count = self.line_count.saturating_add(edit.line_delta);
+        self.rebuild_markers(line_count, |marker| Some(shift_marker_insert(marker, edit)));
     }
 
     /// Inserts whole lines at a given line index.
@@ -518,18 +580,10 @@ impl<T: Clone> MarkerStore<T> {
         if count == 0 {
             return;
         }
-
-        let boundary = start_line.min(self.line_count);
-        let after = self.suffix_from(boundary);
-        let mut new_after = blank_vec_lines(after.len().saturating_add(count));
-
-        for marker in after.iter().flat_map(LineBucket::iter).cloned() {
-            let marker = insert_marker_shift_lines(marker, start_line, count);
-            insert_marker_into_vec_lines_offset(&mut new_after, marker, start_line);
-        }
-
-        self.replace_suffix(boundary, new_after);
-        self.rebuild_index();
+        let line_count = self.line_count.saturating_add(count);
+        self.rebuild_markers(line_count, |marker| {
+            Some(insert_marker_shift_lines(marker, start_line, count))
+        });
     }
 
     /// Shifts markers for a deletion.
@@ -537,54 +591,12 @@ impl<T: Clone> MarkerStore<T> {
         if edit.start >= edit.end {
             return;
         }
-
-        if edit.start.line == edit.end.line {
-            self.shift_delete_single_line(edit);
-        } else {
-            self.shift_delete_multi_line(edit);
-        }
-    }
-
-    fn shift_delete_single_line(&mut self, edit: DeleteShape) {
-        let line = edit.start.line;
-        let Some(bucket) = self.bucket(line) else {
-            return;
-        };
-        if bucket.is_empty() {
-            return;
-        }
-
-        let mut new_markers: Vec<Marker<T>> = Vec::with_capacity(bucket.len());
-        for marker in bucket.iter().cloned() {
-            new_markers.push(shift_marker_delete(marker, edit));
-        }
-        new_markers.sort_by_key(|m| m.anchor());
-        let index_updates: Vec<_> = new_markers
-            .iter()
-            .map(|marker| (marker.id, marker.anchor().line))
-            .collect();
-        if let Some(bucket) = self.bucket_mut(line) {
-            bucket.markers = Arc::from(new_markers.into_boxed_slice());
-        }
-        for (id, line) in index_updates {
-            self.set_index(id, line);
-        }
-    }
-
-    fn shift_delete_multi_line(&mut self, edit: DeleteShape) {
-        let boundary = edit.start.line.min(self.line_count);
-        let after = self.suffix_from(boundary);
-
         let deleted_lines = edit.end.line.saturating_sub(edit.start.line);
-        let mut new_after = blank_vec_lines(after.len().saturating_sub(deleted_lines));
-
-        for marker in after.iter().flat_map(LineBucket::iter).cloned() {
+        let line_count = self.line_count.saturating_sub(deleted_lines).max(1);
+        self.rebuild_markers(line_count, |marker| {
             let marker = shift_marker_delete(marker, edit);
-            insert_marker_into_vec_lines_offset(&mut new_after, marker, boundary);
-        }
-
-        self.replace_suffix(boundary, new_after);
-        self.rebuild_index();
+            (!marker.is_empty_range()).then_some(marker)
+        });
     }
 
     /// Clears markers on the specified half-open line range.
@@ -604,10 +616,10 @@ impl<T: Clone> MarkerStore<T> {
                 .bucket(line)
                 .into_iter()
                 .flat_map(LineBucket::iter)
-                .map(|marker| marker.id)
+                .map(Marker::id)
                 .collect();
             if let Some(bucket) = self.bucket_mut(line) {
-                bucket.markers = Arc::from(Vec::<Marker<T>>::new());
+                bucket.markers = Arc::from(Vec::<Marker<P, R>>::new());
             }
             for id in ids {
                 self.clear_index(id);
@@ -620,7 +632,7 @@ impl<T: Clone> MarkerStore<T> {
         &mut self,
         start_line: usize,
         end_line: usize,
-        keep: impl Fn(&Marker<T>) -> bool,
+        keep: impl Fn(&Marker<P, R>) -> bool,
     ) {
         let num_lines = self.line_count;
         if start_line >= num_lines || start_line >= end_line {
@@ -635,7 +647,7 @@ impl<T: Clone> MarkerStore<T> {
             let removed: Vec<_> = bucket
                 .iter()
                 .filter(|marker| !keep(marker))
-                .map(|marker| marker.id)
+                .map(Marker::id)
                 .collect();
             if removed.is_empty() {
                 continue;
@@ -659,7 +671,7 @@ impl<T: Clone> MarkerStore<T> {
         &mut self,
         start: Cursor,
         end: Cursor,
-        keep: impl Fn(&Marker<T>) -> bool,
+        keep: impl Fn(&Marker<P, R>) -> bool,
     ) {
         if start >= end {
             return;
@@ -675,7 +687,7 @@ impl<T: Clone> MarkerStore<T> {
             let removed: Vec<_> = bucket
                 .iter()
                 .filter(|marker| !keep(marker))
-                .map(|marker| marker.id)
+                .map(Marker::id)
                 .collect();
             if removed.is_empty() {
                 continue;
@@ -694,46 +706,18 @@ impl<T: Clone> MarkerStore<T> {
         }
     }
 
-    /// Deletes complete lines and removes markers anchored to the deleted range.
+    /// Deletes complete lines, contracting ranges around the removed text.
     pub fn delete_lines(&mut self, start_line: usize, count: usize) {
         let total_lines = self.line_count;
-        if total_lines == 0 || start_line >= total_lines || count == 0 {
+        if start_line >= total_lines || count == 0 {
             return;
         }
-
         let actual_count = (total_lines - start_line).min(count);
         let deleted_end = start_line + actual_count;
-
-        if start_line == 0 && deleted_end >= total_lines {
-            self.chunks = chunk_vec_lines(1);
-            self.id_line_chunks.clear();
-            self.namespace_locations_by_id.clear();
-            self.namespaces.clear();
-            self.line_count = 1;
-            return;
-        }
-
-        let after = self.suffix_from(start_line);
-        let mut new_after = blank_vec_lines(after.len().saturating_sub(actual_count));
-
-        for marker in after.iter().flat_map(LineBucket::iter).cloned() {
-            let line = marker.anchor().line;
-            if line >= deleted_end {
-                let mut marker = marker;
-                match &mut marker.kind {
-                    MarkerShape::Point(point) => point.pos.line -= actual_count,
-                    MarkerShape::Range(range) => {
-                        range.start.line -= actual_count;
-                        range.end.line -= actual_count;
-                    }
-                }
-                insert_marker_into_vec_lines_offset(&mut new_after, marker, start_line);
-            }
-        }
-
-        self.replace_suffix(start_line, new_after);
-        self.rebuild_index();
-        self.prune_namespace_index();
+        let line_count = total_lines.saturating_sub(actual_count).max(1);
+        self.rebuild_markers(line_count, |marker| {
+            delete_marker_lines(marker, start_line, deleted_end, actual_count)
+        });
     }
 
     fn next_marker_id(&mut self) -> MarkerId {
@@ -742,12 +726,33 @@ impl<T: Clone> MarkerStore<T> {
         id
     }
 
-    fn insert_marker(&mut self, marker: Marker<T>) {
+    fn insert_marker(&mut self, marker: Marker<P, R>) {
         let line_idx = marker.anchor().line;
         self.ensure_line(line_idx);
         if let Some(bucket) = self.bucket_mut(line_idx) {
             bucket.insert_sorted(marker);
         }
+    }
+
+    /// Rebuilds line buckets after an edit. Ranges may cross the edited line even
+    /// when their start anchor lives in an earlier bucket, so edit transforms
+    /// must inspect every marker rather than only the edited line's bucket.
+    fn rebuild_markers(
+        &mut self,
+        line_count: usize,
+        transform: impl Fn(Marker<P, R>) -> Option<Marker<P, R>>,
+    ) {
+        let markers: Vec<_> = self.iter().cloned().collect();
+        self.line_count = line_count.max(1);
+        self.chunks = chunk_vec_lines(self.line_count);
+        self.id_line_chunks.clear();
+        for marker in markers.into_iter().filter_map(transform) {
+            let id = marker.id();
+            let line = marker.anchor().line;
+            self.insert_marker(marker);
+            self.set_index(id, line);
+        }
+        self.prune_namespace_index();
     }
 
     fn set_index(&mut self, id: MarkerId, line: usize) {
@@ -835,21 +840,8 @@ impl<T: Clone> MarkerStore<T> {
             .flatten()
     }
 
-    fn rebuild_index(&mut self) {
-        self.id_line_chunks.clear();
-        let mut entries = Vec::new();
-        for line in 0..self.line_count {
-            if let Some(bucket) = self.bucket(line) {
-                entries.extend(bucket.iter().map(|marker| (marker.id, line)));
-            }
-        }
-        for (id, line) in entries {
-            self.set_index(id, line);
-        }
-    }
-
     fn prune_namespace_index(&mut self) {
-        let live_ids: BTreeSet<_> = self.iter().map(|marker| marker.id).collect();
+        let live_ids: BTreeSet<_> = self.iter().map(Marker::id).collect();
         let stale_ids: Vec<_> = self
             .namespaces
             .iter()
@@ -861,13 +853,13 @@ impl<T: Clone> MarkerStore<T> {
         }
     }
 
-    fn bucket(&self, line: usize) -> Option<&LineBucket<T>> {
+    fn bucket(&self, line: usize) -> Option<&LineBucket<P, R>> {
         let chunk_idx = line / CHUNK_SIZE;
         let line_idx = line % CHUNK_SIZE;
         self.chunks.get(chunk_idx)?.get(line_idx)
     }
 
-    fn bucket_mut(&mut self, line: usize) -> Option<&mut LineBucket<T>> {
+    fn bucket_mut(&mut self, line: usize) -> Option<&mut LineBucket<P, R>> {
         let chunk_idx = line / CHUNK_SIZE;
         let line_idx = line % CHUNK_SIZE;
         Arc::make_mut(self.chunks.get_mut(chunk_idx)?).get_mut(line_idx)
@@ -882,270 +874,332 @@ impl<T: Clone> MarkerStore<T> {
             self.chunks.push(Arc::new(blank_vec_lines(CHUNK_SIZE)));
         }
     }
-
-    fn suffix_from(&self, start_line: usize) -> Vec<LineBucket<T>> {
-        let start_line = start_line.min(self.line_count);
-        let chunk_idx = start_line / CHUNK_SIZE;
-        let line_idx = start_line % CHUNK_SIZE;
-        let mut suffix = Vec::with_capacity(self.line_count.saturating_sub(start_line));
-
-        if let Some(chunk) = self.chunks.get(chunk_idx) {
-            let chunk_end = chunk
-                .len()
-                .min(self.line_count.saturating_sub(chunk_idx * CHUNK_SIZE));
-            suffix.extend(chunk[line_idx..chunk_end].iter().cloned());
-        }
-
-        for chunk in self.chunks.iter().skip(chunk_idx + 1) {
-            suffix.extend(chunk.iter().cloned());
-        }
-
-        suffix.truncate(self.line_count.saturating_sub(start_line));
-        suffix
-    }
-
-    fn replace_suffix(&mut self, start_line: usize, suffix: Vec<LineBucket<T>>) {
-        let start_line = start_line.min(self.line_count);
-        let full_prefix_chunks = start_line / CHUNK_SIZE;
-        let prefix_remainder = start_line % CHUNK_SIZE;
-        let mut chunks: Vec<_> = self
-            .chunks
-            .iter()
-            .take(full_prefix_chunks)
-            .cloned()
-            .collect();
-        let mut rebuilt_tail = Vec::with_capacity(prefix_remainder + suffix.len());
-
-        if prefix_remainder > 0
-            && let Some(chunk) = self.chunks.get(full_prefix_chunks)
-        {
-            rebuilt_tail.extend(chunk[..prefix_remainder].iter().cloned());
-        }
-        rebuilt_tail.extend(suffix);
-
-        let suffix_len = rebuilt_tail.len().saturating_sub(prefix_remainder);
-        chunks.extend(chunk_buckets(rebuilt_tail));
-        self.line_count = start_line.saturating_add(suffix_len).max(1);
-        self.chunks = chunks;
-    }
 }
 
 impl Buffer {
-    /// Returns the current marker store.
+    /// Returns the current decoration store.
     pub fn markers(&self) -> &MarkersStore {
         &self.markers
     }
 
-    /// Returns a marker entry by id.
-    pub fn marker(&self, id: MarkerId) -> Option<&Marker<MarkerPayload>> {
+    /// Returns a decoration marker by id.
+    pub fn marker(&self, id: MarkerId) -> Option<&Marker<VirtualText, Highlight>> {
         self.markers.get(id)
     }
 
-    /// Returns the markers stored on a line.
-    pub fn markers_for_line(&self, line: usize) -> Option<&[Marker<MarkerPayload>]> {
+    /// Returns markers anchored on a line.
+    pub fn markers_for_line(&self, line: usize) -> Option<&[Marker<VirtualText, Highlight>]> {
         self.markers.markers_for_line(line)
     }
 
-    /// Returns the ghost-text markers stored on a line.
-    pub fn ghost_texts_for_line(&self, line: usize) -> Option<Vec<Marker<MarkerPayload>>> {
+    /// Returns generic virtual text anchored on a line.
+    pub fn virtual_texts_for_line(
+        &self,
+        line: usize,
+    ) -> Option<Vec<Marker<VirtualText, Highlight>>> {
         self.markers_for_line(line).map(|markers| {
             markers
                 .iter()
-                .filter(|marker| marker.payload.kind.is_none())
+                .filter(|marker| {
+                    marker
+                        .as_point()
+                        .is_some_and(|(_, text)| text.kind == VirtualTextKind::Generic)
+                })
                 .cloned()
                 .collect()
         })
     }
 
-    /// Returns the inlay-hint markers stored on a line.
-    pub fn inlay_hints_for_line(&self, line: usize) -> Option<Vec<Marker<MarkerPayload>>> {
+    /// Returns inlay hints anchored on a line.
+    pub fn inlay_hints_for_line(&self, line: usize) -> Option<Vec<Marker<VirtualText, Highlight>>> {
         self.markers_for_line(line).map(|markers| {
             markers
                 .iter()
-                .filter(|marker| marker.payload.kind.is_some())
+                .filter(|marker| {
+                    marker
+                        .as_point()
+                        .is_some_and(|(_, text)| text.kind == VirtualTextKind::InlayHint)
+                })
                 .cloned()
                 .collect()
         })
     }
 
-    /// Returns the ghost-text marker by id.
-    pub fn ghost_text(&self, id: MarkerId) -> Option<&Marker<MarkerPayload>> {
-        self.marker(id)
-            .filter(|marker| marker.payload.kind.is_none())
+    /// Returns generic virtual text by id.
+    pub fn virtual_text(&self, id: MarkerId) -> Option<&Marker<VirtualText, Highlight>> {
+        self.marker(id).filter(|marker| {
+            marker
+                .as_point()
+                .is_some_and(|(_, text)| text.kind == VirtualTextKind::Generic)
+        })
     }
 
-    /// Returns the inlay-hint marker by id.
-    pub fn inlay_hint(&self, id: MarkerId) -> Option<&Marker<MarkerPayload>> {
-        self.marker(id)
-            .filter(|marker| marker.payload.kind.is_some())
+    /// Returns an inlay hint by id.
+    pub fn inlay_hint(&self, id: MarkerId) -> Option<&Marker<VirtualText, Highlight>> {
+        self.marker(id).filter(|marker| {
+            marker
+                .as_point()
+                .is_some_and(|(_, text)| text.kind == VirtualTextKind::InlayHint)
+        })
     }
 
-    /// Inserts ghost text anchored to a point.
-    pub fn insert_ghost_text(
+    /// Returns all range highlights in creation order.
+    pub fn highlights(&self) -> Vec<Marker<VirtualText, Highlight>> {
+        let mut highlights: Vec<_> = self
+            .markers
+            .iter()
+            .filter(|marker| marker.as_range().is_some())
+            .cloned()
+            .collect();
+        highlights.sort_by_key(Marker::id);
+        highlights
+    }
+
+    /// Inserts generic virtual text anchored to a point.
+    pub fn insert_virtual_text(
         &mut self,
         pos: Cursor,
         gravity: Gravity,
-        label: impl Into<SmolStr>,
+        text: impl Into<SmolStr>,
     ) -> MarkerId {
-        self.insert_marker(pos, gravity, MarkerPayload::new(label))
+        self.insert_virtual_text_payload(pos, gravity, VirtualText::new(text))
     }
 
-    /// Inserts plugin-owned ghost text anchored to a point.
-    pub fn insert_namespaced_ghost_text(
+    /// Inserts plugin-owned virtual text anchored to a point.
+    pub fn insert_namespaced_virtual_text(
         &mut self,
         namespace: &str,
         pos: Cursor,
         gravity: Gravity,
-        label: impl Into<SmolStr>,
+        text: impl Into<SmolStr>,
         style: Option<StyleOverlay>,
     ) -> MarkerId {
-        let mut payload = MarkerPayload::new(label);
+        let mut payload = VirtualText::new(text);
         payload.style = style;
         let id = self
             .markers
             .insert_point_in_namespace(pos, gravity, payload, Some(namespace));
-        self.bump_visual_generation();
-        self.update_markers();
+        self.decorations_changed();
         id
     }
 
-    /// Returns plugin-owned ghost text by id.
-    pub fn namespaced_ghost_text(
+    /// Returns plugin-owned virtual text by id.
+    pub fn namespaced_virtual_text(
         &self,
         namespace: &str,
         id: MarkerId,
-    ) -> Option<&Marker<MarkerPayload>> {
+    ) -> Option<&Marker<VirtualText, Highlight>> {
         self.markers
             .marker_is_in_namespace(id, namespace)
-            .then(|| self.ghost_text(id))
+            .then(|| self.virtual_text(id))
             .flatten()
     }
 
-    /// Returns plugin-owned ghost text in line and position order.
-    pub fn namespaced_ghost_texts(&self, namespace: &str) -> Vec<Marker<MarkerPayload>> {
+    /// Returns plugin-owned virtual text in buffer order.
+    pub fn namespaced_virtual_texts(&self, namespace: &str) -> Vec<Marker<VirtualText, Highlight>> {
         let mut markers: Vec<_> = self
             .markers
             .marker_ids_in_namespace(namespace)
             .into_iter()
-            .filter_map(|id| self.ghost_text(id).cloned())
+            .filter_map(|id| self.virtual_text(id).cloned())
             .collect();
         markers.sort_by_key(Marker::anchor);
         markers
     }
 
-    /// Updates plugin-owned ghost text while preserving its id.
-    pub fn update_namespaced_ghost_text(
+    /// Updates plugin-owned virtual text while preserving its id.
+    pub fn update_namespaced_virtual_text(
         &mut self,
         namespace: &str,
         id: MarkerId,
         pos: Cursor,
         gravity: Gravity,
-        label: impl Into<SmolStr>,
+        text: impl Into<SmolStr>,
         style: Option<StyleOverlay>,
     ) -> bool {
-        if self.namespaced_ghost_text(namespace, id).is_none() {
+        if self.namespaced_virtual_text(namespace, id).is_none() {
             return false;
         }
-        let mut payload = MarkerPayload::new(label);
+        let mut payload = VirtualText::new(text);
         payload.style = style;
         if !self.markers.update_point(id, pos, gravity, payload) {
             return false;
         }
-        self.bump_visual_generation();
-        self.update_markers();
+        self.decorations_changed();
         true
     }
 
-    /// Removes plugin-owned ghost text by id.
-    pub fn remove_namespaced_ghost_text(
+    /// Removes plugin-owned virtual text by id.
+    pub fn remove_namespaced_virtual_text(
         &mut self,
         namespace: &str,
         id: MarkerId,
-    ) -> Option<Marker<MarkerPayload>> {
-        self.namespaced_ghost_text(namespace, id)?;
+    ) -> Option<Marker<VirtualText, Highlight>> {
+        self.namespaced_virtual_text(namespace, id)?;
         self.remove_marker(id)
     }
 
-    /// Clears and returns the number of plugin-owned ghost-text markers.
-    pub fn clear_namespaced_ghost_texts(&mut self, namespace: &str) -> usize {
+    /// Clears and returns the number of plugin-owned virtual-text markers.
+    pub fn clear_namespaced_virtual_texts(&mut self, namespace: &str) -> usize {
         let ids = self.markers.marker_ids_in_namespace(namespace);
-        let mut removed = 0;
-        for id in ids {
-            if self
-                .markers
-                .get(id)
-                .is_some_and(|marker| marker.payload.kind.is_none())
-                && self.markers.remove(id).is_some()
-            {
-                removed += 1;
-            }
-        }
+        let removed = self.remove_matching_ids(ids, |marker| {
+            marker
+                .as_point()
+                .is_some_and(|(_, text)| text.kind == VirtualTextKind::Generic)
+        });
         if removed > 0 {
-            self.bump_visual_generation();
-            self.update_markers();
+            self.decorations_changed();
         }
         removed
     }
 
-    /// Inserts an inlay hint anchored to a point.
+    /// Inserts an LSP inlay hint anchored to a point.
     pub fn insert_inlay_hint(
         &mut self,
         pos: Cursor,
         gravity: Gravity,
-        label: impl Into<SmolStr>,
+        text: impl Into<SmolStr>,
     ) -> MarkerId {
-        self.insert_marker(pos, gravity, MarkerPayload::inlay_hint(label))
+        self.insert_virtual_text_payload(pos, gravity, VirtualText::inlay_hint(text))
     }
 
-    /// Removes a marker by id.
-    pub fn remove_marker(&mut self, id: MarkerId) -> Option<Marker<MarkerPayload>> {
-        let removed = self.markers.remove(id);
-        if removed.is_some() {
-            self.bump_visual_generation();
-            self.update_markers();
+    /// Inserts a plugin-owned range highlight.
+    pub fn insert_namespaced_highlight(
+        &mut self,
+        namespace: &str,
+        range: RangeAnchor,
+        style: StyleOverlay,
+    ) -> Option<MarkerId> {
+        if range.start >= range.end {
+            return None;
+        }
+        let id = self.markers.insert_range_in_namespace(
+            range.start,
+            range.end,
+            range.start_gravity,
+            range.end_gravity,
+            Highlight { style },
+            Some(namespace),
+        );
+        self.decorations_changed();
+        Some(id)
+    }
+
+    /// Returns a plugin-owned range highlight by id.
+    pub fn namespaced_highlight(
+        &self,
+        namespace: &str,
+        id: MarkerId,
+    ) -> Option<&Marker<VirtualText, Highlight>> {
+        self.markers
+            .marker_is_in_namespace(id, namespace)
+            .then(|| self.marker(id).filter(|marker| marker.as_range().is_some()))
+            .flatten()
+    }
+
+    /// Returns plugin-owned range highlights in buffer order.
+    pub fn namespaced_highlights(&self, namespace: &str) -> Vec<Marker<VirtualText, Highlight>> {
+        let mut markers: Vec<_> = self
+            .markers
+            .marker_ids_in_namespace(namespace)
+            .into_iter()
+            .filter_map(|id| self.namespaced_highlight(namespace, id).cloned())
+            .collect();
+        markers.sort_by_key(Marker::anchor);
+        markers
+    }
+
+    /// Updates a plugin-owned range highlight while preserving its id.
+    pub fn update_namespaced_highlight(
+        &mut self,
+        namespace: &str,
+        id: MarkerId,
+        range: RangeAnchor,
+        style: StyleOverlay,
+    ) -> bool {
+        if range.start >= range.end || self.namespaced_highlight(namespace, id).is_none() {
+            return false;
+        }
+        if !self.markers.update_range(
+            id,
+            range.start,
+            range.end,
+            range.start_gravity,
+            range.end_gravity,
+            Highlight { style },
+        ) {
+            return false;
+        }
+        self.decorations_changed();
+        true
+    }
+
+    /// Removes a plugin-owned range highlight by id.
+    pub fn remove_namespaced_highlight(
+        &mut self,
+        namespace: &str,
+        id: MarkerId,
+    ) -> Option<Marker<VirtualText, Highlight>> {
+        self.namespaced_highlight(namespace, id)?;
+        self.remove_marker(id)
+    }
+
+    /// Clears and returns the number of plugin-owned range highlights.
+    pub fn clear_namespaced_highlights(&mut self, namespace: &str) -> usize {
+        let ids = self.markers.marker_ids_in_namespace(namespace);
+        let removed = self.remove_matching_ids(ids, |marker| marker.as_range().is_some());
+        if removed > 0 {
+            self.decorations_changed();
         }
         removed
     }
 
-    /// Removes ghost text by id.
-    pub fn remove_ghost_text(&mut self, id: MarkerId) -> Option<Marker<MarkerPayload>> {
-        if self
-            .marker(id)
-            .is_some_and(|marker| marker.payload.kind.is_none())
-        {
-            self.remove_marker(id)
-        } else {
-            None
+    /// Removes a decoration marker by id.
+    pub fn remove_marker(&mut self, id: MarkerId) -> Option<Marker<VirtualText, Highlight>> {
+        let removed = self.markers.remove(id);
+        if removed.is_some() {
+            self.decorations_changed();
         }
+        removed
     }
 
-    /// Clears all markers.
+    /// Removes generic virtual text by id.
+    pub fn remove_virtual_text(&mut self, id: MarkerId) -> Option<Marker<VirtualText, Highlight>> {
+        self.virtual_text(id)?;
+        self.remove_marker(id)
+    }
+
+    /// Clears all decoration markers.
     pub fn clear_markers(&mut self) {
         self.markers.clear_to_line_count(self.lines.line_count());
-        self.bump_visual_generation();
-        self.update_markers();
+        self.decorations_changed();
     }
 
-    /// Clears markers on a line range.
+    /// Clears markers anchored on a line range.
     pub fn clear_markers_for_lines(&mut self, start_line: usize, end_line: usize) {
         self.markers.clear_line_range(start_line, end_line);
-        self.bump_visual_generation();
-        self.update_markers();
+        self.decorations_changed();
     }
 
-    /// Clears all ghost text.
-    pub fn clear_ghost_texts(&mut self) {
-        self.retain_markers(|payload| payload.kind.is_some());
+    /// Clears all generic virtual text.
+    pub fn clear_virtual_texts(&mut self) {
+        self.retain_point_markers_in_line_range(0, self.lines.line_count(), |text| {
+            text.kind != VirtualTextKind::Generic
+        });
     }
 
     /// Clears all inlay hints.
     pub fn clear_inlay_hints(&mut self) {
-        self.retain_markers(|payload| payload.kind.is_none());
+        self.retain_point_markers_in_line_range(0, self.lines.line_count(), |text| {
+            text.kind != VirtualTextKind::InlayHint
+        });
     }
 
-    /// Clears inlay hints on a line range.
+    /// Clears inlay hints anchored on a line range.
     pub fn clear_inlay_hints_for_lines(&mut self, start_line: usize, end_line: usize) {
-        self.retain_markers_in_line_range(start_line, end_line, |payload| payload.kind.is_none());
+        self.retain_point_markers_in_line_range(start_line, end_line, |text| {
+            text.kind != VirtualTextKind::InlayHint
+        });
     }
 
     /// Clears inlay hints whose anchors are inside a half-open cursor range.
@@ -1154,45 +1208,72 @@ impl Buffer {
             return;
         }
         self.markers.retain_in_cursor_range(start, end, |marker| {
-            marker.payload.kind.is_none() || marker.anchor() < start || marker.anchor() >= end
+            !matches!(
+                marker,
+                Marker::Point { anchor, payload, .. }
+                    if payload.kind == VirtualTextKind::InlayHint
+                        && anchor.pos >= start
+                        && anchor.pos < end
+            )
         });
-        self.bump_visual_generation();
-        self.update_markers();
+        self.decorations_changed();
     }
 
-    fn insert_marker(&mut self, pos: Cursor, gravity: Gravity, payload: MarkerPayload) -> MarkerId {
+    fn insert_virtual_text_payload(
+        &mut self,
+        pos: Cursor,
+        gravity: Gravity,
+        payload: VirtualText,
+    ) -> MarkerId {
         let id = self.markers.insert_point(pos, gravity, payload);
-        self.bump_visual_generation();
-        self.update_markers();
+        self.decorations_changed();
         id
     }
 
-    fn retain_markers(&mut self, keep: impl Fn(&MarkerPayload) -> bool) {
-        self.retain_markers_in_line_range(0, self.lines.line_count(), keep);
-    }
-
-    fn retain_markers_in_line_range(
+    fn retain_point_markers_in_line_range(
         &mut self,
         start_line: usize,
         end_line: usize,
-        keep: impl Fn(&MarkerPayload) -> bool,
+        keep: impl Fn(&VirtualText) -> bool,
     ) {
         self.markers
-            .retain_in_line_range(start_line, end_line, |marker| keep(&marker.payload));
+            .retain_in_line_range(start_line, end_line, |marker| {
+                marker.as_point().is_none_or(|(_, payload)| keep(payload))
+            });
+        self.decorations_changed();
+    }
+
+    fn remove_matching_ids(
+        &mut self,
+        ids: Vec<MarkerId>,
+        matches: impl Fn(&Marker<VirtualText, Highlight>) -> bool,
+    ) -> usize {
+        let mut removed = 0;
+        for id in ids {
+            if self.markers.get(id).is_some_and(&matches) && self.markers.remove(id).is_some() {
+                removed += 1;
+            }
+        }
+        removed
+    }
+
+    fn decorations_changed(&mut self) {
         self.bump_visual_generation();
         self.update_markers();
     }
 }
 
-fn blank_vec_lines<T: Clone>(line_count: usize) -> Vec<LineBucket<T>> {
+fn blank_vec_lines<P: Clone, R: Clone>(line_count: usize) -> Vec<LineBucket<P, R>> {
     (0..line_count).map(|_| LineBucket::new()).collect()
 }
 
-fn chunk_vec_lines<T: Clone>(line_count: usize) -> Vec<Arc<Vec<LineBucket<T>>>> {
+fn chunk_vec_lines<P: Clone, R: Clone>(line_count: usize) -> Vec<Arc<Vec<LineBucket<P, R>>>> {
     chunk_buckets(blank_vec_lines(line_count))
 }
 
-fn chunk_buckets<T: Clone>(mut lines: Vec<LineBucket<T>>) -> Vec<Arc<Vec<LineBucket<T>>>> {
+fn chunk_buckets<P: Clone, R: Clone>(
+    mut lines: Vec<LineBucket<P, R>>,
+) -> Vec<Arc<Vec<LineBucket<P, R>>>> {
     if lines.is_empty() {
         lines.push(LineBucket::new());
     }
@@ -1203,7 +1284,7 @@ fn chunk_buckets<T: Clone>(mut lines: Vec<LineBucket<T>>) -> Vec<Arc<Vec<LineBuc
     chunks
 }
 
-fn insertion_index<T>(markers: &[Marker<T>], anchor: Cursor) -> usize {
+fn insertion_index<P, R>(markers: &[Marker<P, R>], anchor: Cursor) -> usize {
     let mut low = 0usize;
     let mut high = markers.len();
 
@@ -1219,17 +1300,6 @@ fn insertion_index<T>(markers: &[Marker<T>], anchor: Cursor) -> usize {
     low
 }
 
-fn insert_marker_into_vec_lines_offset<T: Clone>(
-    lines: &mut [LineBucket<T>],
-    marker: Marker<T>,
-    offset_line: usize,
-) {
-    let line_idx = marker.anchor().line.saturating_sub(offset_line);
-    if let Some(bucket) = lines.get_mut(line_idx) {
-        bucket.insert_sorted(marker);
-    }
-}
-
 fn normalize_range(
     start: Cursor,
     end: Cursor,
@@ -1243,73 +1313,144 @@ fn normalize_range(
     }
 }
 
-fn shift_marker_insert<T: Clone>(marker: Marker<T>, edit: InsertShape) -> Marker<T> {
-    match marker.kind {
-        MarkerShape::Point(point) => Marker {
-            id: marker.id,
-            kind: MarkerShape::Point(PointMarker {
-                pos: shift_cursor_insert(point.pos, edit, point.gravity),
-                gravity: point.gravity,
-            }),
-            payload: marker.payload,
+fn shift_marker_insert<P, R>(marker: Marker<P, R>, edit: InsertShape) -> Marker<P, R> {
+    match marker {
+        Marker::Point {
+            id,
+            anchor,
+            payload,
+        } => Marker::Point {
+            id,
+            anchor: PointAnchor {
+                pos: shift_cursor_insert(anchor.pos, edit, anchor.gravity),
+                gravity: anchor.gravity,
+            },
+            payload,
         },
-        MarkerShape::Range(range) => Marker {
-            id: marker.id,
-            kind: MarkerShape::Range(RangeMarker {
-                start: shift_cursor_insert(range.start, edit, range.start_gravity),
-                end: shift_cursor_insert(range.end, edit, range.end_gravity),
-                start_gravity: range.start_gravity,
-                end_gravity: range.end_gravity,
-            }),
-            payload: marker.payload,
-        },
-    }
-}
-
-fn shift_marker_delete<T: Clone>(marker: Marker<T>, edit: DeleteShape) -> Marker<T> {
-    match marker.kind {
-        MarkerShape::Point(point) => Marker {
-            id: marker.id,
-            kind: MarkerShape::Point(PointMarker {
-                pos: shift_cursor_delete(point.pos, edit),
-                gravity: point.gravity,
-            }),
-            payload: marker.payload,
-        },
-        MarkerShape::Range(range) => Marker {
-            id: marker.id,
-            kind: MarkerShape::Range(RangeMarker {
-                start: shift_cursor_delete(range.start, edit),
-                end: shift_cursor_delete(range.end, edit),
-                start_gravity: range.start_gravity,
-                end_gravity: range.end_gravity,
-            }),
-            payload: marker.payload,
+        Marker::Range {
+            id,
+            anchor,
+            payload,
+        } => Marker::Range {
+            id,
+            anchor: RangeAnchor {
+                start: shift_cursor_insert(anchor.start, edit, anchor.start_gravity),
+                end: shift_cursor_insert(anchor.end, edit, anchor.end_gravity),
+                start_gravity: anchor.start_gravity,
+                end_gravity: anchor.end_gravity,
+            },
+            payload,
         },
     }
 }
 
-fn insert_marker_shift_lines<T: Clone>(
-    mut marker: Marker<T>,
+fn shift_marker_delete<P, R>(marker: Marker<P, R>, edit: DeleteShape) -> Marker<P, R> {
+    match marker {
+        Marker::Point {
+            id,
+            anchor,
+            payload,
+        } => Marker::Point {
+            id,
+            anchor: PointAnchor {
+                pos: shift_cursor_delete(anchor.pos, edit),
+                gravity: anchor.gravity,
+            },
+            payload,
+        },
+        Marker::Range {
+            id,
+            anchor,
+            payload,
+        } => Marker::Range {
+            id,
+            anchor: RangeAnchor {
+                start: shift_cursor_delete(anchor.start, edit),
+                end: shift_cursor_delete(anchor.end, edit),
+                start_gravity: anchor.start_gravity,
+                end_gravity: anchor.end_gravity,
+            },
+            payload,
+        },
+    }
+}
+
+fn insert_marker_shift_lines<P, R>(
+    mut marker: Marker<P, R>,
     start_line: usize,
     count: usize,
-) -> Marker<T> {
-    match &mut marker.kind {
-        MarkerShape::Point(point) => {
-            if point.pos.line >= start_line {
-                point.pos.line += count;
+) -> Marker<P, R> {
+    match &mut marker {
+        Marker::Point { anchor, .. } => {
+            if anchor.pos.line >= start_line {
+                anchor.pos.line += count;
             }
         }
-        MarkerShape::Range(range) => {
-            if range.start.line >= start_line {
-                range.start.line += count;
+        Marker::Range { anchor, .. } => {
+            if anchor.start.line >= start_line {
+                anchor.start.line += count;
             }
-            if range.end.line >= start_line {
-                range.end.line += count;
+            if anchor.end.line >= start_line {
+                anchor.end.line += count;
             }
         }
     }
     marker
+}
+
+fn delete_marker_lines<P, R>(
+    marker: Marker<P, R>,
+    start_line: usize,
+    deleted_end: usize,
+    count: usize,
+) -> Option<Marker<P, R>> {
+    let shift = |cursor: Cursor| {
+        if cursor.line < start_line {
+            cursor
+        } else if cursor.line >= deleted_end {
+            Cursor::new(cursor.line - count, cursor.col)
+        } else {
+            Cursor::new(start_line, 0)
+        }
+    };
+
+    match marker {
+        Marker::Point {
+            id,
+            anchor,
+            payload,
+        } => {
+            if anchor.pos.line >= start_line && anchor.pos.line < deleted_end {
+                None
+            } else {
+                Some(Marker::Point {
+                    id,
+                    anchor: PointAnchor {
+                        pos: shift(anchor.pos),
+                        gravity: anchor.gravity,
+                    },
+                    payload,
+                })
+            }
+        }
+        Marker::Range {
+            id,
+            anchor,
+            payload,
+        } => {
+            let anchor = RangeAnchor {
+                start: shift(anchor.start),
+                end: shift(anchor.end),
+                start_gravity: anchor.start_gravity,
+                end_gravity: anchor.end_gravity,
+            };
+            (anchor.start < anchor.end).then_some(Marker::Range {
+                id,
+                anchor,
+                payload,
+            })
+        }
+    }
 }
 
 fn shift_cursor_insert(cursor: Cursor, edit: InsertShape, gravity: Gravity) -> Cursor {

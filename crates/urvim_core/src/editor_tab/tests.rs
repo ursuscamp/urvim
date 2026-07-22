@@ -509,6 +509,14 @@ fn syntax_themed_tab() -> Theme {
         Style::new().bg(Color::ansi(21)),
     );
     highlights.insert(
+        Tag::parse("ui.virtual_text").expect("valid tag"),
+        Style::new().fg(Color::ansi(15)).faint().italic(),
+    );
+    highlights.insert(
+        Tag::parse("ui.virtual_text.inlay_hint").expect("valid tag"),
+        Style::new().fg(Color::ansi(15)).faint().italic(),
+    );
+    highlights.insert(
         Tag::parse("ui.tab.active").expect("valid tag"),
         Style::new().fg(Color::ansi(5)).bg(Color::ansi(6)),
     );
@@ -1016,44 +1024,13 @@ fn test_tab_render_keeps_todo_marker_above_active_line_base_style() {
 fn test_tab_render_keeps_inlay_hint_background_on_active_line() {
     let mut buffer = Buffer::from_str("abcd");
     buffer.insert_inlay_hint(Cursor::new(0, 2), crate::buffer::Gravity::Right, "hint");
-    let mut tab = EditorTab::new(buffer);
     let theme = syntax_themed_tab();
     let expected_hint_style = theme
         .default_style()
         .overlay(theme.highlight_style_for_name("ui.window.active_line"))
-        .overlay(theme.highlight_style_for_name("ui.inlay_hint"));
+        .overlay(theme.highlight_style_for_name("ui.virtual_text.inlay_hint"));
     let _theme_guard = globals::set_test_active_theme(theme);
-    let _config_guard = globals::set_test_config(Config {
-        active_line: true,
-        syntax: false,
-        ..Default::default()
-    });
-
-    let mut screen = crate::screen::Screen::new(1, 20);
-    tab.render(&mut screen, Position::new(0, 0), Size::new(1, 20));
-
-    assert_eq!(
-        screen.get_cell_mut(0, 5).unwrap().style,
-        expected_hint_style
-    );
-}
-
-#[test]
-fn test_tab_render_ghost_text_inherits_active_line_background() {
-    let mut buffer = Buffer::from_str("abcd");
-    buffer.insert_ghost_text(Cursor::new(0, 2), crate::buffer::Gravity::Right, "ghost");
     let mut tab = EditorTab::new(buffer);
-    let theme = syntax_themed_tab();
-    let expected_ghost_style = theme
-        .default_style()
-        .overlay(theme.highlight_style_for_name("ui.window.active_line"))
-        .overlay(
-            Style::new()
-                .set_foreground(theme.default_style().foreground())
-                .faint()
-                .italic(),
-        );
-    let _theme_guard = globals::set_test_active_theme(theme);
     let _config_guard = globals::set_test_config(Config {
         active_line: true,
         syntax: false,
@@ -1065,7 +1042,33 @@ fn test_tab_render_ghost_text_inherits_active_line_background() {
 
     assert_eq!(
         screen.get_cell_mut(0, CONTENT_COL + 2).unwrap().style,
-        expected_ghost_style
+        expected_hint_style
+    );
+}
+
+#[test]
+fn test_tab_render_virtual_text_inherits_active_line_background() {
+    let mut buffer = Buffer::from_str("abcd");
+    buffer.insert_virtual_text(Cursor::new(0, 2), crate::buffer::Gravity::Right, "ghost");
+    let theme = syntax_themed_tab();
+    let expected_virtual_text_style = theme
+        .default_style()
+        .overlay(theme.highlight_style_for_name("ui.window.active_line"))
+        .overlay(theme.highlight_style_for_name("ui.virtual_text"));
+    let _theme_guard = globals::set_test_active_theme(theme);
+    let mut tab = EditorTab::new(buffer);
+    let _config_guard = globals::set_test_config(Config {
+        active_line: true,
+        syntax: false,
+        ..Default::default()
+    });
+
+    let mut screen = crate::screen::Screen::new(1, 20);
+    tab.render(&mut screen, Position::new(0, 0), Size::new(1, 20));
+
+    assert_eq!(
+        screen.get_cell_mut(0, CONTENT_COL + 2).unwrap().style,
+        expected_virtual_text_style
     );
 }
 
@@ -3036,9 +3039,9 @@ fn test_render_data_get_line() {
 }
 
 #[test]
-fn test_render_data_inserts_ghost_text_inline() {
+fn test_render_data_inserts_virtual_text_inline() {
     let mut buffer = Buffer::from_str("abcd");
-    buffer.insert_ghost_text(Cursor::new(0, 2), crate::buffer::Gravity::Right, "ghost");
+    buffer.insert_virtual_text(Cursor::new(0, 2), crate::buffer::Gravity::Right, "ghost");
 
     let view = BufferView::new(buffer);
     let render_data = view.build_render_data(Size::new(1, 80));
@@ -3050,9 +3053,9 @@ fn test_render_data_inserts_ghost_text_inline() {
             .collect::<Vec<_>>(),
         vec!["ab", "ghost", "cd"]
     );
-    assert!(!line[0].is_ghost_text);
-    assert!(line[1].is_ghost_text);
-    assert!(!line[2].is_ghost_text);
+    assert!(!line[0].is_virtual_text);
+    assert!(line[1].is_virtual_text);
+    assert!(!line[2].is_virtual_text);
 }
 
 #[test]
@@ -3060,7 +3063,8 @@ fn test_marker_mutations_advance_buffer_visual_generation() {
     let mut buffer = Buffer::from_str("abcd");
     let initial = buffer.visual_generation();
 
-    let marker_id = buffer.insert_ghost_text(Cursor::new(0, 2), crate::buffer::Gravity::Right, "x");
+    let marker_id =
+        buffer.insert_virtual_text(Cursor::new(0, 2), crate::buffer::Gravity::Right, "x");
     assert_ne!(buffer.visual_generation(), initial);
 
     let after_insert = buffer.visual_generation();
@@ -3083,7 +3087,7 @@ fn test_render_data_adds_trailing_space_after_colon_inlay_hint() {
             .collect::<Vec<_>>(),
         vec!["ab", "name: ", "cd"]
     );
-    assert!(line[1].is_ghost_text);
+    assert!(line[1].is_virtual_text);
 }
 
 #[test]
@@ -3101,7 +3105,7 @@ fn test_render_data_adds_leading_space_before_eol_type_inlay_hint() {
             .collect::<Vec<_>>(),
         vec!["abcd", " Type"]
     );
-    assert!(line[1].is_ghost_text);
+    assert!(line[1].is_virtual_text);
 }
 
 #[test]
@@ -3122,9 +3126,94 @@ fn test_render_data_adds_trailing_space_after_eol_colon_inlay_hint() {
 }
 
 #[test]
-fn test_render_data_wraps_ghost_text_with_the_line() {
+fn test_render_data_applies_overlapping_highlights_in_creation_order() {
     let mut buffer = Buffer::from_str("abcd");
-    buffer.insert_ghost_text(Cursor::new(0, 2), crate::buffer::Gravity::Right, "XY");
+    buffer
+        .insert_namespaced_highlight(
+            "test",
+            crate::buffer::RangeAnchor {
+                start: Cursor::new(0, 1),
+                end: Cursor::new(0, 3),
+                start_gravity: crate::buffer::Gravity::Right,
+                end_gravity: crate::buffer::Gravity::Left,
+            },
+            urvim_theme::StyleOverlay {
+                bold: Some(true),
+                fg: Some(Color::ansi(1)),
+                ..Default::default()
+            },
+        )
+        .expect("first highlight");
+    buffer
+        .insert_namespaced_highlight(
+            "test",
+            crate::buffer::RangeAnchor {
+                start: Cursor::new(0, 2),
+                end: Cursor::new(0, 4),
+                start_gravity: crate::buffer::Gravity::Right,
+                end_gravity: crate::buffer::Gravity::Left,
+            },
+            urvim_theme::StyleOverlay {
+                fg: Some(Color::ansi(2)),
+                italic: Some(true),
+                ..Default::default()
+            },
+        )
+        .expect("second highlight");
+
+    let view = BufferView::new(buffer);
+    let render_data = view.build_render_data(Size::new(1, 80));
+    let line = render_data.get_line(0).expect("line");
+
+    assert_eq!(
+        line.iter()
+            .map(|chunk| chunk.text.as_str())
+            .collect::<Vec<_>>(),
+        vec!["a", "b", "c", "d"]
+    );
+    assert_eq!(line[1].style, Style::new().fg(Color::ansi(1)).bold());
+    assert_eq!(
+        line[2].style,
+        Style::new().fg(Color::ansi(2)).bold().italic()
+    );
+    assert_eq!(line[3].style, Style::new().fg(Color::ansi(2)).italic());
+}
+
+#[test]
+fn test_render_data_highlight_does_not_style_virtual_text() {
+    let mut buffer = Buffer::from_str("abcd");
+    buffer.insert_virtual_text(Cursor::new(0, 2), crate::buffer::Gravity::Right, "virtual");
+    buffer
+        .insert_namespaced_highlight(
+            "test",
+            crate::buffer::RangeAnchor {
+                start: Cursor::new(0, 1),
+                end: Cursor::new(0, 3),
+                start_gravity: crate::buffer::Gravity::Right,
+                end_gravity: crate::buffer::Gravity::Left,
+            },
+            urvim_theme::StyleOverlay {
+                bold: Some(true),
+                ..Default::default()
+            },
+        )
+        .expect("highlight");
+
+    let view = BufferView::new(buffer);
+    let render_data = view.build_render_data(Size::new(1, 80));
+    let virtual_text = render_data
+        .get_line(0)
+        .expect("line")
+        .iter()
+        .find(|chunk| chunk.is_virtual_text)
+        .expect("virtual text");
+    assert_eq!(virtual_text.style, Style::new().faint().italic());
+}
+
+#[test]
+fn test_render_data_wraps_virtual_text_with_the_line() {
+    let mut buffer = Buffer::from_str("abcd");
+    buffer.insert_virtual_text(Cursor::new(0, 2), crate::buffer::Gravity::Right, "XY");
 
     let view = BufferView::new(buffer);
     let render_data = view.build_render_data_with_options(
@@ -3772,9 +3861,9 @@ fn test_tab_visual_cursor_with_gutter() {
 }
 
 #[test]
-fn test_tab_visual_cursor_ignores_ghost_text() {
+fn test_tab_visual_cursor_ignores_virtual_text() {
     let mut buffer = Buffer::from_str("abcd");
-    buffer.insert_ghost_text(Cursor::new(0, 2), crate::buffer::Gravity::Right, "ghost");
+    buffer.insert_virtual_text(Cursor::new(0, 2), crate::buffer::Gravity::Right, "ghost");
     let mut tab = EditorTab::new(buffer);
     tab.buffer_view_mut().set_cursor(Cursor::new(0, 3));
 
@@ -3786,9 +3875,9 @@ fn test_tab_visual_cursor_ignores_ghost_text() {
 }
 
 #[test]
-fn test_tab_visual_cursor_does_not_count_ghost_text_at_cursor() {
+fn test_tab_visual_cursor_does_not_count_virtual_text_at_cursor() {
     let mut buffer = Buffer::from_str("abcd");
-    buffer.insert_ghost_text(Cursor::new(0, 2), crate::buffer::Gravity::Right, "ghost");
+    buffer.insert_virtual_text(Cursor::new(0, 2), crate::buffer::Gravity::Right, "ghost");
     let mut tab = EditorTab::new(buffer);
     tab.buffer_view_mut().set_cursor(Cursor::new(0, 2));
 
@@ -3800,7 +3889,7 @@ fn test_tab_visual_cursor_does_not_count_ghost_text_at_cursor() {
 }
 
 #[test]
-fn test_render_data_cursor_ignores_ghost_text_after_overlay_split() {
+fn test_render_data_cursor_ignores_virtual_text_after_overlay_split() {
     let mut render_data = RenderData::new(1);
     render_data.line_data.push(LineData {
         buffer_line: 0,
@@ -3813,7 +3902,7 @@ fn test_render_data_cursor_ignores_ghost_text_after_overlay_split() {
         folded_line_count: None,
         chunks: vec![
             RenderChunk::new("ab", Style::default()),
-            RenderChunk::ghost_text("ghost", Style::default()),
+            RenderChunk::virtual_text("ghost", Style::default()),
             RenderChunk::new("cd", Style::default()),
         ],
     });
@@ -3824,13 +3913,13 @@ fn test_render_data_cursor_ignores_ghost_text_after_overlay_split() {
         Style::default().fg(Color::ansi(1)),
     );
 
-    let ghost_text = render_data.line_data[0]
+    let virtual_text = render_data.line_data[0]
         .chunks
         .iter()
-        .filter(|chunk| chunk.is_ghost_text)
+        .filter(|chunk| chunk.is_virtual_text)
         .map(|chunk| chunk.text.as_str())
         .collect::<String>();
-    assert_eq!(ghost_text, "ghost");
+    assert_eq!(virtual_text, "ghost");
     assert_eq!(
         render_data.cursor_screen_position(Cursor::new(0, 3)),
         Some(Position::new(0, 8))
@@ -3838,7 +3927,7 @@ fn test_render_data_cursor_ignores_ghost_text_after_overlay_split() {
 }
 
 #[test]
-fn test_render_data_accent_range_ignores_ghost_text_when_counting_bytes() {
+fn test_render_data_accent_range_ignores_virtual_text_when_counting_bytes() {
     let mut render_data = RenderData::new(1);
     render_data.line_data.push(LineData {
         buffer_line: 0,
@@ -3851,7 +3940,7 @@ fn test_render_data_accent_range_ignores_ghost_text_when_counting_bytes() {
         folded_line_count: None,
         chunks: vec![
             RenderChunk::new("ab", Style::default()),
-            RenderChunk::ghost_text("ghost", Style::default()),
+            RenderChunk::virtual_text("ghost", Style::default()),
             RenderChunk::new("cd", Style::default()),
         ],
     });

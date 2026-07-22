@@ -61,8 +61,8 @@ pub use diff::{
 };
 pub use indent::IndentDirection;
 pub use marker::{
-    DeleteShape, Gravity, InsertShape, Marker, MarkerId, MarkerKind, MarkerPayload, MarkerShape,
-    MarkerStore, PointMarker, RangeMarker,
+    DeleteShape, Gravity, Highlight, InsertShape, Marker, MarkerId, MarkerStore, PointAnchor,
+    RangeAnchor, VirtualText, VirtualTextKind,
 };
 pub use pool::{BufferId, BufferPool};
 pub use syntax::{
@@ -254,8 +254,8 @@ pub struct Buffer {
     markers: MarkersStore,
 }
 
-/// Shared marker store used by `Buffer`.
-pub type MarkersStore = MarkerStore<MarkerPayload>;
+/// Shared decoration store used by [`Buffer`].
+pub type MarkersStore = MarkerStore<VirtualText, Highlight>;
 
 impl Clone for Buffer {
     fn clone(&self) -> Self {

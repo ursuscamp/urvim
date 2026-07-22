@@ -55,8 +55,9 @@ enum PayloadKind {
     Inlay,
 }
 
-fn populate_store(scenario: Scenario) -> (MarkerStore<PayloadKind>, Vec<MarkerId>) {
-    let mut store = MarkerStore::with_line_count(scenario.line_count);
+fn populate_store(scenario: Scenario) -> (MarkerStore<PayloadKind, PayloadKind>, Vec<MarkerId>) {
+    let mut store: MarkerStore<PayloadKind, PayloadKind> =
+        MarkerStore::with_line_count(scenario.line_count);
     let mut ids = Vec::with_capacity(scenario.marker_count);
     for idx in 0..scenario.marker_count {
         let line = marker_line(idx, scenario);
@@ -102,7 +103,7 @@ fn bench_construct(c: &mut Criterion) {
     for scenario in SCENARIOS {
         group.bench_function(scenario.name, |b| {
             b.iter(|| {
-                std_black_box(MarkerStore::<PayloadKind>::with_line_count(
+                std_black_box(MarkerStore::<PayloadKind, PayloadKind>::with_line_count(
                     scenario.line_count,
                 ))
             })
@@ -332,7 +333,9 @@ fn bench_clear_inlay_hints_for_lines(c: &mut Criterion) {
                 || store.clone(),
                 |mut cloned| {
                     cloned.retain_in_line_range(0, scenario.line_count / 2, |marker| {
-                        matches!(marker.payload, PayloadKind::Ghost)
+                        marker
+                            .as_point()
+                            .is_none_or(|(_, payload)| matches!(payload, PayloadKind::Ghost))
                     });
                     black_box(cloned);
                 },
@@ -346,7 +349,8 @@ fn bench_clear_inlay_hints_for_lines(c: &mut Criterion) {
 fn bench_namespaced_markers(c: &mut Criterion) {
     let mut group = c.benchmark_group("marker_store_namespaced");
     let scenario = SCENARIOS[4];
-    let mut store = MarkerStore::with_line_count(scenario.line_count);
+    let mut store: MarkerStore<PayloadKind, PayloadKind> =
+        MarkerStore::with_line_count(scenario.line_count);
     let mut ids = Vec::with_capacity(scenario.marker_count);
     for idx in 0..scenario.marker_count {
         ids.push(store.insert_point_in_namespace(

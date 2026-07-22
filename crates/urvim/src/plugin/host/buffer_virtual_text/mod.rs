@@ -1,9 +1,9 @@
-//! Plugin-owned buffer ghost-text API.
+//! Plugin-owned buffer virtual-text API.
 
 use std::collections::HashMap;
 
 use bearscript::Value;
-use urvim_core::buffer::{Cursor, Gravity, Marker, MarkerId, MarkerPayload, MarkerShape};
+use urvim_core::buffer::{Cursor, Gravity, Highlight, Marker, MarkerId, VirtualText};
 use urvim_terminal::{Color, Rgb};
 use urvim_theme::StyleOverlay;
 
@@ -12,8 +12,8 @@ use crate::plugin::{
     buffer_id_from_value, ensure_valid_cursor, unknown_buffer_error, usize_from_value,
 };
 
-/// Builds the `urvim.buffers.ghost_text` module for one plugin.
-pub(in crate::plugin) fn ghost_text_module(plugin: String) -> Value {
+/// Builds the `urvim.buffers.virtual_text` module for one plugin.
+pub(in crate::plugin) fn virtual_text_module(plugin: String) -> Value {
     let add_plugin = plugin.clone();
     let update_plugin = plugin.clone();
     let remove_plugin = plugin.clone();
@@ -25,7 +25,7 @@ pub(in crate::plugin) fn ghost_text_module(plugin: String) -> Value {
             (
                 "add".to_string(),
                 native_fn(
-                    "buffers.ghost_text.add",
+                    "buffers.virtual_text.add",
                     move |buffer_id: Value, options: Value| {
                         let buffer_id = buffer_id_from_value(&buffer_id)?;
                         let options = AddOptions::from_value(&options)?;
@@ -36,7 +36,7 @@ pub(in crate::plugin) fn ghost_text_module(plugin: String) -> Value {
                                 options.position,
                                 "options.position",
                             )?;
-                            Ok::<_, String>(buffer.insert_namespaced_ghost_text(
+                            Ok::<_, String>(buffer.insert_namespaced_virtual_text(
                                 &add_plugin,
                                 options.position,
                                 options.gravity,
@@ -52,27 +52,25 @@ pub(in crate::plugin) fn ghost_text_module(plugin: String) -> Value {
             (
                 "update".to_string(),
                 native_fn(
-                    "buffers.ghost_text.update",
+                    "buffers.virtual_text.update",
                     move |buffer_id: Value, marker_id: Value, changes: Value| {
                         let buffer_id = buffer_id_from_value(&buffer_id)?;
                         let marker_id = marker_id_from_value(&marker_id)?;
                         let changes = UpdateOptions::from_value(&changes)?;
                         urvim_core::globals::with_buffer_mut(buffer_id, |buffer| {
                             let marker = buffer
-                                .namespaced_ghost_text(&update_plugin, marker_id)
+                                .namespaced_virtual_text(&update_plugin, marker_id)
                                 .cloned()
                                 .ok_or_else(|| unavailable_marker_error(marker_id))?;
-                            let MarkerShape::Point(point) = marker.kind else {
+                            let Some((point, payload)) = marker.as_point() else {
                                 return Err(unavailable_marker_error(marker_id));
                             };
                             let position = changes.position.unwrap_or(point.pos);
                             ensure_valid_cursor(buffer_id, buffer, position, "changes.position")?;
                             let gravity = changes.gravity.unwrap_or(point.gravity);
-                            let text = changes
-                                .text
-                                .unwrap_or_else(|| marker.payload.label.clone().into());
-                            let style = changes.style.unwrap_or(marker.payload.style);
-                            if !buffer.update_namespaced_ghost_text(
+                            let text = changes.text.unwrap_or_else(|| payload.text.clone().into());
+                            let style = changes.style.unwrap_or(payload.style);
+                            if !buffer.update_namespaced_virtual_text(
                                 &update_plugin,
                                 marker_id,
                                 position,
@@ -92,13 +90,13 @@ pub(in crate::plugin) fn ghost_text_module(plugin: String) -> Value {
             (
                 "remove".to_string(),
                 native_fn(
-                    "buffers.ghost_text.remove",
+                    "buffers.virtual_text.remove",
                     move |buffer_id: Value, marker_id: Value| {
                         let buffer_id = buffer_id_from_value(&buffer_id)?;
                         let marker_id = marker_id_from_value(&marker_id)?;
                         urvim_core::globals::with_buffer_mut(buffer_id, |buffer| {
                             buffer
-                                .remove_namespaced_ghost_text(&remove_plugin, marker_id)
+                                .remove_namespaced_virtual_text(&remove_plugin, marker_id)
                                 .is_some()
                         })
                         .map(Value::Bool)
@@ -108,22 +106,22 @@ pub(in crate::plugin) fn ghost_text_module(plugin: String) -> Value {
             ),
             (
                 "clear".to_string(),
-                native_fn("buffers.ghost_text.clear", move |buffer_id: Value| {
+                native_fn("buffers.virtual_text.clear", move |buffer_id: Value| {
                     let buffer_id = buffer_id_from_value(&buffer_id)?;
                     urvim_core::globals::with_buffer_mut(buffer_id, |buffer| {
-                        buffer.clear_namespaced_ghost_texts(&clear_plugin) as f64
+                        buffer.clear_namespaced_virtual_texts(&clear_plugin) as f64
                     })
                     .ok_or_else(|| unknown_buffer_error(buffer_id))
                 }),
             ),
             (
                 "list".to_string(),
-                native_fn("buffers.ghost_text.list", move |buffer_id: Value| {
+                native_fn("buffers.virtual_text.list", move |buffer_id: Value| {
                     let buffer_id = buffer_id_from_value(&buffer_id)?;
                     urvim_core::globals::with_buffer(buffer_id, |buffer| {
                         Value::List(
                             buffer
-                                .namespaced_ghost_texts(&list_plugin)
+                                .namespaced_virtual_texts(&list_plugin)
                                 .iter()
                                 .map(marker_to_value)
                                 .collect::<Vec<_>>()
@@ -148,17 +146,17 @@ struct AddOptions {
 impl AddOptions {
     fn from_value(value: &Value) -> Result<Self, String> {
         let Value::Map(map) = value else {
-            return Err("ghost text options must be a map".to_string());
+            return Err("virtual text options must be a map".to_string());
         };
         reject_unknown_keys(map, &["position", "text", "gravity", "style"], "options")?;
         let position = cursor_from_value(
             map.get("position")
-                .ok_or_else(|| "ghost text options require position".to_string())?,
+                .ok_or_else(|| "virtual text options require position".to_string())?,
             "options.position",
         )?;
         let text = string_from_value(
             map.get("text")
-                .ok_or_else(|| "ghost text options require text".to_string())?,
+                .ok_or_else(|| "virtual text options require text".to_string())?,
             "options.text",
         )?;
         let gravity = map
@@ -191,7 +189,7 @@ struct UpdateOptions {
 impl UpdateOptions {
     fn from_value(value: &Value) -> Result<Self, String> {
         let Value::Map(map) = value else {
-            return Err("ghost text changes must be a map".to_string());
+            return Err("virtual text changes must be a map".to_string());
         };
         reject_unknown_keys(map, &["position", "text", "gravity", "style"], "changes")?;
         Ok(Self {
@@ -215,17 +213,17 @@ impl UpdateOptions {
     }
 }
 
-fn marker_to_value(marker: &Marker<MarkerPayload>) -> Value {
-    let MarkerShape::Point(point) = marker.kind else {
-        unreachable!("ghost text is point anchored");
+fn marker_to_value(marker: &Marker<VirtualText, Highlight>) -> Value {
+    let Some((point, payload)) = marker.as_point() else {
+        unreachable!("virtual text is point anchored");
     };
     Value::Map(
         HashMap::from([
-            ("id".to_string(), Value::Number(marker.id as f64)),
+            ("id".to_string(), Value::Number(marker.id() as f64)),
             ("position".to_string(), cursor_to_value(point.pos)),
             (
                 "text".to_string(),
-                Value::String(marker.payload.label.to_string().into_boxed_str().into()),
+                Value::String(payload.text.to_string().into_boxed_str().into()),
             ),
             (
                 "gravity".to_string(),
@@ -239,18 +237,14 @@ fn marker_to_value(marker: &Marker<MarkerPayload>) -> Value {
             ),
             (
                 "style".to_string(),
-                marker
-                    .payload
-                    .style
-                    .map(style_to_value)
-                    .unwrap_or(Value::Null),
+                payload.style.map(style_to_value).unwrap_or(Value::Null),
             ),
         ])
         .into(),
     )
 }
 
-fn cursor_from_value(value: &Value, label: &str) -> Result<Cursor, String> {
+pub(super) fn cursor_from_value(value: &Value, label: &str) -> Result<Cursor, String> {
     let Value::Map(map) = value else {
         return Err(format!("{label} must be a map"));
     };
@@ -267,7 +261,7 @@ fn cursor_from_value(value: &Value, label: &str) -> Result<Cursor, String> {
     ))
 }
 
-fn cursor_to_value(cursor: Cursor) -> Value {
+pub(super) fn cursor_to_value(cursor: Cursor) -> Value {
     Value::Map(
         HashMap::from([
             ("row".to_string(), Value::Number(cursor.line as f64)),
@@ -277,12 +271,12 @@ fn cursor_to_value(cursor: Cursor) -> Value {
     )
 }
 
-fn marker_id_from_value(value: &Value) -> Result<MarkerId, String> {
+pub(super) fn marker_id_from_value(value: &Value) -> Result<MarkerId, String> {
     let id = usize_from_value(value, "marker_id")?;
     Ok(id as MarkerId)
 }
 
-fn gravity_from_value(value: &Value, label: &str) -> Result<Gravity, String> {
+pub(super) fn gravity_from_value(value: &Value, label: &str) -> Result<Gravity, String> {
     match string_from_value(value, label)?.as_str() {
         "left" => Ok(Gravity::Left),
         "right" => Ok(Gravity::Right),
@@ -290,7 +284,10 @@ fn gravity_from_value(value: &Value, label: &str) -> Result<Gravity, String> {
     }
 }
 
-fn optional_style_from_value(value: &Value, label: &str) -> Result<Option<StyleOverlay>, String> {
+pub(super) fn optional_style_from_value(
+    value: &Value,
+    label: &str,
+) -> Result<Option<StyleOverlay>, String> {
     if matches!(value, Value::Null) {
         return Ok(None);
     }
@@ -367,7 +364,7 @@ fn optional_bool(value: Option<&Value>, label: &str) -> Result<Option<bool>, Str
     Ok(Some(*value))
 }
 
-fn style_to_value(style: StyleOverlay) -> Value {
+pub(super) fn style_to_value(style: StyleOverlay) -> Value {
     let mut map = HashMap::new();
     insert_optional_color(&mut map, "fg", style.fg);
     insert_optional_color(&mut map, "bg", style.bg);
@@ -412,7 +409,7 @@ fn string_from_value(value: &Value, label: &str) -> Result<String, String> {
     Ok(value.to_string())
 }
 
-fn reject_unknown_keys(
+pub(super) fn reject_unknown_keys(
     map: &bearscript::CowMap,
     allowed: &[&str],
     label: &str,
@@ -424,5 +421,5 @@ fn reject_unknown_keys(
 }
 
 fn unavailable_marker_error(id: MarkerId) -> String {
-    format!("ghost text marker {id} is unavailable")
+    format!("virtual text marker {id} is unavailable")
 }

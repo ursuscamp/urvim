@@ -2,37 +2,41 @@ use super::*;
 use crate::buffer::{configured_tab_width, display_grapheme_width, display_width_at, expand_tabs};
 use crate::ui::text_width::{ClipSide, clip_text};
 use unicode_segmentation::UnicodeSegmentation;
+use urvim_theme::StyleOverlay;
 
 impl RenderChunk {
+    /// Creates a run backed by real buffer text.
     pub fn new(text: &str, style: Style) -> Self {
         Self {
             text: text.to_string(),
             style,
-            is_ghost_text: false,
+            is_virtual_text: false,
         }
     }
 
+    /// Creates a real-text run with the default style.
     pub fn default_text(text: &str) -> Self {
         Self {
             text: text.to_string(),
             style: Style::default(),
-            is_ghost_text: false,
+            is_virtual_text: false,
         }
     }
 
-    pub fn ghost_text(text: &str, style: Style) -> Self {
+    /// Creates a virtual-text run that consumes no buffer bytes.
+    pub fn virtual_text(text: &str, style: Style) -> Self {
         Self {
             text: text.to_string(),
             style,
-            is_ghost_text: true,
+            is_virtual_text: true,
         }
     }
 
-    fn with_ghost_flag(text: &str, style: Style, is_ghost_text: bool) -> Self {
+    fn with_virtual_text_flag(text: &str, style: Style, is_virtual_text: bool) -> Self {
         Self {
             text: text.to_string(),
             style,
-            is_ghost_text,
+            is_virtual_text,
         }
     }
 }
@@ -98,12 +102,17 @@ impl RenderData {
 
     /// Applies a style overlay to every chunk intersecting the cursor range.
     pub fn overlay_range(&mut self, start: Cursor, end: Cursor, style: Style) {
-        self.apply_range_style(start, end, style, Style::overlay);
+        self.apply_range_style(start, end, |base| base.overlay(style));
+    }
+
+    /// Applies a partial style overlay to real text in a cursor range.
+    pub fn overlay_style_range(&mut self, start: Cursor, end: Cursor, style: StyleOverlay) {
+        self.apply_range_style(start, end, |base| style.apply_to(base));
     }
 
     /// Applies a style accent to every chunk intersecting the cursor range.
     pub fn accent_range(&mut self, start: Cursor, end: Cursor, style: Style) {
-        self.apply_range_style(start, end, style, Style::accent);
+        self.apply_range_style(start, end, |base| base.accent(style));
     }
 
     pub fn cursor_screen_position(&self, cursor: Cursor) -> Option<Position> {
@@ -122,7 +131,7 @@ impl RenderData {
             let mut row_byte_offset = line_data.byte_offset;
             let mut row_end_byte = line_data.byte_offset;
             for chunk in &line_data.chunks {
-                if chunk.is_ghost_text {
+                if chunk.is_virtual_text {
                     continue;
                 }
                 row_has_real_text = true;
@@ -141,7 +150,7 @@ impl RenderData {
             let mut visual_col = 0;
             let mut original_col = line_data.byte_offset;
             for chunk in &line_data.chunks {
-                if chunk.is_ghost_text {
+                if chunk.is_virtual_text {
                     if cursor.col < original_col {
                         break;
                     }
@@ -163,13 +172,7 @@ impl RenderData {
         None
     }
 
-    fn apply_range_style(
-        &mut self,
-        start: Cursor,
-        end: Cursor,
-        style: Style,
-        combine: fn(Style, Style) -> Style,
-    ) {
+    fn apply_range_style(&mut self, start: Cursor, end: Cursor, combine: impl Fn(Style) -> Style) {
         if end.line < start.line || (end.line == start.line && end.col <= start.col) {
             return;
         }
@@ -199,12 +202,12 @@ impl RenderData {
             let mut selected_chunks = Vec::with_capacity(line_data.chunks.len());
             let mut chunk_start = line_data.byte_offset;
             for chunk in line_data.chunks.drain(..) {
-                if chunk.is_ghost_text {
+                if chunk.is_virtual_text {
                     selected_chunks.push(chunk);
                     continue;
                 }
 
-                let selected_style = combine(chunk.style, style);
+                let selected_style = combine(chunk.style);
                 push_split_render_chunk(
                     &mut selected_chunks,
                     &chunk.text,
@@ -231,14 +234,14 @@ fn push_split_render_chunk(
     range_end: usize,
     base_style: Style,
     selected_style: Style,
-    is_ghost_text: bool,
+    is_virtual_text: bool,
 ) {
     let chunk_end = chunk_start + text.len();
     if chunk_end <= range_start || chunk_start >= range_end {
-        chunks.push(RenderChunk::with_ghost_flag(
+        chunks.push(RenderChunk::with_virtual_text_flag(
             text,
             base_style,
-            is_ghost_text,
+            is_virtual_text,
         ));
         return;
     }
@@ -247,24 +250,24 @@ fn push_split_render_chunk(
     let local_end = range_end.saturating_sub(chunk_start).min(text.len());
 
     if local_start > 0 {
-        chunks.push(RenderChunk::with_ghost_flag(
+        chunks.push(RenderChunk::with_virtual_text_flag(
             &text[..local_start],
             base_style,
-            is_ghost_text,
+            is_virtual_text,
         ));
     }
     if local_start < local_end {
-        chunks.push(RenderChunk::with_ghost_flag(
+        chunks.push(RenderChunk::with_virtual_text_flag(
             &text[local_start..local_end],
             selected_style,
-            is_ghost_text,
+            is_virtual_text,
         ));
     }
     if local_end < text.len() {
-        chunks.push(RenderChunk::with_ghost_flag(
+        chunks.push(RenderChunk::with_virtual_text_flag(
             &text[local_end..],
             base_style,
-            is_ghost_text,
+            is_virtual_text,
         ));
     }
 }
