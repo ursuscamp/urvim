@@ -218,10 +218,14 @@ pub(super) fn run(cli: Cli) -> io::Result<()> {
         &mut finalizer,
         shutdown_event,
         |event| {
+            let shutting_down = event.is_some();
             if let Some(event) = event {
                 globals::enqueue_editor_event(event);
             }
             drain_all_plugin_events(&mut plugin_runtime);
+            if shutting_down {
+                plugin_runtime.begin_lsp_shutdown();
+            }
         },
         globals::shutdown_lsp_runtime,
         || urvim_core::session::save_now(&layout.borrow()),
@@ -267,6 +271,10 @@ fn run_editor_loop<I: io::Read + rustix::fd::AsFd, O: io::Write + rustix::fd::As
         }
 
         if plugin_runtime.dispatch_fs_events() {
+            needs_redraw = true;
+        }
+
+        if plugin_runtime.dispatch_lsp_events() {
             needs_redraw = true;
         }
 
@@ -341,6 +349,9 @@ fn run_editor_loop<I: io::Read + rustix::fd::AsFd, O: io::Write + rustix::fd::As
                     needs_redraw = true;
                 }
                 if plugin_runtime.dispatch_fs_events() {
+                    needs_redraw = true;
+                }
+                if plugin_runtime.dispatch_lsp_events() {
                     needs_redraw = true;
                 }
                 if plugin_runtime.dispatch_api_requests() {

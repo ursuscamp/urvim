@@ -5,6 +5,7 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 mod api;
+mod buffer_transactions;
 mod callbacks;
 mod confirmations;
 mod conversion;
@@ -14,8 +15,10 @@ mod health;
 mod host;
 mod inputs;
 mod jobs;
+mod lsp;
 mod pickers;
 mod plugin_events;
+mod state;
 mod timers;
 
 use crate::actions::{execute_action_intent, execute_command_intent};
@@ -42,11 +45,42 @@ use host::urvim_module;
 use host::{native_fn, urvim_module_with_api_queue};
 use inputs::PluginInputEvents;
 use jobs::{PluginJobEvent, PluginJobRegistry, job_event_to_value};
+use lsp::{PluginLspOutcome, PluginLspRegistry};
 use pickers::PluginPickerEvents;
 use plugin_events::{PluginEvent, PluginEventBus};
+use state::PluginStateStore;
 use timers::{PluginTimerEvent, PluginTimerKind, PluginTimerRegistry};
 
 pub(super) type SharedLayout = Rc<RefCell<Layout>>;
+
+fn lsp_outcome_to_value(outcome: &PluginLspOutcome) -> Value {
+    let (ok, result, error) = match &outcome.result {
+        Ok(result) => (
+            true,
+            host::json::json_value_to_bearscript(result.clone()),
+            Value::Null,
+        ),
+        Err(error) => (
+            false,
+            Value::Null,
+            Value::String(error.clone().into_boxed_str().into()),
+        ),
+    };
+    Value::Map(
+        HashMap::from([
+            ("id".to_string(), Value::Number(outcome.id as f64)),
+            (
+                "kind".to_string(),
+                Value::String(outcome.kind.as_str().into()),
+            ),
+            ("ok".to_string(), Value::Bool(ok)),
+            ("result".to_string(), result),
+            ("error".to_string(), error),
+            ("cancelled".to_string(), Value::Bool(outcome.cancelled)),
+        ])
+        .into(),
+    )
+}
 
 fn begin_plugin_callback(layout: &SharedLayout, plugin: &str) -> EventTransaction {
     let transaction = EventTransaction::new(EventSource::plugin(plugin));
@@ -56,7 +90,8 @@ fn begin_plugin_callback(layout: &SharedLayout, plugin: &str) -> EventTransactio
     transaction
 }
 
-fn finish_plugin_callback(layout: &SharedLayout, transaction: EventTransaction) {
+fn finish_plugin_callback(layout: &SharedLayout, plugin: &str, transaction: EventTransaction) {
+    buffer_transactions::finish_plugin(plugin);
     if let Ok(layout) = layout.try_borrow() {
         capture_pane_state(layout.event_pane_snapshots());
     }
@@ -73,6 +108,8 @@ pub(super) struct BearscriptPluginRuntime {
     contributions: Rc<RefCell<urvim_plugin::PluginContributionRegistry>>,
     fs: Rc<PluginFsRegistry>,
     jobs: Rc<PluginJobRegistry>,
+    lsp: Rc<PluginLspRegistry>,
+    state: Rc<PluginStateStore>,
     timers: Rc<PluginTimerRegistry>,
     picker_events: PluginPickerEvents,
     confirmation_events: PluginConfirmationEvents,
@@ -94,6 +131,8 @@ impl BearscriptPluginRuntime {
             )),
             fs: Rc::new(PluginFsRegistry::default()),
             jobs: Rc::new(PluginJobRegistry::default()),
+            lsp: Rc::new(PluginLspRegistry::default()),
+            state: Rc::new(PluginStateStore::default()),
             timers: Rc::new(PluginTimerRegistry::default()),
             picker_events: PluginPickerEvents::default(),
             confirmation_events: PluginConfirmationEvents::default(),
@@ -118,6 +157,8 @@ impl BearscriptPluginRuntime {
             contributions,
             fs: Rc::new(PluginFsRegistry::default()),
             jobs: Rc::new(PluginJobRegistry::default()),
+            lsp: Rc::new(PluginLspRegistry::default()),
+            state: Rc::new(PluginStateStore::from_environment()),
             timers: Rc::new(PluginTimerRegistry::default()),
             picker_events: PluginPickerEvents::default(),
             confirmation_events: PluginConfirmationEvents::default(),
@@ -225,7 +266,7 @@ impl BearscriptPluginRuntime {
             .call_value(callback, vec![bear_args(args)])
             .map(|_| ())
             .map_err(|error| error.to_string());
-        finish_plugin_callback(&layout, transaction);
+        finish_plugin_callback(&layout, plugin, transaction);
         self.record_callback(plugin, format!("command {command}"), started.elapsed());
         if let Err(error) = &result {
             self.record_error(plugin, error.clone());
@@ -270,7 +311,7 @@ impl BearscriptPluginRuntime {
                 .call_value(callback, vec![payload.clone()])
                 .map(|_| ())
                 .map_err(|error| error.to_string());
-            finish_plugin_callback(&self.layout, transaction);
+            finish_plugin_callback(&self.layout, &plugin, transaction);
             self.record_callback(
                 &plugin,
                 format!("event {kind} hook {hook_id}"),
@@ -336,7 +377,7 @@ impl BearscriptPluginRuntime {
                 .call_value(callback, vec![payload.clone()])
                 .map(|_| ())
                 .map_err(|error| error.to_string());
-            finish_plugin_callback(&self.layout, transaction);
+            finish_plugin_callback(&self.layout, &subscriber, transaction);
             self.record_callback(
                 &subscriber,
                 format!(
@@ -385,6 +426,22 @@ impl BearscriptPluginRuntime {
             }
         }
         dispatched
+    }
+
+    /// Polls asynchronous LSP requests and dispatches ready callbacks.
+    pub(super) fn dispatch_lsp_events(&mut self) -> bool {
+        let outcomes = self.lsp.poll();
+        let dispatched = !outcomes.is_empty();
+        for outcome in outcomes {
+            self.dispatch_lsp_outcome(outcome);
+        }
+        dispatched
+    }
+
+    /// Cancels pending plugin LSP requests before the editor shuts LSP down.
+    pub(super) fn begin_lsp_shutdown(&mut self) {
+        self.lsp.begin_shutdown();
+        self.dispatch_lsp_events();
     }
 
     /// Dispatches one batch of deferred cross-plugin API calls.
@@ -440,7 +497,7 @@ impl BearscriptPluginRuntime {
                 validate_cross_plugin_value(&value, "plugin API response")?;
                 Ok(value)
             });
-        finish_plugin_callback(&self.layout, transaction);
+        finish_plugin_callback(&self.layout, &request.plugin, transaction);
         self.record_callback(
             &request.plugin,
             format!("API {}", request.api),
@@ -476,7 +533,7 @@ impl BearscriptPluginRuntime {
             .call_value(callback, vec![payload])
             .map(|_| ())
             .map_err(|error| error.to_string());
-        finish_plugin_callback(&self.layout, transaction);
+        finish_plugin_callback(&self.layout, &request.caller, transaction);
         self.record_callback(
             &request.caller,
             format!("API {} response", request.api),
@@ -598,7 +655,7 @@ impl BearscriptPluginRuntime {
             .call_value(callback, vec![snapshot])
             .map_err(|error| error.to_string())
             .and_then(|value| syntax_line_spans_from_value(&value, &text));
-        finish_plugin_callback(&layout, transaction);
+        finish_plugin_callback(&layout, plugin, transaction);
         self.record_callback(
             plugin,
             format!("syntax provider {provider_id}"),
@@ -696,7 +753,7 @@ impl BearscriptPluginRuntime {
             .call_value(input.on_submit, vec![Value::String(text.into())])
             .map(|_| ())
             .map_err(|error| error.to_string());
-        finish_plugin_callback(&layout, transaction);
+        finish_plugin_callback(&layout, plugin, transaction);
         self.record_callback(
             plugin,
             format!("input {input_id} submit"),
@@ -737,7 +794,7 @@ impl BearscriptPluginRuntime {
             .call_value(confirmation.on_response, vec![value])
             .map(|_| ())
             .map_err(|error| error.to_string());
-        finish_plugin_callback(&layout, transaction);
+        finish_plugin_callback(&layout, plugin, transaction);
         self.record_callback(
             plugin,
             format!("confirmation {confirmation_id} response"),
@@ -779,7 +836,7 @@ impl BearscriptPluginRuntime {
             .call_value(picker.on_select, vec![value])
             .map(|_| ())
             .map_err(|error| error.to_string());
-        finish_plugin_callback(&layout, transaction);
+        finish_plugin_callback(&layout, plugin, transaction);
         self.record_callback(
             plugin,
             format!("picker {picker_id} select"),
@@ -814,7 +871,7 @@ impl BearscriptPluginRuntime {
             .call_value(callback, vec![])
             .map(|_| ())
             .map_err(|error| error.to_string());
-        finish_plugin_callback(&layout, transaction);
+        finish_plugin_callback(&layout, &event.plugin, transaction);
         self.record_callback(
             &event.plugin,
             format!("picker {} cancel", event.picker_id),
@@ -855,7 +912,7 @@ impl BearscriptPluginRuntime {
             .call_value(callback, vec![])
             .map(|_| ())
             .map_err(|error| error.to_string());
-        finish_plugin_callback(&layout, transaction);
+        finish_plugin_callback(&layout, &event.plugin, transaction);
         self.record_callback(
             &event.plugin,
             format!("confirmation {} cancel", event.confirmation_id),
@@ -896,7 +953,7 @@ impl BearscriptPluginRuntime {
             .call_value(callback, vec![])
             .map(|_| ())
             .map_err(|error| error.to_string());
-        finish_plugin_callback(&layout, transaction);
+        finish_plugin_callback(&layout, &event.plugin, transaction);
         self.record_callback(
             &event.plugin,
             format!("input {} cancel", event.input_id),
@@ -912,6 +969,36 @@ impl BearscriptPluginRuntime {
             );
         }
         true
+    }
+
+    fn dispatch_lsp_outcome(&mut self, outcome: PluginLspOutcome) {
+        let layout = Rc::clone(&self.layout);
+        let Some(plugin_runtime) = self.plugins.get_mut(&outcome.plugin) else {
+            return;
+        };
+        let payload = lsp_outcome_to_value(&outcome);
+        let started = Instant::now();
+        let transaction = begin_plugin_callback(&layout, &outcome.plugin);
+        let result = plugin_runtime
+            .engine
+            .call_value(outcome.callback, vec![payload])
+            .map(|_| ())
+            .map_err(|error| error.to_string());
+        finish_plugin_callback(&layout, &outcome.plugin, transaction);
+        self.record_callback(
+            &outcome.plugin,
+            format!("LSP {} request {}", outcome.kind.as_str(), outcome.id),
+            started.elapsed(),
+        );
+        if let Err(error) = result {
+            self.record_error(&outcome.plugin, error.clone());
+            tracing::warn!(
+                plugin = outcome.plugin,
+                request_id = outcome.id,
+                error = %error,
+                "BearScript LSP callback failed"
+            );
+        }
     }
 
     fn dispatch_fs_event(&mut self, event: PluginFsEvent) -> bool {
@@ -935,7 +1022,7 @@ impl BearscriptPluginRuntime {
             .call_value(callback, vec![payload])
             .map(|_| ())
             .map_err(|error| error.to_string());
-        finish_plugin_callback(&layout, transaction);
+        finish_plugin_callback(&layout, &plugin, transaction);
         self.record_callback(
             &plugin,
             format!("fs request {request_id}"),
@@ -981,7 +1068,7 @@ impl BearscriptPluginRuntime {
             .call_value(callback, vec![])
             .map(|_| ())
             .map_err(|error| error.to_string());
-        finish_plugin_callback(&layout, transaction);
+        finish_plugin_callback(&layout, &plugin, transaction);
         self.record_callback(&plugin, label, started.elapsed());
         if let Err(error) = result {
             self.record_error(&plugin, error.clone());
@@ -1041,7 +1128,7 @@ impl BearscriptPluginRuntime {
             .call_value(callback, vec![payload])
             .map(|_| ())
             .map_err(|error| error.to_string());
-        finish_plugin_callback(&layout, transaction);
+        finish_plugin_callback(&layout, &plugin, transaction);
         self.record_callback(&plugin, label, started.elapsed());
         if let Err(error) = result {
             self.record_error(&plugin, error.clone());
@@ -1049,6 +1136,56 @@ impl BearscriptPluginRuntime {
             urvim_core::notify_warn!("Plugin {plugin} job {job_id} callback failed: {error}");
         }
         true
+    }
+
+    fn cleanup_plugin_resources(
+        &mut self,
+        plugin_name: &str,
+        callbacks: &Rc<RefCell<BearscriptPluginCallbacks>>,
+    ) {
+        buffer_transactions::finish_plugin(plugin_name);
+        self.contributions
+            .borrow_mut()
+            .unregister_plugin(plugin_name);
+        self.api_queue.remove_caller(plugin_name);
+        self.plugin_events.remove_plugin(plugin_name);
+        self.timers.cancel_plugin(plugin_name);
+        self.jobs.cancel_plugin(plugin_name);
+        self.lsp.remove_plugin(plugin_name);
+        globals::remove_plugin_keymaps(plugin_name);
+        globals::with_buffer_pool(|pool| {
+            for buffer_id in pool.buffer_ids() {
+                pool.with_buffer_mut(buffer_id, |buffer| {
+                    buffer.clear_namespaced_virtual_texts(plugin_name);
+                    buffer.clear_namespaced_highlights(plugin_name);
+                });
+            }
+        });
+        if let Some(snapshots) =
+            globals::with_diagnostics_store(|store| store.clear_plugin(plugin_name))
+        {
+            for snapshot in snapshots {
+                globals::enqueue_editor_event(EditorEvent::DiagnosticsChanged { snapshot });
+            }
+        }
+        callbacks.borrow_mut().timers.clear();
+        callbacks.borrow_mut().jobs.clear();
+        self.layout
+            .borrow_mut()
+            .overlays_mut()
+            .close_owned(plugin_name);
+        self.layout
+            .borrow_mut()
+            .close_plugin_panes_owned(plugin_name);
+        self.layout
+            .borrow_mut()
+            .close_plugin_picker_owned(plugin_name);
+        self.layout
+            .borrow_mut()
+            .close_plugin_confirmation_owned(plugin_name);
+        self.layout
+            .borrow_mut()
+            .close_plugin_input_owned(plugin_name);
     }
 
     fn load_plugin(
@@ -1074,60 +1211,26 @@ impl BearscriptPluginRuntime {
                 Rc::clone(&self.layout),
                 Rc::clone(&self.fs),
                 Rc::clone(&self.jobs),
+                Rc::clone(&self.lsp),
+                Rc::clone(&self.state),
                 Rc::clone(&self.timers),
+                plugin.config.clone(),
             ),
         );
 
         let entry = plugin.root().join(plugin.entry());
         if let Err(error) = engine.eval_file(entry.to_string_lossy().as_ref()) {
-            self.contributions
-                .borrow_mut()
-                .unregister_plugin_apis(plugin_name);
-            self.api_queue.remove_caller(plugin_name);
-            self.plugin_events.remove_plugin(plugin_name);
-            self.layout
-                .borrow_mut()
-                .overlays_mut()
-                .close_owned(plugin_name);
-            self.layout
-                .borrow_mut()
-                .close_plugin_panes_owned(plugin_name);
-            self.layout
-                .borrow_mut()
-                .close_plugin_picker_owned(plugin_name);
-            self.layout
-                .borrow_mut()
-                .close_plugin_confirmation_owned(plugin_name);
-            self.layout
-                .borrow_mut()
-                .close_plugin_input_owned(plugin_name);
+            buffer_transactions::finish_plugin(plugin_name);
+            self.cleanup_plugin_resources(plugin_name, &callbacks);
             return Err(error.to_string());
         }
+        buffer_transactions::finish_plugin(plugin_name);
         let started = Instant::now();
         let init_result = engine.eval("init();").map_err(|error| error.to_string());
+        buffer_transactions::finish_plugin(plugin_name);
         self.record_callback(plugin_name, "init", started.elapsed());
         if let Err(error) = init_result {
-            self.contributions
-                .borrow_mut()
-                .unregister_plugin_apis(plugin_name);
-            self.api_queue.remove_caller(plugin_name);
-            self.plugin_events.remove_plugin(plugin_name);
-            self.layout
-                .borrow_mut()
-                .overlays_mut()
-                .close_owned(plugin_name);
-            self.layout
-                .borrow_mut()
-                .close_plugin_panes_owned(plugin_name);
-            self.layout
-                .borrow_mut()
-                .close_plugin_picker_owned(plugin_name);
-            self.layout
-                .borrow_mut()
-                .close_plugin_confirmation_owned(plugin_name);
-            self.layout
-                .borrow_mut()
-                .close_plugin_input_owned(plugin_name);
+            self.cleanup_plugin_resources(plugin_name, &callbacks);
             return Err(error);
         }
 
@@ -1187,16 +1290,26 @@ impl BearscriptPluginRuntime {
     }
 }
 
-fn buffers_module(plugin: String) -> Value {
+fn buffers_module(plugin: String, layout: SharedLayout) -> Value {
+    let undo_plugin = plugin.clone();
+    let undo_layout = Rc::clone(&layout);
+    let redo_plugin = plugin.clone();
+    let redo_layout = Rc::clone(&layout);
+    let can_undo_plugin = plugin.clone();
+    let can_redo_plugin = plugin.clone();
+    let begin_transaction_plugin = plugin.clone();
+    let end_transaction_plugin = plugin.clone();
     Value::Module(HashMap::from([
         ("active".to_string(), buffers_module_active_fn()),
+        ("open".to_string(), host::buffer_lifecycle::open_fn()),
+        ("create".to_string(), host::buffer_lifecycle::create_fn()),
         (
             "virtual_text".to_string(),
             host::buffer_virtual_text::virtual_text_module(plugin.clone()),
         ),
         (
             "highlights".to_string(),
-            host::buffer_highlights::highlights_module(plugin),
+            host::buffer_highlights::highlights_module(plugin.clone()),
         ),
         ("list".to_string(), buffers_module_list_fn()),
         (
@@ -1436,6 +1549,66 @@ fn buffers_module(plugin: String) -> Value {
                 },
             ),
         ),
+        ("insert".to_string(), host::buffer_edits::insert_fn()),
+        ("delete".to_string(), host::buffer_edits::delete_fn()),
+        (
+            "text_in_range".to_string(),
+            host::buffer_edits::text_in_range_fn(),
+        ),
+        (
+            "apply_edits".to_string(),
+            host::buffer_edits::apply_edits_fn(),
+        ),
+        (
+            "undo".to_string(),
+            native_fn("buffers.undo", move |buffer_id: Value| {
+                let buffer_id = buffer_id_from_value(&buffer_id)?;
+                apply_plugin_undo_redo(&undo_plugin, &undo_layout, buffer_id, false)
+            }),
+        ),
+        (
+            "redo".to_string(),
+            native_fn("buffers.redo", move |buffer_id: Value| {
+                let buffer_id = buffer_id_from_value(&buffer_id)?;
+                apply_plugin_undo_redo(&redo_plugin, &redo_layout, buffer_id, true)
+            }),
+        ),
+        (
+            "can_undo".to_string(),
+            native_fn("buffers.can_undo", move |buffer_id: Value| {
+                let buffer_id = buffer_id_from_value(&buffer_id)?;
+                if buffer_transactions::is_active(&can_undo_plugin, buffer_id) {
+                    return Ok(false);
+                }
+                globals::with_buffer(buffer_id, |buffer| buffer.can_undo())
+                    .ok_or_else(|| unknown_buffer_error(buffer_id))
+            }),
+        ),
+        (
+            "can_redo".to_string(),
+            native_fn("buffers.can_redo", move |buffer_id: Value| {
+                let buffer_id = buffer_id_from_value(&buffer_id)?;
+                if buffer_transactions::is_active(&can_redo_plugin, buffer_id) {
+                    return Ok(false);
+                }
+                globals::with_buffer(buffer_id, |buffer| buffer.can_redo())
+                    .ok_or_else(|| unknown_buffer_error(buffer_id))
+            }),
+        ),
+        (
+            "begin_transaction".to_string(),
+            native_fn("buffers.begin_transaction", move |buffer_id: Value| {
+                let buffer_id = buffer_id_from_value(&buffer_id)?;
+                buffer_transactions::begin(&begin_transaction_plugin, buffer_id)
+            }),
+        ),
+        (
+            "end_transaction".to_string(),
+            native_fn("buffers.end_transaction", move |buffer_id: Value| {
+                let buffer_id = buffer_id_from_value(&buffer_id)?;
+                buffer_transactions::end(&end_transaction_plugin, buffer_id)
+            }),
+        ),
         (
             "save".to_string(),
             native_fn("buffers.save", |buffer_id: Value| {
@@ -1443,7 +1616,47 @@ fn buffers_module(plugin: String) -> Value {
                 save_buffer_for_plugin(buffer_id)
             }),
         ),
+        (
+            "save_as".to_string(),
+            host::buffer_lifecycle::save_as_fn(),
+        ),
+        ("reload".to_string(), host::buffer_lifecycle::reload_fn()),
     ]).into())
+}
+
+fn apply_plugin_undo_redo(
+    plugin: &str,
+    layout: &SharedLayout,
+    buffer_id: BufferId,
+    redo: bool,
+) -> Result<(), String> {
+    if buffer_transactions::is_active(plugin, buffer_id) {
+        let operation = if redo { "redo" } else { "undo" };
+        return Err(format!(
+            "cannot {operation} buffer_id {} during an active buffer transaction",
+            buffer_id.get()
+        ));
+    }
+
+    let cursor =
+        globals::with_buffer_mut(
+            buffer_id,
+            |buffer| {
+                if redo { buffer.redo() } else { buffer.undo() }
+            },
+        )
+        .ok_or_else(|| unknown_buffer_error(buffer_id))?;
+
+    if let Some(cursor) = cursor
+        && globals::with_active_buffer_id(|active| active == Some(buffer_id))
+    {
+        let mut layout = layout.borrow_mut();
+        if layout.active_buffer_view().buffer_id() == buffer_id {
+            layout.active_buffer_view_mut().set_cursor_synced(cursor);
+            layout.active_editor_pane_mut().record_cursor_position();
+        }
+    }
+    Ok(())
 }
 
 fn buffers_module_active_fn() -> Value {
@@ -1562,19 +1775,22 @@ fn selection_module(layout: SharedLayout) -> Value {
     )
 }
 
-fn diagnostics_module() -> Value {
+fn diagnostics_module(plugin: String) -> Value {
+    let set_plugin = plugin.clone();
+    let clear_plugin = plugin.clone();
+    let get_plugin = plugin;
     Value::Module(
         HashMap::from([
             (
                 "set".to_string(),
                 native_fn(
                     "diagnostics.set",
-                    |namespace: String, buffer_id: Value, diagnostics: Value| {
+                    move |namespace: String, buffer_id: Value, diagnostics: Value| {
                         let buffer_id = buffer_id_from_value(&buffer_id)?;
                         ensure_buffer_exists(buffer_id)?;
                         let diagnostics = diagnostics_from_value(&diagnostics, buffer_id)?;
                         let snapshot = globals::with_diagnostics_store(|store| {
-                            store.set(buffer_id, namespace, diagnostics)
+                            store.set_plugin(buffer_id, &set_plugin, namespace, diagnostics)
                         })
                         .ok_or_else(|| "diagnostics store is unavailable".to_string())?;
                         if let Some(snapshot) = snapshot {
@@ -1590,11 +1806,11 @@ fn diagnostics_module() -> Value {
                 "clear".to_string(),
                 native_fn(
                     "diagnostics.clear",
-                    |namespace: String, buffer_id: Value| {
+                    move |namespace: String, buffer_id: Value| {
                         let buffer_id = buffer_id_from_value(&buffer_id)?;
                         ensure_buffer_exists(buffer_id)?;
                         let snapshot = globals::with_diagnostics_store(|store| {
-                            store.clear(buffer_id, &namespace)
+                            store.clear_plugin_source(buffer_id, &clear_plugin, &namespace)
                         })
                         .ok_or_else(|| "diagnostics store is unavailable".to_string())?;
                         if let Some(snapshot) = snapshot {
@@ -1610,14 +1826,16 @@ fn diagnostics_module() -> Value {
                 "get".to_string(),
                 native_fn(
                     "diagnostics.get",
-                    |buffer_id: Value, namespace: Option<String>| {
+                    move |buffer_id: Value, namespace: Option<String>| {
                         let buffer_id = buffer_id_from_value(&buffer_id)?;
                         ensure_buffer_exists(buffer_id)?;
                         let diagnostics =
                             globals::with_diagnostics_store(|store| match namespace.as_deref() {
-                                Some(namespace) => {
-                                    store.diagnostics_for_buffer_source(buffer_id, namespace)
-                                }
+                                Some(namespace) => store.diagnostics_for_buffer_plugin_source(
+                                    buffer_id,
+                                    &get_plugin,
+                                    namespace,
+                                ),
                                 None => store.diagnostics_for_buffer(buffer_id),
                             })
                             .ok_or_else(|| "diagnostics store is unavailable".to_string())?;
@@ -1825,13 +2043,13 @@ pub(in crate::plugin) fn validate_plugin_command_execution_intent(
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 struct ScriptRange {
     start: Cursor,
     end: Cursor,
 }
 
-fn buffer_id_from_value(value: &Value) -> Result<BufferId, String> {
+pub(super) fn buffer_id_from_value(value: &Value) -> Result<BufferId, String> {
     Ok(BufferId::new(usize_from_value(value, "buffer_id")?))
 }
 
@@ -2087,7 +2305,7 @@ fn range_from_value(value: &Value) -> Result<ScriptRange, String> {
     })
 }
 
-fn cursor_from_value(value: &Value, label: &str) -> Result<Cursor, String> {
+pub(super) fn cursor_from_value(value: &Value, label: &str) -> Result<Cursor, String> {
     let Value::Map(map) = value else {
         return Err(format!("{label} must be a map"));
     };
@@ -2312,6 +2530,13 @@ mod tests {
     }
 
     fn runtime_with_script(script: &str) -> BearscriptPluginRuntime {
+        runtime_with_script_and_config(script, std::collections::BTreeMap::new())
+    }
+
+    fn runtime_with_script_and_config(
+        script: &str,
+        config: std::collections::BTreeMap<String, serde_json::Value>,
+    ) -> BearscriptPluginRuntime {
         let root = unique_temp_dir("plugin-runtime-script-test");
         std::fs::create_dir_all(&root).expect("plugin dir should be created");
         std::fs::write(
@@ -2328,6 +2553,7 @@ entry = "plugin.bear"
         let plugin_config = urvim_plugin::PluginConfigEntry {
             enabled: true,
             path: root.clone(),
+            config,
         };
         let plugins = std::collections::BTreeMap::from([(plugin_id, plugin_config)]);
         let registry = urvim_plugin::PluginRegistry::load_from_config(&plugins)
@@ -2339,6 +2565,123 @@ entry = "plugin.bear"
             .expect("test plugin should load");
         std::fs::remove_dir_all(root).ok();
         runtime
+    }
+
+    #[test]
+    fn plugin_config_and_state_apis_are_scoped_and_support_portable_values() {
+        let mut runtime = runtime_with_script_and_config(
+            "fn init() {}",
+            std::collections::BTreeMap::from([
+                ("greeting".to_string(), serde_json::json!("hello")),
+                ("ui".to_string(), serde_json::json!({ "icons": true })),
+            ]),
+        );
+        let plugin = runtime.plugins.get_mut("demo").unwrap();
+
+        assert_eq!(
+            plugin
+                .engine
+                .eval("urvim.config.get(\"greeting\")")
+                .unwrap(),
+            Value::String("hello".into())
+        );
+        assert_eq!(
+            plugin
+                .engine
+                .eval("urvim.config.get()[\"greeting\"]")
+                .unwrap(),
+            Value::String("hello".into())
+        );
+        assert_eq!(
+            plugin
+                .engine
+                .eval("urvim.config.get(\"ui.icons\")")
+                .unwrap(),
+            Value::Bool(true)
+        );
+        assert_eq!(
+            plugin.engine.eval("urvim.config.get(\"missing\")").unwrap(),
+            Value::Null
+        );
+        plugin
+            .engine
+            .eval("urvim.state.set(\"settings\", { \"enabled\": true })")
+            .unwrap();
+        plugin
+            .engine
+            .eval("urvim.state.set(\"explicit_null\", null)")
+            .unwrap();
+        assert_eq!(
+            plugin
+                .engine
+                .eval("urvim.state.get(\"settings\")[\"enabled\"]")
+                .unwrap(),
+            Value::Bool(true)
+        );
+        assert_eq!(
+            plugin
+                .engine
+                .eval("urvim.state.get(\"absent\", \"fallback\")")
+                .unwrap(),
+            Value::String("fallback".into())
+        );
+        assert_eq!(
+            plugin
+                .engine
+                .eval("urvim.state.get(\"explicit_null\", \"fallback\")")
+                .unwrap(),
+            Value::Null
+        );
+        assert_eq!(
+            plugin
+                .engine
+                .eval("urvim.state.delete(\"settings\")")
+                .unwrap(),
+            Value::Bool(true)
+        );
+        assert_eq!(
+            plugin.engine.eval("urvim.state.clear()").unwrap(),
+            Value::Number(1.0)
+        );
+        assert_eq!(
+            plugin.engine.eval("urvim.state.clear()").unwrap(),
+            Value::Number(0.0)
+        );
+        assert_eq!(
+            plugin
+                .engine
+                .eval("urvim.state.get(\"explicit_null\", \"fallback\")")
+                .unwrap(),
+            Value::String("fallback".into())
+        );
+        assert!(
+            plugin
+                .engine
+                .eval("urvim.state.set(\"bad\", 0..2)")
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn symbol_lens_example_loads_as_bearscript_plugin() {
+        let runtime = runtime_with_script(include_str!(
+            "../../../../examples/plugins/symbol-lens/plugin.bear"
+        ));
+
+        assert!(
+            runtime
+                .contributions
+                .borrow()
+                .command("demo", "hover_lens")
+                .is_some()
+        );
+        assert!(
+            runtime
+                .contributions
+                .borrow()
+                .command("demo", "cancel_demo")
+                .is_some()
+        );
     }
 
     fn add_runtime_plugin(runtime: &mut BearscriptPluginRuntime, name: &str, script: &str) {
@@ -2355,7 +2698,10 @@ entry = "plugin.bear"
                 Rc::clone(&runtime.layout),
                 Rc::clone(&runtime.fs),
                 Rc::clone(&runtime.jobs),
+                Rc::clone(&runtime.lsp),
+                Rc::clone(&runtime.state),
                 Rc::clone(&runtime.timers),
+                std::collections::BTreeMap::new(),
             ),
         );
         engine.eval(script).expect("plugin script should evaluate");
@@ -2751,6 +3097,7 @@ entry = "plugin.bear"
             urvim_plugin::PluginConfigEntry {
                 enabled: true,
                 path: root.clone(),
+                config: std::collections::BTreeMap::new(),
             },
         )]);
         let registry = urvim_plugin::PluginRegistry::load_from_config(&plugins)
@@ -2782,6 +3129,7 @@ entry = "plugin.bear"
                 urvim_plugin::PluginConfigEntry {
                     enabled: true,
                     path: examples.join("api-caller"),
+                    config: std::collections::BTreeMap::new(),
                 },
             ),
             (
@@ -2789,6 +3137,7 @@ entry = "plugin.bear"
                 urvim_plugin::PluginConfigEntry {
                     enabled: true,
                     path: examples.join("api-host"),
+                    config: std::collections::BTreeMap::new(),
                 },
             ),
         ]);
@@ -3532,6 +3881,376 @@ entry = "plugin.bear"
     }
 
     #[test]
+    fn buffers_module_structured_edit_helpers_handle_unicode_and_multiline_text() {
+        let _guard = buffer_pool_lock();
+        let layout = Layout::new(EditorPane::from_buffers(vec![Buffer::from_str(
+            "aébc\nsecond",
+        )]));
+        let buffer_id = layout.active_buffer_view().buffer_id();
+        globals::set_active_buffer_id(buffer_id);
+
+        let mut engine = Engine::new();
+        engine.set_global(
+            "urvim",
+            urvim_module(
+                "demo".to_string(),
+                Rc::new(RefCell::new(
+                    urvim_plugin::PluginContributionRegistry::default(),
+                )),
+                Rc::new(RefCell::new(BearscriptPluginCallbacks::default())),
+                shared_test_layout(),
+                Rc::new(PluginFsRegistry::default()),
+                Rc::new(PluginJobRegistry::default()),
+                test_timers(),
+            ),
+        );
+
+        let selected = engine
+            .eval(
+                r#"
+                let id = urvim.buffers.active()
+                let selected = urvim.buffers.text_in_range(id, {
+                    "start": { "row": 0, "col": 1 },
+                    "end": { "row": 0, "col": 3 }
+                })
+                urvim.buffers.insert(id, { "row": 1, "col": 6 }, "\nthird")
+                urvim.buffers.delete(id, {
+                    "start": { "row": 0, "col": 3 },
+                    "end": { "row": 0, "col": 4 }
+                })
+                selected
+                "#,
+            )
+            .expect("structured buffer helpers should succeed");
+
+        assert_eq!(selected, Value::String("é".into()));
+        assert_eq!(
+            globals::with_buffer(buffer_id, |buffer| buffer.as_str()),
+            Some("aéc\nsecond\nthird".to_string())
+        );
+    }
+
+    #[test]
+    fn buffers_module_apply_edits_uses_original_coordinates_and_one_undo_snapshot() {
+        let _guard = buffer_pool_lock();
+        let layout = Layout::new(EditorPane::from_buffers(vec![Buffer::from_str("abcdef")]));
+        let buffer_id = layout.active_buffer_view().buffer_id();
+        globals::set_active_buffer_id(buffer_id);
+
+        let mut engine = Engine::new();
+        engine.set_global(
+            "urvim",
+            urvim_module(
+                "demo".to_string(),
+                Rc::new(RefCell::new(
+                    urvim_plugin::PluginContributionRegistry::default(),
+                )),
+                Rc::new(RefCell::new(BearscriptPluginCallbacks::default())),
+                shared_test_layout(),
+                Rc::new(PluginFsRegistry::default()),
+                Rc::new(PluginJobRegistry::default()),
+                test_timers(),
+            ),
+        );
+
+        globals::clear_editor_events_for_tests();
+        let transaction = EventTransaction::new(EventSource::plugin("demo"));
+        engine
+            .eval(
+                r#"
+                urvim.buffers.apply_edits(urvim.buffers.active(), [
+                    {
+                        "range": {
+                            "start": { "row": 0, "col": 0 },
+                            "end": { "row": 0, "col": 1 }
+                        },
+                        "text": "A"
+                    },
+                    {
+                        "range": {
+                            "start": { "row": 0, "col": 2 },
+                            "end": { "row": 0, "col": 2 }
+                        },
+                        "text": "X"
+                    },
+                    {
+                        "range": {
+                            "start": { "row": 0, "col": 4 },
+                            "end": { "row": 0, "col": 5 }
+                        },
+                        "text": ""
+                    }
+                ])
+                "#,
+            )
+            .expect("batch edits should succeed");
+        drop(transaction);
+
+        assert_eq!(
+            globals::with_buffer(buffer_id, |buffer| buffer.as_str()),
+            Some("AbXcdf".to_string())
+        );
+        assert!(matches!(
+            drain_editor_events().as_slice(),
+            [
+                EditorEvent::BufferChanged {
+                    buffer_id: changed,
+                    source,
+                    ..
+                },
+                EditorEvent::BufferModifiedChanged {
+                    buffer_id: modified,
+                    source: modified_source,
+                    ..
+                }
+            ] if *changed == buffer_id
+                && *modified == buffer_id
+                && *source == EventSource::plugin("demo")
+                && *modified_source == EventSource::plugin("demo")
+        ));
+        globals::with_buffer_mut(buffer_id, |buffer| {
+            buffer.undo().expect("batch should be undoable");
+            assert_eq!(buffer.as_str(), "abcdef");
+            assert!(!buffer.can_undo());
+        });
+    }
+
+    #[test]
+    fn buffers_module_apply_edits_rejects_conflicts_atomically() {
+        let _guard = buffer_pool_lock();
+        let layout = Layout::new(EditorPane::from_buffers(vec![Buffer::from_str("abcdef")]));
+        let buffer_id = layout.active_buffer_view().buffer_id();
+        globals::set_active_buffer_id(buffer_id);
+
+        let mut engine = Engine::new();
+        engine.set_global(
+            "urvim",
+            urvim_module(
+                "demo".to_string(),
+                Rc::new(RefCell::new(
+                    urvim_plugin::PluginContributionRegistry::default(),
+                )),
+                Rc::new(RefCell::new(BearscriptPluginCallbacks::default())),
+                shared_test_layout(),
+                Rc::new(PluginFsRegistry::default()),
+                Rc::new(PluginJobRegistry::default()),
+                test_timers(),
+            ),
+        );
+
+        engine
+            .eval("urvim.buffers.apply_edits(urvim.buffers.active(), [])")
+            .expect("an empty edit batch should succeed");
+        assert!(!globals::with_buffer(buffer_id, |buffer| buffer.can_undo()).unwrap_or(true));
+
+        for invalid in [
+            r#"urvim.buffers.apply_edits(urvim.buffers.active(), [{ "text": "X" }])"#,
+            r#"urvim.buffers.apply_edits(urvim.buffers.active(), [{
+                "range": {
+                    "start": { "row": 0, "col": 0 },
+                    "end": { "row": 0, "col": 99 }
+                },
+                "text": "X"
+            }])"#,
+        ] {
+            engine
+                .eval(invalid)
+                .expect_err("invalid edit batches should fail before mutation");
+        }
+
+        let error = engine
+            .eval(
+                r#"
+                urvim.buffers.apply_edits(urvim.buffers.active(), [
+                    {
+                        "range": {
+                            "start": { "row": 0, "col": 1 },
+                            "end": { "row": 0, "col": 4 }
+                        },
+                        "text": "X"
+                    },
+                    {
+                        "range": {
+                            "start": { "row": 0, "col": 2 },
+                            "end": { "row": 0, "col": 2 }
+                        },
+                        "text": "Y"
+                    }
+                ])
+                "#,
+            )
+            .expect_err("overlapping edits should fail")
+            .to_string();
+
+        assert!(error.contains("overlaps or conflicts"));
+        globals::with_buffer(buffer_id, |buffer| {
+            assert_eq!(buffer.as_str(), "abcdef");
+            assert!(!buffer.can_undo());
+        });
+    }
+
+    #[test]
+    fn buffers_module_groups_transactions_for_undo_and_redo() {
+        let _guard = buffer_pool_lock();
+        let layout = Layout::new(EditorPane::from_buffers(vec![Buffer::from_str("one")]));
+        let buffer_id = layout.active_buffer_view().buffer_id();
+        globals::set_active_buffer_id(buffer_id);
+
+        let mut engine = Engine::new();
+        engine.set_global(
+            "urvim",
+            urvim_module(
+                "demo".to_string(),
+                Rc::new(RefCell::new(
+                    urvim_plugin::PluginContributionRegistry::default(),
+                )),
+                Rc::new(RefCell::new(BearscriptPluginCallbacks::default())),
+                shared_test_layout(),
+                Rc::new(PluginFsRegistry::default()),
+                Rc::new(PluginJobRegistry::default()),
+                test_timers(),
+            ),
+        );
+
+        engine
+            .eval(
+                r#"
+                let id = urvim.buffers.active()
+                urvim.buffers.begin_transaction(id)
+                urvim.buffers.set_line(id, 0, "two")
+                urvim.buffers.set_line(id, 0, "three")
+                urvim.buffers.end_transaction(id)
+                "#,
+            )
+            .expect("buffer transaction should succeed");
+
+        assert_eq!(
+            globals::with_buffer(buffer_id, |buffer| buffer.as_str()),
+            Some("three".to_string())
+        );
+        assert_eq!(
+            engine
+                .eval("urvim.buffers.can_undo(urvim.buffers.active())")
+                .expect("can_undo should succeed"),
+            Value::Bool(true)
+        );
+        engine
+            .eval("urvim.buffers.undo(urvim.buffers.active())")
+            .expect("undo should succeed");
+        assert_eq!(
+            globals::with_buffer(buffer_id, |buffer| buffer.as_str()),
+            Some("one".to_string())
+        );
+        assert_eq!(
+            engine
+                .eval("urvim.buffers.can_undo(urvim.buffers.active())")
+                .expect("can_undo should succeed"),
+            Value::Bool(false)
+        );
+        assert_eq!(
+            engine
+                .eval("urvim.buffers.can_redo(urvim.buffers.active())")
+                .expect("can_redo should succeed"),
+            Value::Bool(true)
+        );
+        engine
+            .eval("urvim.buffers.redo(urvim.buffers.active())")
+            .expect("redo should succeed");
+        assert_eq!(
+            globals::with_buffer(buffer_id, |buffer| buffer.as_str()),
+            Some("three".to_string())
+        );
+    }
+
+    #[test]
+    fn buffers_module_rejects_invalid_transaction_lifecycle() {
+        let _guard = buffer_pool_lock();
+        let layout = Layout::new(EditorPane::from_buffers(vec![Buffer::from_str("one")]));
+        globals::set_active_buffer_id(layout.active_buffer_view().buffer_id());
+
+        let mut engine = Engine::new();
+        engine.set_global(
+            "urvim",
+            urvim_module(
+                "demo".to_string(),
+                Rc::new(RefCell::new(
+                    urvim_plugin::PluginContributionRegistry::default(),
+                )),
+                Rc::new(RefCell::new(BearscriptPluginCallbacks::default())),
+                shared_test_layout(),
+                Rc::new(PluginFsRegistry::default()),
+                Rc::new(PluginJobRegistry::default()),
+                test_timers(),
+            ),
+        );
+
+        let unmatched = engine
+            .eval("urvim.buffers.end_transaction(urvim.buffers.active())")
+            .expect_err("unmatched end should fail")
+            .to_string();
+        assert!(unmatched.contains("no buffer transaction active"));
+
+        engine
+            .eval("urvim.buffers.begin_transaction(urvim.buffers.active())")
+            .expect("first begin should succeed");
+        let nested = engine
+            .eval("urvim.buffers.begin_transaction(urvim.buffers.active())")
+            .expect_err("nested begin should fail")
+            .to_string();
+        assert!(nested.contains("buffer transaction already active"));
+        let undo = engine
+            .eval("urvim.buffers.undo(urvim.buffers.active())")
+            .expect_err("undo during a transaction should fail")
+            .to_string();
+        assert!(undo.contains("during an active buffer transaction"));
+        engine
+            .eval("urvim.buffers.end_transaction(urvim.buffers.active())")
+            .expect("transaction cleanup should succeed");
+    }
+
+    #[test]
+    fn unfinished_buffer_transaction_is_finalized_at_callback_boundary() {
+        let _guard = buffer_pool_lock();
+        let layout = Layout::new(EditorPane::from_buffers(vec![Buffer::from_str("one")]));
+        let buffer_id = layout.active_buffer_view().buffer_id();
+        globals::set_active_buffer_id(buffer_id);
+
+        let mut engine = Engine::new();
+        engine.set_global(
+            "urvim",
+            urvim_module(
+                "demo".to_string(),
+                Rc::new(RefCell::new(
+                    urvim_plugin::PluginContributionRegistry::default(),
+                )),
+                Rc::new(RefCell::new(BearscriptPluginCallbacks::default())),
+                shared_test_layout(),
+                Rc::new(PluginFsRegistry::default()),
+                Rc::new(PluginJobRegistry::default()),
+                test_timers(),
+            ),
+        );
+
+        engine
+            .eval(
+                r#"
+                let id = urvim.buffers.active()
+                urvim.buffers.begin_transaction(id)
+                urvim.buffers.set_line(id, 0, "two")
+                urvim.buffers.set_line(id, 0, "three")
+                "#,
+            )
+            .expect("callback edits should succeed");
+        buffer_transactions::finish_plugin("demo");
+
+        globals::with_buffer_mut(buffer_id, |buffer| {
+            buffer.undo().expect("finalized group should be undoable");
+            assert_eq!(buffer.as_str(), "one");
+            assert!(!buffer.can_undo());
+        });
+    }
+
+    #[test]
     fn buffers_module_errors_for_missing_buffer_and_out_of_range_row() {
         let _guard = buffer_pool_lock();
         let layout = Layout::new(EditorPane::from_buffers(vec![Buffer::from_str("one")]));
@@ -3616,6 +4335,201 @@ entry = "plugin.bear"
             EditorEvent::BufferSaved { snapshot } if snapshot.buffer_id == buffer_id
         )));
         std::fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn buffers_lifecycle_open_and_create_load_hidden_buffers() {
+        let _guard = buffer_pool_lock();
+        globals::clear_editor_events_for_tests();
+        let path = std::env::temp_dir().join(format!(
+            "urvim-buffers-api-open-{}-{}.txt",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time should be after epoch")
+                .as_nanos()
+        ));
+        std::fs::write(&path, "opened text").unwrap();
+        let layout = Rc::new(RefCell::new(Layout::new(EditorPane::from_buffers(vec![
+            Buffer::from_str("visible"),
+        ]))));
+        let active_id = layout.borrow().active_buffer_view().buffer_id();
+        globals::set_active_buffer_id(active_id);
+        drain_editor_events();
+
+        let mut engine = Engine::new();
+        engine.set_global(
+            "urvim",
+            urvim_module(
+                "demo".to_string(),
+                Rc::new(RefCell::new(
+                    urvim_plugin::PluginContributionRegistry::default(),
+                )),
+                Rc::new(RefCell::new(BearscriptPluginCallbacks::default())),
+                Rc::clone(&layout),
+                Rc::new(PluginFsRegistry::default()),
+                Rc::new(PluginJobRegistry::default()),
+                test_timers(),
+            ),
+        );
+
+        let value = engine
+            .eval(&format!(
+                r#"[
+                    urvim.buffers.open("{}"),
+                    urvim.buffers.open("{}"),
+                    urvim.buffers.create()
+                ]"#,
+                path.display(),
+                path.display()
+            ))
+            .expect("buffer lifecycle calls should succeed");
+        let Value::List(ids) = value else {
+            panic!("lifecycle result should be a list");
+        };
+        assert_eq!(ids[0], ids[1], "open should reuse a loaded path");
+        assert_ne!(ids[0], ids[2], "create should allocate a new buffer");
+        assert_eq!(layout.borrow().active_buffer_view().buffer_id(), active_id);
+        assert_eq!(layout.borrow().visible_buffer_ids(), vec![active_id]);
+        let Value::Number(opened_id) = ids[0] else {
+            panic!("opened buffer id should be numeric");
+        };
+        assert_eq!(
+            globals::with_buffer(BufferId::new(opened_id as usize), |buffer| buffer.as_str()),
+            Some("opened text".to_string())
+        );
+        assert_eq!(
+            drain_editor_events()
+                .iter()
+                .filter(|event| matches!(event, EditorEvent::BufferLoaded { .. }))
+                .count(),
+            2
+        );
+        std::fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn buffers_lifecycle_save_as_and_guarded_reload() {
+        let _guard = buffer_pool_lock();
+        globals::clear_editor_events_for_tests();
+        let path = std::env::temp_dir().join(format!(
+            "urvim-buffers-api-save-as-{}-{}.txt",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time should be after epoch")
+                .as_nanos()
+        ));
+        std::fs::remove_file(&path).ok();
+        let layout = Rc::new(RefCell::new(Layout::new(EditorPane::from_buffers(vec![
+            Buffer::from_str("visible"),
+        ]))));
+
+        let mut engine = Engine::new();
+        engine.set_global(
+            "urvim",
+            urvim_module(
+                "demo".to_string(),
+                Rc::new(RefCell::new(
+                    urvim_plugin::PluginContributionRegistry::default(),
+                )),
+                Rc::new(RefCell::new(BearscriptPluginCallbacks::default())),
+                layout,
+                Rc::new(PluginFsRegistry::default()),
+                Rc::new(PluginJobRegistry::default()),
+                test_timers(),
+            ),
+        );
+
+        let buffer_id = engine
+            .eval(&format!(
+                r#"
+                let id = urvim.buffers.create()
+                urvim.buffers.insert(id, {{ "row": 0, "col": 0 }}, "plugin text")
+                urvim.buffers.save_as(id, "{}")
+                id
+                "#,
+                path.display()
+            ))
+            .expect("save-as should succeed");
+        let Value::Number(buffer_id) = buffer_id else {
+            panic!("buffer id should be numeric");
+        };
+        let buffer_id = buffer_id as usize;
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "plugin text");
+
+        engine
+            .eval(&format!(
+                r#"
+                urvim.buffers.insert({buffer_id}, {{ "row": 0, "col": 11 }}, " changed")
+                "#
+            ))
+            .expect("edit should succeed");
+        let error = engine
+            .eval(&format!("urvim.buffers.reload({buffer_id})"))
+            .expect_err("modified reload should be rejected")
+            .to_string();
+        assert!(error.contains("unsaved changes"));
+        assert_eq!(
+            globals::with_buffer(BufferId::new(buffer_id), |buffer| buffer.as_str()),
+            Some("plugin text changed".to_string())
+        );
+
+        engine
+            .eval(&format!(
+                "urvim.buffers.reload({buffer_id}, {{ \"force\": true }})"
+            ))
+            .expect("forced reload should succeed");
+        assert_eq!(
+            globals::with_buffer(BufferId::new(buffer_id), |buffer| buffer.as_str()),
+            Some("plugin text".to_string())
+        );
+        let events = drain_editor_events();
+        assert!(events.iter().any(|event| matches!(
+            event,
+            EditorEvent::BufferPathChanged { snapshot }
+                if snapshot.buffer.buffer_id == BufferId::new(buffer_id)
+        )));
+        assert!(events.iter().any(|event| matches!(
+            event,
+            EditorEvent::BufferReloaded { snapshot }
+                if snapshot.buffer_id == BufferId::new(buffer_id)
+        )));
+        std::fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn buffers_reload_rejects_unknown_options() {
+        let _guard = buffer_pool_lock();
+        let layout = Rc::new(RefCell::new(Layout::new(EditorPane::from_buffers(vec![
+            Buffer::from_str("visible"),
+        ]))));
+        let buffer_id = layout.borrow().active_buffer_view().buffer_id();
+        let mut engine = Engine::new();
+        engine.set_global(
+            "urvim",
+            urvim_module(
+                "demo".to_string(),
+                Rc::new(RefCell::new(
+                    urvim_plugin::PluginContributionRegistry::default(),
+                )),
+                Rc::new(RefCell::new(BearscriptPluginCallbacks::default())),
+                layout,
+                Rc::new(PluginFsRegistry::default()),
+                Rc::new(PluginJobRegistry::default()),
+                test_timers(),
+            ),
+        );
+
+        let error = engine
+            .eval(&format!(
+                "urvim.buffers.reload({}, {{ \"unknown\": true }})",
+                buffer_id.get()
+            ))
+            .expect_err("unknown reload option should fail")
+            .to_string();
+
+        assert!(error.contains("unknown buffers.reload option unknown"));
     }
 
     #[test]
@@ -5240,6 +6154,69 @@ entry = "plugin.bear"
     }
 
     #[test]
+    fn keymaps_are_owned_by_the_registering_plugin() {
+        let _guard = buffer_pool_lock();
+        globals::with_plugin_keymaps_mut(|keymaps| keymaps.normal.clear());
+        let mut first = Engine::new();
+        first.set_global(
+            "urvim",
+            urvim_module(
+                "first".to_string(),
+                Rc::new(RefCell::new(
+                    urvim_plugin::PluginContributionRegistry::default(),
+                )),
+                Rc::new(RefCell::new(BearscriptPluginCallbacks::default())),
+                shared_test_layout(),
+                Rc::new(PluginFsRegistry::default()),
+                Rc::new(PluginJobRegistry::default()),
+                test_timers(),
+            ),
+        );
+        let mut second = Engine::new();
+        second.set_global(
+            "urvim",
+            urvim_module(
+                "second".to_string(),
+                Rc::new(RefCell::new(
+                    urvim_plugin::PluginContributionRegistry::default(),
+                )),
+                Rc::new(RefCell::new(BearscriptPluginCallbacks::default())),
+                shared_test_layout(),
+                Rc::new(PluginFsRegistry::default()),
+                Rc::new(PluginJobRegistry::default()),
+                test_timers(),
+            ),
+        );
+
+        first
+            .eval("urvim.keymaps.set(\"normal\", \"x\", \"pane wrap-toggle\")")
+            .expect("first plugin should own the mapping");
+        let error = second
+            .eval("urvim.keymaps.set(\"normal\", \"x\", \"pane wrap-toggle\")")
+            .expect_err("another plugin must not replace the mapping")
+            .to_string();
+        assert!(error.contains("owned by plugin first"));
+        second
+            .eval("urvim.keymaps.delete(\"normal\", \"x\")")
+            .expect("deleting another plugin's mapping should be harmless");
+        let first_mappings = first
+            .eval("urvim.keymaps.list(\"normal\")")
+            .expect("owner should still see its mapping");
+        let second_mappings = second
+            .eval("urvim.keymaps.list(\"normal\")")
+            .expect("non-owner should see only its mappings");
+        let Value::List(first_mappings) = first_mappings else {
+            panic!("owner mapping result should be a list");
+        };
+        let Value::List(second_mappings) = second_mappings else {
+            panic!("non-owner mapping result should be a list");
+        };
+        assert_eq!(first_mappings.len(), 1);
+        assert!(second_mappings.is_empty());
+        globals::remove_plugin_keymaps("first");
+    }
+
+    #[test]
     fn keymaps_module_invokes_configured_command_string() {
         let _guard = buffer_pool_lock();
         globals::with_plugin_keymaps_mut(|keymaps| keymaps.normal.clear());
@@ -6618,28 +7595,25 @@ bg = "bg"
         assert_eq!(pane.content().len(), 1);
         assert_eq!(layout.focused_plugin_pane(), Some(id));
         assert_eq!(layout.pane_regions().len(), 2);
-        assert_eq!(
-            descriptors,
-            Value::List(
-                vec![
-                    Value::Map(
-                        HashMap::from([
-                            ("id".to_string(), Value::Number(0.0)),
-                            ("kind".to_string(), Value::String("editor".into())),
-                        ])
-                        .into(),
-                    ),
-                    Value::Map(
-                        HashMap::from([
-                            ("id".to_string(), Value::Number(id.0 as f64)),
-                            ("kind".to_string(), Value::String("plugin".into())),
-                        ])
-                        .into(),
-                    ),
-                ]
-                .into(),
-            )
-        );
+        let Value::List(descriptors) = descriptors else {
+            panic!("pane descriptors should be a list");
+        };
+        assert_eq!(descriptors.len(), 2);
+        for (descriptor, expected_id, expected_kind) in [
+            (&descriptors[0], 0.0, "editor"),
+            (&descriptors[1], id.0 as f64, "plugin"),
+        ] {
+            let Value::Map(descriptor) = descriptor else {
+                panic!("pane descriptor should be a map");
+            };
+            assert_eq!(descriptor.get("id"), Some(&Value::Number(expected_id)));
+            assert_eq!(
+                descriptor.get("kind"),
+                Some(&Value::String(expected_kind.into()))
+            );
+            assert!(matches!(descriptor.get("origin"), Some(Value::Map(_))));
+            assert!(matches!(descriptor.get("size"), Some(Value::Map(_))));
+        }
         assert_eq!(
             layout
                 .plugin_pane_keymaps("demo", id)
@@ -6918,6 +7892,7 @@ bg = "bg"
             urvim_plugin::PluginConfigEntry {
                 enabled: true,
                 path: plugin_root,
+                config: std::collections::BTreeMap::new(),
             },
         )]);
         let registry = urvim_plugin::PluginRegistry::load_from_config(&plugin_config)
@@ -6969,6 +7944,7 @@ bg = "bg"
             urvim_plugin::PluginConfigEntry {
                 enabled: true,
                 path: plugin_root,
+                config: std::collections::BTreeMap::new(),
             },
         )]);
         let registry = urvim_plugin::PluginRegistry::load_from_config(&plugin_config)
@@ -6998,6 +7974,7 @@ bg = "bg"
             urvim_plugin::PluginConfigEntry {
                 enabled: true,
                 path: plugin_root,
+                config: std::collections::BTreeMap::new(),
             },
         )]);
         let registry = urvim_plugin::PluginRegistry::load_from_config(&plugin_config)
@@ -7058,6 +8035,7 @@ bg = "bg"
             urvim_plugin::PluginConfigEntry {
                 enabled: true,
                 path: plugin_root,
+                config: std::collections::BTreeMap::new(),
             },
         )]);
         let registry = urvim_plugin::PluginRegistry::load_from_config(&plugin_config)
@@ -7116,6 +8094,7 @@ bg = "bg"
             urvim_plugin::PluginConfigEntry {
                 enabled: true,
                 path: plugin_root,
+                config: std::collections::BTreeMap::new(),
             },
         )]);
         let registry = urvim_plugin::PluginRegistry::load_from_config(&plugin_config)

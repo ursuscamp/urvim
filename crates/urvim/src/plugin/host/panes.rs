@@ -27,7 +27,9 @@ pub(in crate::plugin) fn panes_module(
     let configure_layout = Rc::clone(&layout);
     let content_plugin = plugin.clone();
     let content_layout = Rc::clone(&layout);
+    let focus_plugin = plugin.clone();
     let focus_layout = Rc::clone(&layout);
+    let close_plugin = plugin.clone();
     let close_layout = Rc::clone(&layout);
     let list_layout = Rc::clone(&layout);
     let active_layout = Rc::clone(&layout);
@@ -88,8 +90,16 @@ pub(in crate::plugin) fn panes_module(
             "focus".to_string(),
             native_fn("panes.focus", move |pane_id: f64| {
                 let id = pane_id_from_number(pane_id)?;
-                if focus_layout.borrow_mut().focus_layout_pane(id) {
-                    Ok(())
+                if focus_layout.borrow().pane_kind(id) == Some(PaneKind::Plugin) {
+                    focus_layout
+                        .borrow_mut()
+                        .focus_plugin_pane(&focus_plugin, id)
+                } else if focus_layout.borrow().pane_kind(id) == Some(PaneKind::Editor) {
+                    if focus_layout.borrow_mut().focus_layout_pane(id) {
+                        Ok(())
+                    } else {
+                        Err(format!("unknown pane_id {}", id.0))
+                    }
                 } else {
                     Err(format!("unknown pane_id {}", id.0))
                 }
@@ -99,7 +109,13 @@ pub(in crate::plugin) fn panes_module(
             "close".to_string(),
             native_fn("panes.close", move |pane_id: f64| {
                 let id = pane_id_from_number(pane_id)?;
-                close_layout.borrow_mut().close_pane(id)
+                if close_layout.borrow().pane_kind(id) == Some(PaneKind::Plugin) {
+                    close_layout
+                        .borrow_mut()
+                        .close_plugin_pane(&close_plugin, id)
+                } else {
+                    close_layout.borrow_mut().close_pane(id)
+                }
             }),
         ),
         (
@@ -110,7 +126,13 @@ pub(in crate::plugin) fn panes_module(
                     layout
                         .pane_ids()
                         .into_iter()
-                        .map(|id| pane_descriptor(id, layout.pane_kind(id).unwrap()))
+                        .map(|id| {
+                            pane_descriptor(
+                                id,
+                                layout.pane_kind(id).unwrap(),
+                                layout.pane_region(id),
+                            )
+                        })
                         .collect::<Vec<_>>()
                         .into(),
                 ))
@@ -123,7 +145,7 @@ pub(in crate::plugin) fn panes_module(
                 let id = layout.focused_pane_id();
                 Ok(layout
                     .pane_kind(id)
-                    .map(|kind| pane_descriptor(id, kind))
+                    .map(|kind| pane_descriptor(id, kind, layout.pane_region(id)))
                     .unwrap_or(Value::Null))
             }),
         ),
@@ -265,11 +287,38 @@ pub(in crate::plugin) fn panes_module(
     Value::Module(module.into())
 }
 
-fn pane_descriptor(id: PaneId, kind: PaneKind) -> Value {
+fn pane_descriptor(
+    id: PaneId,
+    kind: PaneKind,
+    region: Option<urvim_core::layout::PaneRegion>,
+) -> Value {
+    let (origin, size) = region
+        .map(|region| (region.origin, region.size))
+        .unwrap_or_default();
     Value::Map(
         HashMap::from([
             ("id".to_string(), Value::Number(id.0 as f64)),
             ("kind".to_string(), Value::String(kind.as_str().into())),
+            (
+                "origin".to_string(),
+                Value::Map(
+                    HashMap::from([
+                        ("row".to_string(), Value::Number(origin.row as f64)),
+                        ("col".to_string(), Value::Number(origin.col as f64)),
+                    ])
+                    .into(),
+                ),
+            ),
+            (
+                "size".to_string(),
+                Value::Map(
+                    HashMap::from([
+                        ("rows".to_string(), Value::Number(size.rows as f64)),
+                        ("cols".to_string(), Value::Number(size.cols as f64)),
+                    ])
+                    .into(),
+                ),
+            ),
         ])
         .into(),
     )

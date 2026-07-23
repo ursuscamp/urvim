@@ -1,7 +1,72 @@
 fn init() {
-    urvim.commands.register("hello", hello, "Show a BearScript plugin notification")
+    urvim.commands.register("hover_lens", hover_lens, "Show LSP hover at the active cursor")
+    urvim.commands.register("definition_preview", definition_preview, "Show the LSP definition target")
+    urvim.commands.register("completion_lens", completion_lens, "Show LSP completion candidates")
+    urvim.commands.register("cancel_demo", cancel_demo, "Start and cancel an LSP completion request")
 }
 
-fn hello(args) {
-    urvim.ui.show_message("symbol-lens BearScript plugin loaded", { "level": "info" })
+fn hover_lens(args) {
+    urvim.lsp.hover(null, on_hover)
+}
+
+fn definition_preview(args) {
+    urvim.lsp.definition(null, on_definition)
+}
+
+fn completion_lens(args) {
+    urvim.lsp.completion(null, on_completion)
+}
+
+fn cancel_demo(args) {
+    let request_id = urvim.lsp.completion(null, on_cancelled)
+    urvim.lsp.cancel(request_id)
+}
+
+fn on_hover(response) {
+    if !response["ok"] {
+        show_error(response)
+        return
+    }
+    let contents = response["result"]["contents"]
+    if contents == null {
+        contents = "no hover available"
+    }
+    urvim.ui.show_message(contents, { "level": "info" })
+}
+
+fn on_definition(response) {
+    if !response["ok"] {
+        show_error(response)
+        return
+    }
+    let target = response["result"]["target"]
+    if target == null {
+        urvim.ui.show_message("no definition available", { "level": "info" })
+        return
+    }
+    let path = target["path"]
+    let row = urvim.inspect(target["row"] + 1)
+    let col = urvim.inspect(target["col"] + 1)
+    urvim.ui.show_message("definition: {path}:{row}:{col}", { "level": "info" })
+}
+
+fn on_completion(response) {
+    if !response["ok"] {
+        show_error(response)
+        return
+    }
+    let items = response["result"]["items"]
+    urvim.ui.show_message("completion candidates: " + urvim.json.stringify(items), { "level": "info" })
+}
+
+fn on_cancelled(response) {
+    if response["cancelled"] {
+        urvim.ui.show_message("LSP request cancelled", { "level": "info" })
+        return
+    }
+    show_error(response)
+}
+
+fn show_error(response) {
+    urvim.ui.show_message("LSP " + response["kind"] + " failed: " + response["error"], { "level": "warn" })
 }

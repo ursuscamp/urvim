@@ -10,6 +10,10 @@ This is a list, in no particular order, of things that need to be addressed whic
 - quick jump
 - healthcheck
 - expand intents to have more scriptable actions
+- search and replace
+- plugin access to search and replace
+- custom status bars
+- bearscript config
 
 # Bugs
 

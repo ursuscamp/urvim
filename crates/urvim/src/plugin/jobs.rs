@@ -169,11 +169,14 @@ impl PluginJobRegistry {
         })
     }
 
-    pub(in crate::plugin) fn kill(&self, job_id: u64) -> Result<(), String> {
+    pub(in crate::plugin) fn kill(&self, plugin: &str, job_id: u64) -> Result<(), String> {
         let jobs = self.jobs.lock().expect("job registry poisoned");
         let job = jobs
             .get(&job_id)
             .ok_or_else(|| format!("unknown job_id {job_id}"))?;
+        if job.plugin != plugin {
+            return Err(format!("job_id {job_id} is owned by another plugin"));
+        }
         if job.status != PluginJobStatus::Running {
             return Ok(());
         }
@@ -185,18 +188,34 @@ impl PluginJobRegistry {
             .map_err(|error| format!("failed to kill job {job_id}: {error}"))
     }
 
-    pub(in crate::plugin) fn status(&self, job_id: u64) -> Result<PluginJobStatus, String> {
+    pub(in crate::plugin) fn status(
+        &self,
+        plugin: &str,
+        job_id: u64,
+    ) -> Result<PluginJobStatus, String> {
         let jobs = self.jobs.lock().expect("job registry poisoned");
-        jobs.get(&job_id)
-            .map(|job| job.status)
-            .ok_or_else(|| format!("unknown job_id {job_id}"))
+        let job = jobs
+            .get(&job_id)
+            .ok_or_else(|| format!("unknown job_id {job_id}"))?;
+        if job.plugin != plugin {
+            return Err(format!("job_id {job_id} is owned by another plugin"));
+        }
+        Ok(job.status)
     }
 
-    pub(in crate::plugin) fn write_stdin(&self, job_id: u64, text: &str) -> Result<(), String> {
+    pub(in crate::plugin) fn write_stdin(
+        &self,
+        plugin: &str,
+        job_id: u64,
+        text: &str,
+    ) -> Result<(), String> {
         let mut jobs = self.jobs.lock().expect("job registry poisoned");
         let job = jobs
             .get_mut(&job_id)
             .ok_or_else(|| format!("unknown job_id {job_id}"))?;
+        if job.plugin != plugin {
+            return Err(format!("job_id {job_id} is owned by another plugin"));
+        }
         if job.status != PluginJobStatus::Running {
             return Err(format!("job_id {job_id} is not running"));
         }
@@ -209,18 +228,22 @@ impl PluginJobRegistry {
             .map_err(|error| format!("failed to write stdin for job {job_id}: {error}"))
     }
 
-    pub(in crate::plugin) fn close_stdin(&self, job_id: u64) -> Result<(), String> {
+    pub(in crate::plugin) fn close_stdin(&self, plugin: &str, job_id: u64) -> Result<(), String> {
         let mut jobs = self.jobs.lock().expect("job registry poisoned");
         let job = jobs
             .get_mut(&job_id)
             .ok_or_else(|| format!("unknown job_id {job_id}"))?;
+        if job.plugin != plugin {
+            return Err(format!("job_id {job_id} is owned by another plugin"));
+        }
         job.stdin = None;
         Ok(())
     }
 
-    pub(in crate::plugin) fn list(&self) -> Vec<Value> {
+    pub(in crate::plugin) fn list(&self, plugin: &str) -> Vec<Value> {
         let jobs = self.jobs.lock().expect("job registry poisoned");
         jobs.iter()
+            .filter(|(_, job)| job.plugin == plugin)
             .map(|(id, job)| {
                 Value::Map(
                     HashMap::from([
@@ -242,6 +265,21 @@ impl PluginJobRegistry {
                 )
             })
             .collect()
+    }
+
+    pub(in crate::plugin) fn cancel_plugin(&self, plugin: &str) {
+        let jobs = self.jobs.lock().expect("job registry poisoned");
+        for job in jobs.values().filter(|job| job.plugin == plugin) {
+            if job.status == PluginJobStatus::Running {
+                *job.kill_requested.lock().expect("job status poisoned") =
+                    Some(PluginJobStatus::Killed);
+                job.child
+                    .lock()
+                    .expect("child process poisoned")
+                    .kill()
+                    .ok();
+            }
+        }
     }
 
     pub(in crate::plugin) fn poll_event(&self) -> Option<PluginJobEvent> {

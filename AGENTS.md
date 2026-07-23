@@ -23,6 +23,9 @@ urvim is a terminal based text editor.
 - when describing interfaces in design.md, DO NOT include doc tests because the embedded markdown messes up design.md syntax highlighting
 - when implementing methods from design.md, DO include docs tests where appropriate
 - use conventional commits for commit messages
+- when adding or modifying BearScript plugin APIs
+  - use snake_case for public function names, option keys, callback payload fields, and result fields
+  - keep BearScript examples and plugin documentation consistent with these names
 - when adding or modifying syntaxes
   - create regression tests
   - create or update appropriate fixture file for in syntax/fixtures folder

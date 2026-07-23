@@ -186,16 +186,20 @@ pub struct PluginConfig {
     pub enabled: bool,
     /// The resolved plugin directory.
     pub path: PathBuf,
+    /// Immutable plugin-owned configuration values.
+    pub config: BTreeMap<String, serde_json::Value>,
 }
 
 /// TOML-backed plugin config table stored in the config file.
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct PartialPluginConfig {
     /// Whether the plugin should be loaded.
     pub enabled: Option<bool>,
     /// Optional plugin directory override.
     pub path: Option<String>,
+    /// Plugin-owned configuration values.
+    pub config: Option<BTreeMap<String, toml::Value>>,
 }
 
 /// One configured editor keymap.
@@ -791,9 +795,35 @@ fn validate_plugins(
                 "config plugin {name:?} path must not be empty"
             )));
         }
+        if let Some(config) = plugin.config.as_ref() {
+            for (key, value) in config {
+                validate_plugin_config_value(value, &format!("plugins.{name}.config.{key}"))?;
+            }
+        }
     }
 
     Ok(())
+}
+
+fn validate_plugin_config_value(value: &toml::Value, path: &str) -> Result<(), ConfigLoadError> {
+    match value {
+        toml::Value::Float(value) if !value.is_finite() => Err(ConfigLoadError::invalid(format!(
+            "config {path} must be a finite number"
+        ))),
+        toml::Value::Array(values) => {
+            for (index, value) in values.iter().enumerate() {
+                validate_plugin_config_value(value, &format!("{path}[{index}]"))?;
+            }
+            Ok(())
+        }
+        toml::Value::Table(values) => {
+            for (key, value) in values {
+                validate_plugin_config_value(value, &format!("{path}.{key}"))?;
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
 }
 
 fn validate_plugin_id(name: &str) -> Result<(), ConfigLoadError> {
@@ -1011,10 +1041,43 @@ fn resolve_plugins(
                 PluginConfig {
                     enabled: plugin.enabled.unwrap_or(true),
                     path,
+                    config: plugin
+                        .config
+                        .as_ref()
+                        .map(|config| {
+                            config
+                                .iter()
+                                .map(|(key, value)| {
+                                    (key.clone(), plugin_config_value_to_json(value))
+                                })
+                                .collect()
+                        })
+                        .unwrap_or_default(),
                 },
             )
         })
         .collect()
+}
+
+fn plugin_config_value_to_json(value: &toml::Value) -> serde_json::Value {
+    match value {
+        toml::Value::String(value) => serde_json::Value::String(value.clone()),
+        toml::Value::Integer(value) => serde_json::Value::Number((*value).into()),
+        toml::Value::Float(value) => serde_json::Number::from_f64(*value)
+            .map(serde_json::Value::Number)
+            .unwrap_or(serde_json::Value::Null),
+        toml::Value::Boolean(value) => serde_json::Value::Bool(*value),
+        toml::Value::Datetime(value) => serde_json::Value::String(value.to_string()),
+        toml::Value::Array(values) => {
+            serde_json::Value::Array(values.iter().map(plugin_config_value_to_json).collect())
+        }
+        toml::Value::Table(values) => serde_json::Value::Object(
+            values
+                .iter()
+                .map(|(key, value)| (key.clone(), plugin_config_value_to_json(value)))
+                .collect(),
+        ),
+    }
 }
 
 fn default_plugin_path(config_home: &Path, plugin_id: &str) -> PathBuf {
@@ -1827,6 +1890,53 @@ mod tests {
     }
 
     #[test]
+    fn resolve_plugins_preserves_plugin_owned_configuration() {
+        let file: PartialConfig = toml::from_str(
+            r#"
+[plugins.demo]
+enabled = true
+
+[plugins.demo.config]
+greeting = "hello"
+features = ["one", "two"]
+
+[plugins.demo.config.ui]
+icons = true
+"#,
+        )
+        .expect("plugin config should parse");
+
+        let config = Config::resolve_with_config_home(
+            Some(&file),
+            None,
+            None,
+            &PathBuf::from("/tmp/urvim-config-home"),
+        );
+        let plugin = &config.plugins["demo"];
+
+        assert_eq!(plugin.config["greeting"], serde_json::json!("hello"));
+        assert_eq!(plugin.config["features"], serde_json::json!(["one", "two"]));
+        assert_eq!(plugin.config["ui"], serde_json::json!({ "icons": true }));
+    }
+
+    #[test]
+    fn plugin_configuration_rejects_non_finite_numbers() {
+        let plugins = BTreeMap::from([(
+            "demo".to_string(),
+            PartialPluginConfig {
+                config: Some(BTreeMap::from([(
+                    "threshold".to_string(),
+                    toml::Value::Float(f64::NAN),
+                )])),
+                ..Default::default()
+            },
+        )]);
+
+        let error = validate_plugins(&plugins).expect_err("NaN should be rejected");
+        assert!(error.to_string().contains("must be a finite number"));
+    }
+
+    #[test]
     fn resolve_plugins_honors_disabled_flag() {
         let config_home = PathBuf::from("/tmp/urvim-config-home");
         let file = PartialConfig {
@@ -1835,6 +1945,7 @@ mod tests {
                 PartialPluginConfig {
                     enabled: Some(false),
                     path: None,
+                    config: None,
                 },
             )])),
             ..Default::default()
@@ -1854,6 +1965,7 @@ mod tests {
                 PartialPluginConfig {
                     enabled: None,
                     path: Some("/opt/urvim/plugins/demo-plugin".to_string()),
+                    config: None,
                 },
             )])),
             ..Default::default()

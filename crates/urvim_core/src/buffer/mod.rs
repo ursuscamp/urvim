@@ -210,19 +210,25 @@ struct Generations {
 /// the "active" snapshot (the one we'd restore if we undo).
 ///
 /// Invariants:
-/// - `0 <= position <= history.len()`
-/// - position == 0 means no snapshots yet (or at oldest)
-/// - position > 0 means "active snapshot" is at position - 1
-/// - position == history.len() means at "current" state (no redo available)
+/// - `position < history.len()`
+/// - `position == 0` means the oldest snapshot is active
+/// - `position == history.len() - 1` means no redo snapshot is available
 #[derive(Debug, Clone)]
 struct UndoState {
     /// History of snapshots, oldest first.
     history: Vec<Snapshot>,
-    /// Current position in history.
-    /// - position == 0: no snapshots yet (or at oldest)
-    /// - position > 0: "active snapshot" is at position - 1
-    /// - position == history.len(): at "current" state
+    /// Index of the active snapshot in `history`.
     position: usize,
+    /// Changes whenever snapshots or the active history position change.
+    revision: u64,
+}
+
+/// Opaque starting point used to combine several edits into one undo entry.
+#[derive(Debug, Clone)]
+pub struct UndoCheckpoint {
+    position: usize,
+    revision: u64,
+    lines: PieceTable,
 }
 
 /// A text buffer backed by isolated text storage.

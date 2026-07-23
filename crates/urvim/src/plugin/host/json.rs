@@ -32,7 +32,7 @@ pub(in crate::plugin) fn json_module() -> Value {
     )
 }
 
-fn json_value_to_bearscript(value: serde_json::Value) -> Value {
+pub(in crate::plugin) fn json_value_to_bearscript(value: serde_json::Value) -> Value {
     match value {
         serde_json::Value::Null => Value::Null,
         serde_json::Value::Bool(value) => Value::Bool(value),

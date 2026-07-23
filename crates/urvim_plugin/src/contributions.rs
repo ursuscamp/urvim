@@ -101,6 +101,8 @@ pub enum PluginEventKind {
     TabOpened,
     /// A tab was closed.
     TabClosed,
+    /// A tab moved between panes.
+    TabMoved,
     /// A tab was activated.
     TabActivated,
     /// The active buffer changed.
@@ -155,6 +157,7 @@ impl PluginEventKind {
         Self::PaneFocused,
         Self::TabOpened,
         Self::TabClosed,
+        Self::TabMoved,
         Self::TabActivated,
         Self::ActiveBufferChanged,
         Self::ModeChanged,
@@ -195,6 +198,7 @@ impl PluginEventKind {
             Self::PaneFocused => "PaneFocused",
             Self::TabOpened => "TabOpened",
             Self::TabClosed => "TabClosed",
+            Self::TabMoved => "TabMoved",
             Self::TabActivated => "TabActivated",
             Self::ActiveBufferChanged => "ActiveBufferChanged",
             Self::ModeChanged => "ModeChanged",
@@ -245,6 +249,7 @@ impl FromStr for PluginEventKind {
             "PaneFocused" => Ok(Self::PaneFocused),
             "TabOpened" => Ok(Self::TabOpened),
             "TabClosed" => Ok(Self::TabClosed),
+            "TabMoved" => Ok(Self::TabMoved),
             "TabActivated" => Ok(Self::TabActivated),
             "ActiveBufferChanged" => Ok(Self::ActiveBufferChanged),
             "ModeChanged" => Ok(Self::ModeChanged),
@@ -297,6 +302,18 @@ impl PluginContributionRegistry {
             .get_mut(plugin)
             .and_then(|apis| apis.remove(api))
             .is_some()
+    }
+
+    /// Unregisters every contribution owned by `plugin`.
+    pub fn unregister_plugin(&mut self, plugin: &str) -> bool {
+        let mut removed = false;
+        removed |= self.apis.remove(plugin).is_some();
+        removed |= self.commands.remove(plugin).is_some();
+        removed |= self.themes.remove(plugin).is_some();
+        removed |= self.filetypes.remove(plugin).is_some();
+        removed |= self.syntax_providers.remove(plugin).is_some();
+        removed |= self.event_hooks.remove(plugin).is_some();
+        removed
     }
 
     /// Unregisters every API endpoint owned by `plugin`.

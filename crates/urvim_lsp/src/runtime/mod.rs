@@ -304,7 +304,7 @@ impl LspRuntime {
         &mut self,
         snapshot: &LspDocumentSnapshot,
         cursor: urvim_text::Cursor,
-    ) -> Result<mpsc::Receiver<urvim_json_rpc::Message>, String> {
+    ) -> Result<session::PendingLspResponse, String> {
         self.with_session_for_document(snapshot, |session, attachment, lines| {
             session.hover_async(attachment, lines, cursor)
         })
@@ -324,7 +324,7 @@ impl LspRuntime {
         &mut self,
         snapshot: &LspDocumentSnapshot,
         cursor: urvim_text::Cursor,
-    ) -> Result<mpsc::Receiver<urvim_json_rpc::Message>, String> {
+    ) -> Result<session::PendingLspResponse, String> {
         self.with_session_for_document(snapshot, |session, attachment, lines| {
             session.completion_async(attachment, lines, cursor)
         })
@@ -354,7 +354,7 @@ impl LspRuntime {
         &mut self,
         snapshot: &LspDocumentSnapshot,
         cursor: urvim_text::Cursor,
-    ) -> Result<mpsc::Receiver<urvim_json_rpc::Message>, String> {
+    ) -> Result<session::PendingLspResponse, String> {
         self.with_session_for_document(snapshot, |session, attachment, lines| {
             session.definition_async(attachment, lines, cursor)
         })
@@ -480,7 +480,7 @@ impl LspRuntime {
         snapshot: &LspInlayHintSnapshot,
         start_line: usize,
         end_line: usize,
-    ) -> Result<mpsc::Receiver<urvim_json_rpc::Message>, String> {
+    ) -> Result<session::PendingLspResponse, String> {
         self.with_session_for_buffer_id(buffer_id, |session| {
             session.send_inlay_hint_request(snapshot, start_line, end_line)
         })

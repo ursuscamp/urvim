@@ -71,6 +71,58 @@ impl Default for NegotiatedCapabilities {
     }
 }
 
+/// A non-blocking LSP response together with the information needed to cancel it.
+#[derive(Debug)]
+pub struct PendingLspResponse {
+    /// The protocol request identifier sent to the language server.
+    pub id: RequestId,
+    /// Receives the eventual server response.
+    pub receiver: mpsc::Receiver<Message>,
+    cancellation: LspRequestCancellation,
+}
+
+impl PendingLspResponse {
+    /// Cancels this request locally and notifies the language server.
+    pub fn cancel(&self) -> io::Result<bool> {
+        self.cancellation.cancel()
+    }
+}
+
+#[derive(Debug)]
+struct LspRequestCancellation {
+    id: RequestId,
+    stdin: Arc<Mutex<ChildStdin>>,
+    pending: Arc<Mutex<HashMap<RequestId, mpsc::Sender<Message>>>>,
+}
+
+impl LspRequestCancellation {
+    fn cancel(&self) -> io::Result<bool> {
+        let removed = self
+            .pending
+            .lock()
+            .map_err(|_| io::Error::other("LSP pending request lock poisoned"))?
+            .remove(&self.id)
+            .is_some();
+        if !removed {
+            return Ok(false);
+        }
+
+        let message = Message::Notification(Notification::new(
+            "$/cancelRequest",
+            Some(json!({ "id": self.id })),
+        ));
+        let bytes = encode_message(&message)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+        let mut stdin = self
+            .stdin
+            .lock()
+            .map_err(|_| io::Error::other("LSP stdin lock poisoned"))?;
+        stdin.write_all(&bytes)?;
+        stdin.flush()?;
+        Ok(true)
+    }
+}
+
 /// One running LSP server process and its protocol state.
 #[derive(Debug)]
 pub struct LspServerSession {
@@ -498,8 +550,11 @@ impl LspServerSession {
     }
 
     pub fn request_raw(&self, method: &str, params: Option<Value>) -> io::Result<Option<Value>> {
-        let (id, rx) = self.request_raw_async_with_id(method, params)?;
-        match rx.recv_timeout(std::time::Duration::from_secs(10)) {
+        let pending_response = self.request_raw_async_with_id(method, params)?;
+        match pending_response
+            .receiver
+            .recv_timeout(std::time::Duration::from_secs(10))
+        {
             Ok(Message::Response(Response::Success(SuccessResponse { result, .. }))) => {
                 Ok(Some(result))
             }
@@ -508,9 +563,7 @@ impl LspServerSession {
             }
             Ok(_) => Ok(None),
             Err(_) => {
-                if let Ok(mut pending) = self.pending.lock() {
-                    pending.remove(&id);
-                }
+                pending_response.cancel().ok();
                 Err(io::Error::new(
                     io::ErrorKind::TimedOut,
                     "timed out waiting for LSP response",
@@ -523,24 +576,37 @@ impl LspServerSession {
         &self,
         method: &str,
         params: Option<Value>,
-    ) -> io::Result<mpsc::Receiver<Message>> {
+    ) -> io::Result<PendingLspResponse> {
         self.request_raw_async_with_id(method, params)
-            .map(|(_, receiver)| receiver)
     }
 
     fn request_raw_async_with_id(
         &self,
         method: &str,
         params: Option<Value>,
-    ) -> io::Result<(RequestId, mpsc::Receiver<Message>)> {
+    ) -> io::Result<PendingLspResponse> {
         let id = RequestId::Number(self.next_request_id.fetch_add(1, Ordering::SeqCst));
         let request = Message::Request(Request::new(id.clone(), method, params));
-        let (tx, rx) = mpsc::channel();
-        if let Ok(mut pending) = self.pending.lock() {
-            pending.insert(id.clone(), tx);
+        let (tx, receiver) = mpsc::channel();
+        self.pending
+            .lock()
+            .map_err(|_| io::Error::other("LSP pending request lock poisoned"))?
+            .insert(id.clone(), tx);
+        if let Err(error) = self.write_message(&request) {
+            if let Ok(mut pending) = self.pending.lock() {
+                pending.remove(&id);
+            }
+            return Err(error);
         }
-        self.write_message(&request)?;
-        Ok((id, rx))
+        Ok(PendingLspResponse {
+            id: id.clone(),
+            receiver,
+            cancellation: LspRequestCancellation {
+                id,
+                stdin: Arc::clone(&self.stdin),
+                pending: Arc::clone(&self.pending),
+            },
+        })
     }
 
     fn notify(&self, method: &str, params: Option<Value>) -> io::Result<()> {
@@ -1063,6 +1129,24 @@ mod tests {
             },
             effect_receiver,
         )
+    }
+
+    #[test]
+    fn pending_response_cancellation_removes_local_request() {
+        let (mut session, _effects) = writable_test_session();
+        let response = session
+            .request_raw_async("textDocument/hover", Some(json!({})))
+            .expect("request should be sent");
+
+        assert_eq!(session.pending.lock().expect("pending lock").len(), 1);
+        assert!(response.cancel().expect("cancellation should be sent"));
+        assert!(session.pending.lock().expect("pending lock").is_empty());
+        assert!(
+            !response
+                .cancel()
+                .expect("repeat cancellation should be a no-op")
+        );
+        session.child.kill().ok();
     }
 
     #[test]

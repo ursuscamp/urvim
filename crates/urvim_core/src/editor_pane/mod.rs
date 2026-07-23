@@ -205,6 +205,37 @@ impl EditorPane {
         (!self.tabs.is_empty()).then(|| self.active_tab().tab_id())
     }
 
+    /// Returns the index of a tab by its stable runtime identifier.
+    pub fn tab_index(&self, tab_id: TabId) -> Option<usize> {
+        self.tabs.iter().position(|tab| tab.tab_id() == tab_id)
+    }
+
+    /// Activates a tab by its stable runtime identifier.
+    pub fn activate_tab(&mut self, tab_id: TabId) -> bool {
+        let Some(index) = self.tab_index(tab_id) else {
+            return false;
+        };
+        self.active_tab = index;
+        crate::session::mark_dirty();
+        true
+    }
+
+    /// Removes and returns a tab by its stable runtime identifier.
+    pub fn remove_tab(&mut self, tab_id: TabId) -> Option<EditorTab> {
+        let index = self.tab_index(tab_id)?;
+        let tab = self.tabs.remove(index);
+        self.normalize_state();
+        crate::session::mark_dirty();
+        Some(tab)
+    }
+
+    /// Appends a transferred tab and makes it active.
+    pub fn insert_tab(&mut self, tab: EditorTab) {
+        self.tabs.push(tab);
+        self.active_tab = self.tabs.len() - 1;
+        crate::session::mark_dirty();
+    }
+
     /// Closes the active tab and returns true when the editor pane becomes empty.
     pub fn close_active_tab(&mut self) -> bool {
         if self.tabs.is_empty() {

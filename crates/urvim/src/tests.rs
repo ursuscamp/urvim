@@ -2710,6 +2710,7 @@ bg = "bg"
             urvim_core::config::PluginConfig {
                 enabled: true,
                 path: root.clone(),
+                config: std::collections::BTreeMap::new(),
             },
         )]),
         ..Config::default()
@@ -2740,6 +2741,7 @@ fn load_startup_plugins_and_themes_skips_disabled_missing_plugins() {
             urvim_core::config::PluginConfig {
                 enabled: false,
                 path: std::path::PathBuf::from("/tmp/urvim-missing-disabled-plugin"),
+                config: std::collections::BTreeMap::new(),
             },
         )]),
         ..Config::default()
@@ -2792,6 +2794,7 @@ fn hello(args) {
             urvim_core::config::PluginConfig {
                 enabled: true,
                 path: root.clone(),
+                config: std::collections::BTreeMap::new(),
             },
         )]),
     )
@@ -2850,6 +2853,7 @@ fn on_saved(event) {
             urvim_core::config::PluginConfig {
                 enabled: true,
                 path: root.clone(),
+                config: std::collections::BTreeMap::new(),
             },
         )]),
     )
@@ -2906,7 +2910,8 @@ fn init() {
             urvim_core::config::PluginConfig {
                 enabled: true,
                 path: root.clone(),
-            },
+                config: std::collections::BTreeMap::new(),
+            }
         )]),
     )
     .expect("plugin registry should load");

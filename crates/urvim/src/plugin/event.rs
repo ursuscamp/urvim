@@ -404,6 +404,24 @@ pub(in crate::plugin) fn event_payload(
             tab_id,
             snapshot,
         )),
+        EditorEvent::TabMoved {
+            previous_pane_id,
+            pane_id,
+            tab_id,
+            buffer_id,
+        } => {
+            payload.insert(
+                "previous_pane_id".to_string(),
+                Value::Number(previous_pane_id.0 as f64),
+            );
+            Some(pane_tab_event_payload(
+                &mut payload,
+                urvim_plugin::PluginEventKind::TabMoved,
+                pane_id,
+                tab_id,
+                buffer_id,
+            ))
+        }
         EditorEvent::TabActivated {
             previous_tab_id,
             pane_id,
@@ -1189,6 +1207,29 @@ mod tests {
         assert_eq!(
             payload.get("tab_id"),
             Some(&Value::Number(tab_id.get() as f64))
+        );
+    }
+
+    #[test]
+    fn tab_moved_payload_contains_source_and_destination_panes() {
+        let tab = urvim_core::editor_tab::EditorTab::from_buffer_id(BufferId::new(2));
+        let (kind, Value::Map(payload)) = event_payload(EditorEvent::TabMoved {
+            previous_pane_id: urvim_core::layout::PaneId(3),
+            pane_id: urvim_core::layout::PaneId(7),
+            tab_id: tab.tab_id(),
+            buffer_id: BufferId::new(2),
+        })
+        .expect("tab move should have a payload") else {
+            panic!("tab move payload should be a map");
+        };
+
+        assert_eq!(kind, urvim_plugin::PluginEventKind::TabMoved);
+        assert_eq!(payload.get("previous_pane_id"), Some(&Value::Number(3.0)));
+        assert_eq!(payload.get("pane_id"), Some(&Value::Number(7.0)));
+        assert_eq!(payload.get("buffer_id"), Some(&Value::Number(2.0)));
+        assert_eq!(
+            payload.get("tab_id"),
+            Some(&Value::Number(tab.tab_id().get() as f64))
         );
     }
 

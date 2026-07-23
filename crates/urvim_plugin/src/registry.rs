@@ -10,6 +10,8 @@ use super::{PluginLoadError, PluginManifest};
 pub struct LoadedPlugin {
     /// Validated plugin manifest.
     pub manifest: PluginManifest,
+    /// Immutable plugin-owned configuration values.
+    pub config: BTreeMap<String, serde_json::Value>,
 }
 
 impl LoadedPlugin {
@@ -42,6 +44,8 @@ pub struct PluginConfigEntry {
     pub enabled: bool,
     /// The resolved plugin directory.
     pub path: PathBuf,
+    /// Immutable plugin-owned configuration values.
+    pub config: BTreeMap<String, serde_json::Value>,
 }
 
 impl PluginRegistry {
@@ -77,7 +81,10 @@ impl PluginRegistry {
                 });
             }
 
-            registry.insert(LoadedPlugin { manifest })?;
+            registry.insert(LoadedPlugin {
+                manifest,
+                config: plugin_config.config.clone(),
+            })?;
             tracing::debug!(plugin = id, path = ?plugin_config.path, "loaded plugin manifest");
         }
 
@@ -154,6 +161,7 @@ mod tests {
         PluginConfigEntry {
             enabled: true,
             path,
+            config: BTreeMap::new(),
         }
     }
 
@@ -161,6 +169,7 @@ mod tests {
         PluginConfigEntry {
             enabled: false,
             path,
+            config: BTreeMap::new(),
         }
     }
 
@@ -181,7 +190,11 @@ version = "0.1.0"
 entry = "plugin.bear"
 "#,
         );
-        let config = BTreeMap::from([("test-plugin".to_string(), enabled(root.clone()))]);
+        let mut entry = enabled(root.clone());
+        entry
+            .config
+            .insert("greeting".to_string(), serde_json::json!("hello"));
+        let config = BTreeMap::from([("test-plugin".to_string(), entry)]);
 
         let registry = PluginRegistry::load_from_config(&config).expect("plugin should load");
 
@@ -191,6 +204,7 @@ entry = "plugin.bear"
             .expect("plugin should be registered");
         assert_eq!(plugin.root(), root.as_path());
         assert_eq!(plugin.entry(), Path::new("plugin.bear"));
+        assert_eq!(plugin.config["greeting"], serde_json::json!("hello"));
         std::fs::remove_dir_all(root).ok();
     }
 
@@ -256,12 +270,14 @@ entry = "plugin.bear"
         registry
             .insert(LoadedPlugin {
                 manifest: first_manifest,
+                config: BTreeMap::new(),
             })
             .expect("first insert should work");
 
         let error = registry
             .insert(LoadedPlugin {
                 manifest: second_manifest,
+                config: BTreeMap::new(),
             })
             .expect_err("duplicate should fail");
 

@@ -1,14 +1,17 @@
 # symbol-lens
 
-An example urvim plugin that demonstrates async LSP-backed editor APIs.
+A BearScript plugin demonstrating asynchronous LSP requests and cancellation.
 
 ## Commands
 
 - `plugin symbol-lens hover_lens`: shows hover text at the active cursor.
-- `plugin symbol-lens definition_preview`: shows the first definition target as `path:line:col`.
-- `plugin symbol-lens completion_lens`: shows the completion count and top five candidate labels.
+- `plugin symbol-lens definition_preview`: shows the first definition target.
+- `plugin symbol-lens completion_lens`: displays completion candidates.
+- `plugin symbol-lens cancel_demo`: starts and immediately cancels a completion request.
 
-These commands require an attached LSP server for the active buffer. If no LSP result is available, the plugin reports a friendly message through `editor/notify`.
+The commands require an LSP server attached to the active buffer. Request
+failures, timeouts, and cancellation are reported through the same callback
+payload.
 
 ## Config
 
@@ -18,14 +21,9 @@ enabled = true
 path = "/path/to/urvim/examples/plugins/symbol-lens"
 ```
 
-Or symlink into the default plugin directory:
+Or symlink the directory into the default plugin directory:
 
 ```sh
 mkdir -p ~/.config/urvim/plugins
-ln -s /Users/ryan/Dev/urvim/examples/plugins/symbol-lens ~/.config/urvim/plugins/symbol-lens
+ln -s /path/to/urvim/examples/plugins/symbol-lens ~/.config/urvim/plugins/symbol-lens
 ```
-
-## Requirements
-
-- An LSP server configured for the active buffer's filetype.
-- `uv` for running the Python plugin process.

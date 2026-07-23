@@ -13,6 +13,10 @@ Default path:
 ```toml
 [plugins.demo]
 enabled = true
+
+[plugins.demo.config]
+greeting = "hello"
+notify_on_success = true
 ```
 
 When `path` is omitted, urvim loads the plugin from `$XDG_CONFIG_HOME/urvim/plugins/<plugin-id>`.
@@ -131,12 +135,14 @@ The global `urvim` module exposes the APIs below. All arguments and return value
 - `urvim.panes.set_content(pane_id, content)`
 - `urvim.panes.focus(pane_id)`
 - `urvim.panes.close(pane_id)`
-- `urvim.panes.list() -> [{ id, kind }]`
-- `urvim.panes.active() -> { id, kind } | null`
+- `urvim.panes.list() -> [pane]`
+- `urvim.panes.active() -> pane | null`
 - `urvim.panes.set_keymap(pane_id, lhs, rhs)`
 - `urvim.panes.delete_keymap(pane_id, lhs)`
 - `urvim.panes.list_keymaps(pane_id) -> [keymap]`
 - `urvim.buffers.active() -> buffer_id | null`
+- `urvim.buffers.open(path) -> buffer_id`
+- `urvim.buffers.create() -> buffer_id`
 - `urvim.buffers.list() -> [buffer_id]`
 - `urvim.buffers.exists(buffer_id) -> bool`
 - `urvim.buffers.name(buffer_id) -> string`
@@ -152,7 +158,19 @@ The global `urvim` module exposes the APIs below. All arguments and return value
 - `urvim.buffers.insert_line(buffer_id, row, text)`
 - `urvim.buffers.delete_line(buffer_id, row)`
 - `urvim.buffers.replace_range(buffer_id, range, text)`
+- `urvim.buffers.insert(buffer_id, position, text)`
+- `urvim.buffers.delete(buffer_id, range)`
+- `urvim.buffers.text_in_range(buffer_id, range) -> string`
+- `urvim.buffers.apply_edits(buffer_id, edits)`
+- `urvim.buffers.undo(buffer_id)`
+- `urvim.buffers.redo(buffer_id)`
+- `urvim.buffers.can_undo(buffer_id) -> bool`
+- `urvim.buffers.can_redo(buffer_id) -> bool`
+- `urvim.buffers.begin_transaction(buffer_id)`
+- `urvim.buffers.end_transaction(buffer_id)`
 - `urvim.buffers.save(buffer_id)`
+- `urvim.buffers.save_as(buffer_id, path)`
+- `urvim.buffers.reload(buffer_id, opts?)`
 - `urvim.buffers.virtual_text.add(buffer_id, options) -> marker_id`
 - `urvim.buffers.virtual_text.update(buffer_id, marker_id, changes)`
 - `urvim.buffers.virtual_text.remove(buffer_id, marker_id) -> bool`
@@ -163,13 +181,21 @@ The global `urvim` module exposes the APIs below. All arguments and return value
 - `urvim.buffers.highlights.remove(buffer_id, marker_id) -> bool`
 - `urvim.buffers.highlights.clear(buffer_id) -> removed_count`
 - `urvim.buffers.highlights.list(buffer_id) -> [highlight]`
-- `urvim.panes.active() -> { id, kind } | null`
-- `urvim.panes.list() -> [{ id, kind }]`
 - `urvim.panes.buffer(pane_id) -> buffer_id`
 - `urvim.panes.cursor(pane_id) -> { row, col }`
 - `urvim.panes.set_cursor(pane_id, row, col)`
 - `urvim.panes.visible_range(pane_id) -> { start_row, end_row }`
 - `urvim.panes.open_buffer(buffer_id)`
+- `urvim.tabs.list(pane_id?) -> [tab]`
+- `urvim.tabs.active(pane_id?) -> tab_id | null`
+- `urvim.tabs.buffer(tab_id) -> buffer_id`
+- `urvim.tabs.activate(tab_id)`
+- `urvim.tabs.close(tab_id)`
+- `urvim.tabs.move(tab_id, target_pane_id?)`
+- `urvim.editor.mode() -> string`
+- `urvim.editor.cwd() -> string`
+- `urvim.editor.active_pane() -> pane_id`
+- `urvim.editor.active_tab() -> tab_id | null`
 
 ### Commands, Keymaps, and Events
 
@@ -192,7 +218,7 @@ The global `urvim` module exposes the APIs below. All arguments and return value
 - `urvim.register_event_hook(event, function) -> hook_id`
 - `urvim.unregister_event_hook(hook_id)`
 
-Keymap modes are `normal`, `insert`, `visual`, `visual_line` (or `visual-line`), and `resizing` (or `resize`). Keymap right-hand sides are urvim command lines. The optional options map accepts `desc`, a string displayed by the pending-key guide. `urvim.keymaps.list()` includes `desc` as a string or `null`.
+Keymap modes are `normal`, `insert`, `visual`, `visual_line` (or `visual-line`), and `resizing` (or `resize`). Keymap right-hand sides are urvim command lines. The optional options map accepts `desc`, a string displayed by the pending-key guide. `urvim.keymaps.list()` includes `desc` as a string or `null`. Runtime keymaps are owned by the creating plugin: a plugin cannot overwrite, delete, or list another plugin's mapping. Attempting to claim an occupied mapping raises an error.
 
 ```text
 urvim.keymaps.set("normal", "<Space>w", "write", { "desc": "Write buffer" })
@@ -322,6 +348,11 @@ Register names are a single lowercase ASCII letter or `"`.
 - `urvim.path.extension(path) -> string | null`
 - `urvim.path.stem(path) -> string`
 - `urvim.env.get(name) -> string | null`
+- `urvim.config.get(path?) -> value | null`
+- `urvim.state.get(key, default?) -> value`
+- `urvim.state.set(key, value)`
+- `urvim.state.delete(key) -> bool`
+- `urvim.state.clear() -> removed_count`
 - `urvim.project.find_up(marker_or_markers, start?) -> string | null`
 - `urvim.project.root(marker_or_markers, start?) -> string | null`
 - `urvim.json.parse(text) -> value`
@@ -330,6 +361,16 @@ Register names are a single lowercase ASCII letter or `"`.
 - `urvim.inspect(value) -> string`
 
 `project.find_up` returns the matching marker path; `project.root` returns its parent directory. Both search upward from `start`, or the editor process current directory when omitted.
+
+`urvim.config` exposes only the calling plugin's immutable `[plugins.<plugin-id>.config]` table. `config.get()` returns the complete table, while a dot-separated path such as `config.get("ui.icons")` returns a nested value. Missing paths return `null`.
+
+`urvim.state` stores values under the calling plugin's namespace. Values may contain only `null`, booleans, finite numbers, strings, lists, and maps. `state.get` returns its optional default only when the key is absent; an explicitly stored `null` is returned as `null`. `state.delete` reports whether the key existed, while `state.clear` removes every value owned by the calling plugin and returns the number removed. Mutations are synchronously and atomically persisted to `$XDG_STATE_HOME/urvim/plugins/<plugin-id>.json`, falling back to `$HOME/.local/state/urvim/plugins/<plugin-id>.json`.
+
+```text
+let greeting = urvim.config.get("greeting")
+let launch_count = urvim.state.get("launch_count", 0)
+urvim.state.set("launch_count", launch_count + 1)
+```
 
 ### Filetypes and Syntax
 
@@ -359,6 +400,19 @@ Register names are a single lowercase ASCII letter or `"`.
 - `urvim.strings.to_lower(text) -> string`
 - `urvim.strings.to_upper(text) -> string`
 
+### LSP Requests
+
+- `urvim.lsp.hover(opts, callback) -> request_id`
+- `urvim.lsp.definition(opts, callback) -> request_id`
+- `urvim.lsp.completion(opts, callback) -> request_id`
+- `urvim.lsp.cancel(request_id) -> bool`
+
+`opts` may be `null` or a map containing `buffer_id`, `position`, and
+`timeout_ms`. Null and omitted fields use the active buffer, active cursor, and
+a 10-second timeout. A position is `{ "row": n, "col": n }`, using zero-based
+rows and UTF-8 byte columns. Requests for a non-active buffer must provide a
+position. Timeouts must be between 1 and 60,000 milliseconds.
+
 ### Jobs and Timers
 
 - `urvim.jobs.spawn(opts) -> job_id`
@@ -385,7 +439,50 @@ Buffer rows and columns are 0-based. `urvim.buffers.lines(buffer_id, start_row, 
 }
 ```
 
-Invalid buffer ids, rows, columns, and argument shapes raise errors. `urvim.buffers.save(buffer_id)` saves through the normal buffer save path and emits the same `BufferSaved` or `BufferSaveFailed` editor event.
+Invalid buffer ids, rows, columns, and argument shapes raise errors. Columns are UTF-8 byte offsets and must fall on character boundaries. `urvim.buffers.save(buffer_id)` saves through the normal buffer save path and emits the same `BufferSaved` or `BufferSaveFailed` editor event.
+
+`urvim.buffers.open(path)` loads a file-backed buffer and returns its id. A missing file creates an empty file-backed buffer, and a path already loaded returns the existing id. `urvim.buffers.create()` creates an empty unnamed buffer. Both operations only load the buffer; they do not create or activate a tab. Use `urvim.panes.open_buffer(buffer_id)` when the buffer should become visible.
+
+`urvim.buffers.save_as(buffer_id, path)` writes the buffer and changes its resolved path. It rejects a path owned by another loaded buffer. A successful path change emits `BufferPathChanged` before `BufferSaved`; failure leaves the buffer path unchanged.
+
+`urvim.buffers.reload(buffer_id, opts?)` replaces a file-backed buffer with its current disk contents and emits `BufferReloaded`. Reload rejects unnamed buffers and, by default, buffers with unsaved changes. Pass `{ "force": true }` to discard unsaved changes:
+
+```text
+urvim.buffers.reload(buffer_id, { "force": true })
+```
+
+Structured edits use the same range shape. A batch edit contains a range and replacement text:
+
+```text
+urvim.buffers.apply_edits(buffer_id, [
+  {
+    "range": {
+      "start": { "row": 0, "col": 0 },
+      "end": { "row": 0, "col": 3 }
+    },
+    "text": "replacement"
+  }
+])
+```
+
+An empty range inserts text, while empty text deletes the range. All ranges are interpreted against the original buffer state. The complete batch is validated before mutation and is rejected if ranges are invalid or overlap, an insertion falls strictly inside a non-empty edit range, or multiple insertions use the same position. Adjacent edits and insertions at range boundaries are allowed. A successful non-empty batch creates one undo entry; an empty batch does nothing. `insert` and `delete` follow the same validation rules.
+
+`undo` and `redo` restore buffer text through the normal mutation path. They do nothing when the corresponding history is empty; use `can_undo` or `can_redo` when the distinction matters. Undoing or redoing the active buffer also restores its saved cursor, while targeting a non-active buffer does not switch panes or tabs.
+
+Buffer transactions combine several plugin edits into one undo entry:
+
+```text
+let buffer_id = urvim.buffers.active()
+urvim.buffers.begin_transaction(buffer_id)
+urvim.buffers.set_line(buffer_id, 0, "first replacement")
+urvim.buffers.replace_range(buffer_id, {
+    "start": { "row": 1, "col": 0 },
+    "end": { "row": 1, "col": 3 }
+}, "second replacement")
+urvim.buffers.end_transaction(buffer_id)
+```
+
+Transactions are buffer-local, owned by the calling plugin, and cannot be nested for the same buffer. They group undo history but do not roll back edits. `undo` and `redo` are rejected while a transaction is open. If a callback returns or fails without calling `end_transaction`, urvim automatically finalizes its open transactions so they cannot affect later callbacks.
 
 ### Virtual text
 
@@ -434,7 +531,21 @@ Styles are partial overlays on existing buffer text. They apply after syntax hig
 
 See `examples/plugins/funky-text` for an animated demonstration that highlights every `FUNKY` match in a buffer.
 
-Pane rows and columns are 0-based. Pane ids are stable for each split-tree leaf and become invalid after close. Editor-only methods reject plugin panes. `urvim.panes.open_buffer(buffer_id)` activates an existing visible editor tab or opens a loaded hidden buffer in the active or last-focused editor pane, including while a plugin pane or overlay has focus. The last editor pane cannot be closed.
+Pane rows and columns are 0-based. Pane ids are stable for each split-tree leaf and become invalid after close. Pane descriptors contain `id`, `kind`, `origin: { row, col }`, and `size: { rows, cols }`; geometry reflects the most recently calculated layout. Plugin pane configuration, content, and keymap methods require ownership; focus and close use normal editor-pane behavior while enforcing ownership for plugin panes. Editor-only methods reject plugin panes. `urvim.panes.open_buffer(buffer_id)` activates an existing visible editor tab or opens a loaded hidden buffer in the active or last-focused editor pane, including while a plugin pane or overlay has focus. The last editor pane cannot be closed.
+
+Tabs have stable runtime ids and belong to editor panes. `urvim.tabs.list()` returns tabs across all editor panes in layout and tab order. Pass a pane id to restrict the result. Each descriptor contains `id`, `pane_id`, `buffer_id`, zero-based `index`, and `active`.
+
+```text
+let tabs = urvim.tabs.list()
+let active_tab = urvim.editor.active_tab()
+if active_tab != null {
+    let buffer_id = urvim.tabs.buffer(active_tab)
+}
+```
+
+When its pane argument is omitted, `tabs.active` uses the last-focused editor pane. `tabs.activate` focuses the containing pane. `tabs.move` preserves the tab id and complete view state, focuses the destination, and defaults its destination to the last-focused editor pane. Plugin panes cannot contain tabs. Closing the final visible tab creates a new unnamed tab so the editor always remains usable.
+
+`urvim.editor.active_pane()` returns the last-focused editor pane even while retained plugin UI has focus. `urvim.editor.mode()` returns one of `normal`, `insert`, `replace`, `visual`, `visual_line`, or `resizing`. `urvim.editor.cwd()` returns the process working directory.
 
 ### Confirmations
 
@@ -764,9 +875,34 @@ Directory entries use this shape:
 }
 ```
 
-Job callbacks are delivered later through the normal plugin dispatcher, not from process I/O threads. Output callbacks receive text chunks and are not guaranteed to receive complete lines. `urvim.jobs.spawn` accepts `cmd`, `args`, `cwd`, `env`, `stdin`, `timeout_ms`, `on_stdout`, `on_stderr`, and `on_exit`.
+LSP methods return a plugin-owned request id immediately and deliver their
+callbacks later through the normal plugin dispatcher. A callback runs at most
+once and receives:
 
-Timer callbacks are also delivered later through the normal plugin dispatcher. Use `urvim.timers.defer(callback)` to run after the current callback returns, `urvim.timers.set_timeout(ms, callback)` to run once after a delay, and `urvim.timers.set_interval(ms, callback)` to run repeatedly. `urvim.timers.clear(timer_id)` cancels a timeout or interval that has not yet dispatched.
+```text
+{
+    "id": number,
+    "kind": "hover" | "definition" | "completion",
+    "ok": bool,
+    "result": value | null,
+    "error": string | null,
+    "cancelled": bool
+}
+```
+
+Hover results contain `contents`. Definition results contain `target`, which is
+`null` or `{ "path", "buffer_id", "row", "col" }`. Completion results contain
+`items`; candidate fields and edit ranges use snake_case and the same UTF-8 byte
+positions as buffer APIs. `urvim.lsp.cancel` returns false for an unknown or
+already completed request. A plugin cannot cancel another plugin's request.
+Cancellation sends the standard LSP `$/cancelRequest` notification, discards
+late responses, and reports a cancelled callback. Timeouts report an error and
+also cancel the underlying protocol request. Pending requests are cancelled
+when their plugin unloads or the editor begins LSP shutdown.
+
+Job callbacks are delivered later through the normal plugin dispatcher, not from process I/O threads. Output callbacks receive text chunks and are not guaranteed to receive complete lines. `urvim.jobs.spawn` accepts `cmd`, `args`, `cwd`, `env`, `stdin`, `timeout_ms`, `on_stdout`, `on_stderr`, and `on_exit`. Job ids are owned by the creating plugin; job control and listing APIs cannot access another plugin's jobs.
+
+Timer callbacks are also delivered later through the normal plugin dispatcher. Use `urvim.timers.defer(callback)` to run after the current callback returns, `urvim.timers.set_timeout(ms, callback)` to run once after a delay, and `urvim.timers.set_interval(ms, callback)` to run repeatedly. Timer ids are owned by the creating plugin; `urvim.timers.clear(timer_id)` can only cancel that plugin's timer.
 
 ## Syntax Providers
 
@@ -821,6 +957,7 @@ Currently emitted event names:
 - `PaneFocused`
 - `TabOpened`
 - `TabClosed`
+- `TabMoved`
 - `TabActivated`
 - `ActiveBufferChanged`
 - `ModeChanged`
@@ -862,6 +999,7 @@ Tab lifecycle payloads are:
 
 - `TabOpened`: `pane_id`, `tab_id`, and the buffer snapshot fields listed above
 - `TabClosed`: `pane_id`, `tab_id`, and the buffer snapshot fields captured before removal
+- `TabMoved`: `previous_pane_id`, `pane_id`, `tab_id`, and `buffer_id`
 - `TabActivated`: `previous_tab_id` (`null` for a newly created pane), `tab_id`, `pane_id`, and `buffer_id`
 
 `ActiveBufferChanged` contains `previous_buffer_id` (`null` when absent), `buffer_id`, `pane_id`, and `tab_id`.
@@ -876,7 +1014,7 @@ High-frequency events are coalesced independently for each buffer or pane over o
 
 Event draining captures one FIFO wave at a time, so events generated by hooks wait for the next dispatch wave and cannot overtake already queued lifecycle events. A causal chain is limited to 32 consecutive generated waves. On wave 33 urvim logs and displays a health warning, then drops the remaining generated chain to prevent unbounded hook processing.
 
-Events produced by one layout transition are enqueued in this order: closed tabs, globally closed buffers, closed panes, created panes, opened tabs, globally opened buffers, focused pane, activated tabs, then active buffer change. Items within a category follow layout and tab order. Overlay lifecycle does not produce pane events. A split emits `PaneCreated`, editor-only tab and buffer events, and `PaneFocused`.
+Events produced by one layout transition are enqueued in this order: closed tabs, globally closed buffers, closed panes, created panes, moved tabs, opened tabs, globally opened buffers, focused pane, activated tabs, then active buffer change. Items within a category follow layout and tab order. Overlay lifecycle does not produce pane events. A split emits `PaneCreated`, editor-only tab and buffer events, and `PaneFocused`.
 
 Fresh and session-restored layouts emit their initial state as one transition from an empty layout. Initial `PaneCreated`, `TabOpened`, `BufferOpened`, `PaneFocused`, `TabActivated`, and `ActiveBufferChanged` events are queued in the order above before `EditorStarted`.
 
@@ -888,7 +1026,7 @@ An LSP session is identified by `server_name` plus `workspace_root`. `LspServerS
 
 `LspBufferAttached` contains the session identity plus `buffer_id`, `uri`, and `language_id`, and is emitted only after `didOpen` succeeds and the attachment is recorded. `LspBufferDetached` contains the same fields plus `reason` (`no_longer_eligible`, `file_deleted`, or `shutdown`) and is emitted only when an existing attachment is removed. Final shutdown emits all detach events for a session before its stop event. urvim does not currently emit lifecycle events for unexpected process crashes or supervise server restarts.
 
-`DiagnosticsChanged` is a compact post-mutation snapshot. It contains `buffer_id`, `source` (an LSP server name or plugin diagnostics namespace), `cleared`, `source_count`, `total_count`, `errors`, `warnings`, `information`, and `hints`. Counts are captured after the source replacement or clear; severity counts aggregate all sources for that buffer. The full diagnostics are deliberately omitted and remain available through `urvim.diagnostics.get`. Replacing a source with identical diagnostics and clearing an absent source are no-ops and do not emit this event.
+Plugin diagnostic namespaces are owned by the creating plugin. A plugin can only replace or clear its own namespace; LSP diagnostics remain editor-owned. `DiagnosticsChanged` is a compact post-mutation snapshot. It contains `buffer_id`, `source` (an LSP server name or plugin diagnostics namespace), `cleared`, `source_count`, `total_count`, `errors`, `warnings`, `information`, and `hints`. Counts are captured after the source replacement or clear; severity counts aggregate all sources for that buffer. The full diagnostics are deliberately omitted and remain available through `urvim.diagnostics.get`. Replacing a source with identical diagnostics and clearing an absent source are no-ops and do not emit this event.
 
 `CommandExecuted` contains `command`, a stable dotted and kebab-case semantic identifier, `success`, and `error` (`null` on success). Examples include `buffer.save`, `buffer.save-as`, `buffer.close`, `tab.next`, and `lsp.hover`. Plugin commands include their identifiers as `plugin.<plugin>.<command>`, preserving the plugin and command text. Accepted asynchronous commands report success immediately. Buffer domain events are queued before the command completion event.
 

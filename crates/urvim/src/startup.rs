@@ -42,6 +42,7 @@ pub(super) fn load_startup_plugins_and_themes(
                 PluginConfigEntry {
                     enabled: plugin.enabled,
                     path: plugin.path.clone(),
+                    config: plugin.config.clone(),
                 },
             )
         })
@@ -208,6 +209,7 @@ entry = "plugin.bear"
                 PluginConfig {
                     enabled: true,
                     path: root.clone(),
+                    config: std::collections::BTreeMap::new(),
                 },
             )]),
             ..Config::default()
@@ -261,6 +263,7 @@ fn init() {{
                 PluginConfig {
                     enabled: true,
                     path: root.clone(),
+                    config: std::collections::BTreeMap::new(),
                 },
             )]),
             ..Config::default()
@@ -310,6 +313,7 @@ fn init() {{
                 PluginConfig {
                     enabled: true,
                     path: root.clone(),
+                    config: std::collections::BTreeMap::new(),
                 },
             )]),
             ..Config::default()
@@ -334,6 +338,7 @@ fn init() {{
                 PluginConfig {
                     enabled: false,
                     path: std::path::PathBuf::from("/tmp/urvim-missing-disabled-plugin"),
+                    config: std::collections::BTreeMap::new(),
                 },
             )]),
             ..Config::default()

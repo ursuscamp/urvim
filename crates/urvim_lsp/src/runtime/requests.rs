@@ -8,8 +8,6 @@
 //! parameters (e.g., `code_actions` takes diagnostics, inlay hint methods take
 //! config booleans).
 
-use std::sync::mpsc;
-
 use lsp_types::{
     CodeActionContext, CodeActionOrCommand, CodeActionParams, CodeActionTriggerKind,
     CompletionItem, CompletionParams, CompletionResponse, InlayHint, InlayHintKind,
@@ -17,14 +15,14 @@ use lsp_types::{
     TextDocumentPositionParams, WorkspaceEdit, WorkspaceSymbolResponse,
 };
 use serde_json::json;
-use urvim_json_rpc::{Message, Request, RequestId};
+
 use urvim_text::{Cursor, PieceTable};
 
 use urvim_id::BufferId;
 
 use super::session::{
-    BufferAttachment, LspServerSession, cursor_to_lsp_position, line_range_to_lsp_range,
-    position_to_lsp_json, range_text,
+    BufferAttachment, LspServerSession, PendingLspResponse, cursor_to_lsp_position,
+    line_range_to_lsp_range, position_to_lsp_json, range_text,
 };
 
 /// Snapshot needed to request inlay hints for a buffer.
@@ -45,7 +43,7 @@ impl LspServerSession {
         attachment: &BufferAttachment,
         lines: &PieceTable,
         cursor: Cursor,
-    ) -> Result<mpsc::Receiver<Message>, String> {
+    ) -> Result<PendingLspResponse, String> {
         if !self.supports_hover() {
             return Err("attached server does not support hover".to_string());
         }
@@ -135,7 +133,7 @@ impl LspServerSession {
         attachment: &BufferAttachment,
         lines: &PieceTable,
         cursor: Cursor,
-    ) -> Result<mpsc::Receiver<Message>, String> {
+    ) -> Result<PendingLspResponse, String> {
         if !self.supports_completion() {
             return Err("attached server does not support completion".to_string());
         }
@@ -223,7 +221,7 @@ impl LspServerSession {
         attachment: &BufferAttachment,
         lines: &PieceTable,
         cursor: Cursor,
-    ) -> Result<mpsc::Receiver<Message>, String> {
+    ) -> Result<PendingLspResponse, String> {
         if !self.supports_definition() {
             return Err("attached server does not support go to definition".to_string());
         }
@@ -573,7 +571,7 @@ impl LspServerSession {
         snapshot: &LspInlayHintSnapshot,
         start_line: usize,
         end_line: usize,
-    ) -> Result<mpsc::Receiver<Message>, String> {
+    ) -> Result<PendingLspResponse, String> {
         let Some(range) = line_range_to_lsp_range(
             &snapshot.lines,
             start_line,
@@ -594,22 +592,9 @@ impl LspServerSession {
             range,
         };
 
-        let id = RequestId::Number(
-            self.next_request_id
-                .fetch_add(1, std::sync::atomic::Ordering::SeqCst),
-        );
         let value = serde_json::to_value(params).map_err(|e| e.to_string())?;
-        let request = Message::Request(Request::new(
-            id.clone(),
-            "textDocument/inlayHint",
-            Some(value),
-        ));
-        let (tx, rx) = mpsc::channel();
-        if let Ok(mut pending) = self.pending.lock() {
-            pending.insert(id.clone(), tx);
-        }
-        self.write_message(&request).map_err(|e| e.to_string())?;
-        Ok(rx)
+        self.request_raw_async("textDocument/inlayHint", Some(value))
+            .map_err(|error| error.to_string())
     }
 }
 

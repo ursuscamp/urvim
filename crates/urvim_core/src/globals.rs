@@ -110,6 +110,8 @@ thread_local! {
 /// One runtime keymap installed by a plugin.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PluginKeymapEntry {
+    /// Plugin that owns the mapping.
+    pub owner: String,
     /// Command line invoked by the mapping.
     pub command: String,
     /// Optional key-guide description.
@@ -600,6 +602,21 @@ pub fn plugin_keymap_intents_for_mode(mode: crate::editor::ModeKind) -> BTreeMap
             })
             .collect()
     })
+}
+
+/// Removes all runtime keymaps owned by `plugin`.
+pub fn remove_plugin_keymaps(plugin: &str) {
+    with_plugin_keymaps_mut(|keymaps| {
+        for mappings in [
+            &mut keymaps.normal,
+            &mut keymaps.insert,
+            &mut keymaps.visual,
+            &mut keymaps.visual_line,
+            &mut keymaps.resizing,
+        ] {
+            mappings.retain(|_, mapping| mapping.owner != plugin);
+        }
+    });
 }
 
 /// Returns plugin keymap descriptions for a mode.

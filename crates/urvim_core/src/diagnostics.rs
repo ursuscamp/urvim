@@ -10,6 +10,7 @@ use std::sync::Mutex;
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 struct DiagnosticKey {
     buffer_id: BufferId,
+    owner: Option<String>,
     server_name: String,
 }
 
@@ -32,9 +33,31 @@ impl DiagnosticsStore {
         server_name: impl Into<String>,
         diagnostics: Vec<Diagnostic>,
     ) -> Option<DiagnosticsEventSnapshot> {
+        self.set_with_owner(buffer_id, None, server_name, diagnostics)
+    }
+
+    /// Replaces diagnostics for a plugin-owned namespace.
+    pub fn set_plugin(
+        &self,
+        buffer_id: BufferId,
+        owner: impl Into<String>,
+        namespace: impl Into<String>,
+        diagnostics: Vec<Diagnostic>,
+    ) -> Option<DiagnosticsEventSnapshot> {
+        self.set_with_owner(buffer_id, Some(owner.into()), namespace, diagnostics)
+    }
+
+    fn set_with_owner(
+        &self,
+        buffer_id: BufferId,
+        owner: Option<String>,
+        server_name: impl Into<String>,
+        diagnostics: Vec<Diagnostic>,
+    ) -> Option<DiagnosticsEventSnapshot> {
         let source = server_name.into();
         let key = DiagnosticKey {
             buffer_id,
+            owner,
             server_name: source.clone(),
         };
         let mut store = self.diagnostics.lock().ok()?;
@@ -44,8 +67,8 @@ impl DiagnosticsStore {
         {
             return None;
         }
-        store.insert(key, diagnostics);
-        Some(diagnostics_snapshot(&store, buffer_id, source, false))
+        store.insert(key.clone(), diagnostics);
+        Some(diagnostics_snapshot_for_key(&store, &key, false))
     }
 
     /// Clears diagnostics for a buffer and source server.
@@ -58,16 +81,20 @@ impl DiagnosticsStore {
         if store
             .remove(&DiagnosticKey {
                 buffer_id,
+                owner: None,
                 server_name: server_name.to_string(),
             })
             .is_none()
         {
             return None;
         }
-        Some(diagnostics_snapshot(
+        Some(diagnostics_snapshot_for_key(
             &store,
-            buffer_id,
-            server_name.to_string(),
+            &DiagnosticKey {
+                buffer_id,
+                owner: None,
+                server_name: server_name.to_string(),
+            },
             true,
         ))
     }
@@ -93,25 +120,59 @@ impl DiagnosticsStore {
         diagnostics
     }
 
+    /// Clears diagnostics for a plugin-owned namespace in one buffer.
+    pub fn clear_plugin_source(
+        &self,
+        buffer_id: BufferId,
+        owner: &str,
+        namespace: &str,
+    ) -> Option<DiagnosticsEventSnapshot> {
+        let mut store = self.diagnostics.lock().ok()?;
+        let key = DiagnosticKey {
+            buffer_id,
+            owner: Some(owner.to_string()),
+            server_name: namespace.to_string(),
+        };
+        store.remove(&key)?;
+        Some(diagnostics_snapshot_for_key(&store, &key, true))
+    }
+
+    /// Clears diagnostics for a plugin-owned namespace across all buffers.
+    pub fn clear_plugin(&self, owner: &str) -> Vec<DiagnosticsEventSnapshot> {
+        let mut store = match self.diagnostics.lock() {
+            Ok(store) => store,
+            Err(_) => return Vec::new(),
+        };
+        let keys = store
+            .keys()
+            .filter(|key| key.owner.as_deref() == Some(owner))
+            .cloned()
+            .collect::<Vec<_>>();
+        let mut snapshots = Vec::new();
+        for key in keys {
+            store.remove(&key);
+            snapshots.push(diagnostics_snapshot_for_key(&store, &key, true));
+        }
+        snapshots
+    }
+
+    /// Returns diagnostics for a buffer from one plugin-owned namespace.
+    pub fn diagnostics_for_buffer_plugin_source(
+        &self,
+        buffer_id: BufferId,
+        owner: &str,
+        namespace: &str,
+    ) -> Vec<Diagnostic> {
+        self.diagnostics_for_key(buffer_id, Some(owner), namespace)
+    }
+
     /// Returns diagnostics for a buffer from a single source server.
     pub fn diagnostics_for_buffer_source(
         &self,
         buffer_id: BufferId,
         server_name: &str,
     ) -> Vec<Diagnostic> {
-        let mut diagnostics = self
-            .diagnostics
-            .lock()
-            .ok()
-            .and_then(|store| {
-                store
-                    .get(&DiagnosticKey {
-                        buffer_id,
-                        server_name: server_name.to_string(),
-                    })
-                    .cloned()
-            })
-            .unwrap_or_default();
+        let mut diagnostics = self.diagnostics_for_key(buffer_id, None, server_name);
         diagnostics.sort_by(|left, right| position_cmp(left.range.start, right.range.start));
         diagnostics
     }
@@ -181,6 +242,27 @@ impl DiagnosticsStore {
             .map(|diagnostic| cursor_from_position(diagnostic.range.start))
     }
 
+    fn diagnostics_for_key(
+        &self,
+        buffer_id: BufferId,
+        owner: Option<&str>,
+        source: &str,
+    ) -> Vec<Diagnostic> {
+        self.diagnostics
+            .lock()
+            .ok()
+            .and_then(|store| {
+                store
+                    .get(&DiagnosticKey {
+                        buffer_id,
+                        owner: owner.map(str::to_string),
+                        server_name: source.to_string(),
+                    })
+                    .cloned()
+            })
+            .unwrap_or_default()
+    }
+
     fn collect_diagnostics(&self, buffer_id: BufferId) -> Vec<Diagnostic> {
         self.diagnostics
             .lock()
@@ -196,21 +278,15 @@ impl DiagnosticsStore {
     }
 }
 
-fn diagnostics_snapshot(
+fn diagnostics_snapshot_for_key(
     store: &BTreeMap<DiagnosticKey, Vec<Diagnostic>>,
-    buffer_id: BufferId,
-    source: String,
+    key: &DiagnosticKey,
     cleared: bool,
 ) -> DiagnosticsEventSnapshot {
-    let source_count = store
-        .get(&DiagnosticKey {
-            buffer_id,
-            server_name: source.clone(),
-        })
-        .map_or(0, Vec::len);
+    let source_count = store.get(key).map_or(0, Vec::len);
     let mut snapshot = DiagnosticsEventSnapshot {
-        buffer_id,
-        source,
+        buffer_id: key.buffer_id,
+        source: key.server_name.clone(),
         cleared,
         source_count,
         total_count: 0,
@@ -221,7 +297,7 @@ fn diagnostics_snapshot(
     };
     for diagnostic in store
         .iter()
-        .filter(|(key, _)| key.buffer_id == buffer_id)
+        .filter(|(entry_key, _)| entry_key.buffer_id == key.buffer_id)
         .flat_map(|(_, diagnostics)| diagnostics)
     {
         snapshot.total_count += 1;
@@ -361,6 +437,32 @@ mod tests {
         assert_eq!(cleared.total_count, 1);
         assert_eq!(cleared.warnings, 1);
         assert!(store.clear(buffer_id, "server-a").is_none());
+    }
+
+    #[test]
+    fn plugin_diagnostic_namespaces_are_isolated_by_owner() {
+        let store = DiagnosticsStore::new();
+        let buffer_id = BufferId::new(8);
+        let value = vec![diagnostic(0, 0, 1, DiagnosticSeverity::ERROR)];
+
+        store.set_plugin(buffer_id, "first", "lint", value.clone());
+
+        assert_eq!(
+            store.diagnostics_for_buffer_plugin_source(buffer_id, "first", "lint"),
+            value
+        );
+        assert!(
+            store
+                .diagnostics_for_buffer_plugin_source(buffer_id, "second", "lint")
+                .is_empty()
+        );
+        assert!(
+            store
+                .clear_plugin_source(buffer_id, "second", "lint")
+                .is_none()
+        );
+        assert_eq!(store.clear_plugin("first").len(), 1);
+        assert!(store.diagnostics_for_buffer(buffer_id).is_empty());
     }
 
     #[test]

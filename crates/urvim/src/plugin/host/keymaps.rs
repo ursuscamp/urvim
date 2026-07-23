@@ -6,52 +6,73 @@ use urvim_core::globals;
 
 use super::native_fn;
 
-pub(in crate::plugin) fn keymaps_module() -> Value {
+pub(in crate::plugin) fn keymaps_module(plugin: String) -> Value {
+    let set_plugin = plugin.clone();
+    let delete_plugin = plugin.clone();
+    let list_plugin = plugin;
     Value::Module(
         HashMap::from([
             (
                 "set".to_string(),
                 native_fn(
                     "keymaps.set",
-                    |mode: String, lhs: String, rhs: String, opts: Option<Value>| {
+                    move |mode: String, lhs: String, rhs: String, opts: Option<Value>| {
                         let description = keymap_description_from_opts(opts.as_ref())?;
                         let mode = mode_kind_from_keymap_string(&mode)?;
                         validate_keymap_lhs_and_rhs(&lhs, &rhs)?;
                         globals::with_plugin_keymaps_mut(|keymaps| {
-                            keymap_table_mut(keymaps, mode).insert(
+                            let mappings = keymap_table_mut(keymaps, mode);
+                            if let Some(existing) = mappings.get(&lhs)
+                                && existing.owner != set_plugin
+                            {
+                                return Err(format!(
+                                    "keymap {mode:?} {lhs:?} is owned by plugin {}",
+                                    existing.owner
+                                ));
+                            }
+                            mappings.insert(
                                 lhs,
                                 globals::PluginKeymapEntry {
+                                    owner: set_plugin.clone(),
                                     command: rhs,
                                     description,
                                 },
                             );
-                        });
-                        Ok(())
+                            Ok(())
+                        })
                     },
                 ),
             ),
             (
                 "delete".to_string(),
-                native_fn("keymaps.delete", |mode: String, lhs: String| {
+                native_fn("keymaps.delete", move |mode: String, lhs: String| {
                     let mode = mode_kind_from_keymap_string(&mode)?;
                     urvim_core::editor::validate_key_string(&lhs)
                         .map_err(|error| error.to_string())?;
                     globals::with_plugin_keymaps_mut(|keymaps| {
-                        keymap_table_mut(keymaps, mode).remove(&lhs);
+                        let mappings = keymap_table_mut(keymaps, mode);
+                        if mappings
+                            .get(&lhs)
+                            .is_some_and(|mapping| mapping.owner == delete_plugin)
+                        {
+                            mappings.remove(&lhs);
+                        }
                     });
                     Ok(())
                 }),
             ),
             (
                 "list".to_string(),
-                native_fn("keymaps.list", |mode: Option<String>| {
+                native_fn("keymaps.list", move |mode: Option<String>| {
                     let mode = mode
                         .as_deref()
                         .map(mode_kind_from_keymap_string)
                         .transpose()?;
                     Ok(Value::List(
-                        globals::with_plugin_keymaps(|keymaps| keymap_entries(keymaps, mode))
-                            .into(),
+                        globals::with_plugin_keymaps(|keymaps| {
+                            keymap_entries(keymaps, mode, &list_plugin)
+                        })
+                        .into(),
                     ))
                 }),
             ),
@@ -63,6 +84,7 @@ pub(in crate::plugin) fn keymaps_module() -> Value {
 fn keymap_entries(
     keymaps: &urvim_core::globals::PluginKeymaps,
     mode: Option<ModeKind>,
+    plugin: &str,
 ) -> Vec<Value> {
     let modes: Vec<ModeKind> = mode.map(|mode| vec![mode]).unwrap_or_else(|| {
         vec![
@@ -76,6 +98,9 @@ fn keymap_entries(
     let mut entries = Vec::new();
     for mode in modes {
         for (lhs, mapping) in keymap_table(keymaps, mode) {
+            if mapping.owner != plugin {
+                continue;
+            }
             let mut entry = HashMap::from([
                 (
                     "mode".to_string(),

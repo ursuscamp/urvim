@@ -4,21 +4,28 @@ use std::rc::Rc;
 
 use bearscript::{IntoFunction, Value};
 
+pub(in crate::plugin) mod buffer_edits;
 pub(in crate::plugin) mod buffer_highlights;
+pub(in crate::plugin) mod buffer_lifecycle;
 pub(in crate::plugin) mod buffer_virtual_text;
+mod config;
+mod editor;
 mod env;
 mod filetypes;
 mod fs;
 mod inspect;
-mod json;
+pub(in crate::plugin) mod json;
 mod keymaps;
 mod lists;
+mod lsp;
 mod panes;
 mod path;
 mod project;
 mod registers;
+mod state;
 mod strings;
 mod syntax;
+mod tabs;
 mod themes;
 mod ui;
 
@@ -26,12 +33,16 @@ use super::api::PluginApiQueue;
 use super::callbacks::BearscriptPluginCallbacks;
 use super::fs::PluginFsRegistry;
 use super::jobs::{PluginJobRegistry, job_id_from_number};
+use super::lsp::PluginLspRegistry;
 use super::plugin_events::PluginEventBus;
+use super::state::PluginStateStore;
 use super::timers::{PluginTimerRegistry, timer_id_from_number, timer_ms_from_number};
 use super::{
     SharedLayout, buffers_module, command_execute_fn, diagnostics_module, event_constants,
     selection_module,
 };
+use config::config_module;
+use editor::editor_module;
 use env::env_module;
 use filetypes::filetypes_module;
 use fs::fs_module;
@@ -39,12 +50,15 @@ use inspect::inspect_fn;
 use json::json_module;
 use keymaps::keymaps_module;
 use lists::lists_module;
+use lsp::lsp_module;
 use panes::panes_module;
 use path::path_module;
 use project::project_module;
 use registers::registers_module;
+use state::state_module;
 use strings::strings_module;
 use syntax::syntax_module;
+use tabs::tabs_module;
 use themes::themes_module;
 use ui::ui_module;
 
@@ -67,7 +81,10 @@ pub(in crate::plugin) fn urvim_module(
         layout,
         fs,
         jobs,
+        Rc::new(PluginLspRegistry::default()),
+        Rc::new(PluginStateStore::default()),
         timers,
+        std::collections::BTreeMap::new(),
     )
 }
 
@@ -80,7 +97,10 @@ pub(in crate::plugin) fn urvim_module_with_api_queue(
     layout: SharedLayout,
     fs: Rc<PluginFsRegistry>,
     jobs: Rc<PluginJobRegistry>,
+    lsp: Rc<PluginLspRegistry>,
+    state: Rc<PluginStateStore>,
     timers: Rc<PluginTimerRegistry>,
+    config: std::collections::BTreeMap<String, serde_json::Value>,
 ) -> Value {
     UrvimModuleBuilder {
         plugin,
@@ -91,7 +111,10 @@ pub(in crate::plugin) fn urvim_module_with_api_queue(
         layout,
         fs,
         jobs,
+        lsp,
+        state,
         timers,
+        config,
     }
     .build()
 }
@@ -105,14 +128,20 @@ struct UrvimModuleBuilder {
     layout: SharedLayout,
     fs: Rc<PluginFsRegistry>,
     jobs: Rc<PluginJobRegistry>,
+    lsp: Rc<PluginLspRegistry>,
+    state: Rc<PluginStateStore>,
     timers: Rc<PluginTimerRegistry>,
+    config: std::collections::BTreeMap<String, serde_json::Value>,
 }
 
 impl UrvimModuleBuilder {
     fn build(self) -> Value {
         let mut module = HashMap::new();
         module.insert("events".to_string(), event_constants());
-        module.insert("buffers".to_string(), buffers_module(self.plugin.clone()));
+        module.insert(
+            "buffers".to_string(),
+            buffers_module(self.plugin.clone(), Rc::clone(&self.layout)),
+        );
         module.insert(
             "panes".to_string(),
             panes_module(
@@ -121,6 +150,8 @@ impl UrvimModuleBuilder {
                 Rc::clone(&self.layout),
             ),
         );
+        module.insert("tabs".to_string(), tabs_module(Rc::clone(&self.layout)));
+        module.insert("editor".to_string(), editor_module(Rc::clone(&self.layout)));
         module.insert(
             "selection".to_string(),
             selection_module(Rc::clone(&self.layout)),
@@ -128,8 +159,11 @@ impl UrvimModuleBuilder {
         module.insert("registers".to_string(), registers_module());
         module.insert("commands".to_string(), self.commands_module());
         module.insert("plugins".to_string(), self.plugins_module());
-        module.insert("keymaps".to_string(), keymaps_module());
-        module.insert("diagnostics".to_string(), diagnostics_module());
+        module.insert("keymaps".to_string(), keymaps_module(self.plugin.clone()));
+        module.insert(
+            "diagnostics".to_string(),
+            diagnostics_module(self.plugin.clone()),
+        );
         module.insert(
             "themes".to_string(),
             themes_module(self.plugin.clone(), Rc::clone(&self.contributions)),
@@ -154,6 +188,11 @@ impl UrvimModuleBuilder {
             ),
         );
         module.insert("env".to_string(), env_module());
+        module.insert("config".to_string(), config_module(self.config.clone()));
+        module.insert(
+            "state".to_string(),
+            state_module(self.plugin.clone(), Rc::clone(&self.state)),
+        );
         module.insert(
             "filetypes".to_string(),
             filetypes_module(self.plugin.clone(), Rc::clone(&self.contributions)),
@@ -162,6 +201,14 @@ impl UrvimModuleBuilder {
         module.insert("lists".to_string(), lists_module());
         module.insert("project".to_string(), project_module());
         module.insert("jobs".to_string(), self.jobs_module());
+        module.insert(
+            "lsp".to_string(),
+            lsp_module(
+                self.plugin.clone(),
+                Rc::clone(&self.layout),
+                Rc::clone(&self.lsp),
+            ),
+        );
         module.insert("timers".to_string(), self.timers_module());
         module.insert(
             "syntax".to_string(),
@@ -423,6 +470,11 @@ impl UrvimModuleBuilder {
 
     fn jobs_module(&self) -> Value {
         let spawn_plugin = self.plugin.clone();
+        let kill_plugin = self.plugin.clone();
+        let status_plugin = self.plugin.clone();
+        let write_plugin = self.plugin.clone();
+        let close_plugin = self.plugin.clone();
+        let list_plugin = self.plugin.clone();
         let spawn_jobs = Rc::clone(&self.jobs);
         let spawn_callbacks = Rc::clone(&self.callbacks);
         let kill_jobs = Rc::clone(&self.jobs);
@@ -446,14 +498,14 @@ impl UrvimModuleBuilder {
                 (
                     "kill".to_string(),
                     super::native_fn("jobs.kill", move |job_id: f64| {
-                        kill_jobs.kill(job_id_from_number(job_id)?)
+                        kill_jobs.kill(&kill_plugin, job_id_from_number(job_id)?)
                     }),
                 ),
                 (
                     "status".to_string(),
                     super::native_fn("jobs.status", move |job_id: f64| {
                         Ok(status_jobs
-                            .status(job_id_from_number(job_id)?)?
+                            .status(&status_plugin, job_id_from_number(job_id)?)?
                             .as_str()
                             .to_string())
                     }),
@@ -461,19 +513,19 @@ impl UrvimModuleBuilder {
                 (
                     "write_stdin".to_string(),
                     super::native_fn("jobs.write_stdin", move |job_id: f64, text: String| {
-                        write_jobs.write_stdin(job_id_from_number(job_id)?, &text)
+                        write_jobs.write_stdin(&write_plugin, job_id_from_number(job_id)?, &text)
                     }),
                 ),
                 (
                     "close_stdin".to_string(),
                     super::native_fn("jobs.close_stdin", move |job_id: f64| {
-                        close_jobs.close_stdin(job_id_from_number(job_id)?)
+                        close_jobs.close_stdin(&close_plugin, job_id_from_number(job_id)?)
                     }),
                 ),
                 (
                     "list".to_string(),
                     super::native_fn("jobs.list", move || {
-                        Ok(Value::List(list_jobs.list().into()))
+                        Ok(Value::List(list_jobs.list(&list_plugin).into()))
                     }),
                 ),
             ])
@@ -491,6 +543,7 @@ impl UrvimModuleBuilder {
         let interval_plugin = self.plugin.clone();
         let interval_timers = Rc::clone(&self.timers);
         let interval_callbacks = Rc::clone(&self.callbacks);
+        let clear_plugin = self.plugin.clone();
         let clear_timers = Rc::clone(&self.timers);
         let clear_callbacks = Rc::clone(&self.callbacks);
         Value::Module(
@@ -528,7 +581,7 @@ impl UrvimModuleBuilder {
                     "clear".to_string(),
                     super::native_fn("timers.clear", move |timer_id: f64| {
                         let timer_id = timer_id_from_number(timer_id)?;
-                        clear_timers.clear(timer_id);
+                        clear_timers.clear(&clear_plugin, timer_id)?;
                         clear_callbacks.borrow_mut().timers.remove(&timer_id);
                         Ok(())
                     }),

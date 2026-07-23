@@ -411,6 +411,44 @@ impl BufferPool {
         accepted_redraw
     }
 
+    /// Reloads a file-backed buffer from disk.
+    ///
+    /// Modified buffers are rejected unless `force` is true. A successful
+    /// reload refreshes derived caches and emits [`EditorEvent::BufferReloaded`].
+    pub fn reload_buffer(&mut self, id: BufferId, force: bool) -> io::Result<()> {
+        let Some(buffer) = self.buffers.get(&id) else {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                "buffer id not found",
+            ));
+        };
+        if buffer.path().is_none() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "buffer has no path",
+            ));
+        }
+        if buffer.is_modified() && !force {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "buffer has unsaved changes",
+            ));
+        }
+
+        self.with_buffer_mut(id, |buffer| buffer.reload_from_disk())
+            .expect("validated buffer should remain loaded")?;
+        self.reported_external_conflicts.remove(&id);
+        let snapshot = BufferEventSnapshot::from_buffer(
+            id,
+            self.buffers
+                .get(&id)
+                .expect("reloaded buffer should remain loaded"),
+        );
+        globals::enqueue_editor_event(EditorEvent::BufferReloaded { snapshot });
+        self.request_buffer_cache_refresh(id);
+        Ok(())
+    }
+
     /// Returns true when the buffer should confirm overwriting newer on-disk contents.
     pub fn buffer_needs_overwrite_confirmation(&self, buffer_id: BufferId) -> bool {
         let Some(buffer) = self.buffers.get(&buffer_id) else {
@@ -531,6 +569,22 @@ impl BufferPool {
         };
         if !self.buffers.contains_key(&id) {
             let error = io::Error::new(io::ErrorKind::NotFound, "buffer id not found");
+            globals::enqueue_editor_event(EditorEvent::BufferSaveFailed {
+                error: BufferErrorSnapshot::from_io_error(
+                    Some(id),
+                    Some(abs_path.as_path().to_path_buf()),
+                    &error,
+                ),
+            });
+            return Err(error);
+        }
+        if let Some(existing_id) = self.paths.get(&abs_path).copied()
+            && existing_id != id
+        {
+            let error = io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                "buffer path already exists in pool",
+            );
             globals::enqueue_editor_event(EditorEvent::BufferSaveFailed {
                 error: BufferErrorSnapshot::from_io_error(
                     Some(id),
@@ -1149,6 +1203,50 @@ mod tests {
     }
 
     #[test]
+    fn test_save_as_rejects_path_owned_by_another_buffer_before_writing() {
+        globals::clear_editor_events_for_tests();
+        let source_path = temp_file("save-as-owned-source.txt");
+        let destination_path = temp_file("save-as-owned-destination.txt");
+        fs::write(&source_path, "source").unwrap();
+        fs::write(&destination_path, "destination").unwrap();
+        let mut pool = BufferPool::new();
+        let source_id = pool.open_buffer(&source_path).unwrap();
+        let destination_id = pool.open_buffer(&destination_path).unwrap();
+        pool.with_buffer_mut(source_id, |buffer| {
+            buffer.insert_text(crate::buffer::Cursor::new(0, 6), " changed");
+        });
+        drain_editor_events();
+
+        let error = pool
+            .save_buffer_to_path(source_id, &destination_path)
+            .unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::AlreadyExists);
+        assert_eq!(
+            fs::read_to_string(&destination_path).unwrap(),
+            "destination"
+        );
+        assert_eq!(
+            pool.get(source_id).unwrap().path().unwrap().as_path(),
+            source_path
+        );
+        assert_eq!(
+            pool.buffer_id_for_path(
+                &AbsolutePath::from_path(&destination_path).expect("path should resolve")
+            ),
+            Some(destination_id)
+        );
+        assert!(matches!(
+            drain_editor_events().as_slice(),
+            [crate::event::EditorEvent::BufferSaveFailed { error }]
+                if error.buffer_id == Some(source_id)
+                    && error.error_kind == "already_exists"
+        ));
+        fs::remove_file(source_path).ok();
+        fs::remove_file(destination_path).ok();
+    }
+
+    #[test]
     fn test_failed_save_as_keeps_path_and_emits_one_failure() {
         globals::clear_editor_events_for_tests();
         let original = temp_file("save-as-original.txt");
@@ -1172,6 +1270,46 @@ mod tests {
                     && error.error_kind == "not_found"
         ));
         fs::remove_file(original).ok();
+    }
+
+    #[test]
+    fn test_reload_buffer_rejects_modified_by_default_and_force_discards_changes() {
+        globals::clear_editor_events_for_tests();
+        let path = temp_file("explicit-reload.txt");
+        fs::write(&path, "disk").unwrap();
+        let mut pool = BufferPool::new();
+        let id = pool.open_buffer(&path).unwrap();
+        pool.with_buffer_mut(id, |buffer| {
+            buffer.insert_text(crate::buffer::Cursor::new(0, 4), " edit");
+        });
+        drain_editor_events();
+        fs::write(&path, "new disk").unwrap();
+
+        let error = pool.reload_buffer(id, false).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+        assert_eq!(pool.get(id).unwrap().as_str(), "disk edit");
+        assert!(drain_editor_events().is_empty());
+
+        pool.reload_buffer(id, true).unwrap();
+        assert_eq!(pool.get(id).unwrap().as_str(), "new disk");
+        assert!(!pool.get(id).unwrap().is_modified());
+        assert!(drain_editor_events().iter().any(|event| matches!(
+            event,
+            crate::event::EditorEvent::BufferReloaded { snapshot }
+                if snapshot.buffer_id == id
+        )));
+        fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn test_reload_buffer_rejects_unnamed_buffer() {
+        let mut pool = BufferPool::new();
+        let id = pool.create_buffer();
+
+        let error = pool.reload_buffer(id, false).unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+        assert_eq!(error.to_string(), "buffer has no path");
     }
 
     #[test]

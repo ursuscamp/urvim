@@ -56,6 +56,10 @@ save_rust = ["buffer write path={1}", "buffer filetype filetype=rust"]
 [plugins.cargo-fmt]
 enabled = true
 
+[plugins.cargo-fmt.config]
+command = "cargo fmt"
+notify_on_success = true
+
 [plugins.local-tools]
 path = "~/src/urvim-local-tools"
 
@@ -188,10 +192,11 @@ Registers explicitly enabled plugins.
 - Behavior: each configured plugin id is loaded from a plugin directory in a later plugin-loading phase
 - `enabled`: optional boolean, defaults to `true`; when `false`, the plugin entry is retained in config but skipped by plugin loading
 - `path`: optional plugin directory override
+- `config`: optional plugin-owned TOML table exposed read-only through `urvim.config`; nested tables and arrays are supported
 - Default path: when `path` is omitted, urvim resolves the plugin directory to `$XDG_CONFIG_HOME/urvim/plugins/<plugin-id>`
 - Explicit path: when `path` is provided, it may use `~` for the user's home directory
 - Validation: plugin ids must be non-empty and must not contain whitespace or path separators; explicit paths must not be empty
-- Scope: plugin manifest loading, plugin themes, and plugin scripts
+- Scope: plugin manifest loading, plugin themes, plugin scripts, and immutable plugin-owned configuration
 - Example: `[plugins.cargo-fmt]` loads `$XDG_CONFIG_HOME/urvim/plugins/cargo-fmt` by default
 - See: `docs/plugins.md` for manifest schema, plugin themes, plugin scripts, and local development setup
 

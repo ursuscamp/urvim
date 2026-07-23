@@ -1,1 +1,0 @@
-"""Symbol Lens example plugin."""

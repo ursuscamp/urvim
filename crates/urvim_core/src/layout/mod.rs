@@ -19,6 +19,7 @@ mod node;
 mod picker;
 mod render;
 mod session;
+mod tabs;
 mod tree;
 
 use self::dialogs::Dialogs;
@@ -38,7 +39,7 @@ use crate::ui::geometry::{Position, Size};
 use crate::ui::overlay::{OverlayId, OverlayManager, OverlayOptions, RetainedContent};
 use crate::ui::plugin_pane::{PluginPane, PluginPaneOptions};
 use crate::ui::{Command, Intent, KeymapInheritance, UiEvent, UiEventResult};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
@@ -47,6 +48,7 @@ use urvim_terminal::CursorStyle;
 use self::tree::ResizeDirection;
 pub use geometry::PaneRegion;
 pub use node::{LayoutNode, Pane, PaneContent, PaneId, PaneKind, SplitAxis, SplitNode, SplitSize};
+pub use tabs::TabSnapshot;
 
 /// Snapshot of a visible buffer range in a pane.
 #[derive(Debug, Clone)]
@@ -446,14 +448,28 @@ impl Layout {
         let before_panes: BTreeMap<_, _> =
             before.panes.iter().map(|pane| (pane.id, pane)).collect();
         let after_panes: BTreeMap<_, _> = after.panes.iter().map(|pane| (pane.id, pane)).collect();
+        let before_tabs: BTreeMap<_, _> = before
+            .panes
+            .iter()
+            .flat_map(|pane| {
+                pane.tabs
+                    .iter()
+                    .map(move |&(tab_id, buffer_id)| (tab_id, (pane.id, buffer_id)))
+            })
+            .collect();
+        let after_tabs: BTreeMap<_, _> = after
+            .panes
+            .iter()
+            .flat_map(|pane| {
+                pane.tabs
+                    .iter()
+                    .map(move |&(tab_id, buffer_id)| (tab_id, (pane.id, buffer_id)))
+            })
+            .collect();
 
         for pane in &before.panes {
-            let after_tabs: BTreeSet<_> = after_panes
-                .get(&pane.id)
-                .map(|pane| pane.tabs.iter().map(|(id, _)| *id).collect())
-                .unwrap_or_default();
             for &(tab_id, buffer_id) in &pane.tabs {
-                if !after_tabs.contains(&tab_id) {
+                if !after_tabs.contains_key(&tab_id) {
                     let snapshot = before
                         .buffers
                         .get(&buffer_id)
@@ -496,13 +512,21 @@ impl Layout {
                 });
             }
         }
+        for (&tab_id, &(pane_id, buffer_id)) in &after_tabs {
+            if let Some(&(previous_pane_id, _)) = before_tabs.get(&tab_id)
+                && previous_pane_id != pane_id
+            {
+                globals::enqueue_editor_event(EditorEvent::TabMoved {
+                    previous_pane_id,
+                    pane_id,
+                    tab_id,
+                    buffer_id,
+                });
+            }
+        }
         for pane in &after.panes {
-            let before_tabs: BTreeSet<_> = before_panes
-                .get(&pane.id)
-                .map(|pane| pane.tabs.iter().map(|(id, _)| *id).collect())
-                .unwrap_or_default();
             for &(tab_id, buffer_id) in &pane.tabs {
-                if !before_tabs.contains(&tab_id) {
+                if !before_tabs.contains_key(&tab_id) {
                     let snapshot = after
                         .buffers
                         .get(&buffer_id)

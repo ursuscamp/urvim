@@ -56,6 +56,11 @@ impl TabId {
         )
     }
 
+    /// Creates an identifier from its plugin-facing numeric representation.
+    pub fn from_raw(value: u64) -> Option<Self> {
+        (value != 0).then_some(Self(value))
+    }
+
     /// Returns the numeric identifier.
     pub fn get(self) -> u64 {
         self.0

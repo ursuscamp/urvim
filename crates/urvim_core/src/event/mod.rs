@@ -406,6 +406,17 @@ pub enum EditorEvent {
         /// Buffer metadata captured before the tab was removed.
         snapshot: BufferEventSnapshot,
     },
+    /// A tab moved between editor panes.
+    TabMoved {
+        /// Pane that previously contained the tab.
+        previous_pane_id: PaneId,
+        /// Pane that now contains the tab.
+        pane_id: PaneId,
+        /// Stable runtime tab identifier.
+        tab_id: TabId,
+        /// Buffer shown by the tab.
+        buffer_id: BufferId,
+    },
     /// A different tab became active in an editor pane.
     TabActivated {
         /// Previously active tab, or `None` for a newly created pane.

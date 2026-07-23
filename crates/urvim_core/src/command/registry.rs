@@ -443,6 +443,7 @@ entry = "plugin.bear"
             urvim_plugin::PluginConfigEntry {
                 enabled: true,
                 path: root.clone(),
+                config: std::collections::BTreeMap::new(),
             },
         )]);
         let plugins = PluginRegistry::load_from_config(&config).expect("plugin should load");

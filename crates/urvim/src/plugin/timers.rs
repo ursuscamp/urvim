@@ -110,17 +110,29 @@ impl PluginTimerRegistry {
         id
     }
 
-    pub(in crate::plugin) fn clear(&self, timer_id: u64) -> bool {
-        let Some(timer) = self
-            .timers
-            .lock()
-            .expect("timer registry poisoned")
-            .remove(&timer_id)
-        else {
-            return false;
+    pub(in crate::plugin) fn clear(&self, plugin: &str, timer_id: u64) -> Result<bool, String> {
+        let mut timers = self.timers.lock().expect("timer registry poisoned");
+        let Some(timer) = timers.get(&timer_id) else {
+            return Ok(false);
         };
+        if timer.plugin != plugin {
+            return Err(format!("timer_id {timer_id} is owned by another plugin"));
+        }
+        let timer = timers.remove(&timer_id).expect("timer should exist");
         timer.cancelled.store(true, Ordering::SeqCst);
-        true
+        Ok(true)
+    }
+
+    pub(in crate::plugin) fn cancel_plugin(&self, plugin: &str) {
+        let mut timers = self.timers.lock().expect("timer registry poisoned");
+        timers.retain(|_, timer| {
+            if timer.plugin == plugin {
+                timer.cancelled.store(true, Ordering::SeqCst);
+                false
+            } else {
+                true
+            }
+        });
     }
 
     pub(in crate::plugin) fn poll_event(&self) -> Option<PluginTimerEvent> {

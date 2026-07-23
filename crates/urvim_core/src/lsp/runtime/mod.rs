@@ -85,7 +85,7 @@ pub struct PendingLspRequest {
     cursor: Cursor,
     started_at: Instant,
     timeout: Duration,
-    receiver: mpsc::Receiver<Message>,
+    response: PendingLspResponseSource,
     snapshot_text: PieceTable,
     position_encoding: PositionEncodingKind,
 }
@@ -95,6 +95,13 @@ enum PendingLspRequestKind {
     Hover,
     Definition,
     Completion,
+}
+
+#[derive(Debug)]
+enum PendingLspResponseSource {
+    Live(urvim_lsp::runtime::session::PendingLspResponse),
+    #[cfg(test)]
+    Test(mpsc::Receiver<Message>),
 }
 
 /// Result of polling a pending LSP request without blocking.
@@ -108,7 +115,7 @@ impl PendingLspRequest {
     fn new(
         kind: PendingLspRequestKind,
         cursor: Cursor,
-        receiver: mpsc::Receiver<Message>,
+        response: urvim_lsp::runtime::session::PendingLspResponse,
         snapshot_text: PieceTable,
         position_encoding: PositionEncodingKind,
     ) -> Self {
@@ -117,7 +124,7 @@ impl PendingLspRequest {
             cursor,
             started_at: Instant::now(),
             timeout: Duration::from_secs(10),
-            receiver,
+            response: PendingLspResponseSource::Live(response),
             snapshot_text,
             position_encoding,
         }
@@ -141,24 +148,46 @@ impl PendingLspRequest {
             cursor,
             started_at: Instant::now(),
             timeout: Duration::from_secs(10),
-            receiver,
+            response: PendingLspResponseSource::Test(receiver),
             snapshot_text: PieceTable::from_text(lines),
             position_encoding: PositionEncodingKind::UTF16,
         }
     }
 
+    /// Sets the maximum time to wait for a server response.
+    pub fn set_timeout(&mut self, timeout: Duration) {
+        self.timeout = timeout;
+    }
+
     /// Polls this request once and returns immediately.
     pub fn poll(self) -> PendingLspPoll {
         if self.started_at.elapsed() >= self.timeout {
+            self.cancel().ok();
             return PendingLspPoll::Ready(Err("timed out waiting for LSP response".to_string()));
         }
 
-        match self.receiver.try_recv() {
+        let received = match &self.response {
+            PendingLspResponseSource::Live(response) => response.receiver.try_recv(),
+            #[cfg(test)]
+            PendingLspResponseSource::Test(receiver) => receiver.try_recv(),
+        };
+        match received {
             Ok(message) => PendingLspPoll::Ready(self.resolve_message(message)),
             Err(mpsc::TryRecvError::Empty) => PendingLspPoll::Pending(self),
             Err(mpsc::TryRecvError::Disconnected) => PendingLspPoll::Ready(Err(
                 "LSP response channel disconnected before a response was received".to_string(),
             )),
+        }
+    }
+
+    /// Cancels this request and notifies its language server.
+    pub fn cancel(&self) -> Result<bool, String> {
+        match &self.response {
+            PendingLspResponseSource::Live(response) => {
+                response.cancel().map_err(|error| error.to_string())
+            }
+            #[cfg(test)]
+            PendingLspResponseSource::Test(_) => Ok(true),
         }
     }
 
@@ -709,6 +738,7 @@ impl LspRuntime {
         self.sync();
         self.runtime
             .send_inlay_hint_request(buffer_id, snapshot, start_line, end_line)
+            .map(|response| response.receiver)
     }
 
     // -----------------------------------------------------------------------
@@ -936,7 +966,7 @@ fn resolve_definition_value(result: serde_json::Value) -> Result<serde_json::Val
         "target": {
             "path": path,
             "buffer_id": buffer_id.get(),
-            "line": cursor.line,
+            "row": cursor.line,
             "col": cursor.col,
         }
     }))
@@ -969,17 +999,17 @@ fn completion_candidate_json(
         "symbol": candidate.symbol,
         "kind": candidate.kind.and_then(|kind| serde_json::to_value(kind).ok()),
         "detail": candidate.detail,
-        "labelDetail": candidate.label_detail,
-        "labelDescription": candidate.label_description,
-        "insertFormat": candidate.insert_format.map(|format| match format {
+        "label_detail": candidate.label_detail,
+        "label_description": candidate.label_description,
+        "insert_format": candidate.insert_format.map(|format| match format {
             crate::ui::completion::CompletionInsertFormat::PlainText => "plainText",
             crate::ui::completion::CompletionInsertFormat::Snippet => "snippet",
         }),
-        "additionalTextEdits": candidate.additional_text_edits.into_iter().map(|edit| json!({
+        "additional_text_edits": candidate.additional_text_edits.into_iter().map(|edit| json!({
             "range": text_range_json(edit.range),
             "text": edit.text,
         })).collect::<Vec<_>>(),
-        "lspCompletionItem": candidate.lsp_completion_item,
+        "lsp_completion_item": candidate.lsp_completion_item,
         "deprecated": candidate.deprecated,
         "preselect": candidate.preselect,
     })
@@ -987,8 +1017,8 @@ fn completion_candidate_json(
 
 fn text_range_json(range: crate::buffer::TextObjectRange) -> serde_json::Value {
     json!({
-        "start": { "line": range.start.line, "col": range.start.col },
-        "end": { "line": range.end.line, "col": range.end.col },
+        "start": { "row": range.start.line, "col": range.start.col },
+        "end": { "row": range.end.line, "col": range.end.col },
     })
 }
 
@@ -1205,6 +1235,14 @@ mod tests {
         };
 
         assert_eq!(result["contents"], "hover docs");
+    }
+
+    #[test]
+    fn pending_test_request_can_be_cancelled() {
+        let (_tx, rx) = mpsc::channel();
+        let pending = PendingLspRequest::new_for_test(rx, "hover", "text", Cursor::new(0, 0));
+
+        assert!(pending.cancel().expect("test request should cancel"));
     }
 
     #[test]

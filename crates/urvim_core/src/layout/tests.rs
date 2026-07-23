@@ -3427,6 +3427,46 @@ fn closing_whole_pane_closes_buffers_before_pane() {
 }
 
 #[test]
+fn moving_tab_emits_move_without_open_or_close_lifecycle_events() {
+    let _lock = globals::buffer_pool_test_lock();
+    globals::with_buffer_pool(|pool| *pool = crate::buffer::BufferPool::new());
+    let mut layout = Layout::new(EditorPane::from_buffers(vec![
+        Buffer::from_str("first"),
+        Buffer::from_str("second"),
+    ]));
+    let moved = layout.tab_snapshots(None).unwrap()[1];
+    assert!(layout.dispatch_intent(&Intent::Command(Command::SplitVertical)));
+    let target_pane_id = layout.last_editor_pane_id();
+    drain_editor_events();
+
+    layout.move_tab(moved.id, target_pane_id).unwrap();
+
+    let events = drain_editor_events();
+    assert!(events.iter().any(|event| matches!(
+        event,
+        EditorEvent::TabMoved {
+            previous_pane_id,
+            pane_id,
+            tab_id,
+            buffer_id,
+        } if *previous_pane_id == moved.pane_id
+            && *pane_id == target_pane_id
+            && *tab_id == moved.id
+            && *buffer_id == moved.buffer_id
+    )));
+    assert!(!events.iter().any(|event| matches!(
+        event,
+        EditorEvent::TabOpened { tab_id, .. } | EditorEvent::TabClosed { tab_id, .. }
+            if *tab_id == moved.id
+    )));
+    assert!(!events.iter().any(|event| matches!(
+        event,
+        EditorEvent::BufferOpened { snapshot } | EditorEvent::BufferClosed { snapshot }
+            if snapshot.buffer_id == moved.buffer_id
+    )));
+}
+
+#[test]
 fn closing_active_tab_snapshots_buffer_before_activation_changes() {
     let mut layout =
         layout_with_buffers(vec![Buffer::from_str("first"), Buffer::from_str("second")]);

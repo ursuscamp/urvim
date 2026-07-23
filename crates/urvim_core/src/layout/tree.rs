@@ -398,7 +398,7 @@ impl Layout {
         }
     }
 
-    fn ensure_editor_pane_has_tab(&mut self) {
+    pub(super) fn ensure_editor_pane_has_tab(&mut self) {
         let ids = self.editor_pane_ids();
         if ids.is_empty() {
             return;

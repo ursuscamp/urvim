@@ -172,6 +172,7 @@ bg = "bg"
             PluginConfigEntry {
                 enabled: true,
                 path,
+                config: BTreeMap::new(),
             },
         )])
     }
@@ -207,6 +208,7 @@ bg = "bg"
                 PluginConfigEntry {
                     enabled: true,
                     path: first.clone(),
+                    config: BTreeMap::new(),
                 },
             ),
             (
@@ -214,6 +216,7 @@ bg = "bg"
                 PluginConfigEntry {
                     enabled: true,
                     path: second.clone(),
+                    config: BTreeMap::new(),
                 },
             ),
         ]);

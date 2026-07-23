@@ -15,6 +15,7 @@ impl UndoState {
                 markers,
             }],
             position: 0,
+            revision: 0,
         }
     }
 
@@ -50,6 +51,7 @@ impl UndoState {
             markers,
         });
         self.position = self.history.len() - 1;
+        self.revision = self.revision.wrapping_add(1);
     }
 
     fn update_cursor(&mut self, cursor: Cursor) {
@@ -76,6 +78,7 @@ impl UndoState {
         }
 
         self.position -= 1;
+        self.revision = self.revision.wrapping_add(1);
         let snapshot = self.history.get(self.position)?;
         Some((
             snapshot.lines.clone(),
@@ -91,6 +94,7 @@ impl UndoState {
         }
 
         self.position += 1;
+        self.revision = self.revision.wrapping_add(1);
         let snapshot = self.history.get(self.position)?;
         Some((
             snapshot.lines.clone(),
@@ -112,6 +116,48 @@ impl UndoState {
         self.history
             .get(self.position)
             .is_some_and(|active| active.lines == *lines)
+    }
+
+    fn checkpoint(&self) -> UndoCheckpoint {
+        let active = &self.history[self.position];
+        UndoCheckpoint {
+            position: self.position,
+            revision: self.revision,
+            lines: active.lines.clone(),
+        }
+    }
+
+    fn squash_since(&mut self, checkpoint: UndoCheckpoint) -> Option<PieceTable> {
+        let Some(base) = self.history.get(checkpoint.position) else {
+            return None;
+        };
+        if base.lines != checkpoint.lines || self.position < checkpoint.position {
+            return None;
+        }
+        if self.revision == checkpoint.revision {
+            return Some(base.lines.clone());
+        }
+
+        let base_lines = base.lines.clone();
+        let mut final_snapshot = self.history[self.position].clone();
+        let net_no_op = piece_tables_have_equal_text(&base_lines, &final_snapshot.lines);
+        self.history.truncate(checkpoint.position + 1);
+        self.position = checkpoint.position;
+        if net_no_op {
+            final_snapshot.lines = base_lines;
+            self.history[self.position] = final_snapshot;
+        } else {
+            self.push_snapshot(
+                final_snapshot.lines,
+                final_snapshot.cursor,
+                final_snapshot.buffer_cache,
+                final_snapshot.markers,
+            );
+        }
+        self.revision = self.revision.wrapping_add(1);
+        self.history
+            .get(self.position)
+            .map(|snapshot| snapshot.lines.clone())
     }
 }
 
@@ -150,6 +196,24 @@ impl Buffer {
             .unwrap_or_default()
     }
 
+    /// Captures the current undo head for a future grouped edit.
+    pub fn undo_checkpoint(&self) -> UndoCheckpoint {
+        self.undo_state.checkpoint()
+    }
+
+    /// Combines snapshots created after `checkpoint` into one undo entry.
+    ///
+    /// Returns `false` when the checkpoint no longer belongs to the active
+    /// history branch.
+    pub fn squash_undo_history(&mut self, checkpoint: UndoCheckpoint) -> bool {
+        let Some(lines) = self.undo_state.squash_since(checkpoint) else {
+            return false;
+        };
+        self.lines = lines;
+        true
+    }
+
+    /// Restores the previous undo snapshot and returns its stored cursor.
     pub fn undo(&mut self) -> Option<Cursor> {
         match self.undo_state.undo() {
             Some((lines, buffer_cache, markers, cursor)) => {
@@ -167,6 +231,7 @@ impl Buffer {
         }
     }
 
+    /// Restores the next redo snapshot and returns its stored cursor.
     pub fn redo(&mut self) -> Option<Cursor> {
         match self.undo_state.redo() {
             Some((lines, buffer_cache, markers, cursor)) => {
@@ -184,10 +249,12 @@ impl Buffer {
         }
     }
 
+    /// Returns whether an older undo snapshot is available.
     pub fn can_undo(&self) -> bool {
         self.undo_state.can_undo()
     }
 
+    /// Returns whether a newer redo snapshot is available.
     pub fn can_redo(&self) -> bool {
         self.undo_state.can_redo()
     }
@@ -195,5 +262,89 @@ impl Buffer {
     /// Returns true when the current buffer text matches the active undo snapshot.
     pub fn current_text_matches_undo_head(&self) -> bool {
         self.undo_state.current_snapshot_matches(&self.lines)
+    }
+}
+
+fn piece_tables_have_equal_text(left: &PieceTable, right: &PieceTable) -> bool {
+    if left == right {
+        return true;
+    }
+    if left.len() != right.len() {
+        return false;
+    }
+    left.text()
+        .chunks()
+        .flat_map(str::bytes)
+        .eq(right.text().chunks().flat_map(str::bytes))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn squash_undo_history_groups_multiple_snapshots() {
+        let mut buffer = Buffer::from_str("one");
+        let checkpoint = buffer.undo_checkpoint();
+
+        buffer.insert_text(Cursor::new(0, 3), " two");
+        buffer.push_snapshot(Cursor::new(0, 7));
+        buffer.insert_text(Cursor::new(0, 7), " three");
+        buffer.push_snapshot(Cursor::new(0, 13));
+
+        assert!(buffer.squash_undo_history(checkpoint));
+        assert_eq!(buffer.undo(), Some(Cursor::new(0, 0)));
+        assert_eq!(buffer.as_str(), "one");
+        assert!(!buffer.can_undo());
+        assert_eq!(buffer.redo(), Some(Cursor::new(0, 13)));
+        assert_eq!(buffer.as_str(), "one two three");
+    }
+
+    #[test]
+    fn squash_undo_history_omits_net_no_op() {
+        let mut buffer = Buffer::from_str("one");
+        let checkpoint = buffer.undo_checkpoint();
+
+        buffer.insert_text(Cursor::new(0, 3), " two");
+        buffer.push_snapshot(Cursor::new(0, 7));
+        buffer.remove(Cursor::new(0, 3), Cursor::new(0, 7));
+        buffer.push_snapshot(Cursor::new(0, 3));
+
+        assert!(buffer.squash_undo_history(checkpoint));
+        assert_eq!(buffer.as_str(), "one");
+        assert!(!buffer.can_undo());
+    }
+
+    #[test]
+    fn squash_undo_history_without_edits_preserves_redo() {
+        let mut buffer = Buffer::from_str("one");
+        buffer.insert_text(Cursor::new(0, 3), " two");
+        buffer.push_snapshot(Cursor::new(0, 7));
+        buffer.undo().expect("first edit should be undoable");
+        let checkpoint = buffer.undo_checkpoint();
+
+        assert!(buffer.squash_undo_history(checkpoint));
+        assert!(buffer.can_redo());
+        buffer.redo().expect("redo branch should remain available");
+        assert_eq!(buffer.as_str(), "one two");
+    }
+
+    #[test]
+    fn squash_undo_history_replaces_the_redo_branch() {
+        let mut buffer = Buffer::from_str("one");
+        buffer.insert_text(Cursor::new(0, 3), " two");
+        buffer.push_snapshot(Cursor::new(0, 7));
+        buffer.undo().expect("first edit should be undoable");
+        let checkpoint = buffer.undo_checkpoint();
+
+        buffer.insert_text(Cursor::new(0, 3), " changed");
+        buffer.push_snapshot(Cursor::new(0, 11));
+
+        assert!(buffer.squash_undo_history(checkpoint));
+        assert!(!buffer.can_redo());
+        buffer.undo().expect("grouped edit should be undoable");
+        assert_eq!(buffer.as_str(), "one");
+        buffer.redo().expect("grouped edit should be redoable");
+        assert_eq!(buffer.as_str(), "one changed");
     }
 }
