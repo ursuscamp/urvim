@@ -18,6 +18,7 @@ mod lsp_rename;
 mod node;
 mod picker;
 mod render;
+mod search;
 mod session;
 mod tabs;
 mod tree;
@@ -149,6 +150,7 @@ pub struct Layout {
     modal_inherited_keymap: InheritedKeymap,
     modal_key_sequence: ModalKeySequence,
     insert_session: Option<InsertSession>,
+    search: search::SearchState,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -293,6 +295,9 @@ impl Layout {
             modal_inherited_keymap: InheritedKeymap::new(NormalMode::keymap()),
             modal_key_sequence: ModalKeySequence::None,
             insert_session: None,
+            search: search::SearchState::new(
+                globals::with_config(|config| config.search).unwrap_or_default(),
+            ),
         };
         layout.emit_initial_lifecycle_events();
         layout
@@ -304,10 +309,16 @@ impl Layout {
         key: &urvim_terminal::Key,
     ) -> EditorKeyHandlingResult {
         let previous_key_guide = self.key_guide.rendered_snapshot().cloned();
-        let result = self
+        let clear_search = key.code == urvim_terminal::KeyCode::Esc
+            && self.active_tab_mode_kind() == ModeKind::Normal
+            && !self.active_buffer_view().search_query().is_empty();
+        let mut result = self
             .active_editor_pane_mut()
             .active_tab_mut()
             .handle_key(key);
+        if clear_search {
+            result = crate::editor::HandleKeyResult::Complete(Command::ClearSearch.into());
+        }
         let snapshot = self.active_editor_pane().active_tab().key_guide();
         let config = globals::with_config(|config| config.key_guide.clone()).unwrap_or_default();
         if config.enabled {
@@ -702,7 +713,10 @@ impl Layout {
 
     /// Returns the visual cursor for the focused pane, if any.
     pub fn visual_cursor(&self) -> Option<Position> {
-        if let Some(position) = self.dialogs.visual_cursor() {
+        if let Some(position) = self
+            .search_cursor()
+            .or_else(|| self.dialogs.visual_cursor())
+        {
             return Some(position);
         }
 
@@ -1177,6 +1191,7 @@ impl Layout {
 impl Layout {
     /// Closes all open dialogs and overlays.
     pub(super) fn close_all_dialogs(&mut self) {
+        self.close_search_ui();
         self.dialogs.close_all();
         self.clear_modal_inherited_keys();
     }
@@ -1210,6 +1225,24 @@ impl Layout {
             }
             Command::OpenCommandLine => {
                 self.open_command_line();
+                true
+            }
+            Command::Search {
+                query,
+                replacement,
+                options,
+            } => {
+                self.execute_search(query.clone(), replacement.clone(), *options);
+                true
+            }
+            Command::OpenSearchUi(request) => {
+                self.open_search_ui(request.clone());
+                true
+            }
+            Command::SearchNext => self.select_next_search_match(),
+            Command::SearchPrevious => self.select_previous_search_match(),
+            Command::ClearSearch => {
+                self.active_buffer_view_mut().clear_search();
                 true
             }
             Command::OpenUnnamedBuffer => {
@@ -1645,7 +1678,9 @@ impl Layout {
                 }
             }
             UiEvent::Key(key) => {
-                if self.confirmation_box_is_open() {
+                if self.search_box_is_open() || self.replace_confirmation_is_open() {
+                    self.with_event_transition(|layout| layout.handle_search_event(event))
+                } else if self.confirmation_box_is_open() {
                     self.handle_confirmation_box_event(event)
                 } else if self.input_box_is_open() {
                     self.handle_input_box_event(event)
@@ -1660,7 +1695,9 @@ impl Layout {
                 }
             }
             UiEvent::Paste(text) => {
-                if self.confirmation_box_is_open() {
+                if self.search_box_is_open() || self.replace_confirmation_is_open() {
+                    self.with_event_transition(|layout| layout.handle_search_event(event))
+                } else if self.confirmation_box_is_open() {
                     self.handle_confirmation_box_event(event)
                 } else if self.input_box_is_open() {
                     self.handle_input_box_event(event)

@@ -65,6 +65,7 @@ pub use marker::{
     RangeAnchor, VirtualText, VirtualTextKind,
 };
 pub use pool::{BufferId, BufferPool};
+pub use search::{SearchDirection, SearchOptions, SearchPattern};
 pub use syntax::{
     BufferCache, BufferCacheRefreshResult, IndentScope, IndentScopeId, IndentScopeRefreshJob,
     IndentScopeRefreshResult, SyntaxFoldRegion, SyntaxRefreshJob, SyntaxRefreshResult, SyntaxSpan,

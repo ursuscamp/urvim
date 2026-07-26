@@ -40,6 +40,8 @@ bg = "bg"
 "ui.status_bar" = { fg = "fg", bg = "surface0", bold = true }
 "ui.status_bar.modified_marker" = { fg = "orange", bold = true }
 "ui.selection" = { bg = "selection" }
+"ui.search.match" = { reverse = true }
+"ui.search.current" = { reverse = true, bold = true }
 "ui.window.active_line" = { bg = "surface0", overlay = true }
 "ui.tab.active" = { fg = "bg", bg = "accent", bold = true }
 "ui.tab.inactive" = { fg = "fg", bg = "surface0" }

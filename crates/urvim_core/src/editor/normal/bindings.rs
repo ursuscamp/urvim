@@ -1,9 +1,9 @@
-use crate::buffer::Boundary;
+use crate::buffer::{Boundary, SearchDirection};
 use crate::editor::{
     BoundaryMotion, EditorAction, EditorOperation, LinewiseMotion, ModeKind, Operator,
     OperatorTarget, TrieKeymap,
 };
-use crate::ui::Command;
+use crate::ui::{Command, SearchUiRequest};
 
 #[derive(Clone, Copy)]
 struct OperatorSequenceSpec {
@@ -251,6 +251,16 @@ fn register_misc_bindings(trie_keymap: &mut TrieKeymap) {
     trie_keymap.insert_str("U", EditorAction::new(EditorOperation::Redo));
     trie_keymap.insert_str(".", EditorAction::new(EditorOperation::RepeatLastChange));
     trie_keymap.insert_str(":", Command::OpenCommandLine);
+    trie_keymap.insert_str(
+        "/",
+        Command::OpenSearchUi(SearchUiRequest::with_direction(SearchDirection::Forward)),
+    );
+    trie_keymap.insert_str(
+        "?",
+        Command::OpenSearchUi(SearchUiRequest::with_direction(SearchDirection::Reverse)),
+    );
+    trie_keymap.insert_str("n", Command::SearchNext);
+    trie_keymap.insert_str("N", Command::SearchPrevious);
     trie_keymap.insert_str("<Left>", EditorAction::new(EditorOperation::MoveLeft));
     trie_keymap.insert_str("<Down>", EditorAction::new(EditorOperation::MoveDown));
     trie_keymap.insert_str("<Up>", EditorAction::new(EditorOperation::MoveUp));

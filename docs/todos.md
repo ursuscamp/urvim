@@ -18,3 +18,6 @@ This is a list, in no particular order, of things that need to be addressed whic
 # Bugs
 
 # Refactors
+
+- add config options for defaults
+- live search should be an option as well

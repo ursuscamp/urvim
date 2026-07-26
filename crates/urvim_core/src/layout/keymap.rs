@@ -19,6 +19,8 @@ impl Layout {
     pub(super) fn overlay_modal_is_open(&self) -> bool {
         self.confirmation_box_is_open()
             || self.input_box_is_open()
+            || self.search_box_is_open()
+            || self.replace_confirmation_is_open()
             || self.lsp_rename_prompt_is_open()
     }
 

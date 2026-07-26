@@ -384,9 +384,26 @@ followed by visible overlays in creation order. Cycling wraps at both ends.
 ## App
 
 - `app command-line`
+- `app search <query>* [replacement]* [dir=fwd|rev] [case=true|false] [re=true|false]`
+- `app search-ui [query]* [replacement]* [replace=true|false] [dir=fwd|rev] [case=true|false] [re=true|false]`
+- `app search-next`
+- `app search-previous`
+- `app search-clear`
 - `app completion`
 - `app try-quit`
 - `app quit`
+
+`app search` commits a search immediately without opening the Search and Replace form. Its query is required; an optional replacement starts per-match confirmation. Omitted options default to forward, case-sensitive, literal matching. Invalid regular expressions are rejected.
+
+`app search-ui` opens the form. Every argument is optional, and omitted values use the form's retained query, replacement, Replace mode, direction, case-sensitivity, and regex settings. Supplied values prefill or override those retained values for the session. Supplying replacement text enables Replace mode unless `replace=false` is also provided. Query and replacement can use their named forms when only one field needs overriding, for example `app search-ui replacement=done re=true`.
+
+Examples:
+
+- `app search needle`
+- `app search '(\w+):(\w+)' '$2, $1' re=true`
+- `app search-ui dir=rev`
+- `app search-ui replace=true`
+- `app search-ui query='\bword\b' re=true case=false`
 
 ## Quoted Paths
 

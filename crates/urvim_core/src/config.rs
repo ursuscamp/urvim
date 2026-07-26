@@ -301,6 +301,39 @@ pub struct PartialKeyGuideConfig {
     pub delay_ms: Option<u64>,
 }
 
+/// Default options used when the Search UI is first opened.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SearchConfig {
+    /// Whether searches initially match letter case.
+    pub case_sensitive: bool,
+    /// Whether searches initially interpret queries as regular expressions.
+    pub regex: bool,
+    /// Whether the replacement input is initially enabled.
+    pub replace: bool,
+}
+
+impl Default for SearchConfig {
+    fn default() -> Self {
+        Self {
+            case_sensitive: true,
+            regex: false,
+            replace: false,
+        }
+    }
+}
+
+/// TOML-backed default options for the Search UI.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct PartialSearchConfig {
+    /// Whether searches should initially match letter case.
+    pub case_sensitive: Option<bool>,
+    /// Whether searches should initially interpret queries as regular expressions.
+    pub regex: Option<bool>,
+    /// Whether the replacement input should initially be enabled.
+    pub replace: Option<bool>,
+}
+
 /// The TOML-backed config table for a single LSP server.
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -332,6 +365,8 @@ pub struct Config {
     pub key_guide: KeyGuideConfig,
     /// The resolved default register selectors for yank, delete, and change.
     pub default_registers: DefaultRegisters,
+    /// Default options used to initialize the Search UI.
+    pub search: SearchConfig,
     /// Whether syntax highlighting is enabled for rendered buffers.
     pub syntax: bool,
     /// Whether insert mode should auto-close supported bracket and quote pairs.
@@ -386,6 +421,8 @@ pub struct PartialConfig {
     pub key_guide: Option<PartialKeyGuideConfig>,
     /// The default register table stored in the config file.
     pub default_registers: Option<PartialDefaultRegisters>,
+    /// Default Search UI options stored in the config file.
+    pub search: Option<PartialSearchConfig>,
     /// Whether syntax highlighting is enabled in the config file.
     pub syntax: Option<bool>,
     /// Whether insert mode should auto-close supported bracket and quote pairs.
@@ -510,6 +547,14 @@ impl Config {
             .and_then(|config| config.default_registers.as_ref())
             .map(resolve_default_registers)
             .unwrap_or_default();
+        let search = file
+            .and_then(|config| config.search.as_ref())
+            .map(|search| SearchConfig {
+                case_sensitive: search.case_sensitive.unwrap_or(true),
+                regex: search.regex.unwrap_or(false),
+                replace: search.replace.unwrap_or(false),
+            })
+            .unwrap_or_default();
         let syntax = cli_syntax
             .or_else(|| file.and_then(|config| config.syntax))
             .unwrap_or(true);
@@ -569,6 +614,7 @@ impl Config {
             keymaps,
             key_guide,
             default_registers,
+            search,
             syntax,
             auto_close_pairs,
             active_line,
@@ -648,6 +694,7 @@ impl Default for Config {
             keymaps: KeymapsConfig::default(),
             key_guide: KeyGuideConfig::default(),
             default_registers: DefaultRegisters::default(),
+            search: SearchConfig::default(),
             syntax: true,
             auto_close_pairs: true,
             active_line: false,
@@ -1556,6 +1603,40 @@ mod tests {
                 "zls".to_string(),
             ])
         );
+    }
+
+    #[test]
+    fn resolve_search_defaults_and_partial_overrides() {
+        assert_eq!(Config::default().search, SearchConfig::default());
+
+        let file: PartialConfig = toml::from_str(
+            r#"
+            [search]
+            regex = true
+            replace = true
+            "#,
+        )
+        .expect("search config should parse");
+        assert_eq!(
+            Config::resolve(Some(&file), None, None).search,
+            SearchConfig {
+                case_sensitive: true,
+                regex: true,
+                replace: true,
+            }
+        );
+    }
+
+    #[test]
+    fn search_config_rejects_unknown_fields() {
+        let result = toml::from_str::<PartialConfig>(
+            r#"
+            [search]
+            unknown = true
+            "#,
+        );
+
+        assert!(result.is_err());
     }
 
     #[test]

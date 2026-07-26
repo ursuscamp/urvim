@@ -36,6 +36,8 @@ bg = "bg0"
 "ui.status_bar" = { fg = "fg1", bg = "bg2", bold = true }
 "ui.status_bar.modified_marker" = { fg = "orange", bold = true }
 "ui.selection" = { bg = "bg3" }
+"ui.search.match" = { reverse = true }
+"ui.search.current" = { reverse = true, bold = true }
 "ui.window.active_line" = { bg = "bg1", overlay = true }
 "ui.tab.active" = { fg = "bg0", bg = "green", bold = true }
 "ui.tab.inactive" = { fg = "fg4", bg = "bg1" }

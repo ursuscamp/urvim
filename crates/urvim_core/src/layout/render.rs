@@ -170,6 +170,7 @@ impl Layout {
         self.render_command_line_overlay(screen, origin, size);
         self.render_lsp_rename_overlay(screen, origin, size);
         self.render_input_box_overlay(screen, origin, size);
+        self.render_search(screen, UiRect::new(origin, size));
         self.render_confirmation_box_overlay(screen, origin, size);
 
         if self.inlay_hint_request_pending() {

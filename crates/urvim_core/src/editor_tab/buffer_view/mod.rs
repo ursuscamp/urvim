@@ -5,7 +5,7 @@ mod session;
 mod view;
 mod wrap;
 
-use crate::buffer::Cursor;
+use crate::buffer::{Cursor, SearchOptions};
 use crate::ui::geometry::Position;
 use std::collections::BTreeSet;
 use std::time::Instant;
@@ -20,6 +20,9 @@ pub struct BufferView {
     remembered_visual_col: Option<usize>,
     visual_selection: Option<VisualSelection>,
     yank_flash: Option<YankFlash>,
+    search_query: String,
+    search_options: SearchOptions,
+    current_search_match: Option<Cursor>,
     folded_lines: BTreeSet<usize>,
     rendered_visual_generation: u64,
 }

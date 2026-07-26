@@ -44,6 +44,7 @@ impl Layout {
             ),
             modal_key_sequence: super::ModalKeySequence::None,
             insert_session: None,
+            search: super::search::SearchState::default(),
         };
         layout.next_pane_id = layout.max_pane_id().map(|id| id.0 + 1).unwrap_or(0);
         if layout.root.is_some() {

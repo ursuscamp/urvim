@@ -121,6 +121,21 @@ Diff hunk motions hop across the current buffer's unstaged Git hunks.
 | `cgg`                    | Change linewise from the current line to line 1 (or to line N with a count)        |
 | `cG`                     | Change linewise from the current line to the last line (or to line N with a count) |
 
+## Search and Replace
+
+- Press `/` in normal mode to open the search and replace form with forward search selected.
+- Press `?` to open the form with reverse search selected.
+- Enter a query in **Search**. Every match in the active buffer is highlighted live; queries are literal by default.
+- Press Ctrl-R in the form to toggle reverse search, Ctrl-C to toggle case sensitivity, Ctrl-E to toggle regular-expression search, and Ctrl-P to toggle Replace mode. The toggles are displayed below the inputs but are not part of the Tab order. Query, replacement, Replace mode, direction, case sensitivity, and regex mode persist after submission.
+- Regex matching is line-oriented and supports zero-width matches such as `^`, `$`, and `\b`. An invalid expression shows the Search prompt in the error style and cannot be committed.
+- When Replace mode is off, only the Search input is shown and Tab remains on it. When Replace mode is on, the Replace input is shown and Tab or Shift-Tab moves between both inputs.
+- Press Enter anywhere in the form to submit it. Replace mode off commits a search; Replace mode on begins confirming replacements. An empty replacement deletes each accepted match. In regex mode, replacements support `regex` crate capture references such as `$1`, `${name}`, and `$0`; use `$$` for a literal dollar sign.
+- Press Esc while editing the form to restore the previously committed search, options, and cursor.
+- Press `n` to select the next match in the committed search direction and `N` to select a match in the opposite direction. Navigation wraps at both ends of the buffer.
+- Press Esc in normal mode to clear the active search and remove its highlights.
+- During replacement confirmation, Enter or `r` replaces the current match, `s` or `n` skips it, `a` replaces all remaining matches, and Esc stops while preserving completed replacements. Confirmation follows the selected search direction and wraps around the buffer.
+- One confirmation session is recorded as one undo step.
+
 ## Visual Mode
 
 urvim supports a simple character-wise visual mode.

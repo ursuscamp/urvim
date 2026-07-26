@@ -27,6 +27,8 @@ bg = "bg"
 "ui.status_bar" = { fg = "fg", bg = "surface", bold = true }
 "ui.status_bar.modified_marker" = { fg = "orange", bold = true }
 "ui.selection" = { bg = "selection" }
+"ui.search.match" = { reverse = true }
+"ui.search.current" = { reverse = true, bold = true }
 "ui.window.active_line" = { bg = "surface", overlay = true }
 "ui.tab.active" = { fg = "black", bg = "blue", bold = true }
 "ui.tab.inactive" = { fg = "fg", bg = "surface" }

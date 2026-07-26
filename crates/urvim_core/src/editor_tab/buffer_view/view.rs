@@ -2,7 +2,7 @@ use super::fold;
 use super::wrap::WrappedLineSegment;
 use super::{BufferView, VisualSelection, VisualSelectionKind, YankFlash, YankFlashSelection};
 use crate::buffer::BufferId;
-use crate::buffer::{Buffer, Cursor};
+use crate::buffer::{Buffer, Cursor, SearchOptions};
 use crate::buffer::{
     Highlight, Marker, TextRef, VirtualText, configured_tab_width, display_grapheme_width,
     display_width_at,
@@ -45,6 +45,9 @@ impl BufferView {
             remembered_visual_col: None,
             visual_selection: None,
             yank_flash: None,
+            search_query: String::new(),
+            search_options: SearchOptions::default(),
+            current_search_match: None,
             folded_lines: BTreeSet::new(),
             rendered_visual_generation: 0,
         }
@@ -60,9 +63,54 @@ impl BufferView {
             remembered_visual_col: None,
             visual_selection: None,
             yank_flash: None,
+            search_query: String::new(),
+            search_options: SearchOptions::default(),
+            current_search_match: None,
             folded_lines: BTreeSet::new(),
             rendered_visual_generation: 0,
         }
+    }
+
+    /// Returns the active search query.
+    pub fn search_query(&self) -> &str {
+        self.search_query.as_str()
+    }
+
+    /// Returns the options used by the active search.
+    pub fn search_options(&self) -> SearchOptions {
+        self.search_options
+    }
+
+    /// Returns the start of the currently selected search match.
+    pub fn current_search_match(&self) -> Option<Cursor> {
+        self.current_search_match
+    }
+
+    /// Sets the search query, options, and current match.
+    pub fn set_search(
+        &mut self,
+        query: impl Into<String>,
+        options: SearchOptions,
+        current: Option<Cursor>,
+    ) {
+        self.search_query = query.into();
+        self.search_options = options;
+        self.current_search_match = current;
+    }
+
+    /// Clears the active search.
+    pub fn clear_search(&mut self) {
+        self.search_query.clear();
+        self.current_search_match = None;
+    }
+
+    /// Returns the current matches from the latest buffer text.
+    pub fn search_matches(&self) -> Vec<crate::buffer::TextObjectRange> {
+        self.with_buffer(|buffer| {
+            buffer.find_search_matches(self.search_query.as_str(), self.search_options)
+        })
+        .and_then(Result::ok)
+        .unwrap_or_default()
     }
 
     /// Returns the buffer ID owned by this view, if it is pooled.
@@ -812,6 +860,8 @@ impl BufferView {
             }
         }
 
+        self.apply_search_overlays(&mut render_data);
+
         if let Some(selection_style) = selection_style {
             self.apply_visual_selection(&mut render_data, selection_style);
             self.apply_yank_flash(&mut render_data, selection_style);
@@ -820,6 +870,30 @@ impl BufferView {
         self.apply_diagnostic_overlays(&mut render_data);
 
         render_data
+    }
+
+    fn apply_search_overlays(&self, render_data: &mut RenderData) {
+        if self.search_query.is_empty() {
+            return;
+        }
+        let (match_style, current_style) = globals::with_active_theme(|theme| {
+            (
+                theme.map(|theme| theme.resolve_name_with_default("ui.search.match")),
+                theme.map(|theme| theme.resolve_name_with_default("ui.search.current")),
+            )
+        });
+        let Some(match_style) = match_style else {
+            return;
+        };
+        let current_style = current_style.unwrap_or(match_style);
+        for range in self.search_matches() {
+            let style = if self.current_search_match == Some(range.start) {
+                current_style
+            } else {
+                match_style
+            };
+            render_data.overlay_range(range.start, range.end, style);
+        }
     }
 
     fn apply_visual_selection(&self, render_data: &mut RenderData, selection_style: Style) {

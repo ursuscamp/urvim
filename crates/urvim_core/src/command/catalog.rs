@@ -1,11 +1,11 @@
 use super::{CommandError, CommandInvocation};
-use crate::buffer::{Boundary, BufferId};
+use crate::buffer::{Boundary, BufferId, SearchDirection, SearchOptions, SearchPattern};
 use crate::editor::{
     BoundaryMotion, DelimiterFamily, EditorAction, EditorOperation, LinewiseMotion, ModeKind,
     Operator, OperatorTarget, QuoteKind, TextObject,
 };
 use crate::register::RegisterName;
-use crate::ui::{Command, Intent};
+use crate::ui::{Command, Intent, SearchUiRequest};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
@@ -815,6 +815,11 @@ fn resolve_app(tokens: &[String]) -> Result<Intent, CommandError> {
 
     let command = match subcommand {
         "command-line" => Command::OpenCommandLine,
+        "search" => return resolve_search(&tokens[1..]),
+        "search-ui" => return resolve_search_ui(&tokens[1..]),
+        "search-next" => Command::SearchNext,
+        "search-previous" => Command::SearchPrevious,
+        "search-clear" => Command::ClearSearch,
         "completion" => Command::OpenCompletion,
         "quit" => Command::Quit,
         "try-quit" => Command::TryQuit,
@@ -826,6 +831,58 @@ fn resolve_app(tokens: &[String]) -> Result<Intent, CommandError> {
     }
 
     Ok(Intent::Command(command))
+}
+
+fn resolve_search(tokens: &[String]) -> Result<Intent, CommandError> {
+    let mut args = ArgCursor::from_tokens("app search", tokens)?;
+    let query = args.require_string("query")?;
+    let replacement = args.take_string("replacement")?;
+    let direction = args
+        .take_named("dir")
+        .map(|value| parse_search_direction("app search", "dir", &value))
+        .transpose()?
+        .unwrap_or(SearchDirection::Forward);
+    let case_sensitive = args.take_bool("case")?.unwrap_or(true);
+    let regex = args.take_bool("re")?.unwrap_or(false);
+    args.finish()?;
+    let options = SearchOptions::new(direction, case_sensitive, regex);
+    if SearchPattern::compile(&query, options).is_err() {
+        return Err(CommandError::InvalidArgument {
+            command: "app search".to_string(),
+            name: "query".to_string(),
+            value: query,
+            expected: "valid regular expression",
+        });
+    }
+    Ok(Intent::Command(Command::Search {
+        query,
+        replacement,
+        options,
+    }))
+}
+
+fn resolve_search_ui(tokens: &[String]) -> Result<Intent, CommandError> {
+    let mut args = ArgCursor::from_tokens("app search-ui", tokens)?;
+    let query = args.take_string("query")?;
+    let replacement = args.take_string("replacement")?;
+    let replace_enabled = args
+        .take_bool("replace")?
+        .or_else(|| replacement.as_ref().map(|_| true));
+    let direction = args
+        .take_named("dir")
+        .map(|value| parse_search_direction("app search-ui", "dir", &value))
+        .transpose()?;
+    let case_sensitive = args.take_bool("case")?;
+    let regex = args.take_bool("re")?;
+    args.finish()?;
+    Ok(Intent::Command(Command::OpenSearchUi(SearchUiRequest {
+        query,
+        replacement,
+        replace_enabled,
+        direction,
+        case_sensitive,
+        regex,
+    })))
 }
 
 fn action_intent(
@@ -1020,6 +1077,23 @@ fn parse_usize(command: &str, name: &str, value: &str) -> Result<usize, CommandE
         value: value.to_string(),
         expected: "positive integer",
     })
+}
+
+fn parse_search_direction(
+    command: &str,
+    name: &str,
+    value: &str,
+) -> Result<SearchDirection, CommandError> {
+    match value {
+        "fwd" => Ok(SearchDirection::Forward),
+        "rev" => Ok(SearchDirection::Reverse),
+        _ => Err(CommandError::InvalidArgument {
+            command: command.to_string(),
+            name: name.to_string(),
+            value: value.to_string(),
+            expected: "fwd or rev",
+        }),
+    }
 }
 
 fn parse_bool(command: &str, name: &str, value: &str) -> Result<bool, CommandError> {

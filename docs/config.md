@@ -23,7 +23,7 @@ Command-line flags override config file values.
 
 ## Current Schema
 
-The canonical config values are `theme`, `keymaps`, `key_guide`, `default_registers`, `syntax`, `todo_markers`, `aliases`, `scripts`, `plugins`, `auto_close_pairs`, `active_line`, `relative_number`, `indent_guides`, `auto_indent`, `completion_trigger`, `completion_sources`, `advanced_glyphs`, `inlay_hints`, `tab_insertion`, `tab_behavior`, `tab_width`, `scroll_margin`, `wrap_mode`, and `lsp`.
+The canonical config values are `theme`, `keymaps`, `key_guide`, `default_registers`, `search`, `syntax`, `todo_markers`, `aliases`, `scripts`, `plugins`, `auto_close_pairs`, `active_line`, `relative_number`, `indent_guides`, `auto_indent`, `completion_trigger`, `completion_sources`, `advanced_glyphs`, `inlay_hints`, `tab_insertion`, `tab_behavior`, `tab_width`, `scroll_margin`, `wrap_mode`, and `lsp`.
 
 ```toml
 theme = "Friday Night"
@@ -66,6 +66,11 @@ path = "~/src/urvim-local-tools"
 [key_guide]
 enabled = true
 delay_ms = 300
+
+[search]
+case_sensitive = true
+regex = false
+replace = false
 
 [keymaps.normal]
 "<Space>f" = { command = "pick file", desc = "Find file" }
@@ -128,6 +133,18 @@ Controls the passive guide shown for pending editor-mode key sequences.
 - `delay_ms`: delay before opening; `0` opens immediately
 - Scope: editor modes and their effective built-in, configured, and plugin keymaps
 - Behavior: counts and register selection do not open the guide; character-target commands display a `<char>` continuation
+
+### `search`
+
+Sets the options used to initialize the Search UI.
+
+- Type: TOML table with `case_sensitive`, `regex`, and `replace` boolean entries
+- Default: `{ case_sensitive = true, regex = false, replace = false }`
+- `case_sensitive`: starts searches in case-sensitive mode when `true`
+- `regex`: starts searches in regular-expression mode when `true`; otherwise queries are treated literally
+- `replace`: starts the Search UI with the replacement input enabled when `true`
+- Initialization: these defaults are applied once when the editor layout is created; options committed through the Search UI are retained for subsequent searches
+- Direction: `/` still opens forward search and `?` still opens reverse search; direction is not configurable here
 
 ### `default_registers`
 

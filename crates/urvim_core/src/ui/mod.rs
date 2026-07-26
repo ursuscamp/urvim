@@ -16,10 +16,11 @@ pub mod lsp_rename;
 pub mod overlay;
 pub mod picker;
 pub mod plugin_pane;
+pub mod search_box;
 pub mod text_width;
 
 use crate::buffer::BufferId;
-use crate::buffer::Cursor;
+use crate::buffer::{Cursor, SearchDirection, SearchOptions};
 use crate::editor::EditorAction;
 use crate::notification::NotificationLevel;
 pub use geometry::{Position, Size};
@@ -121,6 +122,33 @@ pub enum KeymapInheritance {
     Explicit,
 }
 
+/// Optional values used to prefill the search and replace form.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct SearchUiRequest {
+    /// Search query override.
+    pub query: Option<String>,
+    /// Replacement text override.
+    pub replacement: Option<String>,
+    /// Replace-mode override.
+    pub replace_enabled: Option<bool>,
+    /// Search direction override.
+    pub direction: Option<SearchDirection>,
+    /// Case-sensitivity override.
+    pub case_sensitive: Option<bool>,
+    /// Regular-expression mode override.
+    pub regex: Option<bool>,
+}
+
+impl SearchUiRequest {
+    /// Creates a request that overrides only the search direction.
+    pub fn with_direction(direction: SearchDirection) -> Self {
+        Self {
+            direction: Some(direction),
+            ..Self::default()
+        }
+    }
+}
+
 /// UI/app orchestration command.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
@@ -133,6 +161,23 @@ pub enum Command {
     },
     /// Open the command-line overlay.
     OpenCommandLine,
+    /// Execute and commit an active-buffer search without opening the form.
+    Search {
+        /// Search query.
+        query: String,
+        /// Optional replacement that starts confirmation when present.
+        replacement: Option<String>,
+        /// Search options.
+        options: SearchOptions,
+    },
+    /// Open the active-buffer search and replace form.
+    OpenSearchUi(SearchUiRequest),
+    /// Select the next search match.
+    SearchNext,
+    /// Select the previous search match.
+    SearchPrevious,
+    /// Clear search highlighting from the active view.
+    ClearSearch,
     /// Open a new unnamed buffer in a new tab.
     OpenUnnamedBuffer,
     /// Open the insert-mode completion popup.
@@ -305,6 +350,11 @@ impl Command {
         match self {
             Self::EnqueueNotification { .. } => Cow::Borrowed("notification.enqueue"),
             Self::OpenCommandLine => Cow::Borrowed("command-line.open"),
+            Self::Search { .. } => Cow::Borrowed("search.execute"),
+            Self::OpenSearchUi(_) => Cow::Borrowed("search.open"),
+            Self::SearchNext => Cow::Borrowed("search.next"),
+            Self::SearchPrevious => Cow::Borrowed("search.previous"),
+            Self::ClearSearch => Cow::Borrowed("search.clear"),
             Self::OpenUnnamedBuffer => Cow::Borrowed("buffer.new"),
             Self::OpenCompletion => Cow::Borrowed("completion.open"),
             Self::OpenBufferPicker => Cow::Borrowed("picker.buffer"),
@@ -411,6 +461,11 @@ impl Command {
             | Self::TryQuit
             | Self::Quit => KeymapInheritance::Application,
             Self::OpenUnnamedBuffer
+            | Self::Search { .. }
+            | Self::OpenSearchUi(_)
+            | Self::SearchNext
+            | Self::SearchPrevious
+            | Self::ClearSearch
             | Self::OpenCompletion
             | Self::OpenFiletypePicker
             | Self::OpenDocumentSymbolsPicker

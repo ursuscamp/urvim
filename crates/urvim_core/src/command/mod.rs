@@ -307,7 +307,7 @@ fn quote_command_token(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::buffer::{Boundary, BufferId};
+    use crate::buffer::{Boundary, BufferId, SearchDirection, SearchOptions};
     use crate::config::Config;
     use crate::editor::{
         EditorAction, EditorOperation, ModeKind, Operator, OperatorTarget, QuoteKind, TextObject,
@@ -636,6 +636,64 @@ mod tests {
         assert!(matches!(
             parse("focus previous").expect("previous target should resolve"),
             Intent::Command(Command::FocusPreviousTarget)
+        ));
+    }
+
+    #[test]
+    fn resolve_direct_search_with_defaults_and_overrides() {
+        assert_eq!(
+            parse("app search needle").expect("search should resolve"),
+            Intent::Command(Command::Search {
+                query: "needle".to_string(),
+                replacement: None,
+                options: SearchOptions::default(),
+            })
+        );
+        assert_eq!(
+            parse(r#"app search "(\\w+)" "$1!" dir=rev case=false re=true"#)
+                .expect("regex replacement search should resolve"),
+            Intent::Command(Command::Search {
+                query: r"(\w+)".to_string(),
+                replacement: Some("$1!".to_string()),
+                options: SearchOptions::new(SearchDirection::Reverse, false, true),
+            })
+        );
+    }
+
+    #[test]
+    fn resolve_search_ui_with_optional_overrides() {
+        assert_eq!(
+            parse("app search-ui replacement=x dir=rev re=true").expect("search UI should resolve"),
+            Intent::Command(Command::OpenSearchUi(crate::ui::SearchUiRequest {
+                query: None,
+                replacement: Some("x".to_string()),
+                replace_enabled: Some(true),
+                direction: Some(SearchDirection::Reverse),
+                case_sensitive: None,
+                regex: Some(true),
+            }))
+        );
+        assert_eq!(
+            parse("app search-ui one two replace=false")
+                .expect("explicit replace mode should resolve"),
+            Intent::Command(Command::OpenSearchUi(crate::ui::SearchUiRequest {
+                query: Some("one".to_string()),
+                replacement: Some("two".to_string()),
+                replace_enabled: Some(false),
+                ..crate::ui::SearchUiRequest::default()
+            }))
+        );
+    }
+
+    #[test]
+    fn direct_search_rejects_missing_or_invalid_regex_queries() {
+        assert!(matches!(
+            parse("app search"),
+            Err(CommandError::MissingArgument { name, .. }) if name == "query"
+        ));
+        assert!(matches!(
+            parse("app search '(' re=true"),
+            Err(CommandError::InvalidArgument { name, .. }) if name == "query"
         ));
     }
 

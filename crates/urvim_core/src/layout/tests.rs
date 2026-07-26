@@ -4,15 +4,15 @@ use crate::background::{
     JobEvent, JobKind, JobPayload, JobToken, LspInlayHint, LspInlayHintsChunk,
 };
 use crate::buffer::Buffer;
-use crate::buffer::Cursor;
-use crate::config::{Config, KeymapsConfig};
+use crate::buffer::{Cursor, SearchDirection, SearchOptions};
+use crate::config::{Config, KeymapsConfig, SearchConfig};
 use crate::editor::{EditorAction, EditorOperation, ModeKind};
 use crate::editor_pane::EditorPane;
 use crate::editor_tab::{BufferView, EditorTab};
 use crate::globals;
 use crate::path::AbsolutePath;
 use crate::ui::geometry::{Position, Size};
-use crate::ui::{Command, Intent, UiEvent, UiEventResult};
+use crate::ui::{Command, Intent, SearchUiRequest, UiEvent, UiEventResult};
 use lsp_types::{Diagnostic, DiagnosticSeverity, Range};
 use smol_str::SmolStr;
 use std::collections::BTreeSet;
@@ -3508,4 +3508,510 @@ fn closing_active_tab_snapshots_buffer_before_activation_changes() {
             && *previous == closed_buffer_id
             && *active_buffer_id == next_buffer_id
     ));
+}
+
+#[test]
+fn literal_search_updates_live_and_navigation_wraps() {
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("one two one")]);
+    assert!(layout.dispatch_intent(
+        &Command::OpenSearchUi(SearchUiRequest::with_direction(SearchDirection::Forward)).into()
+    ));
+
+    for ch in "one".chars() {
+        assert!(
+            layout
+                .handle_search_event(&UiEvent::Key(KeyCode::Char(ch).key()))
+                .handled()
+        );
+    }
+    assert_eq!(layout.active_buffer_view().cursor(), Cursor::new(0, 0));
+    assert_eq!(layout.active_buffer_view().search_matches().len(), 2);
+
+    layout.handle_search_event(&UiEvent::Key(KeyCode::Enter.key()));
+    assert!(!layout.search_box_is_open());
+    assert!(layout.dispatch_intent(&Command::SearchNext.into()));
+    assert_eq!(layout.active_buffer_view().cursor(), Cursor::new(0, 8));
+    assert!(layout.dispatch_intent(&Command::SearchNext.into()));
+    assert_eq!(layout.active_buffer_view().cursor(), Cursor::new(0, 0));
+    assert!(layout.dispatch_intent(&Command::SearchPrevious.into()));
+    assert_eq!(layout.active_buffer_view().cursor(), Cursor::new(0, 8));
+}
+
+#[test]
+fn direct_search_commits_without_opening_the_form() {
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("zero one zero")]);
+    layout
+        .active_buffer_view_mut()
+        .set_cursor(Cursor::new(0, 4));
+
+    assert!(
+        layout.dispatch_intent(
+            &Command::Search {
+                query: "zero".to_string(),
+                replacement: None,
+                options: SearchOptions::default(),
+            }
+            .into()
+        )
+    );
+
+    assert!(!layout.search_box_is_open());
+    assert_eq!(layout.active_buffer_view().search_query(), "zero");
+    assert_eq!(layout.active_buffer_view().cursor(), Cursor::new(0, 9));
+}
+
+#[test]
+fn direct_search_with_replacement_starts_confirmation() {
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("Ada:Lovelace")]);
+    let options = SearchOptions::new(SearchDirection::Forward, true, true);
+
+    assert!(
+        layout.dispatch_intent(
+            &Command::Search {
+                query: r"(\w+):(\w+)".to_string(),
+                replacement: Some("$2, $1".to_string()),
+                options,
+            }
+            .into()
+        )
+    );
+    assert!(layout.replace_confirmation_is_open());
+    layout.handle_search_event(&UiEvent::Key(KeyCode::Enter.key()));
+
+    assert_eq!(
+        layout
+            .active_buffer_view()
+            .with_buffer(Buffer::as_str)
+            .as_deref(),
+        Some("Lovelace, Ada")
+    );
+}
+
+#[test]
+fn question_mark_opens_reverse_search() {
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("one")]);
+
+    let handling = layout.handle_active_editor_key(&KeyCode::Char('?').key());
+    let crate::editor::HandleKeyResult::Complete(intent) = handling.result else {
+        panic!("question mark should open reverse search");
+    };
+    assert_eq!(
+        intent,
+        Intent::Command(Command::OpenSearchUi(SearchUiRequest::with_direction(
+            SearchDirection::Reverse,
+        )))
+    );
+}
+
+#[test]
+fn reverse_search_navigation_follows_committed_direction() {
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("one two one")]);
+    layout
+        .active_buffer_view_mut()
+        .set_cursor(Cursor::new(0, 8));
+    layout.open_search(SearchDirection::Reverse);
+    for ch in "one".chars() {
+        layout.handle_search_event(&UiEvent::Key(KeyCode::Char(ch).key()));
+    }
+    layout.handle_search_event(&UiEvent::Key(KeyCode::Enter.key()));
+
+    assert_eq!(layout.active_buffer_view().cursor(), Cursor::new(0, 8));
+    assert_eq!(
+        layout.active_buffer_view().search_options().direction(),
+        SearchDirection::Reverse
+    );
+    layout.select_next_search_match();
+    assert_eq!(layout.active_buffer_view().cursor(), Cursor::new(0, 0));
+    layout.select_next_search_match();
+    assert_eq!(layout.active_buffer_view().cursor(), Cursor::new(0, 8));
+    layout.select_previous_search_match();
+    assert_eq!(layout.active_buffer_view().cursor(), Cursor::new(0, 0));
+}
+
+#[test]
+fn search_ui_uses_configured_defaults_once() {
+    let _config = globals::set_test_config(Config {
+        search: SearchConfig {
+            case_sensitive: false,
+            regex: true,
+            replace: true,
+        },
+        ..Config::default()
+    });
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("One")]);
+    layout.open_search_ui(SearchUiRequest {
+        query: Some("One".to_string()),
+        ..SearchUiRequest::default()
+    });
+
+    assert_eq!(
+        layout.active_buffer_view().search_options(),
+        SearchOptions::new(SearchDirection::Forward, false, true)
+    );
+
+    for key in ['c', 'e', 'p'] {
+        layout.handle_search_event(&UiEvent::Key(Key::with_modifiers(
+            KeyCode::Char(key),
+            Modifiers::CTRL,
+        )));
+    }
+    layout.handle_search_event(&UiEvent::Key(KeyCode::Enter.key()));
+    assert!(!layout.replace_confirmation_is_open());
+
+    layout.open_search_ui(SearchUiRequest::default());
+    assert_eq!(
+        layout.active_buffer_view().search_options(),
+        SearchOptions::new(SearchDirection::Forward, true, false)
+    );
+    layout.handle_search_event(&UiEvent::Key(KeyCode::Enter.key()));
+    assert!(!layout.replace_confirmation_is_open());
+}
+
+#[test]
+fn case_toggle_updates_live_matches_and_persists_after_commit() {
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("One one")]);
+    layout.open_search(SearchDirection::Forward);
+    for ch in "one".chars() {
+        layout.handle_search_event(&UiEvent::Key(KeyCode::Char(ch).key()));
+    }
+    assert_eq!(layout.active_buffer_view().search_matches().len(), 1);
+
+    layout.handle_search_event(&UiEvent::Key(Key::with_modifiers(
+        KeyCode::Char('c'),
+        Modifiers::CTRL,
+    )));
+    assert_eq!(layout.active_buffer_view().search_matches().len(), 2);
+    layout.handle_search_event(&UiEvent::Key(KeyCode::Enter.key()));
+    assert!(
+        !layout
+            .active_buffer_view()
+            .search_options()
+            .case_sensitive()
+    );
+
+    layout.open_search(SearchDirection::Reverse);
+    layout.handle_search_event(&UiEvent::Key(KeyCode::Enter.key()));
+    assert_eq!(
+        layout.active_buffer_view().search_options(),
+        SearchOptions::new(SearchDirection::Reverse, false, false)
+    );
+}
+
+#[test]
+fn regex_toggle_updates_live_matches_and_persists_after_commit() {
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("one 123")]);
+    layout.open_search(SearchDirection::Forward);
+    for ch in r"\d+".chars() {
+        layout.handle_search_event(&UiEvent::Key(KeyCode::Char(ch).key()));
+    }
+    assert!(layout.active_buffer_view().search_matches().is_empty());
+
+    layout.handle_search_event(&UiEvent::Key(Key::with_modifiers(
+        KeyCode::Char('e'),
+        Modifiers::CTRL,
+    )));
+    assert_eq!(layout.active_buffer_view().search_matches().len(), 1);
+    layout.handle_search_event(&UiEvent::Key(KeyCode::Enter.key()));
+    assert!(layout.active_buffer_view().search_options().regex());
+
+    layout.open_search(SearchDirection::Reverse);
+    layout.handle_search_event(&UiEvent::Key(KeyCode::Enter.key()));
+    assert!(layout.active_buffer_view().search_options().regex());
+}
+
+#[test]
+fn invalid_regex_cannot_be_committed() {
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("one")]);
+    layout.open_search(SearchDirection::Forward);
+    layout.handle_search_event(&UiEvent::Key(Key::with_modifiers(
+        KeyCode::Char('e'),
+        Modifiers::CTRL,
+    )));
+    layout.handle_search_event(&UiEvent::Key(KeyCode::Char('(').key()));
+    assert!(layout.active_buffer_view().search_matches().is_empty());
+
+    layout.handle_search_event(&UiEvent::Key(KeyCode::Enter.key()));
+
+    assert!(layout.search_box_is_open());
+}
+
+#[test]
+fn search_ui_overrides_and_persists_all_form_options() {
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("One 123")]);
+    layout.open_search_ui(SearchUiRequest {
+        query: Some(r"\d+".to_string()),
+        replacement: Some("number".to_string()),
+        replace_enabled: Some(true),
+        direction: Some(SearchDirection::Reverse),
+        case_sensitive: Some(false),
+        regex: Some(true),
+    });
+    assert_eq!(layout.active_buffer_view().search_matches().len(), 1);
+    layout.handle_search_event(&UiEvent::Key(KeyCode::Enter.key()));
+    assert_eq!(
+        layout.active_buffer_view().search_options(),
+        SearchOptions::new(SearchDirection::Reverse, false, true)
+    );
+
+    layout.open_search_ui(SearchUiRequest::default());
+    layout.handle_search_event(&UiEvent::Key(KeyCode::Enter.key()));
+
+    assert_eq!(layout.active_buffer_view().search_query(), r"\d+");
+    assert_eq!(
+        layout.active_buffer_view().search_options(),
+        SearchOptions::new(SearchDirection::Reverse, false, true)
+    );
+}
+
+#[test]
+fn search_ui_remembers_replace_mode_after_submission() {
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("one")]);
+    layout.open_search_ui(SearchUiRequest {
+        query: Some("one".to_string()),
+        replacement: Some("two".to_string()),
+        replace_enabled: Some(false),
+        ..SearchUiRequest::default()
+    });
+    layout.handle_search_event(&UiEvent::Key(Key::with_modifiers(
+        KeyCode::Char('p'),
+        Modifiers::CTRL,
+    )));
+    layout.handle_search_event(&UiEvent::Key(KeyCode::Enter.key()));
+    assert!(layout.replace_confirmation_is_open());
+    layout.handle_search_event(&UiEvent::Key(KeyCode::Esc.key()));
+
+    layout.open_search_ui(SearchUiRequest::default());
+    layout.handle_search_event(&UiEvent::Key(KeyCode::Enter.key()));
+
+    assert!(layout.replace_confirmation_is_open());
+}
+
+#[test]
+fn search_ui_remembers_disabled_replace_mode_and_hidden_text() {
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("one")]);
+    layout.open_search_ui(SearchUiRequest {
+        query: Some("one".to_string()),
+        replacement: Some("two".to_string()),
+        replace_enabled: Some(false),
+        ..SearchUiRequest::default()
+    });
+    layout.handle_search_event(&UiEvent::Key(KeyCode::Enter.key()));
+    assert!(!layout.replace_confirmation_is_open());
+
+    layout.open_search_ui(SearchUiRequest::default());
+    layout.handle_search_event(&UiEvent::Key(Key::with_modifiers(
+        KeyCode::Char('p'),
+        Modifiers::CTRL,
+    )));
+    layout.handle_search_event(&UiEvent::Key(KeyCode::Enter.key()));
+    layout.handle_search_event(&UiEvent::Key(KeyCode::Enter.key()));
+
+    assert_eq!(
+        layout
+            .active_buffer_view()
+            .with_buffer(Buffer::as_str)
+            .as_deref(),
+        Some("two")
+    );
+}
+
+#[test]
+fn normal_mode_escape_clears_search_highlights() {
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("one two one")]);
+    layout.active_buffer_view_mut().set_search(
+        "one",
+        SearchOptions::default(),
+        Some(Cursor::new(0, 0)),
+    );
+
+    let handling = layout.handle_active_editor_key(&KeyCode::Esc.key());
+    let crate::editor::HandleKeyResult::Complete(intent) = handling.result else {
+        panic!("normal Escape should emit a clear-search command");
+    };
+    assert_eq!(intent, Intent::Command(Command::ClearSearch));
+    assert!(layout.dispatch_intent(&intent));
+    assert!(layout.active_buffer_view().search_query().is_empty());
+    assert!(layout.active_buffer_view().search_matches().is_empty());
+}
+
+#[test]
+fn search_escape_restores_previous_search_and_cursor() {
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("one two")]);
+    let restored_options = SearchOptions::new(SearchDirection::Reverse, false, true);
+    layout
+        .active_buffer_view_mut()
+        .set_search("one", restored_options, Some(Cursor::new(0, 0)));
+    layout
+        .active_buffer_view_mut()
+        .set_cursor(Cursor::new(0, 4));
+    layout.open_search(SearchDirection::Forward);
+    layout.handle_search_event(&UiEvent::Key(KeyCode::Char('x').key()));
+    layout.handle_search_event(&UiEvent::Key(KeyCode::Esc.key()));
+
+    assert_eq!(layout.active_buffer_view().search_query(), "one");
+    assert_eq!(
+        layout.active_buffer_view().search_options(),
+        restored_options
+    );
+    assert_eq!(
+        layout.active_buffer_view().current_search_match(),
+        Some(Cursor::new(0, 0))
+    );
+    assert_eq!(layout.active_buffer_view().cursor(), Cursor::new(0, 4));
+}
+
+#[test]
+fn reverse_replacement_confirmation_proceeds_backward() {
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("a a a")]);
+    layout
+        .active_buffer_view_mut()
+        .set_cursor(Cursor::new(0, 4));
+    layout.open_search(SearchDirection::Reverse);
+    layout.handle_search_event(&UiEvent::Key(KeyCode::Char('a').key()));
+    layout.handle_search_event(&UiEvent::Key(Key::with_modifiers(
+        KeyCode::Char('p'),
+        Modifiers::CTRL,
+    )));
+    layout.handle_search_event(&UiEvent::Key(KeyCode::Tab.key()));
+    layout.handle_search_event(&UiEvent::Key(KeyCode::Char('x').key()));
+    layout.handle_search_event(&UiEvent::Key(KeyCode::Enter.key()));
+
+    assert_eq!(layout.active_buffer_view().cursor(), Cursor::new(0, 4));
+    layout.handle_search_event(&UiEvent::Key(KeyCode::Char('s').key()));
+    assert_eq!(layout.active_buffer_view().cursor(), Cursor::new(0, 2));
+    layout.handle_search_event(&UiEvent::Key(KeyCode::Char('s').key()));
+    assert_eq!(layout.active_buffer_view().cursor(), Cursor::new(0, 0));
+}
+
+#[test]
+fn replace_all_confirmation_is_one_undo_step() {
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("one two one")]);
+    layout.open_search(SearchDirection::Forward);
+    for ch in "one".chars() {
+        layout.handle_search_event(&UiEvent::Key(KeyCode::Char(ch).key()));
+    }
+    layout.handle_search_event(&UiEvent::Key(Key::with_modifiers(
+        KeyCode::Char('p'),
+        Modifiers::CTRL,
+    )));
+    layout.handle_search_event(&UiEvent::Key(KeyCode::Tab.key()));
+    layout.handle_search_event(&UiEvent::Key(KeyCode::Char('x').key()));
+    layout.handle_search_event(&UiEvent::Key(KeyCode::Enter.key()));
+    assert!(layout.replace_confirmation_is_open());
+
+    layout.handle_search_event(&UiEvent::Key(KeyCode::Char('a').key()));
+    assert!(!layout.replace_confirmation_is_open());
+    assert_eq!(
+        layout
+            .active_buffer_view()
+            .with_buffer(Buffer::as_str)
+            .as_deref(),
+        Some("x two x")
+    );
+
+    layout.active_buffer_view().with_buffer_mut(|buffer| {
+        buffer.undo();
+    });
+    assert_eq!(
+        layout
+            .active_buffer_view()
+            .with_buffer(Buffer::as_str)
+            .as_deref(),
+        Some("one two one")
+    );
+}
+
+#[test]
+fn regex_replace_all_expands_captures_for_each_match() {
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("Ada:Lovelace Alan:Turing")]);
+    layout.open_search(SearchDirection::Forward);
+    layout.handle_search_event(&UiEvent::Key(Key::with_modifiers(
+        KeyCode::Char('e'),
+        Modifiers::CTRL,
+    )));
+    for ch in r"(\w+):(\w+)".chars() {
+        layout.handle_search_event(&UiEvent::Key(KeyCode::Char(ch).key()));
+    }
+    layout.handle_search_event(&UiEvent::Key(Key::with_modifiers(
+        KeyCode::Char('p'),
+        Modifiers::CTRL,
+    )));
+    layout.handle_search_event(&UiEvent::Key(KeyCode::Tab.key()));
+    for ch in "$2, $1".chars() {
+        layout.handle_search_event(&UiEvent::Key(KeyCode::Char(ch).key()));
+    }
+    layout.handle_search_event(&UiEvent::Key(KeyCode::Enter.key()));
+    layout.handle_search_event(&UiEvent::Key(KeyCode::Char('a').key()));
+
+    assert_eq!(
+        layout
+            .active_buffer_view()
+            .with_buffer(Buffer::as_str)
+            .as_deref(),
+        Some("Lovelace, Ada Turing, Alan")
+    );
+}
+
+#[test]
+fn regex_zero_width_replacement_inserts_at_each_line_start() {
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("one\ntwo")]);
+    layout.open_search(SearchDirection::Forward);
+    layout.handle_search_event(&UiEvent::Key(Key::with_modifiers(
+        KeyCode::Char('e'),
+        Modifiers::CTRL,
+    )));
+    layout.handle_search_event(&UiEvent::Key(KeyCode::Char('^').key()));
+    layout.handle_search_event(&UiEvent::Key(Key::with_modifiers(
+        KeyCode::Char('p'),
+        Modifiers::CTRL,
+    )));
+    layout.handle_search_event(&UiEvent::Key(KeyCode::Tab.key()));
+    layout.handle_search_event(&UiEvent::Key(KeyCode::Char('>').key()));
+    layout.handle_search_event(&UiEvent::Key(KeyCode::Char(' ').key()));
+    layout.handle_search_event(&UiEvent::Key(KeyCode::Enter.key()));
+    layout.handle_search_event(&UiEvent::Key(KeyCode::Char('a').key()));
+
+    assert_eq!(
+        layout
+            .active_buffer_view()
+            .with_buffer(Buffer::as_str)
+            .as_deref(),
+        Some("> one\n> two")
+    );
+}
+
+#[test]
+fn replacement_confirmation_can_replace_then_cancel() {
+    let mut layout = layout_with_buffers(vec![Buffer::from_str("a a")]);
+    layout.open_search(SearchDirection::Forward);
+    layout.handle_search_event(&UiEvent::Key(KeyCode::Char('a').key()));
+    layout.handle_search_event(&UiEvent::Key(Key::with_modifiers(
+        KeyCode::Char('p'),
+        Modifiers::CTRL,
+    )));
+    layout.handle_search_event(&UiEvent::Key(KeyCode::Tab.key()));
+    layout.handle_search_event(&UiEvent::Key(KeyCode::Char('a').key()));
+    layout.handle_search_event(&UiEvent::Key(KeyCode::Char('a').key()));
+    layout.handle_search_event(&UiEvent::Key(KeyCode::Enter.key()));
+
+    layout.handle_search_event(&UiEvent::Key(KeyCode::Enter.key()));
+    layout.handle_search_event(&UiEvent::Key(KeyCode::Esc.key()));
+    assert_eq!(
+        layout
+            .active_buffer_view()
+            .with_buffer(Buffer::as_str)
+            .as_deref(),
+        Some("aa a")
+    );
+
+    layout.active_buffer_view().with_buffer_mut(|buffer| {
+        buffer.undo();
+    });
+    assert_eq!(
+        layout
+            .active_buffer_view()
+            .with_buffer(Buffer::as_str)
+            .as_deref(),
+        Some("a a")
+    );
 }
