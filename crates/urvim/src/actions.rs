@@ -815,6 +815,22 @@ pub(super) fn process_intents_with_shared_layout(
                 }
                 None => true,
             },
+            Intent::Command(Command::PluginInputSubmit {
+                plugin,
+                input_id,
+                text,
+            }) => match plugin_runtime.as_deref_mut() {
+                Some(runtime) => {
+                    if let Err(error) = runtime.run_input_submission(&plugin, input_id, text) {
+                        tracing::warn!(plugin, input_id, error = %error, "plugin input submission failed");
+                        urvim_core::notify_warn!(
+                            "Plugin {plugin} input {input_id} failed: {error}"
+                        );
+                    }
+                    true
+                }
+                None => true,
+            },
             other => process_intent_queue_with_plugin_runtime(
                 &mut layout.borrow_mut(),
                 plugin_runtime.as_deref_mut(),

@@ -2781,6 +2781,7 @@ entry = "plugin.bear"
             "panes",
             "selection",
             "registers",
+            "search",
             "commands",
             "plugins",
             "keymaps",
@@ -7932,6 +7933,65 @@ bg = "bg"
         assert_eq!(
             layout.borrow().active_buffer_view().cursor(),
             Cursor::new(0, 4)
+        );
+    }
+
+    #[test]
+    fn find_demo_example_searches_and_jumps_to_a_selected_match() {
+        let _guard = buffer_pool_lock();
+        let plugin_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../examples/plugins/find-demo");
+        let plugin_config = std::collections::BTreeMap::from([(
+            "find-demo".to_string(),
+            urvim_plugin::PluginConfigEntry {
+                enabled: true,
+                path: plugin_root,
+                config: std::collections::BTreeMap::new(),
+            },
+        )]);
+        let registry = urvim_plugin::PluginRegistry::load_from_config(&plugin_config)
+            .expect("find demo registry should load");
+        let layout = Rc::new(RefCell::new(Layout::new(EditorPane::from_buffers(vec![
+            Buffer::from_str("zero\nneedle one\nother needle"),
+        ]))));
+        let plugin = registry
+            .get("find-demo")
+            .expect("find demo plugin should be present");
+        let mut runtime = BearscriptPluginRuntime::empty(Rc::clone(&layout));
+        runtime
+            .load_plugin("find-demo", plugin)
+            .expect("find demo plugin should load");
+
+        runtime
+            .run_command("find-demo", "open", &[])
+            .expect("find demo command should run");
+        layout
+            .borrow_mut()
+            .route_ui_event(&urvim_core::ui::UiEvent::Paste("needle".to_string()));
+        let input_result = layout
+            .borrow_mut()
+            .route_ui_event(&urvim_core::ui::UiEvent::Key(Key::new(KeyCode::Enter)));
+        assert!(crate::actions::handle_ui_result_with_shared_layout(
+            &layout,
+            &mut runtime,
+            input_result,
+        ));
+        assert!(layout.borrow().plugin_picker_is_open());
+        layout
+            .borrow_mut()
+            .route_ui_event(&urvim_core::ui::UiEvent::Tick);
+        let result = layout
+            .borrow_mut()
+            .route_ui_event(&urvim_core::ui::UiEvent::Key(Key::new(KeyCode::Enter)));
+        assert!(crate::actions::handle_ui_result_with_shared_layout(
+            &layout,
+            &mut runtime,
+            result,
+        ));
+
+        assert_eq!(
+            layout.borrow().active_buffer_view().cursor(),
+            Cursor::new(1, 0)
         );
     }
 

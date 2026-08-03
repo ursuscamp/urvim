@@ -22,6 +22,7 @@ mod panes;
 mod path;
 mod project;
 mod registers;
+mod search;
 mod state;
 mod strings;
 mod syntax;
@@ -55,6 +56,7 @@ use panes::panes_module;
 use path::path_module;
 use project::project_module;
 use registers::registers_module;
+use search::search_module;
 use state::state_module;
 use strings::strings_module;
 use syntax::syntax_module;
@@ -157,6 +159,7 @@ impl UrvimModuleBuilder {
             selection_module(Rc::clone(&self.layout)),
         );
         module.insert("registers".to_string(), registers_module());
+        module.insert("search".to_string(), search_module());
         module.insert("commands".to_string(), self.commands_module());
         module.insert("plugins".to_string(), self.plugins_module());
         module.insert("keymaps".to_string(), keymaps_module(self.plugin.clone()));

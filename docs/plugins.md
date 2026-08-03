@@ -196,6 +196,9 @@ The global `urvim` module exposes the APIs below. All arguments and return value
 - `urvim.editor.cwd() -> string`
 - `urvim.editor.active_pane() -> pane_id`
 - `urvim.editor.active_tab() -> tab_id | null`
+- `urvim.search.find(buffer_id, pattern, opts?) -> [match]`
+- `urvim.search.find_in_range(buffer_id, range, pattern, opts?) -> [match]`
+- `urvim.search.replace(buffer_id, pattern, replacement, opts?) -> count`
 
 ### Commands, Keymaps, and Events
 
@@ -483,6 +486,47 @@ urvim.buffers.end_transaction(buffer_id)
 ```
 
 Transactions are buffer-local, owned by the calling plugin, and cannot be nested for the same buffer. They group undo history but do not roll back edits. `undo` and `redo` are rejected while a transaction is open. If a callback returns or fails without calling `end_transaction`, urvim automatically finalizes its open transactions so they cannot affect later callbacks.
+
+### Search
+
+Search APIs use the editor's line-oriented search engine. Options may be omitted or set to `null`; supported fields are `case_sensitive` (default `true`) and `regex` (default `false`). These API defaults are independent of the configured Search UI defaults.
+
+```text
+let matches = urvim.search.find(buffer_id, "TODO", {
+    "case_sensitive": false
+})
+
+for matched in matches {
+    urvim.ui.show_message(matched["text"])
+}
+```
+
+Each match contains its exact `text` and a half-open `range` using zero-based rows and UTF-8 byte columns:
+
+```text
+{
+    "range": {
+        "start": { "row": 3, "col": 8 },
+        "end": { "row": 3, "col": 12 }
+    },
+    "text": "TODO"
+}
+```
+
+`find_in_range` returns only matches fully contained in the supplied half-open range. Results are ordered from the start of the buffer. Regex searches support zero-width matches but do not span lines. Empty patterns and patterns containing line breaks return no matches. Invalid regular expressions, ranges, buffer ids, or options raise errors.
+
+`replace` replaces every match and returns the number replaced. Literal mode preserves replacement text exactly. Regex mode uses Rust regex replacement syntax, including `$0`, `$1`, `${name}`, and `$$`. Because BearScript uses braces for string interpolation, write a named capture reference as `"$\{name\}"` in a BearScript string. All replacements are applied atomically as one undo entry; no matches leaves the buffer unchanged.
+
+```text
+let count = urvim.search.replace(
+    buffer_id,
+    "(?P<name>[A-Za-z_][A-Za-z0-9_]*)",
+    "$\{name\}_renamed",
+    { "regex": true }
+)
+```
+
+See `examples/plugins/find-demo` for an alternative Find interface that uses an input dialog, `urvim.search.find`, and a searchable result picker.
 
 ### Virtual text
 

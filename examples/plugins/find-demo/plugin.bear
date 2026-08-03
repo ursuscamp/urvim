@@ -1,0 +1,89 @@
+let search_pane_id = null
+let search_buffer_id = null
+
+fn init() {
+    urvim.commands.register("open", open, "Find text with a searchable results picker")
+}
+
+fn open(args) {
+    let pane = urvim.panes.active()
+    if pane == null {
+        urvim.ui.show_message("No active editor pane", { "level": "warn" })
+        return
+    }
+
+    search_pane_id = pane["id"]
+    search_buffer_id = urvim.panes.buffer(search_pane_id)
+
+    if len(args) > 0 {
+        find_matches(urvim.strings.join(args, " "))
+        return
+    }
+
+    urvim.ui.input({
+        "title": "Find in Buffer",
+        "prompt": "Find: ",
+        "on_submit": find_matches,
+        "on_cancel": cancel_find
+    })
+}
+
+fn cancel_find() {
+    search_pane_id = null
+    search_buffer_id = null
+}
+
+fn find_matches(query) {
+    if query == "" {
+        cancel_find()
+        urvim.ui.show_message("Find query cannot be empty", { "level": "info" })
+        return
+    }
+
+    let pane_id = search_pane_id
+    let buffer_id = search_buffer_id
+    let matches = urvim.search.find(buffer_id, query, {
+        "case_sensitive": false
+    })
+    cancel_find()
+
+    if len(matches) == 0 {
+        urvim.ui.show_message("No matches for '{query}'", { "level": "info" })
+        return
+    }
+
+    let items = []
+    for matched in matches {
+        let start = matched["range"]["start"]
+        let row = start["row"]
+        let col = start["col"]
+        let context = urvim.strings.trim(urvim.buffers.line(buffer_id, row))
+        items = urvim.lists.push(items, {
+            "key": "{row}:{col}",
+            "label": context,
+            "detail": "{row + 1}:{col + 1}",
+            "value": {
+                "pane_id": pane_id,
+                "buffer_id": buffer_id,
+                "range": matched["range"]
+            }
+        })
+    }
+
+    urvim.ui.pickers.open({
+        "title": "Find: {query}",
+        "items": items,
+        "on_select": select_match
+    })
+}
+
+fn select_match(match) {
+    let pane_id = match["pane_id"]
+    let buffer_id = match["buffer_id"]
+    if urvim.panes.buffer(pane_id) != buffer_id {
+        urvim.panes.open_buffer(buffer_id)
+        pane_id = urvim.panes.active()["id"]
+    }
+    let start = match["range"]["start"]
+    urvim.panes.set_cursor(pane_id, start["row"], start["col"])
+}

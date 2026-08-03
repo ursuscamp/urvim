@@ -1,0 +1,4 @@
+name = "find-demo"
+version = "0.1.0"
+description = "Demonstrates an alternative Find UI backed by urvim.search."
+entry = "plugin.bear"
